@@ -103,7 +103,7 @@ struct drm_file;
 #include <machine/../linux/linux.h>
 #include <machine/../linux/linux_proto.h>
 #else
-/* Either it was defined when it shouldn't be (FreeBSD amd64) or it isn'tkkj
+/* Either it was defined when it shouldn't be (FreeBSD amd64) or it isn't
  * supported on this OS yet.
  */
 #undef DRM_LINUX
