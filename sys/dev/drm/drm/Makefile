@@ -20,6 +20,7 @@ SRCS    = \
 	drm_memory.c \
 	drm_mm.c \
 	drm_pci.c \
+	drm_priv_other.c \
 	drm_scatter.c \
 	drm_sman.c \
 	drm_subr_hash.c \
