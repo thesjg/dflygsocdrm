@@ -91,6 +91,8 @@ struct drm_file;
 #include "dev/drm/drm_atomic.h"
 #include "dev/drm/drm_internal.h"
 
+#include "dev/drm/drm_priv_other.h"
+
 #include <opt_drm.h>
 #ifdef DRM_DEBUG
 #undef DRM_DEBUG
