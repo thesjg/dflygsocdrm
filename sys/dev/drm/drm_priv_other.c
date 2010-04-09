@@ -25,3 +25,7 @@
  */
 
 #include "dev/drm/drmP.h"
+
+int idr_pre_get(struct idr *pidr, int flags) {
+	return 1;
+}

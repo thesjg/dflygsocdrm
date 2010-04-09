@@ -29,5 +29,21 @@
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
+struct idr {
+	int i;
+};
+
+/* drm_buf_t is already defined as struct drm_buf */
+
+struct kref {
+	int j;
+};
+
+#define KERN_DEBUG
+
+/* idr */
+
+int idr_pre_get(struct idr *pidr, int flags);
+
 #endif /* __KERNEL__ */
 #endif /* _DRM_PRIV_OTHER_H_ */
