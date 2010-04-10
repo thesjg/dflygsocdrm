@@ -35,15 +35,24 @@ struct idr {
 
 /* drm_buf_t is already defined as struct drm_buf */
 
-struct kref {
-	int j;
-};
-
 #define KERN_DEBUG
 
 /* idr */
 
-int idr_pre_get(struct idr *pidr, int flags);
+int
+idr_pre_get(struct idr *pidr, int flags);
+
+int
+idr_get_new_above(struct idr * pidr, void * what, int base, int id);
+
+void
+idr_remove(struct idr *pidr, int id);
+
+/* Referencing counting */
+
+struct kref {
+	int j;
+};
 
 #endif /* __KERNEL__ */
 #endif /* _DRM_PRIV_OTHER_H_ */

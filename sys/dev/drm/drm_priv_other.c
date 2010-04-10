@@ -26,6 +26,17 @@
 
 #include "dev/drm/drmP.h"
 
-int idr_pre_get(struct idr *pidr, int flags) {
+int
+idr_pre_get(struct idr *pidr, int flags) {
 	return 1;
+}
+
+int
+idr_get_new_above(struct idr * pidr, void * what, int base, int id) {
+	return 0;
+}
+
+void
+idr_remove(struct idr *pidr, int id) {
+	return 0;
 }
