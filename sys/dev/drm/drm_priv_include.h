@@ -1,4 +1,10 @@
-/* drm_priv_other.c -- Implementation Direct Rendering Manager other OS -*- linux-c -*-
+/* drm_priv_include.h -- Private header for Direct Rendering Manager -*- linux-c -*-
+ * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
+ */
+/*-
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All rights reserved.
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -14,15 +20,21 @@
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
- * ... AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
  *
  * Authors:
- *    David Shao <davshao@gmail.com>
+ *    Rickard E. (Rik) Faith <faith@valinux.com>
+ *    Gareth Hughes <gareth@valinux.com>
  *
  */
+
+#ifndef _DRM_PRIV_INCLUDE_H_
+#define _DRM_PRIV_INCLUDE_H_
+
+#if defined(_KERNEL) || defined(__KERNEL__)
 
 #include <sys/param.h>
 #include <sys/queue.h>
@@ -71,19 +83,5 @@
 #include <sys/selinfo.h>
 #include <sys/bus.h>
 
-#include "dev/drm/drm_priv_other.h"
-
-int
-idr_pre_get(struct idr *pidr, int flags) {
-	return 1;
-}
-
-int
-idr_get_new_above(struct idr * pidr, void * what, int base, int id) {
-	return 0;
-}
-
-void
-idr_remove(struct idr *pidr, int id) {
-	;
-}
+#endif /* __KERNEL__ */
+#endif /* _DRM_PRIV_INCLUDE_H_ */

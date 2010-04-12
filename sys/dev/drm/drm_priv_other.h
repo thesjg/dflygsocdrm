@@ -29,16 +29,57 @@
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
+#include "dev/drm/drm_linux_list.h"
+
+#define EXPORT_SYMBOL(sym)
+
+/* drm_mm.c function drm_mm_takedown() */
+#define BUG_ON(cond)
+
+/* Don't want to deal with seq_printf in
+ * drm_mm.c function drm_mm_dump_table
+ */
+#ifdef CONFIG_DEBUG_FS
+#undef CONFIG_DEBUG_FS
+#endif
+
+/* DRM_MEM_ERROR appears unused and so is drm_mem_stats */
+
+#define KERN_DEBUG "KERN_DEBUG"
+#define KERN_ERR   "KERN_ERR"
+#define KERN_INFO  "KERN_INFO"
+
+#define __GFP_COLD      0x4
+#define __GFP_COMP      0x8
+#define __GFP_DMA32     0x10
+#define __GFP_HIGHMEM   0x20
+#define __GFP_NORETRY   0x40
+#define __GFP_NOWARN    0x80
+#define __GFP_ZERO      0x100
+
+#define PAGE_KERNEL     0x200
+#define _PAGE_NO_CACHE  0x400
+
+#define printk    printf
+#define vprintk   kvprintf
+
+#define spinlock_t   struct lock
+#define spin_lock(l)   lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
+#define spin_unlock(u) lockmgr(u, LK_RELEASE)
+#define spin_lock_init(l) lockinit(l, "spin_lock_init", 0, LK_CANRECURSE)
+
+/* DragonFly drmP.h */
+#define ARRAY_SIZE(x)   (sizeof(x) / sizeof(x[0]))
+
+/* drm_buf_t is already defined as struct drm_buf */
+
+/* idr */
+
 struct idr {
 	int i;
 };
 
-/* drm_buf_t is already defined as struct drm_buf */
-
-#define KERN_DEBUG
-
-/* idr */
-
+/* Every mention of idr_pre_get has GPP_KERNEL */
 int
 idr_pre_get(struct idr *pidr, int flags);
 

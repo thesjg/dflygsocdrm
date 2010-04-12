@@ -86,6 +86,8 @@ struct drm_file;
 #include <sys/selinfo.h>
 #include <sys/bus.h>
 
+#include "dev/drm/drm_priv_other.h"
+
 #include "dev/drm/drm.h"
 #include "dev/drm/drm_linux_list.h"
 #include "dev/drm/drm_atomic.h"
@@ -1024,8 +1026,6 @@ drm_core_findmap(struct drm_device *dev, unsigned long offset)
 static __inline__ void drm_core_dropmap(struct drm_map *map)
 {
 }
-
-#include "dev/drm/drm_priv_other.h"
 
 #endif /* __KERNEL__ */
 #endif /* _DRM_P_H_ */

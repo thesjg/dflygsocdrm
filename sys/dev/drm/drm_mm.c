@@ -24,7 +24,6 @@
  * USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
  *
- * __FBSDID("$FreeBSD: src/sys/dev/drm/drm_mm.c,v 1.1 2010/01/31 14:25:29 rnoland Exp $");
  **************************************************************************/
 
 /*
@@ -44,6 +43,8 @@
 
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm_mm.h"
+#include "dev/drm/drm_linux_list.h"
+#include "dev/drm/drm_priv_memory.h"
 
 #define MM_UNUSED_TARGET 4
 
@@ -82,12 +83,12 @@ static struct drm_mm_node *drm_mm_kmalloc(struct drm_mm *mm, int atomic)
 	struct drm_mm_node *child;
 
 	if (atomic)
-		child = malloc(sizeof(*child), DRM_MEM_MM, M_NOWAIT);
+		child = kmalloc(sizeof(*child), GFP_ATOMIC);
 	else
-		child = malloc(sizeof(*child), DRM_MEM_MM, M_WAITOK);
+		child = kmalloc(sizeof(*child), GFP_KERNEL);
 
 	if (unlikely(child == NULL)) {
-		DRM_SPINLOCK(&mm->unused_lock);
+		spin_lock(&mm->unused_lock);
 		if (list_empty(&mm->unused_nodes))
 			child = NULL;
 		else {
@@ -97,32 +98,38 @@ static struct drm_mm_node *drm_mm_kmalloc(struct drm_mm *mm, int atomic)
 			list_del(&child->fl_entry);
 			--mm->num_unused;
 		}
-		DRM_SPINUNLOCK(&mm->unused_lock);
+		spin_unlock(&mm->unused_lock);
 	}
 	return child;
 }
 
+/* drm_mm_pre_get() - pre allocate drm_mm_node structure
+ * drm_mm:	memory manager struct we are pre-allocating for
+ *
+ * Returns 0 on success or -ENOMEM if allocation fails.
+ */
 int drm_mm_pre_get(struct drm_mm *mm)
 {
 	struct drm_mm_node *node;
 
-	DRM_SPINLOCK(&mm->unused_lock);
+	spin_lock(&mm->unused_lock);
 	while (mm->num_unused < MM_UNUSED_TARGET) {
-		DRM_SPINUNLOCK(&mm->unused_lock);
-		node = malloc(sizeof(*node), DRM_MEM_MM, M_WAITOK);
-		DRM_SPINLOCK(&mm->unused_lock);
+		spin_unlock(&mm->unused_lock);
+		node = kmalloc(sizeof(*node), GFP_KERNEL);
+		spin_lock(&mm->unused_lock);
 
 		if (unlikely(node == NULL)) {
 			int ret = (mm->num_unused < 2) ? -ENOMEM : 0;
-			DRM_SPINUNLOCK(&mm->unused_lock);
+			spin_unlock(&mm->unused_lock);
 			return ret;
 		}
 		++mm->num_unused;
 		list_add_tail(&node->fl_entry, &mm->unused_nodes);
 	}
-	DRM_SPINUNLOCK(&mm->unused_lock);
+	spin_unlock(&mm->unused_lock);
 	return 0;
 }
+EXPORT_SYMBOL(drm_mm_pre_get);
 
 static int drm_mm_create_tail_node(struct drm_mm *mm,
 				   unsigned long start,
@@ -217,6 +224,45 @@ struct drm_mm_node *drm_mm_get_block_generic(struct drm_mm_node *node,
 
 	return node;
 }
+EXPORT_SYMBOL(drm_mm_get_block_generic);
+
+struct drm_mm_node *drm_mm_get_block_range_generic(struct drm_mm_node *node,
+						unsigned long size,
+						unsigned alignment,
+						unsigned long start,
+						unsigned long end,
+						int atomic)
+{
+	struct drm_mm_node *align_splitoff = NULL;
+	unsigned tmp = 0;
+	unsigned wasted = 0;
+
+	if (node->start < start)
+		wasted += start - node->start;
+	if (alignment)
+		tmp = ((node->start + wasted) % alignment);
+
+	if (tmp)
+		wasted += alignment - tmp;
+	if (wasted) {
+		align_splitoff = drm_mm_split_at_start(node, wasted, atomic);
+		if (unlikely(align_splitoff == NULL))
+			return NULL;
+	}
+
+	if (node->size == size) {
+		list_del_init(&node->fl_entry);
+		node->free = 0;
+	} else {
+		node = drm_mm_split_at_start(node, size, atomic);
+	}
+
+	if (align_splitoff)
+		drm_mm_put_block(align_splitoff);
+
+	return node;
+}
+EXPORT_SYMBOL(drm_mm_get_block_range_generic);
 
 /*
  * Put a block. Merge with the previous and / or next block if they are free.
@@ -250,12 +296,14 @@ void drm_mm_put_block(struct drm_mm_node *cur)
 				prev_node->size += next_node->size;
 				list_del(&next_node->ml_entry);
 				list_del(&next_node->fl_entry);
+				spin_lock(&mm->unused_lock);
 				if (mm->num_unused < MM_UNUSED_TARGET) {
 					list_add(&next_node->fl_entry,
 						 &mm->unused_nodes);
 					++mm->num_unused;
 				} else
-					free(next_node, DRM_MEM_MM);
+					kfree(next_node);
+				spin_unlock(&mm->unused_lock);
 			} else {
 				next_node->size += cur->size;
 				next_node->start = cur->start;
@@ -268,13 +316,17 @@ void drm_mm_put_block(struct drm_mm_node *cur)
 		list_add(&cur->fl_entry, &mm->fl_entry);
 	} else {
 		list_del(&cur->ml_entry);
+		spin_lock(&mm->unused_lock);
 		if (mm->num_unused < MM_UNUSED_TARGET) {
 			list_add(&cur->fl_entry, &mm->unused_nodes);
 			++mm->num_unused;
 		} else
-			free(cur, DRM_MEM_MM);
+			kfree(cur);
+		spin_unlock(&mm->unused_lock);
 	}
 }
+
+EXPORT_SYMBOL(drm_mm_put_block);
 
 struct drm_mm_node *drm_mm_search_free(const struct drm_mm *mm,
 				       unsigned long size,
@@ -306,7 +358,7 @@ struct drm_mm_node *drm_mm_search_free(const struct drm_mm *mm,
 		if (entry->size >= size + wasted) {
 			if (!best_match)
 				return entry;
-			if (size < best_size) {
+			if (entry->size < best_size) {
 				best = entry;
 				best_size = entry->size;
 			}
@@ -315,6 +367,58 @@ struct drm_mm_node *drm_mm_search_free(const struct drm_mm *mm,
 
 	return best;
 }
+EXPORT_SYMBOL(drm_mm_search_free);
+
+struct drm_mm_node *drm_mm_search_free_in_range(const struct drm_mm *mm,
+						unsigned long size,
+						unsigned alignment,
+						unsigned long start,
+						unsigned long end,
+						int best_match)
+{
+	struct list_head *list;
+	const struct list_head *free_stack = &mm->fl_entry;
+	struct drm_mm_node *entry;
+	struct drm_mm_node *best;
+	unsigned long best_size;
+	unsigned wasted;
+
+	best = NULL;
+	best_size = ~0UL;
+
+	list_for_each(list, free_stack) {
+		entry = list_entry(list, struct drm_mm_node, fl_entry);
+		wasted = 0;
+
+		if (entry->size < size)
+			continue;
+
+		if (entry->start > end || (entry->start+entry->size) < start)
+			continue;
+
+		if (entry->start < start)
+			wasted += start - entry->start;
+
+		if (alignment) {
+			register unsigned tmp = (entry->start + wasted) % alignment;
+			if (tmp)
+				wasted += alignment - tmp;
+		}
+
+		if (entry->size >= size + wasted &&
+		    (entry->start + wasted + size) <= end) {
+			if (!best_match)
+				return entry;
+			if (entry->size < best_size) {
+				best = entry;
+				best_size = entry->size;
+			}
+		}
+	}
+
+	return best;
+}
+EXPORT_SYMBOL(drm_mm_search_free_in_range);
 
 int drm_mm_clean(struct drm_mm * mm)
 {
@@ -322,6 +426,7 @@ int drm_mm_clean(struct drm_mm * mm)
 
 	return (head->next->next == head);
 }
+EXPORT_SYMBOL(drm_mm_clean);
 
 int drm_mm_init(struct drm_mm * mm, unsigned long start, unsigned long size)
 {
@@ -329,10 +434,11 @@ int drm_mm_init(struct drm_mm * mm, unsigned long start, unsigned long size)
 	INIT_LIST_HEAD(&mm->fl_entry);
 	INIT_LIST_HEAD(&mm->unused_nodes);
 	mm->num_unused = 0;
-	DRM_SPININIT(&mm->unused_lock, "drm_unused");
+	spin_lock_init(&mm->unused_lock);
 
 	return drm_mm_create_tail_node(mm, start, size, 0);
 }
+EXPORT_SYMBOL(drm_mm_init);
 
 void drm_mm_takedown(struct drm_mm * mm)
 {
@@ -350,17 +456,56 @@ void drm_mm_takedown(struct drm_mm * mm)
 
 	list_del(&entry->fl_entry);
 	list_del(&entry->ml_entry);
-	free(entry, DRM_MEM_MM);
+	kfree(entry);
 
-	DRM_SPINLOCK(&mm->unused_lock);
+	spin_lock(&mm->unused_lock);
 	list_for_each_entry_safe(entry, next, &mm->unused_nodes, fl_entry) {
 		list_del(&entry->fl_entry);
-		free(entry, DRM_MEM_MM);
+		kfree(entry);
 		--mm->num_unused;
 	}
-	DRM_SPINUNLOCK(&mm->unused_lock);
+	spin_unlock(&mm->unused_lock);
 
-	DRM_SPINUNINIT(&mm->unused_lock);
-
-	KASSERT(mm->num_unused == 0, ("num_unused != 0"));
+	BUG_ON(mm->num_unused != 0);
 }
+EXPORT_SYMBOL(drm_mm_takedown);
+
+void drm_mm_debug_table(struct drm_mm *mm, const char *prefix)
+{
+	struct drm_mm_node *entry;
+	int total_used = 0, total_free = 0, total = 0;
+
+	list_for_each_entry(entry, &mm->ml_entry, ml_entry) {
+		printk(KERN_DEBUG "%s 0x%08lx-0x%08lx: %8ld: %s\n",
+			prefix, entry->start, entry->start + entry->size,
+			entry->size, entry->free ? "free" : "used");
+		total += entry->size;
+		if (entry->free)
+			total_free += entry->size;
+		else
+			total_used += entry->size;
+	}
+	printk(KERN_DEBUG "%s total: %d, used %d free %d\n", prefix, total,
+		total_used, total_free);
+}
+EXPORT_SYMBOL(drm_mm_debug_table);
+
+#if defined(CONFIG_DEBUG_FS)
+int drm_mm_dump_table(struct seq_file *m, struct drm_mm *mm)
+{
+	struct drm_mm_node *entry;
+	int total_used = 0, total_free = 0, total = 0;
+
+	list_for_each_entry(entry, &mm->ml_entry, ml_entry) {
+		seq_printf(m, "0x%08lx-0x%08lx: 0x%08lx: %s\n", entry->start, entry->start + entry->size, entry->size, entry->free ? "free" : "used");
+		total += entry->size;
+		if (entry->free)
+			total_free += entry->size;
+		else
+			total_used += entry->size;
+	}
+	seq_printf(m, "total: %d, used %d free %d\n", total, total_used, total_free);
+	return 0;
+}
+EXPORT_SYMBOL(drm_mm_dump_table);
+#endif

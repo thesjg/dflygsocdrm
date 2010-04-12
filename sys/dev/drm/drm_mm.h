@@ -24,9 +24,7 @@
  * USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
  *
- * __FBSDID("$FreeBSD: src/sys/dev/drm/drm_mm.h,v 1.1 2010/01/31 14:25:29 rnoland Exp $");
  **************************************************************************/
-
 /*
  * Authors:
  * Thomas Hellstrom <thomas-at-tungstengraphics-dot-com>
@@ -35,7 +33,14 @@
 #ifndef _DRM_MM_H_
 #define _DRM_MM_H_
 
+/*
+ * Generic range manager structs
+ */
 #include "dev/drm/drm_linux_list.h"
+#include "dev/drm/drm_priv_other.h"
+#ifdef CONFIG_DEBUG_FS
+#include <linux/seq_file.h>
+#endif
 
 struct drm_mm_node {
 	struct list_head fl_entry;
@@ -52,7 +57,7 @@ struct drm_mm {
 	struct list_head ml_entry;
 	struct list_head unused_nodes;
 	int num_unused;
-	DRM_SPINTYPE unused_lock;
+	spinlock_t unused_lock;
 };
 
 /*
@@ -62,6 +67,13 @@ extern struct drm_mm_node *drm_mm_get_block_generic(struct drm_mm_node *node,
 						    unsigned long size,
 						    unsigned alignment,
 						    int atomic);
+extern struct drm_mm_node *drm_mm_get_block_range_generic(
+						struct drm_mm_node *node,
+						unsigned long size,
+						unsigned alignment,
+						unsigned long start,
+						unsigned long end,
+						int atomic);
 static inline struct drm_mm_node *drm_mm_get_block(struct drm_mm_node *parent,
 						   unsigned long size,
 						   unsigned alignment)
@@ -74,11 +86,38 @@ static inline struct drm_mm_node *drm_mm_get_block_atomic(struct drm_mm_node *pa
 {
 	return drm_mm_get_block_generic(parent, size, alignment, 1);
 }
+static inline struct drm_mm_node *drm_mm_get_block_range(
+						struct drm_mm_node *parent,
+						unsigned long size,
+						unsigned alignment,
+						unsigned long start,
+						unsigned long end)
+{
+	return drm_mm_get_block_range_generic(parent, size, alignment,
+						start, end, 0);
+}
+static inline struct drm_mm_node *drm_mm_get_block_atomic_range(
+						struct drm_mm_node *parent,
+						unsigned long size,
+						unsigned alignment,
+						unsigned long start,
+						unsigned long end)
+{
+	return drm_mm_get_block_range_generic(parent, size, alignment,
+						start, end, 1);
+}
 extern void drm_mm_put_block(struct drm_mm_node *cur);
 extern struct drm_mm_node *drm_mm_search_free(const struct drm_mm *mm,
 					      unsigned long size,
 					      unsigned alignment,
 					      int best_match);
+extern struct drm_mm_node *drm_mm_search_free_in_range(
+						const struct drm_mm *mm,
+						unsigned long size,
+						unsigned alignment,
+						unsigned long start,
+						unsigned long end,
+						int best_match);
 extern int drm_mm_init(struct drm_mm *mm, unsigned long start,
 		       unsigned long size);
 extern void drm_mm_takedown(struct drm_mm *mm);
@@ -94,5 +133,10 @@ static inline struct drm_mm *drm_get_mm(struct drm_mm_node *block)
 {
 	return block->mm;
 }
+
+extern void drm_mm_debug_table(struct drm_mm *mm, const char *prefix);
+#ifdef CONFIG_DEBUG_FS
+int drm_mm_dump_table(struct seq_file *m, struct drm_mm *mm);
+#endif
 
 #endif

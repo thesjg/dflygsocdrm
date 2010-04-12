@@ -59,6 +59,8 @@ MALLOC_DEFINE(DRM_MEM_SGLISTS, "drm_sglists", "DRM SGLISTS Data Structures");
 MALLOC_DEFINE(DRM_MEM_DRAWABLE, "drm_drawable", "DRM DRAWABLE Data Structures");
 MALLOC_DEFINE(DRM_MEM_MM, "drm_sman", "DRM MEMORY MANAGER Data Structures");
 MALLOC_DEFINE(DRM_MEM_HASHTAB, "drm_hashtab", "DRM HASHTABLE Data Structures");
+/* Default for kmalloc() and kfree() equivalent */
+MALLOC_DEFINE(DRM_MEM_DEFAULT, "drm_default", "DRM DEFAULT Data Structures");
 
 void drm_mem_init(void)
 {

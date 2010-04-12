@@ -106,4 +106,15 @@ list_del_init(struct list_head *entry) {
 	    &pos->member != (head);					\
 	    pos = n, n = list_entry(n->member.next, __typeof(*n), member))
 
+/** extension of previous, needed for new drm_mm.c
+ * list_for_each_entry - iterate over list of given type
+ * @pos:        the type * to use as a loop cursor.
+ * @head:       the head for your list.
+ * @member:     the name of the list_struct within the struct.
+ */
+#define list_for_each_entry(pos, head, member)			\
+	for (pos = list_entry((head)->next, __typeof(*pos), member);	\
+	    &pos->member != (head);					\
+	    pos = list_entry(pos->member.next, __typeof(*pos), member))
+
 #endif /* _DRM_LINUX_LIST_H_ */
