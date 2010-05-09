@@ -310,20 +310,6 @@ for ( ret = 0 ; !ret && !(condition) ; ) {			\
 	DRM_LOCK();						\
 }
 
-#define printf	kprintf
-#define snprintf ksnprintf
-#define sscanf	ksscanf
-#define malloc	kmalloc
-#define realloc	krealloc
-#define reallocf krealloc	/* XXX XXX XXX */
-
-__inline static void
-free(void *addr, struct malloc_type *type)
-{
-	if (addr != NULL)
-		kfree(addr, type);
-}
-
 #define DRM_ERROR(fmt, ...) \
 	printf("error: [" DRM_NAME ":pid%d:%s] *ERROR* " fmt,		\
 	    DRM_CURRENTPID, __func__ , ##__VA_ARGS__)

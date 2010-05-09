@@ -63,6 +63,20 @@
 #define printk    printf
 #define vprintk   kvprintf
 
+#define printf	kprintf
+#define snprintf ksnprintf
+#define sscanf	ksscanf
+#define malloc	kmalloc
+#define realloc	krealloc
+#define reallocf krealloc	/* XXX XXX XXX */
+
+__inline static void
+free(void *addr, struct malloc_type *type)
+{
+	if (addr != NULL)
+		kfree(addr, type);
+}
+
 #define spinlock_t   struct lock
 #define spin_lock(l)   lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
 #define spin_unlock(u) lockmgr(u, LK_RELEASE)
@@ -75,19 +89,37 @@
 
 /* idr */
 
-struct idr {
-	int i;
-};
+struct idr;
+
+void idr_init(struct idr *pidr);
+
+void *idr_find(struct idr *pidr, int id);
 
 /* Every mention of idr_pre_get has GPP_KERNEL */
 int
-idr_pre_get(struct idr *pidr, int flags);
+idr_pre_get(struct idr *pidr, unsigned int flags);
 
 int
-idr_get_new_above(struct idr * pidr, void * what, int base, int id);
+idr_get_new_above(struct idr * pidr, void *data, int floor, int *id);
+
+int
+idr_get_new(struct idr *pidr, void *data, int *id);
 
 void
 idr_remove(struct idr *pidr, int id);
+
+void
+idr_remove_all(struct idr *pidr);
+
+void
+idr_for_each(struct idr *pidr,
+	int (*func)(int id, void *ptr, void *data), void * data);
+
+void *
+idr_replace(struct idr *pidr, void *newData, int id);
+
+void
+idr_destroy(struct idr *pidr);
 
 /* Referencing counting */
 
