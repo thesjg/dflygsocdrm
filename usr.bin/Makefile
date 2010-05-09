@@ -50,6 +50,7 @@ SUBDIR=	alias \
 	ee \
 	enigma \
 	env \
+	evtranalyze \
 	expand \
 	false \
 	fetch \
@@ -74,6 +75,7 @@ SUBDIR=	alias \
 	iconv \
 	id \
 	indent \
+	ionice \
 	ipcrm \
 	ipcs \
 	join \
@@ -84,6 +86,7 @@ SUBDIR=	alias \
 	keylogout \
 	killall \
 	ktrace \
+	ktrdump \
 	kzip \
 	lam \
 	last \
@@ -231,13 +234,6 @@ SUBDIR=	alias \
 	ypmatch \
 	ypwhich
 
-.if !defined(NO_BIND)
-SUBDIR+=dig \
-	dnssec-keygen \
-	dnssec-signzone \
-	host
-.endif
-
 .if defined(WANT_HESIOD)
 SUBDIR+=hesinfo
 .endif
@@ -255,10 +251,8 @@ SUBDIR+=vacation
 .if ${MACHINE_ARCH} == "i386"
 # Things that don't compile on x86_64 or are i386 specific:
 SUBDIR+=doscmd \
-	evtranalyze \
 	gcore \
 	gprof4 \
-	ktrdump \
 	ncplist \
 	ncplogin \
 	sasc \

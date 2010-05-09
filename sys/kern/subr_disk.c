@@ -106,7 +106,7 @@
 #include <sys/devfs.h>
 #include <sys/thread.h>
 #include <sys/thread2.h>
-
+#include <sys/dsched.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
 
@@ -523,6 +523,8 @@ disk_create(int unit, struct disk *dp, struct dev_ops *raw_ops)
 
 	dp->d_cdev->si_disk = dp;
 
+	dsched_disk_create_callback(dp, raw_ops->head.name, unit);
+
 	lwkt_gettoken(&ilock, &disklist_token);
 	LIST_INSERT_HEAD(&disklist, dp, d_list);
 	lwkt_reltoken(&ilock);
@@ -564,6 +566,8 @@ _setdiskinfo(struct disk *disk, struct disk_info *info)
 	}
 	if (oldserialno)
 		kfree(oldserialno, M_TEMP);
+
+	dsched_disk_update_callback(disk, info);
 
 	/*
 	 * The caller may set d_media_size or d_media_blocks and we
@@ -625,6 +629,7 @@ disk_setdiskinfo_sync(struct disk *disk, struct disk_info *info)
 void
 disk_destroy(struct disk *disk)
 {
+	dsched_disk_destroy_callback(disk);
 	disk_msg_send_sync(DISK_DISK_DESTROY, disk, NULL);
 	return;
 }
@@ -852,10 +857,10 @@ diskioctl(struct dev_ioctl_args *ap)
 		return (ENXIO);
 
 	devfs_debug(DEVFS_DEBUG_DEBUG,
-		    "diskioctl: cmd is: %x (name: %s)\n",
+		    "diskioctl: cmd is: %lx (name: %s)\n",
 		    ap->a_cmd, dev->si_name);
 	devfs_debug(DEVFS_DEBUG_DEBUG,
-		    "diskioctl: &dp->d_slice is: %x, %x\n",
+		    "diskioctl: &dp->d_slice is: %p, %p\n",
 		    &dp->d_slice, dp->d_slice);
 
 	if (ap->a_cmd == DIOCGKERNELDUMP) {
@@ -903,7 +908,7 @@ diskstrategy(struct dev_strategy_args *ap)
 	 * or error due to being beyond the device size).
 	 */
 	if ((nbio = dscheck(dev, bio, dp->d_slice)) != NULL) {
-		dev_dstrategy(dp->d_rawdev, nbio);
+		dsched_queue(dp, nbio);
 	} else {
 		biodone(bio);
 	}

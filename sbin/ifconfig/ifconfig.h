@@ -53,6 +53,7 @@ struct cmd {
 		c_func	*c_func;
 		c_func2	*c_func2;
 	} c_u;
+	int	c_iscloneop;
 	struct cmd *c_next;
 };
 void	cmd_register(struct cmd *);
@@ -68,11 +69,20 @@ void	callback_register(callback_func *, void *);
 #define	DECL_CMD_FUNC2(name, arg1, arg2)	\
 	void name(const char *arg1, const char *arg2, int s, const struct afswtch *afp)
 
-#define	DEF_CMD(name, param, func)	{ name, param, { .c_func = func } }
+#define	DEF_CMD(name, param, func)	\
+	{ name, param, { .c_func = func }, 0, NULL }
 #define	DEF_CMD_ARG(name, func)		\
-	{ .c_name = name, .c_parameter = NEXTARG, .c_u = { .c_func = func } }
-#define	DEF_CMD_OPTARG(name, func)	{ name, OPTARG, { .c_func = func } }
-#define	DEF_CMD_ARG2(name, func)	{ name, NEXTARG2, { .c_func2 = func } }
+	{ .c_name = name, .c_parameter = NEXTARG, \
+		.c_u = { .c_func = func }, 0, NULL }
+#define	DEF_CMD_OPTARG(name, func)	\
+	{ name, OPTARG, { .c_func = func }, 0, NULL }
+#define	DEF_CMD_ARG2(name, func)	\
+	{ name, NEXTARG2, { .c_func2 = func }, 0, NULL }
+#define	DEF_CLONE_CMD(name, param, func) \
+	{ name, param, { .c_func = func }, 1, NULL }
+#define	DEF_CLONE_CMD_ARG(name, func)	\
+	{ name, NEXTARG, { .c_func = func }, 1, NULL }
+
 
 struct rt_addrinfo;
 struct addrinfo;
@@ -140,6 +150,13 @@ void	setifcap(const char *, int value, int s, const struct afswtch *);
 void	Perror(const char *cmd);
 void	printb(const char *s, unsigned value, const char *bits);
 
-void	ifmaybeload(char *);
+void	ifmaybeload(const char *);
 
-void	clone_create(void);
+typedef void clone_callback_func(int, struct ifreq *);
+void    clone_setdefcallback(const char *, clone_callback_func *);
+
+/*
+ * XXX expose this so modules that neeed to know of any pending
+ * operations on ifmedia can avoid cmd line ordering confusion.
+ */
+struct ifmediareq *ifmedia_getstate(int s);

@@ -24,9 +24,8 @@
 .\" SUCH DAMAGE.
 .\"
 .\" $FreeBSD: src/share/man/man4/wlan_ccmp.4,v 1.3 2005/01/13 11:09:58 ru Exp $
-.\" $DragonFly: src/share/man/man4/wlan_ccmp.4,v 1.1 2006/05/18 14:34:31 sephe Exp $
 .\"
-.Dd May 14, 2006
+.Dd April 14, 2010
 .Dt WLAN_CCMP 4
 .Os
 .Sh NAME
@@ -47,10 +46,9 @@ module is an 802.11 cryptographic plugin module for use by the
 .Xr wlan 4
 module.
 This module is automatically loaded if an AES-CCMP key is configured;
-typically by a WPA supplicant program such as wpa_supplicant.
-.\"typically by a WPA supplicant program such as wpa_supplicant,
-.\"or a WPA authenticator program such as
-.\".Nm hostapd .
+typically by a WPA supplicant program such as wpa_supplicant,
+or a WPA authenticator program such as
+.Nm hostapd .
 Should the underlying network device not be capable of doing the AES-CCMP
 calculations in hardware, the
 .Nm

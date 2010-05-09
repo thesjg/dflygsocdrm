@@ -39,6 +39,6 @@
 
 KMOD	= if_ath
 SRCS	= if_ath.c if_ath_pci.c
-SRCS	+= device_if.h bus_if.h pci_if.h opt_ath.h opt_ah.h
+SRCS	+= device_if.h bus_if.h pci_if.h opt_ath.h opt_ah.h opt_wlan.h opt_inet.h
 
 .include <bsd.kmod.mk>

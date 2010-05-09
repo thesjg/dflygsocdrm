@@ -55,6 +55,7 @@ PKGSRC_PACKAGES?=	pkgtools/pkg_leaves \
 			pkgtools/pkg_tarup \
 			pkgtools/pkgin \
 			devel/scmgit \
+			net/bind96 \
 			net/isc-dhcp4 \
 			net/isc-dhcpd4 \
 			sysutils/cdrtools \
@@ -339,6 +340,7 @@ customizeiso:
 		    ${ISOROOT}/var/db/pkg.refcount
 	test -e ${ISODIR}/.didbootstrap || \
 	    ${CHROOT_CMD} "cd /usr/pkgsrc/bootstrap;    \
+		export share_dir=/usr/pkgobj/bootstrap/work/share; \
 		./bootstrap --workdir /usr/pkgobj/bootstrap/work"
 .if make(gui)
 	test -e ${ISODIR}/.didbootstrap || \
@@ -458,7 +460,9 @@ realclean:	clean
 
 pkgsrc_bootstrap:
 	mkdir -p /usr/release/bootstrap
-	(cd ${PKGSRC_PATH}/bootstrap; ./bootstrap --workdir /usr/release/bootstrap)
+	(cd ${PKGSRC_PATH}/bootstrap; \
+	    export share_dir=/usr/release/bootstrap/share; \
+	    ./bootstrap --workdir /usr/release/bootstrap)
 
 pkgsrc_cdrecord:
 .if !exists (${PKGBIN_MKISOFS})

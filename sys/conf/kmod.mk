@@ -1,13 +1,11 @@
 #	From: @(#)bsd.prog.mk	5.26 (Berkeley) 6/25/91
 # $FreeBSD: src/sys/conf/kmod.mk,v 1.82.2.15 2003/02/10 13:11:50 nyan Exp $
-# $DragonFly: src/sys/conf/kmod.mk,v 1.35 2008/08/27 16:35:19 hasso Exp $
 #
 # The include file <bsd.kmod.mk> handles installing Kernel Loadable Device
 # drivers (KLD's).
 #
 #
 # +++ variables +++
-#
 # CLEANFILES	Additional files to remove for the clean and cleandir targets.
 #
 # KMOD          The name of the kernel module to build.
@@ -36,6 +34,8 @@
 #
 # MFILES	Optionally a list of interfaces used by the module.
 #		This file contains a default list of interfaces.
+#
+# FIRMWS	Firmware module in the form filename:shortname:version
 #
 # +++ targets +++
 #
@@ -133,6 +133,36 @@ CFLAGS+=	-fno-omit-frame-pointer
 .endif
 
 .include <bsd.patch.mk>
+
+.if defined(FIRMWS)
+AWK=/usr/bin/awk
+.if !exists(@)
+${KMOD:S/$/.c/}: @
+.else
+${KMOD:S/$/.c/}: @/tools/fw_stub.awk
+.endif
+	${AWK} -f @/tools/fw_stub.awk ${FIRMWS} -m${KMOD} -c${KMOD:S/$/.c/g} \
+	    ${FIRMWARE_LICENSE:C/.+/-l/}${FIRMWARE_LICENSE}
+
+SRCS+=	${KMOD:S/$/.c/}
+CLEANFILES+=	${KMOD:S/$/.c/}
+
+.for _firmw in ${FIRMWS}
+${_firmw:C/\:.*$/.fwo/}:	${_firmw:C/\:.*$//}
+	@${ECHO} ${_firmw:C/\:.*$//} ${.ALLSRC:M*${_firmw:C/\:.*$//}}
+	@if [ -e ${_firmw:C/\:.*$//} ]; then			\
+		${LD} -b binary --no-warn-mismatch ${LDFLAGS}	\
+		    -r -d -o ${.TARGET}	${_firmw:C/\:.*$//};	\
+	else							\
+		ln -s ${.ALLSRC:M*${_firmw:C/\:.*$//}} ${_firmw:C/\:.*$//}; \
+		${LD} -b binary --no-warn-mismatch ${LDFLAGS}	\
+		    -r -d -o ${.TARGET}	${_firmw:C/\:.*$//};	\
+		rm ${_firmw:C/\:.*$//};				\
+	fi
+
+OBJS+=	${_firmw:C/\:.*$/.fwo/}
+.endfor
+.endif
 
 OBJS+=  ${SRCS:N*.h:N*.patch:R:S/$/.o/g}
 
@@ -269,7 +299,8 @@ MFILES?= kern/bus_if.m kern/device_if.m bus/iicbus/iicbb_if.m \
     dev/acpica5/acpi_if.m dev/disk/nata/ata_if.m \
     dev/sound/pcm/ac97_if.m dev/sound/pcm/channel_if.m \
     dev/sound/pcm/feeder_if.m dev/sound/pcm/mixer_if.m \
-    libiconv/iconv_converter_if.m dev/agp/agp_if.m opencrypto/cryptodev_if.m
+    libiconv/iconv_converter_if.m dev/agp/agp_if.m opencrypto/cryptodev_if.m \
+    bus/mmc/mmcbus_if.m bus/mmc/mmcbr_if.m
 
 .for _srcsrc in ${MFILES}
 .for _ext in c h

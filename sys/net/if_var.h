@@ -195,6 +195,7 @@ enum ifnet_serialize {
  */
 struct ifnet {
 	void	*if_softc;		/* pointer to driver state */
+	void	*if_l2com;		/* pointer to protocol bits */
 	TAILQ_ENTRY(ifnet) if_link;	/* all struct ifnets are chained */
 	char	if_xname[IFNAMSIZ];	/* external name (name + unit) */
 	const char *if_dname;		/* driver name */
@@ -352,6 +353,10 @@ typedef void if_init_f_t (void *);
 } while (0)
 
 #ifdef _KERNEL
+
+/* interface link layer address change event */
+typedef void (*iflladdr_event_handler_t)(void *, struct ifnet *);
+EVENTHANDLER_DECLARE(iflladdr_event, iflladdr_event_handler_t);
 
 #ifdef INVARIANTS
 #define ASSERT_IFNET_SERIALIZED_ALL(ifp) \
@@ -624,6 +629,7 @@ IFAREF(struct ifaddr *_ifa)
 
 MALLOC_DECLARE(M_IFADDR);
 MALLOC_DECLARE(M_IFMADDR);
+MALLOC_DECLARE(M_IFNET);
 
 void	ifac_free(struct ifaddr_container *, int);
 
@@ -649,6 +655,7 @@ struct lwkt_port *ifnet_portfn(int);
 int	ifnet_domsg(struct lwkt_msg *, int);
 void	ifnet_sendmsg(struct lwkt_msg *, int);
 void	ifnet_forwardmsg(struct lwkt_msg *, int);
+struct ifnet *ifnet_byindex(unsigned short);
 
 static __inline int
 ifa_domsg(struct lwkt_msg *_lmsg, int _cpu)
@@ -694,6 +701,7 @@ int	if_addmulti(struct ifnet *, struct sockaddr *, struct ifmultiaddr **);
 int	if_allmulti(struct ifnet *, int);
 void	if_attach(struct ifnet *, struct lwkt_serialize *);
 int	if_delmulti(struct ifnet *, struct sockaddr *);
+void	if_delallmulti(struct ifnet *ifp);
 void	if_purgeaddrs_nolink(struct ifnet *);
 void	if_detach(struct ifnet *);
 void	if_down(struct ifnet *);
@@ -701,6 +709,8 @@ void	if_link_state_change(struct ifnet *);
 void	if_initname(struct ifnet *, const char *, int);
 int	if_getanyethermac(uint16_t *, int);
 int	if_printf(struct ifnet *, const char *, ...) __printflike(2, 3);
+struct ifnet *if_alloc(uint8_t);
+void	if_free(struct ifnet *);
 void	if_route(struct ifnet *, int flag, int fam);
 int	if_setlladdr(struct ifnet *, const u_char *, int);
 void	if_unroute(struct ifnet *, int flag, int fam);
@@ -717,10 +727,17 @@ struct	ifaddr *ifa_ifwithnet(struct sockaddr *);
 struct	ifaddr *ifa_ifwithroute(int, struct sockaddr *, struct sockaddr *);
 struct	ifaddr *ifaof_ifpforaddr(struct sockaddr *, struct ifnet *);
 
+typedef void *if_com_alloc_t(u_char type, struct ifnet *ifp);
+typedef void if_com_free_t(void *com, u_char type);
+void    if_register_com_alloc(u_char, if_com_alloc_t *a, if_com_free_t *);
+void    if_deregister_com_alloc(u_char);
+
 void	*ifa_create(int, int);
 void	ifa_destroy(struct ifaddr *);
 void	ifa_iflink(struct ifaddr *, struct ifnet *, int);
 void	ifa_ifunlink(struct ifaddr *, struct ifnet *);
+
+struct ifaddr *ifaddr_byindex(unsigned short);
 
 struct	ifmultiaddr *ifmaof_ifpforaddr(struct sockaddr *, struct ifnet *);
 int	if_simloop(struct ifnet *ifp, struct mbuf *m, int af, int hlen);

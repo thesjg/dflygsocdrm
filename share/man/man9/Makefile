@@ -1,5 +1,4 @@
 # $FreeBSD: src/share/man/man9/Makefile,v 1.60.2.26 2003/06/13 01:04:17 hmp Exp $
-# $DragonFly: src/share/man/man9/Makefile,v 1.81 2008/11/22 20:08:35 swildner Exp $
 
 MAN=	accept_filter.9 \
 	accf_data.9 \
@@ -30,6 +29,7 @@ MAN=	accept_filter.9 \
 	byteorder.9 \
 	callout.9 \
 	cd.9 \
+	condvar.9 \
 	contigmalloc.9 \
 	copy.9 \
 	crit_enter.9 \
@@ -80,13 +80,18 @@ MAN=	accept_filter.9 \
 	firmware.9 \
 	hash.9 \
 	ieee80211.9 \
+	ieee80211_beacon.9 \
+	ieee80211_bmiss.9 \
 	ieee80211_crypto.9 \
+	ieee80211_ddb.9 \
 	ieee80211_input.9 \
-	ieee80211_ioctl.9 \
 	ieee80211_node.9 \
 	ieee80211_output.9 \
 	ieee80211_proto.9 \
 	ieee80211_radiotap.9 \
+	ieee80211_regdomain.9 \
+	ieee80211_scan.9 \
+	ieee80211_vap.9 \
 	ifnet.9 \
 	inittodr.9 \
 	intro.9 \
@@ -116,6 +121,8 @@ MAN=	accept_filter.9 \
 	panic.9 \
 	pci.9 \
 	pfil.9 \
+	pfind.9 \
+	pgfind.9 \
 	physio.9 \
 	posix4.9 \
 	priv.9 \
@@ -193,6 +200,7 @@ MAN=	accept_filter.9 \
 	vrele.9 \
 	vslock.9 \
 	zone.9
+#	ieee80211_amrr.9 \
 
 MLINKS+=accept_filter.9 accept_filt_add.9 \
 	accept_filter.9 accept_filt_del.9 \
@@ -336,6 +344,15 @@ MLINKS+=callout.9 callout_active.9 \
 	callout.9 callout_stop.9 \
 	callout.9 timeout.9 \
 	callout.9 untimeout.9
+MLINKS+=condvar.9 cv_broadcast.9 \
+	condvar.9 cv_broadcastpri.9 \
+	condvar.9 cv_destroy.9 \
+	condvar.9 cv_init.9 \
+	condvar.9 cv_signal.9 \
+	condvar.9 cv_timedwait.9 \
+	condvar.9 cv_timedwait_sig.9 \
+	condvar.9 cv_wait.9 \
+	condvar.9 cv_wait_sig.9
 MLINKS+=contigmalloc.9 contigfree.9
 MLINKS+=copy.9 copyin.9 \
 	copy.9 copyinstr.9 \
@@ -393,8 +410,10 @@ MLINKS+=fetch.9 fubyte.9 \
 	fetch.9 casuword.9 \
 	fetch.9 fusword.9 \
 	fetch.9 fuword.9
-MLINKS+=firmware.9 firmware_image_load.9 \
-	firmware.9 firmware_image_unload.9
+MLINKS+=firmware.9 firmware_get.9 \
+	firmware.9 firmware_put.9 \
+	firmware.9 firmware_register.9 \
+	firmware.9 firmware_unregister.9
 MLINKS+=hash.9 hashinit.9 \
 	hash.9 hashinit_ext.9 \
 	hash.9 phashinit.9 \
@@ -403,49 +422,83 @@ MLINKS+=ioctl.9 _IOR.9 \
 	ioctl.9 _IOW.9 \
 	ioctl.9 _IOWR.9 \
 	ioctl.9 _IO.9
-MLINKS+=ieee80211.9 ieee80211_chan2ieee.9 \
-	ieee80211.9 ieee80211_chan2mode.9 \
-	ieee80211.9 ieee80211_ieee2mhz.9 \
-	ieee80211.9 ieee80211_ifattach.9 \
-	ieee80211.9 ieee80211_ifdetach.9 \
-	ieee80211.9 ieee80211_media2rate.9 \
-	ieee80211.9 ieee80211_media_change.9 \
-	ieee80211.9 ieee80211_media_init.9 \
-	ieee80211.9 ieee80211_media_status.9 \
-	ieee80211.9 ieee80211_mhz2ieee.9 \
-	ieee80211.9 ieee80211_rate2media.9 \
-	ieee80211.9 ieee80211_setmode.9 \
-	ieee80211.9 ieee80211_watchdog.9
-MLINKS+=ieee80211_crypto.9 ieee80211_crypto_encap.9
-MLINKS+=ieee80211_input.9 ieee80211_recv_mgmt.9
-MLINKS+=ieee80211_ioctl.9 ieee80211_cfgget.9 \
-	ieee80211_ioctl.9 ieee80211_cfgset.9
-MLINKS+=ieee80211_node.9 ieee80211_begin_scan.9 \
-	ieee80211_node.9 ieee80211_create_ibss.9 \
-	ieee80211_node.9 ieee80211_end_scan.9 \
-	ieee80211_node.9 ieee80211_find_node.9 \
+MLINKS+=ieee80211.9 ieee80211_ifattach.9 \
+	ieee80211.9 ieee80211_ifdetach.9
+#MLINKS+=ieee80211_amrr.9 ieee80211_amrr_choose.9 \
+#	ieee80211_amrr.9 ieee80211_amrr_cleanup.9 \
+#	ieee80211_amrr.9 ieee80211_amrr_init.9 \
+#	ieee80211_amrr.9 ieee80211_amrr_node_init.9 \
+#	ieee80211_amrr.9 ieee80211_amrr_setinterval.9 \
+#	ieee80211_amrr.9 ieee80211_amrr_tx_complete.9 \
+#	ieee80211_amrr.9 ieee80211_amrr_tx_update.9
+MLINKS+=ieee80211_beacon.9 ieee80211_beacon_alloc.9 \
+	ieee80211_beacon.9 ieee80211_beacon_notify.9 \
+	ieee80211_beacon.9 ieee80211_beacon_update.9
+MLINKS+=ieee80211_bmiss.9 ieee80211_beacon_miss.9
+MLINKS+=ieee80211_crypto.9 ieee80211_crypto_available.9 \
+	ieee80211_crypto.9 ieee80211_crypto_decap.9 \
+	ieee80211_crypto.9 ieee80211_crypto_delglobalkeys.9 \
+	ieee80211_crypto.9 ieee80211_crypto_delkey.9 \
+	ieee80211_crypto.9 ieee80211_crypto_demic.9 \
+	ieee80211_crypto.9 ieee80211_crypto_encap.9 \
+	ieee80211_crypto.9 ieee80211_crypto_enmic.9 \
+	ieee80211_crypto.9 ieee80211_crypto_newkey.9 \
+	ieee80211_crypto.9 ieee80211_crypto_register.9 \
+	ieee80211_crypto.9 ieee80211_crypto_reload_keys.9 \
+	ieee80211_crypto.9 ieee80211_crypto_setkey.9 \
+	ieee80211_crypto.9 ieee80211_crypto_unregister.9 \
+	ieee80211_crypto.9 ieee80211_key_update_begin.9 \
+	ieee80211_crypto.9 ieee80211_key_update_end.9 \
+	ieee80211_crypto.9 ieee80211_notify_michael_failure.9 \
+	ieee80211_crypto.9 ieee80211_notify_replay_failure.9
+MLINKS+=ieee80211_input.9 ieee80211_input_all.9
+MLINKS+=ieee80211_node.9 ieee80211_dump_node.9 \
+	ieee80211_node.9 ieee80211_dump_nodes.9 \
 	ieee80211_node.9 ieee80211_find_rxnode.9 \
-	ieee80211_node.9 ieee80211_find_txnode.9 \
+	ieee80211_node.9 ieee80211_find_rxnode_withkey.9 \
 	ieee80211_node.9 ieee80211_free_node.9 \
 	ieee80211_node.9 ieee80211_iterate_nodes.9 \
-	ieee80211_node.9 ieee80211_next_scan.9
-#	ieee80211_node.9 ieee80211_alloc_node.9 \
-#	ieee80211_node.9 ieee80211_dup_bss.9 \
-#	ieee80211_node.9 ieee80211_free_allnodes.9 \
-#	ieee80211_node.9 ieee80211_node_attach.9 \
-#	ieee80211_node.9 ieee80211_node_detach.9 \
-#	ieee80211_node.9 ieee80211_node_lateattach.9
-MLINKS+=ieee80211_output.9 ieee80211_add_rates.9 \
-	ieee80211_output.9 ieee80211_add_ssid.9 \
-	ieee80211_output.9 ieee80211_add_xrates.9 \
-	ieee80211_output.9 ieee80211_encap.9 \
-	ieee80211_output.9 ieee80211_send_mgmt.9
-MLINKS+=ieee80211_proto.9 ieee80211_dump_pkt.9 \
-	ieee80211_proto.9 ieee80211_fix_rate.9 \
-	ieee80211_proto.9 ieee80211_print_essid.9 \
-	ieee80211_proto.9 ieee80211_proto_attach.9 \
-	ieee80211_proto.9 ieee80211_proto_detach.9
-MLINKS+=ieee80211_radiotap.9 radiotap.9
+	ieee80211_node.9 ieee80211_ref_node.9 \
+	ieee80211_node.9 ieee80211_unref_node.9
+MLINKS+=ieee80211_output.9 ieee80211_process_callback.9 \
+	ieee80211_output.9 M_SEQNO_GET.9 \
+	ieee80211_output.9 M_WME_GETAC.9
+MLINKS+=ieee80211_proto.9 ieee80211_new_state.9 \
+	ieee80211_proto.9 ieee80211_resume_all.9 \
+	ieee80211_proto.9 ieee80211_start_all.9 \
+	ieee80211_proto.9 ieee80211_stop_all.9 \
+	ieee80211_proto.9 ieee80211_suspend_all.9 \
+	ieee80211_proto.9 ieee80211_waitfor_parent.9
+MLINKS+=ieee80211_radiotap.9 ieee80211_radiotap_active.9 \
+	ieee80211_radiotap.9 ieee80211_radiotap_active_vap.9 \
+	ieee80211_radiotap.9 ieee80211_radiotap_attach.9 \
+	ieee80211_radiotap.9 ieee80211_radiotap_tx.9 \
+	ieee80211_radiotap.9 radiotap.9
+MLINKS+=ieee80211_regdomain.9 ieee80211_alloc_countryie.9 \
+	ieee80211_regdomain.9 ieee80211_init_channels.9 \
+	ieee80211_regdomain.9 ieee80211_sort_channels.9
+MLINKS+=ieee80211_scan.9 ieee80211_add_scan.9 \
+	ieee80211_scan.9 ieee80211_bg_scan.9 \
+	ieee80211_scan.9 ieee80211_cancel_anyscan.9 \
+	ieee80211_scan.9 ieee80211_cancel_scan.9 \
+	ieee80211_scan.9 ieee80211_check_scan.9 \
+	ieee80211_scan.9 ieee80211_check_scan_current.9 \
+	ieee80211_scan.9 ieee80211_probe_curchan.9 \
+	ieee80211_scan.9 ieee80211_scan_assoc_fail.9 \
+	ieee80211_scan.9 ieee80211_scan_done.9 \
+	ieee80211_scan.9 ieee80211_scan_dump_channels.9 \
+	ieee80211_scan.9 ieee80211_scan_flush.9 \
+	ieee80211_scan.9 ieee80211_scan_iterate.9 \
+	ieee80211_scan.9 ieee80211_scanner_get.9 \
+	ieee80211_scan.9 ieee80211_scanner_register.9 \
+	ieee80211_scan.9 ieee80211_scanner_unregister.9 \
+	ieee80211_scan.9 ieee80211_scanner_unregister_all.9 \
+	ieee80211_scan.9 ieee80211_scan_next.9 \
+	ieee80211_scan.9 ieee80211_scan_timeout.9 \
+	ieee80211_scan.9 ieee80211_start_scan.9
+MLINKS+=ieee80211_vap.9 ieee80211_vap_attach.9 \
+	ieee80211_vap.9 ieee80211_vap_detach.9 \
+	ieee80211_vap.9 ieee80211_vap_setup.9
 MLINKS+=ifnet.9 ifaddr.9 \
 	ifnet.9 if_data.9 \
 	ifnet.9 ifqueue.9
@@ -568,6 +621,7 @@ MLINKS+=pfil.9 pfil_add_hook.9 \
 	pfil.9 pfil_hook_get.9 \
 	pfil.9 pfil_remove_hook.9 \
 	pfil.9 pfil_run_hooks.9
+MLINKS+=pfind.9 zpfind.9
 MLINKS+=physio.9 physread.9 \
 	physio.9 physwrite.9
 MLINKS+=posix4.9 p1003_1b.9
@@ -636,11 +690,13 @@ MLINKS+=serializer.9 ASSERT_NOT_SERIALIZED.9 \
 	serializer.9 lwkt_serialize_init.9 \
 	serializer.9 lwkt_serialize_try.9
 MLINKS+=sleep.9 lksleep.9 \
+	sleep.9 mtxsleep.9 \
 	sleep.9 ssleep.9 \
 	sleep.9 tsleep.9 \
-	sleep.9 zsleep.9 \
+	sleep.9 tsleep_interlock.9 \
 	sleep.9 wakeup.9 \
-	sleep.9 wakeup_one.9
+	sleep.9 wakeup_one.9 \
+	sleep.9 zsleep.9
 MLINKS+=spinlock.9 spin_init.9 \
 	spinlock.9 spin_lock_rd.9 \
 	spinlock.9 spin_lock_rd_quick.9 \

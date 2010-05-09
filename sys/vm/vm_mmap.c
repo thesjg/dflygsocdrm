@@ -180,7 +180,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	 *
 	 * NOTE: We support the full unsigned range for size now.
 	 */
-	if (((flags & MAP_ANON) && fd != -1))
+	if (((flags & MAP_ANON) && (fd != -1 || pos != 0)))
 		return (EINVAL);
 
 	if (flags & MAP_STACK) {
@@ -263,7 +263,6 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 		 */
 		handle = NULL;
 		maxprot = VM_PROT_ALL;
-		pos = 0;
 	} else {
 		/*
 		 * Mapping file, get fp for validation. Obtain vnode and make
@@ -1026,7 +1025,7 @@ sys_mlock(struct mlock_args *uap)
 int
 sys_mlockall(struct mlockall_args *uap)
 {
-	return 0;
+	return (ENOSYS);
 }
 
 /*
@@ -1039,7 +1038,7 @@ sys_mlockall(struct mlockall_args *uap)
 int
 sys_munlockall(struct munlockall_args *uap)
 {
-	return 0;
+	return (ENOSYS);
 }
 
 /*

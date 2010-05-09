@@ -25,23 +25,11 @@
         ..
         dma
         ..
-        firmware
-        ..
         isdn            mode=0700
         ..
         mail
         ..
         mtree
-        ..
-        namedb
-            etc
-            ..
-            var
-                run     uname=bind gname=bind mode=0750
-                ..
-            ..
-            s           uname=bind gname=bind mode=0750
-            ..
         ..
         periodic
             daily

@@ -21,20 +21,16 @@
 SUBDIR=	csu \
 	libbluetooth libcom_err libcrypt libm libmd libarchive \
 	libncurses libradius librt libtacplus libutil libsbuf \
-	libalias libatm ${_libbind} ${_libbind9} libbz2 libc ${_libc_r} \
+	libalias libatm libbz2 libc ${_libc_r} \
 	libcalendar libcam libcompat libdevinfo libdevstat libedit \
 	libevent libexpat libfetch \
-	libftpio libipsec libipx libisc libkcore libkiconv libkinfo \
+	libftpio libipsec libipx libkcore libkiconv libkinfo \
 	libkvm libmagic \
 	${_libmilter} ${_libncp} libnetgraph libopie libpam \
 	libpcap libposix1e libsdp libthread_xu libpthread librpcsvc ${_libsm} \
 	${_libsmb} ${_libsmdb} ${_libsmutil} libstand libtelnet libusbhid \
 	${_libvgl} libwrap libxpg4 liby libypclnt libz i18n_module pam_module \
-	libc_rtld libsctp
-
-.if ${MACHINE_ARCH} == "i386"
-SUBDIR+= libevtr
-.endif
+	libc_rtld libsctp libevtr
 
 .if exists(${.CURDIR}/compat/${MACHINE_ARCH}/Makefile)
 SUBDIR+= compat/${MACHINE_ARCH}
@@ -42,11 +38,6 @@ SUBDIR+= compat/${MACHINE_ARCH}
 
 .if !defined(NO_LIBC_R)
 _libc_r=	libc_r
-.endif
-
-.if !defined(NO_BIND)
-_libbind=	libbind
-_libbind9=	libbind9
 .endif
 
 .if !defined(NO_SENDMAIL)

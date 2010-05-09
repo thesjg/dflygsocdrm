@@ -129,8 +129,12 @@ SYSINIT(interfaces, SI_SUB_PROTO_IF, SI_ORDER_FIRST, ifinit, NULL)
 /* Must be after netisr_init */
 SYSINIT(ifnet, SI_SUB_PRE_DRIVERS, SI_ORDER_SECOND, ifnetinit, NULL)
 
+static  if_com_alloc_t *if_com_alloc[256];
+static  if_com_free_t *if_com_free[256];
+
 MALLOC_DEFINE(M_IFADDR, "ifaddr", "interface address");
 MALLOC_DEFINE(M_IFMADDR, "ether_multi", "link-level multicast address");
+MALLOC_DEFINE(M_IFNET, "ifnet", "interface structure");
 
 int			ifqmaxlen = IFQ_MAXLEN;
 struct ifnethead	ifnet = TAILQ_HEAD_INITIALIZER(ifnet);
@@ -1262,12 +1266,15 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct ucred *cred)
 
 	switch (cmd) {
 	case SIOCIFCREATE:
+	case SIOCIFCREATE2:
+		if ((error = priv_check_cred(cred, PRIV_ROOT, 0)) != 0)
+			return (error);
+		return (if_clone_create(ifr->ifr_name, sizeof(ifr->ifr_name),
+		    	cmd == SIOCIFCREATE2 ? ifr->ifr_data : NULL));
 	case SIOCIFDESTROY:
 		if ((error = priv_check_cred(cred, PRIV_ROOT, 0)) != 0)
 			return (error);
-		return ((cmd == SIOCIFCREATE) ?
-			if_clone_create(ifr->ifr_name, sizeof(ifr->ifr_name)) :
-			if_clone_destroy(ifr->ifr_name));
+		return (if_clone_destroy(ifr->ifr_name));
 
 	case SIOCIFGCLONERS:
 		return (if_clone_list((struct if_clonereq *)data));
@@ -1544,8 +1551,10 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct ucred *cred)
 		error = priv_check_cred(cred, PRIV_ROOT, 0);
 		if (error)
 			return (error);
-		return if_setlladdr(ifp,
+		error = if_setlladdr(ifp,
 		    ifr->ifr_addr.sa_data, ifr->ifr_addr.sa_len);
+		EVENTHANDLER_INVOKE(iflladdr_event, ifp);
+		return (error);
 
 	default:
 		oif_flags = ifp->if_flags;
@@ -1863,7 +1872,8 @@ if_addmulti(
 	crit_enter();
 	LIST_INSERT_HEAD(&ifp->if_multiaddrs, ifma, ifma_link);
 	crit_exit();
-	*retifma = ifma;
+	if (retifma)
+		*retifma = ifma;
 
 	if (llsa != 0) {
 		LIST_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
@@ -1892,7 +1902,8 @@ if_addmulti(
 	 */
 	crit_enter();
 	ifnet_serialize_all(ifp);
-	ifp->if_ioctl(ifp, SIOCADDMULTI, 0, NULL);
+	if (ifp->if_ioctl)
+		ifp->if_ioctl(ifp, SIOCADDMULTI, 0, NULL);
 	ifnet_deserialize_all(ifp);
 	crit_exit();
 
@@ -1972,6 +1983,21 @@ if_delmulti(struct ifnet *ifp, struct sockaddr *sa)
 
 	return 0;
 }
+
+/*
+ * Delete all multicast group membership for an interface.
+ * Should be used to quickly flush all multicast filters.
+ */
+void
+if_delallmulti(struct ifnet *ifp)
+{
+	struct ifmultiaddr *ifma;
+	struct ifmultiaddr *next;
+
+	LIST_FOREACH_MUTABLE(ifma, &ifp->if_multiaddrs, ifma_link, next)
+		if_delmulti(ifp, ifma->ifma_addr);
+}
+
 
 /*
  * Set the link layer address on an interface.
@@ -2102,6 +2128,31 @@ if_printf(struct ifnet *ifp, const char *fmt, ...)
 	retval += kvprintf(fmt, ap);
 	__va_end(ap);
 	return (retval);
+}
+
+struct ifnet *
+if_alloc(uint8_t type)
+{
+        struct ifnet *ifp;
+
+	ifp = kmalloc(sizeof(struct ifnet), M_IFNET, M_WAITOK|M_ZERO);
+
+	ifp->if_type = type;
+
+	if (if_com_alloc[type] != NULL) {
+		ifp->if_l2com = if_com_alloc[type](type, ifp);
+		if (ifp->if_l2com == NULL) {
+			kfree(ifp, M_IFNET);
+			return (NULL);
+		}
+	}
+	return (ifp);
+}
+
+void
+if_free(struct ifnet *ifp)
+{
+	kfree(ifp, M_IFNET);
 }
 
 void
@@ -2436,4 +2487,49 @@ ifnetinit(void *dummy __unused)
 			    thr, TDF_NETWORK | TDF_MPSAFE, i, "ifnet %d", i);
 		netmsg_service_port_init(&thr->td_msgport);
 	}
+}
+
+struct ifnet *
+ifnet_byindex(unsigned short idx)
+{
+	if (idx > if_index)
+		return NULL;
+	return ifindex2ifnet[idx];
+}
+
+struct ifaddr *
+ifaddr_byindex(unsigned short idx)
+{
+	struct ifnet *ifp;
+
+	ifp = ifnet_byindex(idx);
+	if (!ifp)
+		return NULL;
+	return TAILQ_FIRST(&ifp->if_addrheads[mycpuid])->ifa;
+}
+
+void
+if_register_com_alloc(u_char type,
+    if_com_alloc_t *a, if_com_free_t *f)
+{
+
+        KASSERT(if_com_alloc[type] == NULL,
+            ("if_register_com_alloc: %d already registered", type));
+        KASSERT(if_com_free[type] == NULL,
+            ("if_register_com_alloc: %d free already registered", type));
+
+        if_com_alloc[type] = a;
+        if_com_free[type] = f;
+}
+
+void
+if_deregister_com_alloc(u_char type)
+{
+
+        KASSERT(if_com_alloc[type] != NULL,
+            ("if_deregister_com_alloc: %d not registered", type));
+        KASSERT(if_com_free[type] != NULL,
+            ("if_deregister_com_alloc: %d free not registered", type));
+        if_com_alloc[type] = NULL;
+        if_com_free[type] = NULL;
 }

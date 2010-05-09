@@ -202,81 +202,85 @@ dev/disk/aic7xxx/aic79xx.c		optional ahd pci
 dev/disk/aic7xxx/aic79xx_osm.c		optional ahd pci
 dev/disk/aic7xxx/aic79xx_pci.c		optional ahd pci
 dev/netif/ath/hal/ah_osdep.c				optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_attach.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_power.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_keycache.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_beacon.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_recv.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_misc.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_xmit.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_reset.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_phy.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5211/ar5211_interrupts.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ah_regdomain.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ah_eeprom_v1.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ah_eeprom_v3.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_power.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal_adcgain.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_ani.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_attach.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_beacon.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_keycache.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar9160_attach.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_recv.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_gpio.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_eeprom.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_reset.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar2133.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal_adcdc.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_interrupts.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_xmit.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_misc.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_phy.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal_iq.c	optional ath_hal
-# XXX not yet
-# dev/netif/ath/hal/ath_hal/ar5312/ar5312_misc.c	optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5312/ar5312_interrupts.c	optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5312/ar5312_reset.c	optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5312/ar5312_eeprom.c	optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5312/ar5312_gpio.c	optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5312/ar5315_gpio.c	optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5312/ar5312_power.c	optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5312/ar5312_attach.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_rfgain.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_interrupts.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_ani.c		optional ath_hal
-# XXX not yet
-# dev/netif/ath/hal/ath_hal/ar5212/ar2316.c		optional ath_hal
-# dev/netif/ath/hal/ath_hal/ar5212/ar2317.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar2413.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5413.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_power.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar2425.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_recv.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_gpio.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_beacon.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_misc.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_xmit.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_eeprom.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_keycache.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_phy.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_attach.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5212_reset.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5111.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5212/ar5112.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ah.c				optional ath_hal
-dev/netif/ath/hal/ath_hal/ah_eeprom_v14.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_misc.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_xmit.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_power.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_keycache.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_beacon.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_reset.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_interrupts.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_attach.c	optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_recv.c		optional ath_hal
-dev/netif/ath/hal/ath_hal/ar5210/ar5210_phy.c		optional ath_hal
+dev/netif/ath/hal/ath_hal/ah.c 				optional ath_hal
+dev/netif/ath/hal/ath_hal/ah_eeprom_v1.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ah_eeprom_v14.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ah_eeprom_v3.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ah_eeprom_v4k.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ah_regdomain.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_attach.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_beacon.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_interrupts.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_keycache.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_misc.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_phy.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_power.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_recv.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_reset.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5210/ar5210_xmit.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_attach.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_beacon.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_interrupts.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_keycache.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_misc.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_phy.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_power.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_recv.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_reset.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5211/ar5211_xmit.c 		optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5212/ar2316.c 		optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5212/ar2317.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar2413.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar2425.c	 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5111.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5112.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_ani.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_attach.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_beacon.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_eeprom.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_gpio.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_interrupts.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_keycache.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_misc.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_phy.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_power.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_recv.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_reset.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_rfgain.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5212_xmit.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5212/ar5413.c 		optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5312_attach.c 	optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5312_eeprom.c 	optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5312_gpio.c 	optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5312_interrupts.c 	optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5312_misc.c 	optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5312_power.c 	optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5312_reset.c 	optional ath_hal
+#dev/netif/ath/hal/ath_hal/ar5312/ar5315_gpio.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar2133.c	 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_ani.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_attach.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_beacon.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal_adcdc.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal_adcgain.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_cal_iq.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_eeprom.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_gpio.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_interrupts.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_keycache.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_misc.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_phy.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_power.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_recv.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_reset.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar5416_xmit.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar9160_attach.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar9280.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar9280_attach.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar9285.c 		optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar9285_attach.c 	optional ath_hal
+dev/netif/ath/hal/ath_hal/ar5416/ar9285_reset.c 	optional ath_hal
 dev/netif/ath/rate_amrr/amrr.c		optional ath_rate_amrr \
 	compile-with "${NORMAL_C} -I$S/dev/netif/ath/ath ${WERROR}"
 dev/netif/ath/rate_onoe/onoe.c		optional ath_rate_onoe \
@@ -438,6 +442,10 @@ dev/raid/mlx/mlx_disk.c		optional mlx
 dev/raid/mlx/mlx_pci.c		optional mlx
 dev/raid/mlx/mlx.c		optional mlx
 dev/raid/mly/mly.c		optional mly
+bus/mmc/mmc.c			optional mmc
+bus/mmc/mmcbr_if.m		standard
+bus/mmc/mmcbus_if.m		standard
+dev/disk/mmcsd/mmcsd.c		optional mmcsd
 dev/disk/mpt/mpt.c		optional mpt
 dev/disk/mpt/mpt_cam.c		optional mpt
 dev/disk/mpt/mpt_debug.c	optional mpt
@@ -474,6 +482,7 @@ dev/serial/rp/rp_isa.c		optional nrp isa
 dev/serial/rp/rp_pci.c		optional nrp pci
 dev/netif/sbni/if_sbni_pci.c	optional sbni pci
 dev/netif/sbsh/if_sbsh.c	optional sbsh
+dev/disk/sdhci/sdhci.c		optional sdhci pci
 bus/smbus/smbus_if.m		optional smbus
 bus/smbus/smbconf.c		optional smbus
 bus/smbus/smbus.c		optional smbus
@@ -645,6 +654,7 @@ kern/link_elf.c		standard
 kern/kern_acct.c	standard
 kern/kern_acl.c		standard
 kern/kern_clock.c	standard
+kern/kern_condvar.c	standard
 kern/kern_conf.c	standard
 kern/kern_debug.c	standard
 kern/kern_device.c	standard
@@ -654,7 +664,6 @@ kern/kern_environment.c	standard
 kern/kern_event.c	standard
 kern/kern_exec.c	standard
 kern/kern_exit.c	standard
-kern/kern_firmware.c	standard
 kern/kern_fork.c	standard
 kern/kern_jail.c	standard
 kern/kern_kinfo.c	standard
@@ -697,6 +706,7 @@ kern/lwkt_token.c	standard
 kern/lwkt_msgport.c	standard
 kern/lwkt_serialize.c	standard
 kern/lwkt_caps.c	standard
+kern/kern_dsched.c	standard
 kern/kern_sensors.c	standard
 kern/kern_spinlock.c	standard
 kern/kern_synch.c	standard
@@ -717,6 +727,7 @@ kern/subr_disklabel32.c	standard
 kern/subr_disklabel64.c	standard
 kern/subr_diskslice.c	standard
 kern/subr_eventhandler.c	standard
+kern/subr_firmware.c	standard
 kern/subr_kcore.c	standard
 kern/subr_kobj.c	standard
 kern/subr_log.c		standard
@@ -881,25 +892,45 @@ net/route.c		standard
 net/rtsock.c		standard
 net/zlib.c		optional ppp_deflate
 net/zlib.c		optional ipsec
-netproto/802_11/wlan/ieee80211.c			optional wlan
-netproto/802_11/wlan/ieee80211_crypto.c			optional wlan
-netproto/802_11/wlan/ieee80211_crypto_none.c		optional wlan
-netproto/802_11/wlan/ieee80211_ratectl.c		optional wlan
-netproto/802_11/wlan/ieee80211_ratectl_none.c		optional wlan
-netproto/802_11/wlan/ieee80211_dragonfly.c		optional wlan
-netproto/802_11/wlan/ieee80211_input.c			optional wlan
-netproto/802_11/wlan/ieee80211_ioctl.c			optional wlan
-netproto/802_11/wlan/ieee80211_node.c			optional wlan
-netproto/802_11/wlan/ieee80211_output.c			optional wlan
-netproto/802_11/wlan/ieee80211_proto.c			optional wlan
-netproto/802_11/wlan_acl/ieee80211_acl.c		optional wlan_acl
-netproto/802_11/wlan_ccmp/ieee80211_crypto_ccmp.c	optional wlan_ccmp
-netproto/802_11/wlan_tkip/ieee80211_crypto_tkip.c	optional wlan_tkip
-netproto/802_11/wlan_wep/ieee80211_crypto_wep.c		optional wlan_wep
-netproto/802_11/wlan_xauth/ieee80211_xauth.c		optional wlan_xauth
-netproto/802_11/wlan_ratectl/onoe/ieee80211_ratectl_onoe.c	optional wlan_ratectl_onoe
-netproto/802_11/wlan_ratectl/amrr/ieee80211_ratectl_amrr.c	optional wlan_ratectl_amrr
-netproto/802_11/wlan_ratectl/sample/ieee80211_ratectl_sample.c	optional wlan_ratectl_sample
+netproto/802_11/wlan/ieee80211.c            optional wlan
+netproto/802_11/wlan_acl/ieee80211_acl.c    optional wlan_acl
+netproto/802_11/wlan/ieee80211_action.c     optional wlan
+netproto/802_11/wlan/ieee80211_ageq.c       optional wlan
+netproto/802_11/wlan/ieee80211_adhoc.c      optional wlan
+netproto/802_11/wlan/ieee80211_ageq.c       optional wlan
+netproto/802_11/wlan/ieee80211_amrr.c       optional wlan_amrr
+netproto/802_11/wlan/ieee80211_crypto.c     optional wlan
+netproto/802_11/wlan_ccmp/ieee80211_crypto_ccmp.c optional wlan_ccmp
+netproto/802_11/wlan/ieee80211_crypto_none.c optional wlan
+netproto/802_11/wlan_tkip/ieee80211_crypto_tkip.c optional wlan_tkip
+netproto/802_11/wlan_wep/ieee80211_crypto_wep.c optional wlan_wep
+netproto/802_11/wlan/ieee80211_ddb.c        optional wlan ddb
+netproto/802_11/wlan/ieee80211_dfs.c        optional wlan
+netproto/802_11/wlan/ieee80211_dragonfly.c  optional wlan
+netproto/802_11/wlan/ieee80211_hostap.c     optional wlan
+netproto/802_11/wlan/ieee80211_ht.c         optional wlan
+netproto/802_11/wlan/ieee80211_hwmp.c       optional wlan ieee80211_support_mesh
+netproto/802_11/wlan/ieee80211_input.c      optional wlan
+netproto/802_11/wlan/ieee80211_ioctl.c      optional wlan
+netproto/802_11/wlan/ieee80211_mesh.c       optional wlan ieee80211_support_mesh
+netproto/802_11/wlan/ieee80211_monitor.c    optional wlan
+netproto/802_11/wlan/ieee80211_node.c       optional wlan
+netproto/802_11/wlan/ieee80211_output.c     optional wlan
+netproto/802_11/wlan/ieee80211_phy.c        optional wlan
+netproto/802_11/wlan/ieee80211_power.c      optional wlan
+netproto/802_11/wlan/ieee80211_proto.c      optional wlan
+netproto/802_11/wlan/ieee80211_radiotap.c   optional wlan
+netproto/802_11/wlan/ieee80211_ratectl.c    optional wlan
+netproto/802_11/wlan/ieee80211_ratectl.c    optional wlan
+netproto/802_11/wlan/ieee80211_regdomain.c  optional wlan
+netproto/802_11/wlan/ieee80211_rssadapt.c   optional wlan_rssadapt
+netproto/802_11/wlan/ieee80211_scan.c       optional wlan
+netproto/802_11/wlan/ieee80211_scan_sta.c   optional wlan
+netproto/802_11/wlan/ieee80211_sta.c        optional wlan
+netproto/802_11/wlan/ieee80211_superg.c     optional wlan ieee80211_support_superg
+netproto/802_11/wlan/ieee80211_tdma.c       optional wlan ieee80211_support_tdma
+netproto/802_11/wlan/ieee80211_wds.c        optional wlan
+netproto/802_11/wlan_xauth/ieee80211_xauth.c optional wlan_xauth
 netproto/atalk/aarp.c		optional netatalk
 netproto/atalk/at_control.c	optional netatalk
 netproto/atalk/at_proto.c	optional netatalk
@@ -1591,6 +1622,7 @@ libiconv/iconv_converter_if.m		optional libiconv
 libkern/index.c				standard
 libkern/inet_ntoa.c			standard
 libkern/mcount.c			optional	profiling-routine
+libkern/memmove.c			standard
 libkern/qsort.c				standard
 libkern/random.c			standard
 libkern/rindex.c			standard
@@ -1598,6 +1630,7 @@ libkern/scanc.c				standard
 libkern/skpc.c				standard
 libkern/strcat.c			standard
 libkern/strcmp.c			standard
+libkern/strcasecmp.c			standard
 libkern/fnmatch.c			standard
 libkern/strcpy.c			standard
 libkern/strlcat.c			standard
@@ -1720,7 +1753,7 @@ ${OSACPI_MI_DIR}/acpi_package.c		optional acpi
 ${OSACPI_MI_DIR}/acpi_pci.c		optional acpi pci
 ${OSACPI_MI_DIR}/acpi_pci_link.c	optional acpi pci
 ${OSACPI_MI_DIR}/acpi_pcib.c		optional acpi pci
-${OSACPI_MI_DIR}/acpi_pcib_acpi.c	optional nowerror acpi pci
+${OSACPI_MI_DIR}/acpi_pcib_acpi.c	optional acpi pci
 ${OSACPI_MI_DIR}/acpi_pcib_pci.c	optional acpi pci
 ${OSACPI_MI_DIR}/acpi_powerres.c	optional acpi
 ${OSACPI_MI_DIR}/acpi_resource.c	optional acpi
@@ -1747,6 +1780,10 @@ ${OSACPI_MI_DIR}/acpi_thinkpad/acpi_thinkpad.c	optional acpi_thinkpad acpi
 ${OSACPI_MI_DIR}/acpi_toshiba/acpi_toshiba.c	optional acpi_toshiba acpi
 ${OSACPI_MI_DIR}/acpi_video/acpi_video.c	optional acpi_video acpi
 ${OSACPI_MI_DIR}/aibs/atk0110.c			optional aibs acpi
+
+#dsched stuff
+kern/dsched/fq/fq_core.c		optional dsched_fq
+kern/dsched/fq/fq_diskops.c		optional dsched_fq
 
 # ACPICA code
 ${ACPICA_DIR}/debugger/dbcmds.c			optional acpi acpi_debug

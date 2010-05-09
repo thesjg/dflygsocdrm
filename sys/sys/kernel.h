@@ -309,7 +309,6 @@ struct tunable_int {
 	        tunable_int_init, &__tunable_int_ ## line)
 
 #define	TUNABLE_INT_FETCH(path, var)	kgetenv_int((path), (var))
-#define	TUNABLE_LONG_FETCH(path, var)	kgetenv_long((path), (var))
 
 /* Backwards compatibility with the old deprecated TUNABLE_INT_DECL API */
 #define TUNABLE_INT_DECL(path, defval, var)	\
@@ -320,6 +319,48 @@ static void __Tunable_ ## var (void *ignored)	\
 }						\
 SYSINIT(__Tunable_init_ ## var, SI_BOOT1_TUNABLES, SI_ORDER_MIDDLE, \
 	__Tunable_ ## var , NULL);
+
+extern void tunable_long_init(void *);
+
+struct tunable_long {
+	const char *path;
+	long *var;
+};
+#define	TUNABLE_LONG(path, var)					\
+	_TUNABLE_LONG((path), (var), __LINE__)
+#define _TUNABLE_LONG(path, var, line)				\
+	__TUNABLE_LONG((path), (var), line)
+
+#define	__TUNABLE_LONG(path, var, line)				\
+	static struct tunable_long __tunable_long_ ## line = {	\
+		path,						\
+		var,						\
+	};							\
+	SYSINIT(__Tunable_init_ ## line, 			\
+		SI_BOOT1_TUNABLES, SI_ORDER_MIDDLE, 		\
+	        tunable_long_init, &__tunable_long_ ## line)
+
+#define	TUNABLE_LONG_FETCH(path, var)	kgetenv_long((path), (var))
+
+extern void tunable_ulong_init(void *);
+
+struct tunable_ulong {
+	const char *path;
+	unsigned long *var;
+};
+#define	TUNABLE_ULONG(path, var)				\
+	_TUNABLE_ULONG((path), (var), __LINE__)
+#define _TUNABLE_ULONG(path, var, line)				\
+	__TUNABLE_ULONG((path), (var), line)
+
+#define	__TUNABLE_ULONG(path, var, line)			\
+	static struct tunable_ulong __tunable_ulong_ ## line = {\
+		path,						\
+		var,						\
+	};							\
+	SYSINIT(__Tunable_init_ ## line, 			\
+		SI_BOOT1_TUNABLES, SI_ORDER_MIDDLE, 		\
+	        tunable_ulong_init, &__tunable_ulong_ ## line)
 
 #define	TUNABLE_ULONG_FETCH(path, var)	kgetenv_ulong((path), (var))
 

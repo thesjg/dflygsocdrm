@@ -57,6 +57,8 @@
 #include <sys/spinlock2.h>
 #include <sys/mplock2.h>
 
+#include <sys/dsched.h>
+
 #include <vm/vm.h>
 #include <vm/vm_param.h>
 #include <vm/vm_kern.h>
@@ -380,6 +382,8 @@ lwkt_init_thread(thread_t td, void *stack, int stksize, int flags,
     TAILQ_INSERT_TAIL(&gd->gd_tdallq, td, td_allq);
     crit_exit_gd(mygd);
 #endif
+
+    dsched_new_thread(td);
 }
 
 void
@@ -492,7 +496,7 @@ lwkt_switch(void)
 		td->td_flags |= TDF_PANICWARN;
 		kprintf("Warning: thread switch from interrupt or IPI, "
 			"thread %p (%s)\n", td, td->td_comm);
-		print_backtrace();
+		print_backtrace(-1);
 	    }
 	    lwkt_switch();
 	    gd->gd_intr_nesting_level = savegdnest;
@@ -1472,6 +1476,7 @@ lwkt_exit(void)
     if (td->td_flags & TDF_TSLEEPQ)
 	tsleep_remove(td);
     biosched_done(td);
+    dsched_exit_thread(td);
     lwkt_deschedule_self(td);
     lwkt_remove_tdallq(td);
     if (td->td_flags & TDF_ALLOCATED_THREAD)
