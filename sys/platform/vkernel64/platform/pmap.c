@@ -42,7 +42,6 @@
  *
  *	from:	@(#)pmap.c	7.7 (Berkeley)	5/12/91
  * $FreeBSD: src/sys/i386/i386/pmap.c,v 1.250.2.18 2002/03/06 22:48:53 silby Exp $
- * $DragonFly: src/sys/platform/pc64/amd64/pmap.c,v 1.3 2008/08/29 17:07:10 dillon Exp $
  */
 
 /*
@@ -922,7 +921,7 @@ pmap_init_thread(thread_t td)
 	/* enforce pcb placement */
 	td->td_pcb = (struct pcb *)(td->td_kstack + td->td_kstack_size) - 1;
 	td->td_savefpu = &td->td_pcb->pcb_save;
-	td->td_sp = (char *)td->td_pcb - 16; /* JG is -16 needed on amd64? */
+	td->td_sp = (char *)td->td_pcb - 16; /* JG is -16 needed on x86_64? */
 }
 
 /*
@@ -2756,18 +2755,10 @@ pmap_page_exists_quick(pmap_t pmap, vm_page_t m)
 void
 pmap_remove_pages(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 {
-	struct lwp *lp;
 	pt_entry_t *pte, tpte;
 	pv_entry_t pv, npv;
 	vm_page_t m;
-	int iscurrentpmap;
 	int save_generation;
-
-	lp = curthread->td_lwp;
-	if (lp && pmap == vmspace_pmap(lp->lwp_vmspace))
-		iscurrentpmap = 1;
-	else
-		iscurrentpmap = 0;
 
 	crit_enter();
 	for (pv = TAILQ_FIRST(&pmap->pm_pvlist); pv; pv = npv) {
@@ -2823,7 +2814,7 @@ pmap_remove_pages(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 		 */
 		if (save_generation != pmap->pm_generation) {
 			kprintf("Warning: pmap_remove_pages race-A avoided\n");
-			pv = TAILQ_FIRST(&pmap->pm_pvlist);
+			npv = TAILQ_FIRST(&pmap->pm_pvlist);
 		}
 	}
 	crit_exit();

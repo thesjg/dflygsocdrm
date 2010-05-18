@@ -1,6 +1,5 @@
 /*-
- * Copyright (c) 1997 Jonathan Lemon
- * Copyright (c) 2008 The DragonFly Project.
+ * Copyright (c) 1998 Nicolas Souchu
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,49 +23,31 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/pcb_ext.h,v 1.4 1999/12/29 04:33:04 peter Exp $
+ * $FreeBSD: src/sys/i386/include/iic.h,v 1.3 1999/08/28 00:44:16 peter Exp $
+ * $DragonFly: src/sys/platform/pc32/include/iic.h,v 1.4 2006/05/20 02:42:06 dillon Exp $
+ *
  */
-
-#ifndef _MACHINE_PCB_EXT_H_
-#define _MACHINE_PCB_EXT_H_
+#ifndef _MACHINE_IIC_H_
+#define _MACHINE_IIC_H_
 
 #ifndef _SYS_TYPES_H_
 #include <sys/types.h>
 #endif
-
-/*
- * Extension to the 386 process control block
- */
-#ifndef _MACHINE_TSS_H_
-#include <machine/tss.h>
-#endif
-#ifndef _MACHINE_SEGMENTS_H_
-#include <machine/segments.h>
+#ifndef _SYS_IOCCOM_H_
+#include <sys/ioccom.h>
 #endif
 
-struct pcb_ext {
-	struct 	user_segment_descriptor ext_tssd;	/* tss descriptor */
-	struct 	x86_64tss	ext_tss;	/* per-process x86_64tss */
-	caddr_t	ext_iomap;		/* i/o permission bitmap */
+struct iiccmd {
+	u_char slave;
+	size_t count;
+	size_t last;
+	char *buf;
 };
 
-/* JG remove this structure? */
-struct pcb_ldt {
-	caddr_t	ldt_base;
-	int	ldt_len;
-	int	ldt_refcnt;
-	u_long	ldt_active;
-	struct	user_segment_descriptor ldt_sd;
-};
-
-#ifdef _KERNEL
-
-struct pcb;
-
-void set_user_ldt (struct pcb *);
-struct pcb_ldt *user_ldt_alloc (struct pcb *, int);
-void user_ldt_free (struct pcb *);
+#define I2CSTART	_IOW('i', 1, struct iiccmd)	/* start condition */
+#define I2CSTOP		_IO('i', 2)			/* stop condition */
+#define I2CRSTCARD	_IOW('i', 3, struct iiccmd)	/* reset the card */
+#define I2CWRITE	_IOW('i', 4, struct iiccmd)	/* send data */
+#define I2CREAD		_IOW('i', 5, struct iiccmd)	/* receive data */
 
 #endif
-
-#endif /* _MACHINE_PCB_EXT_H_ */
