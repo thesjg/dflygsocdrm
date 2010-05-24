@@ -35,6 +35,22 @@
 /* For current implementation of idr */
 #include <sys/tree.h>
 
+/* Print functions */
+
+/* For file drm_stub.c, function drm_ut_debug_printk() */
+#define printk    printf
+#define vprintk   kvprintf
+
+#define printf	kprintf
+#define snprintf ksnprintf
+
+/* For file drm_stub.c, function drm_ut_debug_printk() */
+/* DRM_MEM_ERROR appears unused and so is drm_mem_stats */
+
+#define KERN_DEBUG "debug: "
+#define KERN_ERR   "error: "
+#define KERN_INFO  "KERN_INFO"
+
 MALLOC_DECLARE(DRM_MEM_DMA);
 MALLOC_DECLARE(DRM_MEM_SAREA);
 MALLOC_DECLARE(DRM_MEM_DRIVER);
@@ -72,12 +88,6 @@ MALLOC_DECLARE(DRM_MEM_HASHTAB);
 #undef CONFIG_DEBUG_FS
 #endif
 
-/* DRM_MEM_ERROR appears unused and so is drm_mem_stats */
-
-#define KERN_DEBUG "KERN_DEBUG"
-#define KERN_ERR   "KERN_ERR"
-#define KERN_INFO  "KERN_INFO"
-
 #define __GFP_COLD      0x4
 #define __GFP_COMP      0x8
 #define __GFP_DMA32     0x10
@@ -89,11 +99,6 @@ MALLOC_DECLARE(DRM_MEM_HASHTAB);
 #define PAGE_KERNEL     0x200
 #define _PAGE_NO_CACHE  0x400
 
-#define printk    printf
-#define vprintk   kvprintf
-
-#define printf	kprintf
-#define snprintf ksnprintf
 #define sscanf	ksscanf
 #define malloc	kmalloc
 #define realloc	krealloc
