@@ -34,6 +34,10 @@
 #ifndef _DRM_PRIV_INCLUDE_H_
 #define _DRM_PRIV_INCLUDE_H_
 
+/* Derived from drmP.h
+ *
+ */
+
 #if defined(_KERNEL) || defined(__KERNEL__)
 
 #include <sys/param.h>
