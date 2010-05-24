@@ -31,6 +31,9 @@
 
 #include "dev/drm/drm_linux_list.h"
 
+/* For current implementation of idr */
+#include <sys/tree.h>
+
 #define EXPORT_SYMBOL(sym)
 
 /* drm_mm.c function drm_mm_takedown() */
@@ -82,6 +85,15 @@ free(void *addr, struct malloc_type *type)
 #define spin_unlock(u) lockmgr(u, LK_RELEASE)
 #define spin_lock_init(l) lockinit(l, "spin_lock_init", 0, LK_CANRECURSE)
 
+/* drm_drawable.c drm_addraw() and previous drmP.h */
+#define spin_lock_irqsave(l, irqflags) \
+        do {                           \
+                spin_lock(l);          \
+                (void)irqflags;        \
+        } while (0)
+
+#define spin_unlock_irqrestore(u, irqflags) spin_unlock(u)
+
 /* DragonFly drmP.h */
 #define ARRAY_SIZE(x)   (sizeof(x) / sizeof(x[0]))
 
@@ -89,7 +101,28 @@ free(void *addr, struct malloc_type *type)
 
 /* idr */
 
-struct idr;
+/* Brute force implementation of idr API
+ * using current red-black tree backing
+ *
+ * Adapted from FreeBSD port of drm_drawable.c
+ */
+
+struct drm_rb_info {
+	void *data;
+	int handle;
+	RB_ENTRY(drm_rb_info) tree;
+};
+
+int
+drm_rb_compare(struct drm_rb_info *a, struct drm_rb_info *b);
+
+RB_HEAD(drm_rb_tree, drm_rb_info);
+
+RB_PROTOTYPE(drm_rb_tree, drm_rb_info, tree, drm_rb_compare);
+
+struct idr {
+	struct drm_rb_tree *tree;
+};
 
 void idr_init(struct idr *pidr);
 
@@ -121,10 +154,17 @@ idr_replace(struct idr *pidr, void *newData, int id);
 void
 idr_destroy(struct idr *pidr);
 
+/* Called in drm_drawable.c, function drm_update_drawable_info().
+ * Negative of error indicators sometimes assigned to (void *).
+ * Tests return value from idr_replace().
+ * Assume pointers are no more than 64-bit.
+ */
+#define IS_ERR(ptr) (((int64_t)ptr) < 0)
+
 /* Referencing counting */
 
 struct kref {
-	int j;
+	int placeholder;
 };
 
 #endif /* __KERNEL__ */

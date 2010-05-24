@@ -83,15 +83,8 @@ MALLOC_DECLARE(DRM_MEM_DEFAULT);
  * Adapted from FreeBSD port of drm_drawable.c
  */
 
-struct drm_rb_info {
-	void *data;
-	int handle;
-	RB_ENTRY(drm_rb_info) tree;
-};
-
-static int
-drm_rb_compare(struct drm_rb_info *a,
-    struct drm_rb_info *b)
+int
+drm_rb_compare(struct drm_rb_info *a, struct drm_rb_info *b)
 {
 	if (a->handle > b->handle)
 		return 1;
@@ -100,14 +93,7 @@ drm_rb_compare(struct drm_rb_info *a,
 	return 0;
 }
 
-RB_HEAD(drm_rb_tree, drm_rb_info);
-
-RB_PROTOTYPE_STATIC(drm_rb_tree, drm_rb_info, tree, drm_rb_compare);
-RB_GENERATE_STATIC(drm_rb_tree, drm_rb_info, tree, drm_rb_compare);
-
-struct idr {
-	struct drm_rb_tree *tree;
-};
+RB_GENERATE(drm_rb_tree, drm_rb_info, tree, drm_rb_compare);
 
 void
 idr_init(struct idr *pidr) {
