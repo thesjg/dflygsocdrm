@@ -36,60 +36,27 @@
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
-struct drm_device;
+#ifndef __linux__
+#define __OS_HAS_AGP	1
+#else
+#define __OS_HAS_AGP (defined(CONFIG_AGP) || (defined(CONFIG_AGP_MODULE) && defined(MODULE)))
+#endif
+
+#define __OS_HAS_MTRR (defined(CONFIG_MTRR))
+
 struct drm_file;
+struct drm_device;
 
-#include <sys/param.h>
-#include <sys/queue.h>
-#include <sys/malloc.h>
-#include <sys/kernel.h>
-#include <sys/module.h>
-#include <sys/systm.h>
-#include <sys/conf.h>
-#include <sys/stat.h>
-#include <sys/priv.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/fcntl.h>
-#include <sys/uio.h>
-#include <sys/filio.h>
-#include <sys/sysctl.h>
-#include <sys/bus.h>
-#include <sys/signalvar.h>
-#include <sys/poll.h>
-#include <sys/tree.h>
-#include <sys/taskqueue.h>
-#include <vm/vm.h>
-#include <vm/pmap.h>
-#include <vm/vm_extern.h>
-#include <vm/vm_map.h>
-#include <vm/vm_object.h>
-#include <vm/vm_page.h>
-#include <vm/vm_param.h>
-#include <machine/param.h>
-#include <machine/pmap.h>
-#include <sys/bus.h>
-#include <sys/resource.h>
-#include <machine/specialreg.h>
-#include <machine/sysarch.h>
-#include <sys/endian.h>
-#include <sys/mman.h>
-#include <sys/rman.h>
-#include <sys/memrange.h>
-#include <dev/agp/agpvar.h>
-#include <sys/device.h>
-#include <sys/agpio.h>
-#include <sys/spinlock.h>
-#include <sys/spinlock2.h>
-#include <bus/pci/pcivar.h>
-#include <bus/pci/pcireg.h>
-#include <sys/selinfo.h>
-#include <sys/bus.h>
-
+#ifdef __linux__
+#include "drm_os_linux.h"
+#else /* Other OS implementations */
 #include "dev/drm/drm_priv_other.h"
+#endif
+
+#include "dev/drm/drm_hashtab.h"
+#include "dev/drm/drm_mm.h"
 
 #include "dev/drm/drm.h"
-#include "dev/drm/drm_linux_list.h"
 #include "dev/drm/drm_atomic.h"
 #include "dev/drm/drm_internal.h"
 
@@ -112,6 +79,52 @@ struct drm_file;
 #define DRM_LINUX 0
 #endif
 
+#ifdef __linux__
+#define DRM_UT_CORE 		0x01
+#define DRM_UT_DRIVER		0x02
+#define DRM_UT_KMS		0x04
+#endif
+
+/*
+ * Three debug levels are defined.
+ * drm_core, drm_driver, drm_kms
+ * drm_core level can be used in the generic drm code. For example:
+ * 	drm_ioctl, drm_mm, drm_memory
+ * The macro definiton of DRM_DEBUG is used.
+ * 	DRM_DEBUG(fmt, args...)
+ * 	The debug info by using the DRM_DEBUG can be obtained by adding
+ * 	the boot option of "drm.debug=1".
+ *
+ * drm_driver level can be used in the specific drm driver. It is used
+ * to add the debug info related with the drm driver. For example:
+ * i915_drv, i915_dma, i915_gem, radeon_drv,
+ * 	The macro definition of DRM_DEBUG_DRIVER can be used.
+ * 	DRM_DEBUG_DRIVER(fmt, args...)
+ * 	The debug info by using the DRM_DEBUG_DRIVER can be obtained by
+ * 	adding the boot option of "drm.debug=0x02"
+ *
+ * drm_kms level can be used in the KMS code related with specific drm driver.
+ * It is used to add the debug info related with KMS mode. For example:
+ * the connector/crtc ,
+ * 	The macro definition of DRM_DEBUG_KMS can be used.
+ * 	DRM_DEBUG_KMS(fmt, args...)
+ * 	The debug info by using the DRM_DEBUG_KMS can be obtained by
+ * 	adding the boot option of "drm.debug=0x04"
+ *
+ * If we add the boot option of "drm.debug=0x06", we can get the debug info by
+ * using the DRM_DEBUG_KMS and DRM_DEBUG_DRIVER.
+ * If we add the boot option of "drm.debug=0x05", we can get the debug info by
+ * using the DRM_DEBUG_KMS and DRM_DEBUG.
+ */
+
+extern void drm_ut_debug_printk(unsigned int request_level,
+				const char *prefix,
+				const char *function_name,
+				const char *format, ...);
+/***********************************************************************/
+/** \name DRM template customization defaults */
+/*@{*/
+
 /* driver capabilities and requirements mask */
 #define DRIVER_USE_AGP     0x1
 #define DRIVER_REQUIRE_AGP 0x2
@@ -120,33 +133,19 @@ struct drm_file;
 #define DRIVER_SG          0x10
 #define DRIVER_HAVE_DMA    0x20
 #define DRIVER_HAVE_IRQ    0x40
-#define DRIVER_DMA_QUEUE   0x100
+#define DRIVER_IRQ_SHARED  0x80
+#define DRIVER_IRQ_VBL     0x100
+#define DRIVER_DMA_QUEUE   0x200
+#define DRIVER_FB_DMA      0x400
+#define DRIVER_IRQ_VBL2    0x800
+#define DRIVER_GEM         0x1000
+#define DRIVER_MODESET     0x2000
 
+/* DRIVER_DMA_QUEUE formerly 0x100 but not actually set anywhere */
 
 #define DRM_HASH_SIZE	      16 /* Size of key hash table		  */
 #define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
 #define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
-
-MALLOC_DECLARE(DRM_MEM_DMA);
-MALLOC_DECLARE(DRM_MEM_SAREA);
-MALLOC_DECLARE(DRM_MEM_DRIVER);
-MALLOC_DECLARE(DRM_MEM_MAGIC);
-MALLOC_DECLARE(DRM_MEM_IOCTLS);
-MALLOC_DECLARE(DRM_MEM_MAPS);
-MALLOC_DECLARE(DRM_MEM_BUFS);
-MALLOC_DECLARE(DRM_MEM_SEGS);
-MALLOC_DECLARE(DRM_MEM_PAGES);
-MALLOC_DECLARE(DRM_MEM_FILES);
-MALLOC_DECLARE(DRM_MEM_QUEUES);
-MALLOC_DECLARE(DRM_MEM_CMDS);
-MALLOC_DECLARE(DRM_MEM_MAPPINGS);
-MALLOC_DECLARE(DRM_MEM_BUFLISTS);
-MALLOC_DECLARE(DRM_MEM_AGPLISTS);
-MALLOC_DECLARE(DRM_MEM_CTXBITMAP);
-MALLOC_DECLARE(DRM_MEM_SGLISTS);
-MALLOC_DECLARE(DRM_MEM_DRAWABLE);
-MALLOC_DECLARE(DRM_MEM_MM);
-MALLOC_DECLARE(DRM_MEM_HASHTAB);
 
 #define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
 
@@ -156,8 +155,6 @@ MALLOC_DECLARE(DRM_MEM_HASHTAB);
 #define DRM_MAX(a,b) ((a)>(b)?(a):(b))
 
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
-
-#define __OS_HAS_AGP	1
 
 #define DRM_DEV_MODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
 #define DRM_DEV_UID	0
