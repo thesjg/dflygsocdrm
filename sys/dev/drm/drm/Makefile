@@ -23,6 +23,7 @@ SRCS    = \
 	drm_priv_other.c \
 	drm_scatter.c \
 	drm_sman.c \
+	drm_stub.c \
 	drm_subr_hash.c \
 	drm_sysctl.c \
 	drm_vm.c
