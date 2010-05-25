@@ -47,9 +47,56 @@
 /* For file drm_stub.c, function drm_ut_debug_printk() */
 /* DRM_MEM_ERROR appears unused and so is drm_mem_stats */
 
-#define KERN_DEBUG "debug: "
-#define KERN_ERR   "error: "
-#define KERN_INFO  "KERN_INFO"
+#define KERN_DEBUG "debug::"
+#define KERN_ERR   "error::"
+#define KERN_INFO  "info::"
+
+/* Wait queues */
+#define wait_queue_head_t	atomic_t
+
+/* Locking idiom from BSD drmP.h */
+
+#define DRM_SPINTYPE		struct lock
+#define DRM_SPININIT(l,name)	lockinit(l, name, 0, LK_CANRECURSE)
+#define DRM_SPINUNINIT(l)
+#define DRM_SPINLOCK(l)		lockmgr(l, LK_EXCLUSIVE|LK_RETRY|LK_CANRECURSE)
+#define DRM_SPINUNLOCK(u)	lockmgr(u, LK_RELEASE)
+#define DRM_SPINLOCK_IRQSAVE(l, irqflags) do {		\
+	DRM_SPINLOCK(l);				\
+	(void)irqflags;					\
+} while (0)
+#define DRM_SPINUNLOCK_IRQRESTORE(u, irqflags) DRM_SPINUNLOCK(u)
+#define DRM_SPINLOCK_ASSERT(l)
+
+#define DRM_LOCK()		DRM_SPINLOCK(&dev->dev_lock)
+#define DRM_UNLOCK()		DRM_SPINUNLOCK(&dev->dev_lock)
+#define DRM_SYSCTL_HANDLER_ARGS	(SYSCTL_HANDLER_ARGS)
+
+/* Locking replacements for Linux drm functions */
+
+#define spinlock_t   struct lock
+#define spin_lock(l)   lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
+#define spin_unlock(u) lockmgr(u, LK_RELEASE)
+#define spin_lock_init(l) lockinit(l, "spin_lock_init", 0, LK_CANRECURSE)
+
+/* drm_drawable.c drm_addraw() and previous drmP.h */
+#define spin_lock_irqsave(l, irqflags) \
+        do {                           \
+                spin_lock(l);          \
+                (void)irqflags;        \
+        } while (0)
+
+#define spin_unlock_irqrestore(u, irqflags) spin_unlock(u)
+
+/* IRQ from BSD drmP.h */
+typedef void			irqreturn_t;
+#define IRQ_HANDLED		/* nothing */
+#define IRQ_NONE		/* nothing */
+
+#define unlikely(x)            __builtin_expect(!!(x), 0)
+#define container_of(ptr, type, member) ({			\
+	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	(type *)( (char *)__mptr - offsetof(type,member) );})
 
 MALLOC_DECLARE(DRM_MEM_DMA);
 MALLOC_DECLARE(DRM_MEM_SAREA);
@@ -111,19 +158,6 @@ free(void *addr, struct malloc_type *type)
 		kfree(addr, type);
 }
 
-#define spinlock_t   struct lock
-#define spin_lock(l)   lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
-#define spin_unlock(u) lockmgr(u, LK_RELEASE)
-#define spin_lock_init(l) lockinit(l, "spin_lock_init", 0, LK_CANRECURSE)
-
-/* drm_drawable.c drm_addraw() and previous drmP.h */
-#define spin_lock_irqsave(l, irqflags) \
-        do {                           \
-                spin_lock(l);          \
-                (void)irqflags;        \
-        } while (0)
-
-#define spin_unlock_irqrestore(u, irqflags) spin_unlock(u)
 
 /* DragonFly drmP.h */
 #define ARRAY_SIZE(x)   (sizeof(x) / sizeof(x[0]))

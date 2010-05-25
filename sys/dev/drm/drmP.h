@@ -36,6 +36,12 @@
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
+#ifndef __linux__ /* Other OS implementations */
+#include "dev/drm/drm_priv_other.h"
+#endif
+
+#include "dev/drm/drm.h"
+
 #ifndef __linux__
 #define __OS_HAS_AGP	1
 #else
@@ -49,41 +55,16 @@ struct drm_device;
 
 #ifdef __linux__
 #include "drm_os_linux.h"
-#else /* Other OS implementations */
-#include "dev/drm/drm_priv_other.h"
+#else
+#include "dev/drm/drm_priv_drmp.h"
 #endif
 
 #include "dev/drm/drm_hashtab.h"
 #include "dev/drm/drm_mm.h"
 
-#include "dev/drm/drm.h"
-#include "dev/drm/drm_atomic.h"
-#include "dev/drm/drm_internal.h"
-
-#include <opt_drm.h>
-#ifdef DRM_DEBUG
-#undef DRM_DEBUG
-#define DRM_DEBUG_DEFAULT_ON 1
-#endif /* DRM_DEBUG */
-
-#if defined(DRM_LINUX) && DRM_LINUX && !defined(__x86_64__) && !defined(__DragonFly__) /* XXX */
-#include <sys/file.h>
-#include <sys/proc.h>
-#include <machine/../linux/linux.h>
-#include <machine/../linux/linux_proto.h>
-#else
-/* Either it was defined when it shouldn't be (FreeBSD amd64) or it isn't
- * supported on this OS yet.
- */
-#undef DRM_LINUX
-#define DRM_LINUX 0
-#endif
-
-#ifdef __linux__
 #define DRM_UT_CORE 		0x01
 #define DRM_UT_DRIVER		0x02
 #define DRM_UT_KMS		0x04
-#endif
 
 /*
  * Three debug levels are defined.
@@ -143,62 +124,122 @@ extern void drm_ut_debug_printk(unsigned int request_level,
 
 /* DRIVER_DMA_QUEUE formerly 0x100 but not actually set anywhere */
 
-#define DRM_HASH_SIZE	      16 /* Size of key hash table		  */
-#define DRM_KERNEL_CONTEXT    0	 /* Change drm_resctx if changed	  */
-#define DRM_RESERVED_CONTEXTS 1	 /* Change drm_resctx if changed	  */
+/***********************************************************************/
+/** \name Begin the DRM... */
+/*@{*/
+
+#define DRM_DEBUG_CODE 2	  /**< Include debugging code if > 1, then
+				     also include looping detection. */
+
+#define DRM_MAGIC_HASH_ORDER  4  /**< Size of key hash table. Must be power of 2. */
+#define DRM_KERNEL_CONTEXT    0	 /**< Change drm_resctx if changed */
+#define DRM_RESERVED_CONTEXTS 1	 /**< Change drm_resctx if changed */
+#define DRM_LOOPING_LIMIT     5000000
+
+/* Linux uses HZ instead of hz used here. */
+#define DRM_TIME_SLICE		(hz/20)  /* Time slice for GLXContexts	  */
+#define DRM_LOCK_SLICE	      1	/**< Time slice for lock, in jiffies */
+
+#define DRM_FLAG_DEBUG	  0x01
 
 #define DRM_MAX_CTXBITMAP (PAGE_SIZE * 8)
+#define DRM_MAP_HASH_OFFSET 0x10000000
 
-				/* Internal types and structures */
+/*@}*/
+
+/***********************************************************************/
+/** \name Macros to make printk easier */
+/*@{*/
+
+/**
+ * Error output.
+ *
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+#define DRM_ERROR(fmt, arg...) \
+	printk(KERN_ERR "[" DRM_NAME ":%s] *ERROR* " fmt , __func__ , ##arg)
+
+/**
+ * Memory error output.
+ *
+ * \param area memory area where the error occurred.
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+#define DRM_MEM_ERROR(area, fmt, arg...) \
+	printk(KERN_ERR "[" DRM_NAME ":%s:%s] *ERROR* " fmt , __func__, \
+	       drm_mem_stats[area].name , ##arg)
+
+#define DRM_INFO(fmt, arg...)  printk(KERN_INFO "[" DRM_NAME "] " fmt , ##arg)
+
+/**
+ * Debug output.
+ *
+ * \param fmt printf() like format string.
+ * \param arg arguments
+ */
+#if DRM_DEBUG_CODE
+#define DRM_DEBUG(fmt, args...)						\
+	do {								\
+		drm_ut_debug_printk(DRM_UT_CORE, DRM_NAME, 		\
+					__func__, fmt, ##args);		\
+	} while (0)
+
+#define DRM_DEBUG_DRIVER(fmt, args...)					\
+	do {								\
+		drm_ut_debug_printk(DRM_UT_DRIVER, DRM_NAME,		\
+					__func__, fmt, ##args);		\
+	} while (0)
+#define DRM_DEBUG_KMS(fmt, args...)				\
+	do {								\
+		drm_ut_debug_printk(DRM_UT_KMS, DRM_NAME, 		\
+					 __func__, fmt, ##args);	\
+	} while (0)
+#define DRM_LOG(fmt, args...)						\
+	do {								\
+		drm_ut_debug_printk(DRM_UT_CORE, NULL,			\
+					NULL, fmt, ##args);		\
+	} while (0)
+#define DRM_LOG_KMS(fmt, args...)					\
+	do {								\
+		drm_ut_debug_printk(DRM_UT_KMS, NULL,			\
+					NULL, fmt, ##args);		\
+	} while (0)
+#define DRM_LOG_MODE(fmt, args...)					\
+	do {								\
+		drm_ut_debug_printk(DRM_UT_MODE, NULL,			\
+					NULL, fmt, ##args);		\
+	} while (0)
+#define DRM_LOG_DRIVER(fmt, args...)					\
+	do {								\
+		drm_ut_debug_printk(DRM_UT_DRIVER, NULL,		\
+					NULL, fmt, ##args);		\
+	} while (0)
+#else
+#define DRM_DEBUG_DRIVER(fmt, args...) do { } while (0)
+#define DRM_DEBUG_KMS(fmt, args...)	do { } while (0)
+#define DRM_DEBUG(fmt, arg...)		 do { } while (0)
+#define DRM_LOG(fmt, arg...)		do { } while (0)
+#define DRM_LOG_KMS(fmt, args...) do { } while (0)
+#define DRM_LOG_MODE(fmt, arg...) do { } while (0)
+#define DRM_LOG_DRIVER(fmt, arg...) do { } while (0)
+
+#endif
+
+/*@}*/
+
+/***********************************************************************/
+/** \name Internal types and structures */
+/*@{*/
+
+/* Define manually rather than refer to ARRAY_SIZE(x) */
 #define DRM_ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
-#define DRM_MIN(a,b) ((a)<(b)?(a):(b))
-#define DRM_MAX(a,b) ((a)>(b)?(a):(b))
+
+#define DRM_LEFTCOUNT(x) (((x)->rp + (x)->count - (x)->wp) % ((x)->count + 1))
+#define DRM_BUFCOUNT(x) ((x)->count - DRM_LEFTCOUNT(x))
 
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
-
-#define DRM_DEV_MODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
-#define DRM_DEV_UID	0
-#define DRM_DEV_GID	0
-
-#define wait_queue_head_t	atomic_t
-#define DRM_WAKEUP(w)		wakeup((void *)w)
-#define DRM_WAKEUP_INT(w)	wakeup(w)
-#define DRM_INIT_WAITQUEUE(queue) do {(void)(queue);} while (0)
-
-#define DRM_CURPROC		curthread
-#define DRM_STRUCTPROC		struct thread
-#define DRM_SPINTYPE		struct lock
-#define DRM_SPININIT(l,name)	lockinit(l, name, 0, LK_CANRECURSE)
-#define DRM_SPINUNINIT(l)
-#define DRM_SPINLOCK(l)		lockmgr(l, LK_EXCLUSIVE|LK_RETRY|LK_CANRECURSE)
-#define DRM_SPINUNLOCK(u)	lockmgr(u, LK_RELEASE)
-#define DRM_SPINLOCK_IRQSAVE(l, irqflags) do {		\
-	DRM_SPINLOCK(l);				\
-	(void)irqflags;					\
-} while (0)
-#define DRM_SPINUNLOCK_IRQRESTORE(u, irqflags) DRM_SPINUNLOCK(u)
-#define DRM_SPINLOCK_ASSERT(l)
-#define DRM_CURRENTPID		curthread->td_proc->p_pid
-#define DRM_LOCK()		DRM_SPINLOCK(&dev->dev_lock)
-#define DRM_UNLOCK()		DRM_SPINUNLOCK(&dev->dev_lock)
-#define DRM_SYSCTL_HANDLER_ARGS	(SYSCTL_HANDLER_ARGS)
-
-#define DRM_IRQ_ARGS		void *arg
-typedef void			irqreturn_t;
-#define IRQ_HANDLED		/* nothing */
-#define IRQ_NONE		/* nothing */
-
-#define unlikely(x)            __builtin_expect(!!(x), 0)
-#define container_of(ptr, type, member) ({			\
-	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
-	(type *)( (char *)__mptr - offsetof(type,member) );})
-
-enum {
-	DRM_IS_NOT_AGP,
-	DRM_IS_AGP,
-	DRM_MIGHT_BE_AGP
-};
-#define DRM_AGP_MEM		struct agp_memory_info
 
 #define drm_get_device_from_kdev(_kdev) (_kdev->si_drv1)
 
@@ -275,7 +316,6 @@ typedef u_int8_t u8;
 
 #define DRM_HZ			hz
 #define DRM_UDELAY(udelay)	DELAY(udelay)
-#define DRM_TIME_SLICE		(hz/20)  /* Time slice for GLXContexts	  */
 
 #define DRM_GET_PRIV_SAREA(_dev, _ctx, _map) do {	\
 	(_map) = (_dev)->context_sareas[_ctx];		\
@@ -307,6 +347,7 @@ for ( ret = 0 ; !ret && !(condition) ; ) {			\
 	DRM_LOCK();						\
 }
 
+#if 0
 #define DRM_ERROR(fmt, ...) \
 	printf("error: [" DRM_NAME ":pid%d:%s] *ERROR* " fmt,		\
 	    DRM_CURRENTPID, __func__ , ##__VA_ARGS__)
@@ -318,6 +359,7 @@ for ( ret = 0 ; !ret && !(condition) ; ) {			\
 		printf("[" DRM_NAME ":pid%d:%s] " fmt, DRM_CURRENTPID,	\
 			__func__ , ##__VA_ARGS__);			\
 } while (0)
+#endif
 
 typedef struct drm_pci_id_list
 {
