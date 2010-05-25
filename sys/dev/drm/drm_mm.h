@@ -37,7 +37,7 @@
  * Generic range manager structs
  */
 #include "dev/drm/drm_linux_list.h"
-#include "dev/drm/drm_priv_other.h"
+#include "dev/drm/drm_port_layer.h"
 #ifdef CONFIG_DEBUG_FS
 #include <linux/seq_file.h>
 #endif

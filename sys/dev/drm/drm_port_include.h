@@ -1,4 +1,4 @@
-/* drm_priv_include.h -- Private header for Direct Rendering Manager -*- linux-c -*-
+/* drm_port_include.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
 /*-
@@ -31,8 +31,8 @@
  *
  */
 
-#ifndef _DRM_PRIV_INCLUDE_H_
-#define _DRM_PRIV_INCLUDE_H_
+#ifndef _DRM_PORT_INCLUDE_H_
+#define _DRM_PORT_INCLUDE_H_
 
 /* Derived from drmP.h
  *
@@ -88,4 +88,4 @@
 #include <sys/bus.h>
 
 #endif /* __KERNEL__ */
-#endif /* _DRM_PRIV_INCLUDE_H_ */
+#endif

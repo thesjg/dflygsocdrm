@@ -1,4 +1,4 @@
-/* drm_priv_other.h -- Header for Direct Rendering Manager other OS -*- linux-c -*-
+/* drm_port_layer.h -- Header for Direct Rendering Manager other OS -*- linux-c -*-
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -24,12 +24,12 @@
  *
  */
 
-#ifndef _DRM_PRIV_OTHER_H_
-#define _DRM_PRIV_OTHER_H_
+#ifndef _DRM_PORT_LAYER_H_
+#define _DRM_PORT_LAYER_H_
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
-#include "dev/drm/drm_priv_include.h"
+#include "dev/drm/drm_port_include.h"
 #include "dev/drm/drm_linux_list.h"
 
 /* For current implementation of idr */
@@ -233,4 +233,4 @@ struct kref {
 };
 
 #endif /* __KERNEL__ */
-#endif /* _DRM_PRIV_OTHER_H_ */
+#endif

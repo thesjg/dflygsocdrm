@@ -36,7 +36,7 @@
  */
 
 #include "dev/drm/drmP.h"
-#include "dev/drm/drm_priv_hash.h"
+#include "dev/drm/drm_port_hash.h"
 
 /* From FreeBSD's sys/systm.h */
 #ifndef HASH_NOWAIT

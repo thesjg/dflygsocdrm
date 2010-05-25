@@ -1,5 +1,5 @@
 /**
- * \file drm_priv_drmp.h
+ * \file drm_port_other.h
  * Declarations in previous BSD version of drmP.h
  * not in current Linux drmP.h
  *
@@ -32,8 +32,8 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef _DRM_PRIV_DRMP_H_
-#define _DRM_PRIV_DRMP_H_
+#ifndef _DRM_PORT_OTHER_H_
+#define _DRM_PORT_OTHER_H_
 
 #include "dev/drm/drm_atomic.h"
 #include "dev/drm/drm_internal.h"
@@ -90,4 +90,4 @@ enum {
 };
 #define DRM_AGP_MEM		struct agp_memory_info
 
-#endif /* _DRM_PRIV_DRMP_H_ */
+#endif

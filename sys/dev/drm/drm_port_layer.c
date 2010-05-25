@@ -1,4 +1,4 @@
-/* drm_priv_other.c -- Implementation Direct Rendering Manager other OS -*- linux-c -*-
+/* drm_port_layer.c -- Implementation Direct Rendering Manager other OS -*- linux-c -*-
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -24,54 +24,7 @@
  *
  */
 
-#include <sys/param.h>
-#include <sys/queue.h>
-#include <sys/malloc.h>
-#include <sys/kernel.h>
-#include <sys/module.h>
-#include <sys/systm.h>
-#include <sys/conf.h>
-#include <sys/stat.h>
-#include <sys/priv.h>
-#include <sys/proc.h>
-#include <sys/lock.h>
-#include <sys/fcntl.h>
-#include <sys/uio.h>
-#include <sys/filio.h>
-#include <sys/sysctl.h>
-#include <sys/bus.h>
-#include <sys/signalvar.h>
-#include <sys/poll.h>
-#include <sys/tree.h>
-#include <sys/taskqueue.h>
-#include <vm/vm.h>
-#include <vm/pmap.h>
-#include <vm/vm_extern.h>
-#include <vm/vm_map.h>
-#include <vm/vm_object.h>
-#include <vm/vm_page.h>
-#include <vm/vm_param.h>
-#include <machine/param.h>
-#include <machine/pmap.h>
-#include <sys/bus.h>
-#include <sys/resource.h>
-#include <machine/specialreg.h>
-#include <machine/sysarch.h>
-#include <sys/endian.h>
-#include <sys/mman.h>
-#include <sys/rman.h>
-#include <sys/memrange.h>
-#include <dev/agp/agpvar.h>
-#include <sys/device.h>
-#include <sys/agpio.h>
-#include <sys/spinlock.h>
-#include <sys/spinlock2.h>
-#include <bus/pci/pcivar.h>
-#include <bus/pci/pcireg.h>
-#include <sys/selinfo.h>
-#include <sys/bus.h>
-
-#include "dev/drm/drm_priv_other.h"
+#include "dev/drm/drm_port_layer.h"
 
 #include <sys/tree.h>
 

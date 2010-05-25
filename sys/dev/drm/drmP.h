@@ -37,7 +37,7 @@
 #if defined(_KERNEL) || defined(__KERNEL__)
 
 #ifndef __linux__ /* Other OS implementations */
-#include "dev/drm/drm_priv_other.h"
+#include "dev/drm/drm_port_layer.h"
 #endif
 
 #include "dev/drm/drm.h"
@@ -56,7 +56,7 @@ struct drm_device;
 #ifdef __linux__
 #include "drm_os_linux.h"
 #else
-#include "dev/drm/drm_priv_drmp.h"
+#include "dev/drm/drm_port_other.h"
 #endif
 
 #include "dev/drm/drm_hashtab.h"

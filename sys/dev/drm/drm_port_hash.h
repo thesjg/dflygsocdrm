@@ -26,8 +26,8 @@
  * $FreeBSD: src/sys/sys/hash.h,v 1.3 2007/04/09 22:55:14 thompsa Exp $
  */
 
-#ifndef _DRM_PRIV_HASH_H
-#define	_DRM_PRIV_HASH_H_
+#ifndef _DRM_PORT_HASH_H_
+#define	_DRM_PORT_HASH_H_
 #include <sys/types.h>
 
 /* Convenience */
@@ -127,4 +127,4 @@ drm_hashinit(int elements, struct malloc_type *type, u_long *hashmask);
 void
 drm_hashdestroy(void *vhashtbl, struct malloc_type *type, u_long hashmask);
 
-#endif /* !_DRM_PRIV_HASH_H_ */
+#endif
