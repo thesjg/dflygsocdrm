@@ -36,16 +36,56 @@
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
-#ifndef __linux__ /* Other OS implementations */
+#ifdef __linux__
+#ifdef __alpha__
+/* add include of current.h so that "current" is defined
+ * before static inline funcs in wait.h. Doing this so we
+ * can build the DRM (part of PI DRI). 4/21/2000 S + B */
+#include <asm/current.h>
+#endif				/* __alpha__ */
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/miscdevice.h>
+#include <linux/fs.h>
+#include <linux/proc_fs.h>
+#include <linux/init.h>
+#include <linux/file.h>
+#include <linux/pci.h>
+#include <linux/jiffies.h>
+#include <linux/smp_lock.h>	/* For (un)lock_kernel */
+#include <linux/dma-mapping.h>
+#include <linux/mm.h>
+#include <linux/cdev.h>
+#include <linux/mutex.h>
+#include <linux/slab.h>
+#if defined(__alpha__) || defined(__powerpc__)
+#include <asm/pgtable.h>	/* For pte_wrprotect */
+#endif
+#include <asm/io.h>
+#include <asm/mman.h>
+#include <asm/uaccess.h>
+#ifdef CONFIG_MTRR
+#include <asm/mtrr.h>
+#endif
+#if defined(CONFIG_AGP) || defined(CONFIG_AGP_MODULE)
+#include <linux/types.h>
+#include <linux/agp_backend.h>
+#endif
+#include <linux/workqueue.h>
+#include <linux/poll.h>
+#include <asm/pgalloc.h>
+#else /* Other OS implementations */
 #include "dev/drm/drm_port_layer.h"
 #endif
 
 #include "dev/drm/drm.h"
 
-#ifndef __linux__
-#define __OS_HAS_AGP	1
-#else
+#ifdef __linux__
+#include <linux/idr.h>
+
 #define __OS_HAS_AGP (defined(CONFIG_AGP) || (defined(CONFIG_AGP_MODULE) && defined(MODULE)))
+#else
+#define __OS_HAS_AGP	1
 #endif
 
 #define __OS_HAS_MTRR (defined(CONFIG_MTRR))
@@ -56,6 +96,7 @@ struct drm_device;
 #ifdef __linux__
 #include "drm_os_linux.h"
 #else
+#include "dev/drm/drm_port_transition.h"
 #include "dev/drm/drm_port_other.h"
 #endif
 
@@ -136,8 +177,12 @@ extern void drm_ut_debug_printk(unsigned int request_level,
 #define DRM_RESERVED_CONTEXTS 1	 /**< Change drm_resctx if changed */
 #define DRM_LOOPING_LIMIT     5000000
 
-/* Linux uses HZ instead of hz used here. */
+#ifdef __linux__
+#define DRM_TIME_SLICE	      (HZ/20)  /**< Time slice for GLXContexts */
+#else
 #define DRM_TIME_SLICE		(hz/20)  /* Time slice for GLXContexts	  */
+#endif
+
 #define DRM_LOCK_SLICE	      1	/**< Time slice for lock, in jiffies */
 
 #define DRM_FLAG_DEBUG	  0x01
@@ -241,85 +286,29 @@ extern void drm_ut_debug_printk(unsigned int request_level,
 
 #define DRM_IF_VERSION(maj, min) (maj << 16 | min)
 
-#define drm_get_device_from_kdev(_kdev) (_kdev->si_drv1)
-
-#define PAGE_ALIGN(addr) round_page(addr)
-/* DRM_SUSER returns true if the user is superuser */
-#define DRM_SUSER(p)		(priv_check(p, PRIV_DRIVER) == 0)
-#define DRM_AGP_FIND_DEVICE()	agp_find_device()
+/* Defined below */
 #define DRM_MTRR_WC		MDF_WRITECOMBINE
-#define jiffies			ticks
 
-typedef unsigned long dma_addr_t;
-typedef u_int64_t u64;
-typedef u_int32_t u32;
-typedef u_int16_t u16;
-typedef u_int8_t u8;
-
-/* DRM_READMEMORYBARRIER() prevents reordering of reads.
- * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
- * DRM_MEMORYBARRIER() prevents reordering of reads and writes.
+/**
+ * Test that the hardware lock is held by the caller, returning otherwise.
+ *
+ * \param dev DRM device.
+ * \param filp file pointer of the caller.
  */
-#if defined(__i386__)
-#define DRM_READMEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%esp)" : : : "memory");
-#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
-#define DRM_MEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%esp)" : : : "memory");
-#elif defined(__alpha__)
-#define DRM_READMEMORYBARRIER()		alpha_mb();
-#define DRM_WRITEMEMORYBARRIER()	alpha_wmb();
-#define DRM_MEMORYBARRIER()		alpha_mb();
-#elif defined(__x86_64__)
-#define DRM_READMEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%rsp)" : : : "memory");
-#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
-#define DRM_MEMORYBARRIER()		__asm __volatile( \
-					"lock; addl $0,0(%%rsp)" : : : "memory");
-#endif
+#ifdef __linux__
 
-#define DRM_READ8(map, offset)						\
-	*(volatile u_int8_t *)(((vm_offset_t)(map)->handle) +		\
-	    (vm_offset_t)(offset))
-#define DRM_READ16(map, offset)						\
-	*(volatile u_int16_t *)(((vm_offset_t)(map)->handle) +		\
-	    (vm_offset_t)(offset))
-#define DRM_READ32(map, offset)						\
-	*(volatile u_int32_t *)(((vm_offset_t)(map)->handle) +		\
-	    (vm_offset_t)(offset))
-#define DRM_WRITE8(map, offset, val)					\
-	*(volatile u_int8_t *)(((vm_offset_t)(map)->handle) +		\
-	    (vm_offset_t)(offset)) = val
-#define DRM_WRITE16(map, offset, val)					\
-	*(volatile u_int16_t *)(((vm_offset_t)(map)->handle) +		\
-	    (vm_offset_t)(offset)) = val
-#define DRM_WRITE32(map, offset, val)					\
-	*(volatile u_int32_t *)(((vm_offset_t)(map)->handle) +		\
-	    (vm_offset_t)(offset)) = val
+#define LOCK_TEST_WITH_RETURN( dev, _file_priv )				\
+do {										\
+	if (!_DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock) ||	\
+	    _file_priv->master->lock.file_priv != _file_priv)	{		\
+		DRM_ERROR( "%s called without lock held, held  %d owner %p %p\n",\
+			   __func__, _DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock),\
+			   _file_priv->master->lock.file_priv, _file_priv);	\
+		return -EINVAL;							\
+	}									\
+} while (0)
 
-#define DRM_VERIFYAREA_READ( uaddr, size )		\
-	(!useracc(__DECONST(caddr_t, uaddr), size, VM_PROT_READ))
-
-#define DRM_COPY_TO_USER(user, kern, size) \
-	copyout(kern, user, size)
-#define DRM_COPY_FROM_USER(kern, user, size) \
-	copyin(user, kern, size)
-#define DRM_COPY_FROM_USER_UNCHECKED(arg1, arg2, arg3) 	\
-	copyin(arg2, arg1, arg3)
-#define DRM_COPY_TO_USER_UNCHECKED(arg1, arg2, arg3)	\
-	copyout(arg2, arg1, arg3)
-#define DRM_GET_USER_UNCHECKED(val, uaddr)		\
-	((val) = fuword32(uaddr), 0)
-
-#define cpu_to_le32(x) htole32(x)
-#define le32_to_cpu(x) le32toh(x)
-
-#define DRM_HZ			hz
-#define DRM_UDELAY(udelay)	DELAY(udelay)
-
-#define DRM_GET_PRIV_SAREA(_dev, _ctx, _map) do {	\
-	(_map) = (_dev)->context_sareas[_ctx];		\
-} while(0)
+#else /* Other OS */
 
 #define LOCK_TEST_WITH_RETURN(dev, file_priv)				\
 do {									\
@@ -330,6 +319,8 @@ do {									\
 		return EINVAL;						\
 	}								\
 } while (0)
+
+#endif /* LOCK_TEST_WITH_RETURN */
 
 /* Returns -errno to shared code */
 #define DRM_WAIT_ON( ret, queue, timeout, condition )		\
@@ -361,6 +352,7 @@ for ( ret = 0 ; !ret && !(condition) ; ) {			\
 } while (0)
 #endif
 
+/* Used only in this file? */
 typedef struct drm_pci_id_list
 {
 	int vendor;
@@ -375,9 +367,39 @@ struct drm_msi_blacklist_entry
 	int device;
 };
 
+/**
+ * Ioctl function type.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private pointer.
+ * \param cmd command.
+ * \param arg argument.
+ */
+typedef int drm_ioctl_t(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+
+typedef int drm_ioctl_compat_t(struct file *filp, unsigned int cmd,
+			       unsigned long arg);
+
+#ifdef __linux__
+#define DRM_IOCTL_NR(n)                _IOC_NR(n)
+#else
+#define DRM_IOCTL_NR(n)		((n) & 0xff)
+#endif
+
+#ifdef __OpenBSD__
+#define DRM_MAJOR       81
+#endif
+#if defined(__linux__) || defined(__NetBSD__) || defined(__DragonFly__)
+#define DRM_MAJOR       226
+#endif
+
 #define DRM_AUTH	0x1
 #define DRM_MASTER	0x2
 #define DRM_ROOT_ONLY	0x4
+#define DRM_CONTROL_ALLOW 0x8
+#define DRM_UNLOCKED	0x10
+
 typedef struct drm_ioctl_desc {
 	unsigned long cmd;
 	int (*func)(struct drm_device *dev, void *data,
