@@ -507,16 +507,13 @@ struct drm_pending_event {
 
 typedef TAILQ_HEAD(drm_file_list, drm_file) drm_file_list_t;
 struct drm_file {
-/* Current Linux drm fields */
 	int		  authenticated;
 	pid_t		  pid;
 	uid_t		  uid;
 	drm_magic_t	  magic;
 	unsigned long	  ioctl_count;
 	struct list_head lhead;
-#ifdef __linux__
 	struct drm_minor *minor;
-#endif
 	unsigned long lock_count;
 
 	/** Mapping of mm object handles to object pointers. */
@@ -528,20 +525,19 @@ struct drm_file {
 
 	void		 *driver_priv;
 	int is_master; /* this file private is a master for a minor */
-#ifdef __linux__
 	struct drm_master *master; /* master this node is currently associated with
 				      N.B. not always minor->master */
-#endif
 	struct list_head fbs;
 
 	wait_queue_head_t event_wait;
 	struct list_head event_list;
 	int event_space;
+
 /* Legacy BSD drm fields */
 	TAILQ_ENTRY(drm_file) link;
 	struct drm_device *dev;
-	int		  master;
-	int		  minor;
+	int		  master_legacy;
+	int		  minor_legacy;
 	int		  refs;
 };
 
@@ -622,11 +618,10 @@ typedef struct drm_agp_mem {
 } drm_agp_mem_t;
 
 typedef struct drm_agp_head {
-#ifdef __linux__
 	DRM_AGP_KERN agp_info;		/**< AGP device information */
+#ifdef __linux__
 	struct list_head memory;
 #else
-	struct agp_info    info;
 	drm_agp_mem_t      *memory;
 #endif
 	unsigned long      mode;
@@ -643,6 +638,7 @@ typedef struct drm_agp_head {
 	const char         *chipset;
 	device_t	   agpdev;
 	int 		   mtrr;
+	struct agp_info    info;
 } drm_agp_head_t;
 
 /**

@@ -180,4 +180,7 @@ enum {
 /* Legacy drm defined in drm_drv.c */
 extern int	drm_debug_flag;
 
+/* Deduced from drm_agpsupport function drm_agp_info() */
+typedef struct drm_agp_info	DRM_AGP_KERN;
+
 #endif

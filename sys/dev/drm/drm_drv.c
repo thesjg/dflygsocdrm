@@ -763,7 +763,7 @@ int drm_ioctl(struct dev_ioctl_args *ap)
 
 	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
 	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
-	    ((ioctl->flags & DRM_MASTER) && !file_priv->master))
+	    ((ioctl->flags & DRM_MASTER) && !file_priv->master_legacy))
 		return EACCES;
 
 	if (is_driver_ioctl) {

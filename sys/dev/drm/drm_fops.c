@@ -74,7 +74,7 @@ int drm_open_helper(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p,
                 priv->uid               = p->td_proc->p_ucred->cr_svuid;
                 priv->pid               = p->td_proc->p_pid;
                 priv->refs              = 1;
-                priv->minor             = m;
+                priv->minor_legacy      = m;
                 priv->ioctl_count       = 0;
 
                 /* for compatibility root is always authenticated */
@@ -91,7 +91,7 @@ int drm_open_helper(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p,
                 }
 
                 /* first opener automatically becomes master */
-                priv->master = TAILQ_EMPTY(&dev->files);
+                priv->master_legacy = TAILQ_EMPTY(&dev->files);
 
                 TAILQ_INSERT_TAIL(&dev->files, priv, link);
 	}
