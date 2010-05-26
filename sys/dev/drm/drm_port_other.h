@@ -174,4 +174,10 @@ enum {
 	(_map) = (_dev)->context_sareas[_ctx];		\
 } while(0)
 
+/* Length for the array of resource pointers for drm_get_resource_*. */
+#define DRM_MAX_PCI_RESOURCE	6
+
+/* Legacy drm defined in drm_drv.c */
+extern int	drm_debug_flag;
+
 #endif

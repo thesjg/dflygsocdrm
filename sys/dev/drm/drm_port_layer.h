@@ -125,6 +125,22 @@
 
 #define spin_unlock_irqrestore(u, irqflags) spin_unlock(u)
 
+struct mutex {
+	int placeholder;
+};
+
+struct delayed_slow_work {
+	int placeholder;
+};
+
+struct work_struct {
+	int placeholder;
+};
+
+struct edid {
+	int placeholder;
+};
+
 /* IRQ from BSD drmP.h */
 typedef void			irqreturn_t;
 #define IRQ_HANDLED		/* nothing */
@@ -138,11 +154,37 @@ typedef void			irqreturn_t;
 /* Memory management */
 #define PAGE_ALIGN(addr) round_page(addr)
 
+struct vm_area_struct {
+	int placeholder;
+};
+
+struct page {
+	int placeholder;
+};
+
+struct vm_operations_struct {
+	int placeholder;
+};
+
+struct address_space {
+	int placeholder;
+};
+
+/* drmP.h struct drm_local_map */
+typedef unsigned long resource_size_t;
+
 /*
  * DMA
  */
 
 typedef unsigned long dma_addr_t;
+
+/* From older version of drmP.h */
+#ifndef DMA_BIT_MASK
+#define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
+#endif
+
+#define upper_32_bits(n) ((u32)(((n) >> 16) >> 16))
 
 /*
  * Time
@@ -150,9 +192,32 @@ typedef unsigned long dma_addr_t;
 
 #define jiffies			ticks
 
+struct timer_list {
+	int placeholder;
+};
+
+typedef unsigned long cycles_t;
+
+/*
+ * Processes and threads
+ */
+struct fasync_struct {
+	int placeholder;
+};
+
+/*
+ * Signals
+ */
+struct sigset_t {
+	int placeholder;
+};
+
 /*
  * Int types
  */
+
+/* i915_drv.h */
+typedef boolean_t bool;
 
 typedef u_int64_t u64;
 typedef u_int32_t u32;
@@ -198,6 +263,49 @@ MALLOC_DECLARE(DRM_MEM_HASHTAB);
 struct file {
 	int placeholder;
 };
+
+struct file_operations {
+	int placeholder;
+};
+
+struct seq_file {
+	int placeholder;
+};
+
+struct dentry {
+	int placeholder;
+};
+
+struct proc_dir_entry {
+	int placeholder;
+};
+
+/*
+ * PCI
+ */
+
+struct pci_driver {
+	int placeholder;
+};
+
+struct pci_dev {
+/* drmP.h, return value from drm_dev_to_irq() */
+	int irq;
+};
+
+/*
+ * Other device types
+ */
+
+struct edi {
+	int placeholder;
+};
+
+struct i2c_adapter{
+	int placeholder;
+};
+
+typedef unsigned long pm_message_t;
 
 /*
  * Non-Linux from drmP.h
