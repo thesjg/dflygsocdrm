@@ -35,6 +35,43 @@
 /* For current implementation of idr */
 #include <sys/tree.h>
 
+/* From previous version of drm.h */
+#ifndef __user
+#define __user
+#endif
+#ifndef __iomem
+#define __iomem
+#endif
+
+/* Used in older version of radeon_drm.h */
+#ifdef __GNUC__
+# define DEPRECATED  __attribute__ ((deprecated))
+#else
+# define DEPRECATED
+#endif
+
+/* On DragonFly at least
+ * sizeof(size_t) == sizeof(unsigned long)
+ */
+
+/* This is beyond ugly, and only works on GCC.  However, it allows me to use
+ * drm.h in places (i.e., in the X-server) where I can't use size_t.  The real
+ * fix is to use uint32_t instead of size_t, but that fix will break existing
+ * LP64 (i.e., PowerPC64, SPARC64, IA-64, Alpha, etc.) systems.  That *will*
+ * eventually happen, though.  I chose 'unsigned long' to be the fallback type
+ * because that works on all the platforms I know about.  Hopefully, the
+ * real fix will happen before that bites us.
+ */
+
+/*
+#ifdef __SIZE_TYPE__
+# define DRM_SIZE_T __SIZE_TYPE__
+#else
+# warning "__SIZE_TYPE__ not defined.  Assuming sizeof(size_t) == sizeof(unsigned long)!"
+# define DRM_SIZE_T unsigned long
+#endif
+*/
+
 /* Print functions */
 
 /* For file drm_stub.c, function drm_ut_debug_printk() */
@@ -98,6 +135,42 @@ typedef void			irqreturn_t;
 	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
 	(type *)( (char *)__mptr - offsetof(type,member) );})
 
+/* Memory management */
+#define PAGE_ALIGN(addr) round_page(addr)
+
+/*
+ * DMA
+ */
+
+typedef unsigned long dma_addr_t;
+
+/*
+ * Time
+ */
+
+#define jiffies			ticks
+
+/*
+ * Int types
+ */
+
+typedef u_int64_t u64;
+typedef u_int32_t u32;
+typedef u_int16_t u16;
+typedef u_int8_t u8;
+
+/*
+ * Endian considerations
+ */
+
+/* vmware */
+#ifndef __le32
+#define __le32 uint32_t
+#endif
+
+#define cpu_to_le32(x) htole32(x)
+#define le32_to_cpu(x) le32toh(x)
+
 MALLOC_DECLARE(DRM_MEM_DMA);
 MALLOC_DECLARE(DRM_MEM_SAREA);
 MALLOC_DECLARE(DRM_MEM_DRIVER);
@@ -118,6 +191,13 @@ MALLOC_DECLARE(DRM_MEM_SGLISTS);
 MALLOC_DECLARE(DRM_MEM_DRAWABLE);
 MALLOC_DECLARE(DRM_MEM_MM);
 MALLOC_DECLARE(DRM_MEM_HASHTAB);
+
+/*
+ * Files
+ */
+struct file {
+	int placeholder;
+};
 
 /*
  * Non-Linux from drmP.h

@@ -35,8 +35,11 @@
 #ifndef _DRM_PORT_OTHER_H_
 #define _DRM_PORT_OTHER_H_
 
-#include "dev/drm/drm_atomic.h"
-#include "dev/drm/drm_internal.h"
+/* #include "dev/drm/drm_internal.h" */
+
+/************************************************
+ * Old version of drmP.h
+ ************************************************/
 
 #include <opt_drm.h>
 #ifdef DRM_DEBUG
@@ -83,11 +86,92 @@
 
 #define DRM_IRQ_ARGS		void *arg
 
+/* Specific to BSD port of drm */
+/* drm_drv.c drm_ioctl() and drm_vm.c drm_mmap() */
+#define drm_get_device_from_kdev(_kdev) (_kdev->si_drv1)
+
+/* DRM_SUSER returns true if the user is superuser */
+#define DRM_SUSER(p)		(priv_check(p, PRIV_DRIVER) == 0)
+
+/*
+ * AGP
+ */
+
+/* Specific to BSD port of drm */
+/* DRM_MIGHT_BE_AGP used in drm_agpsupport.c and mga_drv.c */
 enum {
 	DRM_IS_NOT_AGP,
 	DRM_IS_AGP,
 	DRM_MIGHT_BE_AGP
 };
+
 #define DRM_AGP_MEM		struct agp_memory_info
+
+/* Specific to BSD port of drm */
+/* drm_agpsupport.c */
+#define DRM_AGP_FIND_DEVICE()	agp_find_device()
+
+/* DRM_READMEMORYBARRIER() prevents reordering of reads.
+ * DRM_WRITEMEMORYBARRIER() prevents reordering of writes.
+ * DRM_MEMORYBARRIER() prevents reordering of reads and writes.
+ */
+#if defined(__i386__)
+#define DRM_READMEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
+#define DRM_MEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#elif defined(__alpha__)
+#define DRM_READMEMORYBARRIER()		alpha_mb();
+#define DRM_WRITEMEMORYBARRIER()	alpha_wmb();
+#define DRM_MEMORYBARRIER()		alpha_mb();
+#elif defined(__x86_64__)
+#define DRM_READMEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%rsp)" : : : "memory");
+#define DRM_WRITEMEMORYBARRIER()	__asm __volatile("" : : : "memory");
+#define DRM_MEMORYBARRIER()		__asm __volatile( \
+					"lock; addl $0,0(%%rsp)" : : : "memory");
+#endif
+
+#define DRM_READ8(map, offset)						\
+	*(volatile u_int8_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset))
+#define DRM_READ16(map, offset)						\
+	*(volatile u_int16_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset))
+#define DRM_READ32(map, offset)						\
+	*(volatile u_int32_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset))
+#define DRM_WRITE8(map, offset, val)					\
+	*(volatile u_int8_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset)) = val
+#define DRM_WRITE16(map, offset, val)					\
+	*(volatile u_int16_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset)) = val
+#define DRM_WRITE32(map, offset, val)					\
+	*(volatile u_int32_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset)) = val
+
+#define DRM_VERIFYAREA_READ( uaddr, size )		\
+	(!useracc(__DECONST(caddr_t, uaddr), size, VM_PROT_READ))
+
+#define DRM_COPY_TO_USER(user, kern, size) \
+	copyout(kern, user, size)
+#define DRM_COPY_FROM_USER(kern, user, size) \
+	copyin(user, kern, size)
+#define DRM_COPY_FROM_USER_UNCHECKED(arg1, arg2, arg3) 	\
+	copyin(arg2, arg1, arg3)
+#define DRM_COPY_TO_USER_UNCHECKED(arg1, arg2, arg3)	\
+	copyout(arg2, arg1, arg3)
+#define DRM_GET_USER_UNCHECKED(val, uaddr)		\
+	((val) = fuword32(uaddr), 0)
+
+#define DRM_HZ			hz
+#define DRM_UDELAY(udelay)	DELAY(udelay)
+
+/* Does not appear to be used either BSD or Linux drm */
+#define DRM_GET_PRIV_SAREA(_dev, _ctx, _map) do {	\
+	(_map) = (_dev)->context_sareas[_ctx];		\
+} while(0)
 
 #endif
