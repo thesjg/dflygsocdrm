@@ -111,7 +111,7 @@
 
 /* Locking replacements for Linux drm functions */
 
-#define spinlock_t   struct lock
+#define spinlock_t	struct lock
 #define spin_lock(l)   lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
 #define spin_unlock(u) lockmgr(u, LK_RELEASE)
 #define spin_lock_init(l) lockinit(l, "spin_lock_init", 0, LK_CANRECURSE)

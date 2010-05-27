@@ -174,6 +174,38 @@ enum {
 	(_map) = (_dev)->context_sareas[_ctx];		\
 } while(0)
 
+
+/* Returns -errno to shared code */
+#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
+for ( ret = 0 ; !ret && !(condition) ; ) {			\
+	DRM_UNLOCK();						\
+	lwkt_serialize_enter(&dev->irq_lock);			\
+	if (!(condition)) {					\
+            tsleep_interlock(&(queue), PCATCH);			\
+            lwkt_serialize_exit(&dev->irq_lock);		\
+            ret = -tsleep(&(queue), PCATCH | PINTERLOCKED,	\
+			  "drmwtq", (timeout));			\
+	} else {						\
+		lwkt_serialize_exit(&dev->irq_lock);		\
+	}							\
+	DRM_LOCK();						\
+}
+
+/* Legacy drm used only in this file? */
+typedef struct drm_pci_id_list
+{
+	int vendor;
+	int device;
+	long driver_private;
+	char *name;
+} drm_pci_id_list_t;
+
+struct drm_msi_blacklist_entry
+{
+	int vendor;
+	int device;
+};
+
 /* Length for the array of resource pointers for drm_get_resource_*. */
 #define DRM_MAX_PCI_RESOURCE	6
 

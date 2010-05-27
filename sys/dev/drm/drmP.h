@@ -278,8 +278,11 @@ extern void drm_ut_debug_printk(unsigned int request_level,
 /** \name Internal types and structures */
 /*@{*/
 
-/* Define manually rather than refer to ARRAY_SIZE(x) */
+#ifdef __linux__
+#define DRM_ARRAY_SIZE(x) ARRAY_SIZE(x)
+#else
 #define DRM_ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
+#endif
 
 #define DRM_LEFTCOUNT(x) (((x)->rp + (x)->count - (x)->wp) % ((x)->count + 1))
 #define DRM_BUFCOUNT(x) ((x)->count - DRM_LEFTCOUNT(x))
@@ -319,37 +322,6 @@ do {									\
 
 #endif /* LOCK_TEST_WITH_RETURN */
 
-/* Returns -errno to shared code */
-#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
-for ( ret = 0 ; !ret && !(condition) ; ) {			\
-	DRM_UNLOCK();						\
-	lwkt_serialize_enter(&dev->irq_lock);			\
-	if (!(condition)) {					\
-            tsleep_interlock(&(queue), PCATCH);			\
-            lwkt_serialize_exit(&dev->irq_lock);		\
-            ret = -tsleep(&(queue), PCATCH | PINTERLOCKED,	\
-			  "drmwtq", (timeout));			\
-	} else {						\
-		lwkt_serialize_exit(&dev->irq_lock);		\
-	}							\
-	DRM_LOCK();						\
-}
-
-/* Used only in this file? */
-typedef struct drm_pci_id_list
-{
-	int vendor;
-	int device;
-	long driver_private;
-	char *name;
-} drm_pci_id_list_t;
-
-struct drm_msi_blacklist_entry
-{
-	int vendor;
-	int device;
-};
-
 /**
  * Ioctl function type.
  *
@@ -383,24 +355,31 @@ typedef int drm_ioctl_compat_t(struct file *filp, unsigned int cmd,
 #define DRM_CONTROL_ALLOW 0x8
 #define DRM_UNLOCKED	0x10
 
-/* Linux drm has field cmd defined as unsigned int */
-/* Linux drm does not have type drm_ioctl_desc_t */
+/* Legacy drm order of cmd, func, flags determined by drm_drv.c
+ * array listing of drm_ioctls[256] */
 typedef struct drm_ioctl_desc {
+	unsigned int cmd;
+#if 0
 	unsigned long cmd;
+#endif
 /*
 	int (*func)(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv);
 */
-	drm_ioctl_t *func;
 	int flags;
+	drm_ioctl_t *func;
 } drm_ioctl_desc_t;
 
 /**
  * Creates a driver or general drm_ioctl_desc array entry for the given
  * ioctl, for use by drm_ioctl().
  */
+#define DRM_IOCTL_DEF(ioctl, _func, _flags) \
+	[DRM_IOCTL_NR(ioctl)] = {.cmd = ioctl, .func = _func, .flags = _flags}
+#if 0
 #define DRM_IOCTL_DEF(ioctl, func, flags) \
 	[DRM_IOCTL_NR(ioctl)] = {ioctl, func, flags}
+#endif
 
 typedef struct drm_magic_entry {
 	struct list_head head;
@@ -411,7 +390,7 @@ typedef struct drm_magic_entry {
 	struct drm_magic_entry *next;
 } drm_magic_entry_t;
 
-/* Legacy BSD drm struct */
+/* Legacy drm struct */
 typedef struct drm_magic_head {
 	struct drm_magic_entry *head;
 	struct drm_magic_entry *tail;
@@ -479,14 +458,27 @@ typedef struct drm_freelist {
 
 /* Is bus_addr_t always unsigned long? */
 typedef struct drm_dma_handle {
+#ifdef __linux__
+	dma_addr_t busaddr;
+#else
 	bus_addr_t busaddr;
 	bus_dma_tag_t tag;
 	bus_dmamap_t map;
+#endif
 	void *vaddr;
 	size_t size;
 } drm_dma_handle_t;
 
 typedef struct drm_buf_entry {
+	int buf_size;			/**< size */
+	int buf_count;			/**< number of buffers */
+	struct drm_buf *buflist;		/**< buffer list */
+	int seg_count;
+	int page_order;
+	struct drm_dma_handle **seglist;
+
+	struct drm_freelist freelist;
+#if 0
 	int		  buf_size;
 	int		  buf_count;
 	drm_buf_t	  *buflist;
@@ -495,6 +487,7 @@ typedef struct drm_buf_entry {
 	int		  page_order;
 
 	drm_freelist_t	  freelist;
+#endif
 } drm_buf_entry_t;
 
 /* Event queued up for userspace to read */
@@ -522,8 +515,8 @@ struct drm_file {
 	spinlock_t table_lock;
 
 	struct file *filp;
+	void *driver_priv;
 
-	void		 *driver_priv;
 	int is_master; /* this file private is a master for a minor */
 	struct drm_master *master; /* master this node is currently associated with
 				      N.B. not always minor->master */
@@ -561,10 +554,13 @@ struct drm_queue {
 /**
  * Lock data.
  */
-typedef struct drm_lock_data {
+struct drm_lock_data {
 	struct drm_hw_lock *hw_lock;	/**< Hardware lock */
 	/** Private of lock holder's file (NULL=kernel) */
 	struct drm_file *file_priv;
+/* lock_queue is only used in drm_lock.c
+ * as the memory address upon which to form a queue and then wake up
+ */
 #ifdef __linux__
 	wait_queue_head_t lock_queue;	/**< Queue of blocked processes */
 #else
@@ -575,7 +571,7 @@ typedef struct drm_lock_data {
 	uint32_t kernel_waiters;
 	uint32_t user_waiters;
 	int idle_has_lock;
-} drm_lock_data_t;
+};
 
 /* This structure, in the struct drm_device, is always initialized while the
  * device
@@ -613,6 +609,7 @@ typedef struct drm_agp_mem {
 	int                pages;
 	struct list_head head;
 /* Legacy drm */
+	void *handle_legacy;
 	struct drm_agp_mem *prev;
 	struct drm_agp_mem *next;
 } drm_agp_mem_t;
@@ -910,9 +907,8 @@ struct drm_driver {
 
 	/* these have to be filled in */
 
-#ifdef __linux__
 	irqreturn_t(*irq_handler) (DRM_IRQ_ARGS);
-#else
+#if 0
 	void	(*irq_handler)(DRM_IRQ_ARGS);
 #endif
 	void (*irq_preinstall) (struct drm_device *dev);
@@ -978,9 +974,8 @@ struct drm_driver {
 
 	u32 driver_features;
 	int dev_priv_size;
-#ifdef __linux__
 	struct drm_ioctl_desc *ioctls;
-#else
+#if 0
 	drm_ioctl_desc_t *ioctls;
 #endif
 	int num_ioctls;
@@ -1196,9 +1191,8 @@ struct drm_device {
 	int queue_reserved;		  /**< Number of reserved DMA queues */
 	int queue_slots;		/**< Actual length of queuelist */
 	struct drm_queue **queuelist;	/**< Vector of pointers to DMA queues */
-#ifdef __linux__
 	struct drm_device_dma *dma;		/**< Optional pointer for DMA support */
-#else
+#if 0
 				/* DMA queues (contexts) */
 	drm_device_dma_t  *dma;		/* Optional pointer for DMA support */
 #endif
@@ -1235,9 +1229,8 @@ struct drm_device {
 
 	wait_queue_head_t *vbl_queue;   /**< VBLANK wait queue */
 	atomic_t *_vblank_count;        /**< number of VBLANK interrupts (driver must alloc the right number of counters) */
-#ifdef __linux__
 	spinlock_t vbl_lock;
-#else
+#if 0
 	DRM_SPINTYPE	  vbl_lock;	/* protects vblank operations */
 #endif
 	atomic_t *vblank_refcount;      /* number of users of vblank interruptsper crtc */
@@ -1269,9 +1262,8 @@ struct drm_device {
 	wait_queue_head_t buf_readers;	/**< Processes waiting to read */
 	wait_queue_head_t buf_writers;	/**< Processes waiting to ctx switch */
 
-#ifdef __linux__
 	struct drm_agp_head *agp;	/**< AGP data */
-#else
+#if 0
 	drm_agp_head_t    *agp;
 #endif
 
@@ -1287,9 +1279,8 @@ struct drm_device {
 	u_int16_t pci_device;		/* PCI device id */
 #endif
 
-#ifdef __linux__
 	struct drm_sg_mem *sg;	/**< Scatter gather memory */
-#else
+#if 0
 	drm_sg_mem_t      *sg;  /* Scatter gather memory */
 #endif
 
@@ -1306,9 +1297,8 @@ struct drm_device {
 	struct drm_driver_info *driver;
 #endif
 
-#ifdef __linux__
 	struct drm_local_map *agp_buffer_map;
-#else
+#if 0
 	drm_local_map_t   *agp_buffer_map;
 #endif
 	unsigned int agp_buffer_token;
@@ -1317,9 +1307,8 @@ struct drm_device {
 
 	/** \name Drawable information */
 	/*@{ */
-#ifdef __linux__
 	spinlock_t drw_lock;
-#else
+#if 0
 	DRM_SPINTYPE	  drw_lock;
 #endif
 	struct idr drw_idr;
@@ -1364,7 +1353,7 @@ struct drm_device {
 	drm_local_map_t	  **context_sareas;
 	int		  max_context;
 
-	drm_lock_data_t	  lock;		/* Information on hardware lock	   */
+	struct drm_lock_data lock;	/* Information on hardware lock	   */
 
 				/* Context support */
 	int		  irq;		/* Interrupt used by board	   */
