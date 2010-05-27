@@ -35,11 +35,15 @@ enum debug_flags {
 TAILQ_HEAD(evtr_value_list, evtr_variable_value);
 typedef struct evtr_value_list *evtr_value_list_t;
 
+struct symtab *symtab_new(void);
 struct evtr_variable * symtab_find(const struct symtab *, const char *);
 int symtab_insert(struct symtab *, const char *, struct evtr_variable *);
+void symtab_destroy(struct symtab *);
 
-int parse_string(evtr_event_t, struct symtab *, const char *);
-int parse_var(const char *, struct symtab *, struct evtr_variable **);
+
+int parse_string(evtr_event_t, struct symtab *, const char *, char *, size_t);
+int parse_var(const char *, struct symtab *, struct evtr_variable **,
+	      char *, size_t);
 
 struct hashtab;
 struct hashentry;

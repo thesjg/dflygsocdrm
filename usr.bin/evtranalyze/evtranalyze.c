@@ -88,7 +88,7 @@ struct command {
 };
 
 evtr_t evtr;
-char *opt_infile;
+static char *opt_infile;
 unsigned evtranalyze_debug;
 
 static
@@ -852,8 +852,8 @@ cmd_stats(int argc, char **argv)
 			printf("ignoring assignment of wrong type %d (expected %d)\n",
 			       ev.stmt.val->type, type);
 		} else {
-			printf("STMT: var \"%s\" = %jx\n",
-			       ev.stmt.var->name, ev.stmt.val->num);
+			printf("var \"%s\" = %jx\n",
+			       filt.var, ev.stmt.val->num);
 			sum += ev.stmt.val->num;
 			++occurences;
 		}
@@ -953,7 +953,9 @@ main(int argc, char **argv)
 	if (argc == 0) {
 		err(2, "need to specify a command\n");
 	}
-	if (!opt_infile || !strcmp(opt_infile, "-")) {
+	if (!opt_infile) {
+		err(2, "you need to specify an input file\n");
+	} else if (!strcmp(opt_infile, "-")) {
 		inf = stdin;
 	} else {
 		inf = fopen(opt_infile, "r");

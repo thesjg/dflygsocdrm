@@ -80,6 +80,8 @@
 
 
 #include <assert.h>
+#include <errno.h>
+#include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -93,12 +95,33 @@ struct ktrfmt_parse_ctx {
 	struct evtr_variable *var;
 	struct evtr_variable_value *val;
 	evtr_event_t ev;
+	char *errbuf;
+	size_t errbufsz;
+	int err;
 };
 
 int __ktrfmtlex(YYSTYPE *);
 #define __ktrfmt_lex __ktrfmtlex
 
 void __ktrfmt_error (struct ktrfmt_parse_ctx *, const char *);
+
+static
+void
+do_parse_err(struct ktrfmt_parse_ctx *ctx, const char *fmt, ...)
+{
+	va_list ap;
+
+	va_start(ap, fmt);
+	vsnprintf(ctx->errbuf, ctx->errbufsz, fmt, ap);
+	va_end(ap);
+	ctx->err = !0;
+}
+
+#define parse_err(fmt, ...)			\
+	do {					\
+		do_parse_err(ctx, fmt, ##__VA_ARGS__);	\
+		YYABORT;				\
+ 	} while (0)
 
 static
 struct evtr_variable *
@@ -108,8 +131,10 @@ evtr_var_new(const char *name)
 
 	var = calloc(1, sizeof(*var));
 	if (var) {
-		var->name = strdup(name);
-		/* XXX: oom */
+		if (!(var->name = strdup(name))) {
+			free(var);
+			return NULL;
+		}
 		var->val.type = EVTR_VAL_NIL;
 	}
 	return var;
@@ -130,10 +155,68 @@ uniq_varname(void)
 	return &buf[0];
 }
 
+static
+int
+index_hash(struct ktrfmt_parse_ctx *ctx, const char *hashname,
+	   evtr_variable_value_t val, evtr_var_t *_var)
+{
+	evtr_var_t hsh, var;
+	uintptr_t ret, key;
+	hsh = symtab_find(ctx->symtab, hashname);
+	if (hsh->val.type == EVTR_VAL_NIL) {
+		/* it's probably the first time we see this "variable" */
+		printd(PARSE, "creating hash for %s\n", hsh->name);
+		hsh->val.type = EVTR_VAL_HASH;
+		hsh->val.hashtab = hash_new();
+	} else if (hsh->val.type != EVTR_VAL_HASH) {
+		printd(PARSE, "trying to use type %d as hash\n", hsh->val.type);
+		return !0;
+	}
+	if (val->type == EVTR_VAL_INT) {
+		key = val->num;
+		printd(PARSE, "looking up %s[%jd] in %p\n", hsh->name,
+		       val->num, hsh->val.hashtab);
+	} else if (val->type == EVTR_VAL_STR) {
+		key = (uintptr_t)val->str;
+		printd(PARSE, "looking up %s[\"%s\"] in %p\n", hsh->name,
+		       val->str, hsh->val.hashtab);
+	} else {
+		do_parse_err(ctx, "trying to index hash '%s' with "
+			     "non-supported value", hashname);
+		return !0;
+	}
+
+      	if (hash_find(hsh->val.hashtab, key, &ret)) {
+		printd(PARSE, "didn't find it\n");
+		var = evtr_var_new(uniq_varname());
+		if (var) {
+			printd(PARSE, "inserting it as %s\n", var->name);
+			if (!hash_insert(hsh->val.hashtab, key,
+					 (uintptr_t)var)) {
+				do_parse_err(ctx, "can't insert temporary "
+					"variable into hash\n");
+				return !0;
+			}
+			symtab_insert(ctx->symtab, var->name, var);
+		} else {
+			do_parse_err(ctx, "out of memory");
+		}
+	} else {
+		var = (struct evtr_variable *)ret;
+	}
+	if (!var) {
+		fprintf(stderr, "no var!\n");
+		return !0;
+		/* XXX */
+	}
+	*_var = var;
+	return 0;
+}
+
 
 
 /* Line 189 of yacc.c  */
-#line 137 "ktrfmt.tab.c"
+#line 220 "ktrfmt.tab.c"
 
 /* Enabling traces.  */
 #ifndef YYDEBUG
@@ -177,7 +260,7 @@ typedef union YYSTYPE
 {
 
 /* Line 214 of yacc.c  */
-#line 63 "ktrfmt.y"
+#line 146 "ktrfmt.y"
 
 	struct token *tok;
 	struct evtr_variable *var;
@@ -187,7 +270,7 @@ typedef union YYSTYPE
 
 
 /* Line 214 of yacc.c  */
-#line 191 "ktrfmt.tab.c"
+#line 274 "ktrfmt.tab.c"
 } YYSTYPE;
 # define YYSTYPE_IS_TRIVIAL 1
 # define yystype YYSTYPE /* obsolescent; will be withdrawn */
@@ -199,7 +282,7 @@ typedef union YYSTYPE
 
 
 /* Line 264 of yacc.c  */
-#line 203 "ktrfmt.tab.c"
+#line 286 "ktrfmt.tab.c"
 
 #ifdef short
 # undef short
@@ -412,7 +495,7 @@ union yyalloc
 #endif
 
 /* YYFINAL -- State number of the termination state.  */
-#define YYFINAL  13
+#define YYFINAL  12
 /* YYLAST -- Last index in YYTABLE.  */
 #define YYLAST   14
 
@@ -421,9 +504,9 @@ union yyalloc
 /* YYNNTS -- Number of nonterminals.  */
 #define YYNNTS  9
 /* YYNRULES -- Number of rules.  */
-#define YYNRULES  13
+#define YYNRULES  14
 /* YYNRULES -- Number of states.  */
-#define YYNSTATES  18
+#define YYNSTATES  20
 
 /* YYTRANSLATE(YYLEX) -- Bison symbol number corresponding to YYLEX.  */
 #define YYUNDEFTOK  2
@@ -470,23 +553,23 @@ static const yytype_uint8 yytranslate[] =
 static const yytype_uint8 yyprhs[] =
 {
        0,     0,     3,     5,     7,     9,    11,    13,    15,    17,
-      22,    24,    26,    30
+      22,    26,    28,    30,    34
 };
 
 /* YYRHS -- A `-1'-separated list of the rules' RHS.  */
 static const yytype_int8 yyrhs[] =
 {
       11,     0,    -1,    12,    -1,    16,    -1,    18,    -1,     4,
-      -1,     5,    -1,     3,    -1,    13,    -1,     3,     7,    15,
-       8,    -1,    14,    -1,    15,    -1,    16,     6,    13,    -1,
-      17,    -1
+      -1,     5,    -1,     3,    -1,    13,    -1,    15,     7,    15,
+       8,    -1,    15,     9,     3,    -1,    14,    -1,    15,    -1,
+      16,     6,    13,    -1,    17,    -1
 };
 
 /* YYRLINE[YYN] -- source line where rule number YYN was defined.  */
-static const yytype_uint8 yyrline[] =
+static const yytype_uint16 yyrline[] =
 {
-       0,    88,    88,    90,    93,    95,   104,   118,   131,   135,
-     182,   186,   190,   198
+       0,   171,   171,   173,   176,   178,   192,   207,   225,   229,
+     236,   249,   253,   257,   265
 };
 #endif
 
@@ -515,14 +598,14 @@ static const yytype_uint16 yytoknum[] =
 static const yytype_uint8 yyr1[] =
 {
        0,    10,    11,    12,    12,    13,    13,    14,    14,    15,
-      15,    16,    17,    18
+      15,    15,    16,    17,    18
 };
 
 /* YYR2[YYN] -- Number of symbols composing right hand side of rule YYN.  */
 static const yytype_uint8 yyr2[] =
 {
        0,     2,     1,     1,     1,     1,     1,     1,     1,     4,
-       1,     1,     3,     1
+       3,     1,     1,     3,     1
 };
 
 /* YYDEFACT[STATE-NAME] -- Default rule to reduce with in state
@@ -530,8 +613,8 @@ static const yytype_uint8 yyr2[] =
    means the default is an error.  */
 static const yytype_uint8 yydefact[] =
 {
-       0,     7,     5,     6,     0,     2,     8,    10,    11,     3,
-      13,     4,     0,     1,     0,     0,    12,     9
+       0,     7,     5,     6,     0,     2,     8,    11,    12,     3,
+      14,     4,     1,     0,     0,     0,     0,    10,    13,     9
 };
 
 /* YYDEFGOTO[NTERM-NUM].  */
@@ -542,17 +625,17 @@ static const yytype_int8 yydefgoto[] =
 
 /* YYPACT[STATE-NUM] -- Index in YYTABLE of the portion describing
    STATE-NUM.  */
-#define YYPACT_NINF -6
+#define YYPACT_NINF -5
 static const yytype_int8 yypact[] =
 {
-      -3,    -2,    -6,    -6,     6,    -6,    -6,    -6,    -6,     1,
-      -6,    -6,    -3,    -6,    -1,     0,    -6,    -6
+      -3,    -5,    -5,    -5,     7,    -5,    -5,    -5,    -1,     6,
+      -5,    -5,    -5,    -3,     8,     5,    -4,    -5,    -5,    -5
 };
 
 /* YYPGOTO[NTERM-NUM].  */
 static const yytype_int8 yypgoto[] =
 {
-      -6,    -6,    -6,    -5,    -6,     2,    -6,    -6,    -6
+      -5,    -5,    -5,    -2,    -5,     1,    -5,    -5,    -5
 };
 
 /* YYTABLE[YYPACT[STATE-NUM]].  What to do in state STATE-NUM.  If
@@ -562,14 +645,14 @@ static const yytype_int8 yypgoto[] =
 #define YYTABLE_NINF -1
 static const yytype_uint8 yytable[] =
 {
-       1,     2,     3,     2,     3,    12,    13,    14,    17,    16,
-       0,     0,     0,     0,    15
+       1,     2,     3,    13,    19,    14,    13,    12,    14,     2,
+       3,    17,    15,    18,    16
 };
 
-static const yytype_int8 yycheck[] =
+static const yytype_uint8 yycheck[] =
 {
-       3,     4,     5,     4,     5,     7,     0,     6,     8,    14,
-      -1,    -1,    -1,    -1,    12
+       3,     4,     5,     7,     8,     9,     7,     0,     9,     4,
+       5,     3,     6,    15,    13
 };
 
 /* YYSTOS[STATE-NUM] -- The (internal number of the) accessing
@@ -577,7 +660,7 @@ static const yytype_int8 yycheck[] =
 static const yytype_uint8 yystos[] =
 {
        0,     3,     4,     5,    11,    12,    13,    14,    15,    16,
-      17,    18,     7,     0,     6,    15,    13,     8
+      17,    18,     0,     7,     9,     6,    15,     3,    13,     8
 };
 
 #define yyerrok		(yyerrstatus = 0)
@@ -1396,7 +1479,7 @@ yyreduce:
         case 3:
 
 /* Line 1455 of yacc.c  */
-#line 90 "ktrfmt.y"
+#line 173 "ktrfmt.y"
     {
 	ctx->var = (yyvsp[(1) - (1)].var);
  ;}
@@ -1405,13 +1488,18 @@ yyreduce:
   case 5:
 
 /* Line 1455 of yacc.c  */
-#line 95 "ktrfmt.y"
+#line 178 "ktrfmt.y"
     {
 	evtr_var_t var;
+	if (!(yyvsp[(1) - (1)].tok)->str)
+		parse_err("out of memory");
 	var = evtr_var_new(uniq_varname());
 	var->val.type = EVTR_VAL_INT;
-	var->val.num =
-		atoll((yyvsp[(1) - (1)].tok)->str); /* XXX */
+	errno = 0;
+	var->val.num = strtoll((yyvsp[(1) - (1)].tok)->str, NULL, 0);
+	if (errno) {
+		parse_err("Can't parse numeric constant '%s'", (yyvsp[(1) - (1)].tok)->str);
+	}
 	(yyval.var) = var;
 	tok_free((yyvsp[(1) - (1)].tok));
 	;}
@@ -1420,15 +1508,16 @@ yyreduce:
   case 6:
 
 /* Line 1455 of yacc.c  */
-#line 104 "ktrfmt.y"
+#line 192 "ktrfmt.y"
     {
 	evtr_var_t var;
+	if (!(yyvsp[(1) - (1)].tok)->str)
+		parse_err("out of memory");
 	var = evtr_var_new(uniq_varname());
-	var->val.type = EVTR_VAL_INT;
-	var->val.str = strdup((yyvsp[(1) - (1)].tok)->str);
+	var->val.type = EVTR_VAL_STR;
+	var->val.str = (yyvsp[(1) - (1)].tok)->str;
 	if (!var->val.str) {
-		fprintf(stderr, "oom\n");
-		YYABORT;
+		parse_err("out of memory");
 	}
 	(yyval.var) = var;
 	tok_free((yyvsp[(1) - (1)].tok));
@@ -1438,14 +1527,19 @@ yyreduce:
   case 7:
 
 /* Line 1455 of yacc.c  */
-#line 118 "ktrfmt.y"
+#line 207 "ktrfmt.y"
     {
 	evtr_var_t var;
+	if (!(yyvsp[(1) - (1)].tok)->str)
+		parse_err("out of memory");
 	printd(PARSE, "TOK_ID\n");
 	printd(PARSE, "tok: %p, str = %p\n", (yyvsp[(1) - (1)].tok), (yyvsp[(1) - (1)].tok)->str);
 	var = symtab_find(ctx->symtab, (yyvsp[(1) - (1)].tok)->str);
 	if (!var) {
-		var = evtr_var_new((yyvsp[(1) - (1)].tok)->str); /* XXX: oom */
+		if (!(var = evtr_var_new((yyvsp[(1) - (1)].tok)->str))) {
+			tok_free((yyvsp[(1) - (1)].tok));
+			parse_err("out of memory");
+		}
 		printd(PARSE, "creating var %s\n", (yyvsp[(1) - (1)].tok)->str);
 		symtab_insert(ctx->symtab, (yyvsp[(1) - (1)].tok)->str, var);
 	}
@@ -1457,7 +1551,7 @@ yyreduce:
   case 8:
 
 /* Line 1455 of yacc.c  */
-#line 131 "ktrfmt.y"
+#line 225 "ktrfmt.y"
     {
 	(yyval.var) = (yyvsp[(1) - (1)].var);
   ;}
@@ -1466,52 +1560,12 @@ yyreduce:
   case 9:
 
 /* Line 1455 of yacc.c  */
-#line 135 "ktrfmt.y"
+#line 229 "ktrfmt.y"
     {
-	evtr_var_t hsh, var;
-	evtr_variable_value_t val;
-	hsh = symtab_find(ctx->symtab, (yyvsp[(1) - (4)].tok)->str);
-	if (!hsh) {
-		printd(PARSE, "creating hash: %s\n", (yyvsp[(1) - (4)].tok)->str);
-		hsh = evtr_var_new((yyvsp[(1) - (4)].tok)->str);
-		hsh->val.type = EVTR_VAL_HASH;
-		hsh->val.hashtab = hash_new();
-		symtab_insert(ctx->symtab, (yyvsp[(1) - (4)].tok)->str, hsh);
-	}
-	if (hsh->val.type != EVTR_VAL_HASH) {
-		printd(PARSE, "variable %s does not contain a hash\n", hsh->name);
+	evtr_var_t var;
+
+	if (index_hash(ctx, (yyvsp[(1) - (4)].var)->name, &(yyvsp[(3) - (4)].var)->val, &var))
 		YYABORT;
-	}
-	val = &(yyvsp[(3) - (4)].var)->val;
-	if (val->type == EVTR_VAL_INT) {
-		uintptr_t ret;
-		uintptr_t key = val->num;
-		printd(PARSE, "looking up %s[%jd] in %p\n", (yyvsp[(1) - (4)].tok)->str, val->num, hsh->val.hashtab);
-		/* XXX: should definitely be using uintptr_t for keys/values */
-		if (hash_find(hsh->val.hashtab, key, &ret)) {
-			printd(PARSE, "didn't find it\n");
-			var = evtr_var_new(uniq_varname());
-			if (var) {
-				printd(PARSE, "inserting it as %s\n", var->name);
-				if (!hash_insert(hsh->val.hashtab, key, (uintptr_t)var)) {
-					fprintf(stderr, "can't insert tmp "
-						"variable into hash\n");
-					YYABORT;
-				}
-			}
-		} else {
-			var = (struct evtr_variable *)ret;
-		}
-	} else {
-		fprintf(stderr, "trying to index hash w/ non-integral value\n");
-		YYABORT;
-	}
-	if (!var) {
-		fprintf(stderr, "no var!\n");
-		YYABORT;
-		/* XXX */
-	}
-	tok_free((yyvsp[(1) - (4)].tok));
 	(yyval.var) = var;
  ;}
     break;
@@ -1519,16 +1573,26 @@ yyreduce:
   case 10:
 
 /* Line 1455 of yacc.c  */
-#line 182 "ktrfmt.y"
+#line 236 "ktrfmt.y"
     {
-	(yyval.var) = (yyvsp[(1) - (1)].var);
+	evtr_var_t var, tmp;
+	if (!(yyvsp[(3) - (3)].tok)->str)
+		parse_err("out of memory");
+	tmp = evtr_var_new(uniq_varname());
+	tmp->val.type = EVTR_VAL_STR;
+	tmp->val.str = (yyvsp[(3) - (3)].tok)->str;
+
+	if (index_hash(ctx, (yyvsp[(1) - (3)].var)->name, &tmp->val, &var))
+		YYABORT;
+	tok_free((yyvsp[(3) - (3)].tok));
+	(yyval.var) = var;
  ;}
     break;
 
   case 11:
 
 /* Line 1455 of yacc.c  */
-#line 186 "ktrfmt.y"
+#line 249 "ktrfmt.y"
     {
 	(yyval.var) = (yyvsp[(1) - (1)].var);
  ;}
@@ -1537,7 +1601,16 @@ yyreduce:
   case 12:
 
 /* Line 1455 of yacc.c  */
-#line 190 "ktrfmt.y"
+#line 253 "ktrfmt.y"
+    {
+	(yyval.var) = (yyvsp[(1) - (1)].var);
+ ;}
+    break;
+
+  case 13:
+
+/* Line 1455 of yacc.c  */
+#line 257 "ktrfmt.y"
     {
 	(yyvsp[(1) - (3)].var)->val = (yyvsp[(3) - (3)].var)->val;
 	ctx->ev->type = EVTR_TYPE_STMT;
@@ -1547,10 +1620,10 @@ yyreduce:
  ;}
     break;
 
-  case 13:
+  case 14:
 
 /* Line 1455 of yacc.c  */
-#line 198 "ktrfmt.y"
+#line 265 "ktrfmt.y"
     {
 	(yyval.na) = (yyvsp[(1) - (1)].na);
  ;}
@@ -1559,7 +1632,7 @@ yyreduce:
 
 
 /* Line 1455 of yacc.c  */
-#line 1563 "ktrfmt.tab.c"
+#line 1636 "ktrfmt.tab.c"
       default: break;
     }
   YY_SYMBOL_PRINT ("-> $$ =", yyr1[yyn], &yyval, &yyloc);
@@ -1771,7 +1844,7 @@ yyreturn:
 
 
 /* Line 1675 of yacc.c  */
-#line 203 "ktrfmt.y"
+#line 270 "ktrfmt.y"
 
 
 void * __ktrfmt_scan_string(const char *);
@@ -1780,12 +1853,12 @@ void __ktrfmt_delete_buffer(void *);
 void
 __ktrfmt_error (struct ktrfmt_parse_ctx *ctx, const char *s)
 {
-	(void)ctx;
-	fprintf(stderr, "%s\n", s);
+	do_parse_err(ctx, s);
 }
 
 int
-parse_string(evtr_event_t ev, struct symtab *symtab, const char *str)
+parse_string(evtr_event_t ev, struct symtab *symtab, const char *str,
+	     char *errbuf, size_t errbufsz)
 {
 	void *bufstate;
 	int ret;
@@ -1794,6 +1867,10 @@ parse_string(evtr_event_t ev, struct symtab *symtab, const char *str)
 	printd(PARSE, "parsing \"%s\"\n", str);
 	ctx.ev = ev;
 	ctx.symtab = symtab;
+	ctx.errbuf = errbuf;
+	ctx.errbuf[0] = '\0';
+	ctx.errbufsz = errbufsz;
+	ctx.err = 0;
 	bufstate = __ktrfmt_scan_string(str);
 	ret = __ktrfmt_parse(&ctx);
 	__ktrfmt_delete_buffer(bufstate);
@@ -1802,15 +1879,21 @@ parse_string(evtr_event_t ev, struct symtab *symtab, const char *str)
 }
 
 int
-parse_var(const char *str, struct symtab *symtab, struct evtr_variable **var)
+parse_var(const char *str, struct symtab *symtab, struct evtr_variable **var,
+	  char *errbuf, size_t errbufsz)
 {
 	void *bufstate;
 	int ret;
 	struct ktrfmt_parse_ctx ctx;
 
+	printd(PARSE, "parsing \"%s\"\n", str);
 	ctx.ev = NULL;
 	ctx.symtab = symtab;
 	ctx.var = NULL;
+	ctx.errbuf = errbuf;
+	ctx.errbuf[0] = '\0';
+	ctx.errbufsz = errbufsz;
+	ctx.err = 0;
 	bufstate = __ktrfmt_scan_string(str);
 	ret = __ktrfmt_parse(&ctx);
 	__ktrfmt_delete_buffer(bufstate);
