@@ -120,12 +120,12 @@ static struct drm_ioctl_desc drm_ioctls[256] = {
 
 static struct dev_ops drm_cdevsw = {
 	{ "drm", 145, D_TRACKCLOSE },
-	.d_open =       drm_open,
-	.d_close =	drm_close,
-	.d_read =       drm_read,
-	.d_ioctl =      drm_ioctl,
-	.d_poll =       drm_poll,
-	.d_mmap =       drm_mmap
+	.d_open =       drm_open_legacy,
+	.d_close =	drm_close_legacy,
+	.d_read =       drm_read_legacy,
+	.d_ioctl =      drm_ioctl_legacy,
+	.d_poll =       drm_poll_legacy,
+	.d_mmap =       drm_mmap_legacy
 };
 
 static int drm_msi = 1;	/* Enable by default. */
@@ -569,7 +569,7 @@ int drm_version(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return 0;
 }
 
-int drm_open(struct dev_open_args *ap)
+int drm_open_legacy(struct dev_open_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
 	int flags = ap->a_oflags;
@@ -596,7 +596,7 @@ int drm_open(struct dev_open_args *ap)
 	return retcode;
 }
 
-int drm_close(struct dev_close_args *ap)
+int drm_close_legacy(struct dev_close_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
 	struct drm_file *file_priv;
@@ -694,9 +694,9 @@ done:
 	return (0);
 }
 
-/* drm_ioctl is called whenever a process performs an ioctl on /dev/drm.
+/* drm_ioctl_legacy is called whenever a process performs an ioctl on /dev/drm.
  */
-int drm_ioctl(struct dev_ioctl_args *ap)
+int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
 	u_long cmd = ap->a_cmd;

@@ -215,4 +215,12 @@ extern int	drm_debug_flag;
 /* Deduced from drm_agpsupport function drm_agp_info() */
 typedef struct drm_agp_info	DRM_AGP_KERN;
 
+/* legacy drm */
+d_ioctl_t drm_ioctl_legacy;
+d_open_t drm_open_legacy;
+d_close_t drm_close_legacy;
+d_read_t drm_read_legacy;
+d_poll_t drm_poll_legacy;
+d_mmap_t drm_mmap_legacy;
+
 #endif

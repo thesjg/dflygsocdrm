@@ -102,14 +102,14 @@ int drm_open_helper(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p,
 }
 
 
-/* The drm_read and drm_poll are stubs to prevent spurious errors
+/* The drm_read_legacy and drm_poll_legacy are stubs to prevent spurious errors
  * on older X Servers (4.3.0 and earlier) */
-int drm_read(struct dev_read_args *ap)
+int drm_read_legacy(struct dev_read_args *ap)
 {
 	return 0;
 }
 
-int drm_poll(struct dev_poll_args *ap)
+int drm_poll_legacy(struct dev_poll_args *ap)
 {
 	return 0;
 }

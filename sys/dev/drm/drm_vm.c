@@ -28,7 +28,7 @@
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
 
-int drm_mmap(struct dev_mmap_args *ap)
+int drm_mmap_legacy(struct dev_mmap_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
 	vm_offset_t offset = ap->a_offset;
