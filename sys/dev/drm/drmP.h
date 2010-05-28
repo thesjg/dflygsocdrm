@@ -994,6 +994,7 @@ struct drm_driver {
 	int	buf_priv_size;
 };
 
+#if 0
 /* Legacy drm struct */
 struct drm_driver_info {
 	int	(*load)(struct drm_device *, unsigned long flags);
@@ -1055,6 +1056,7 @@ struct drm_driver_info {
 
 	u32 driver_features;
 };
+#endif
 
 #define DRM_MINOR_UNASSIGNED 0
 #define DRM_MINOR_LEGACY 1
@@ -1294,7 +1296,7 @@ struct drm_device {
 #ifdef __linux__
 	struct drm_driver *driver;
 #else
-	struct drm_driver_info *driver;
+	struct drm_driver *driver;
 #endif
 
 	struct drm_local_map *agp_buffer_map;
