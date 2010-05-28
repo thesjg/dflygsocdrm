@@ -156,7 +156,7 @@ int drm_setsareactx(struct drm_device *dev, void *data,
 	drm_local_map_t *map = NULL;
 
 	DRM_LOCK();
-	TAILQ_FOREACH(map, &dev->maplist, link) {
+	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (map->handle == request->handle) {
 			if (dev->max_context < 0)
 				goto bad;

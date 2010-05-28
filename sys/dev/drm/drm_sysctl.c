@@ -168,7 +168,7 @@ static int drm_vm_info DRM_SYSCTL_HANDLER_ARGS
 	DRM_LOCK();
 
 	mapcount = 0;
-	TAILQ_FOREACH(map, &dev->maplist, link)
+	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
 		mapcount++;
 
 	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount, DRM_MEM_DRIVER,
@@ -179,7 +179,7 @@ static int drm_vm_info DRM_SYSCTL_HANDLER_ARGS
 	}
 
 	i = 0;
-	TAILQ_FOREACH(map, &dev->maplist, link)
+	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
 		tempmaps[i++] = *map;
 
 	DRM_UNLOCK();

@@ -124,7 +124,7 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 	 */
 	if (type == _DRM_REGISTERS || type == _DRM_FRAME_BUFFER ||
 	    type == _DRM_SHM) {
-		TAILQ_FOREACH(map, &dev->maplist, link) {
+		TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 			if (map->type == type && (map->offset == offset ||
 			    (map->type == _DRM_SHM &&
 			    map->flags == _DRM_CONTAINS_LOCK))) {
@@ -246,7 +246,7 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 	}
 
 	DRM_LOCK();
-	TAILQ_INSERT_TAIL(&dev->maplist, map, link);
+	TAILQ_INSERT_TAIL(&dev->maplist_legacy, map, link);
 
 done:
 	/* Jumped to, with lock held, when a kernel map is found. */
@@ -300,7 +300,7 @@ void drm_rmmap(struct drm_device *dev, drm_local_map_t *map)
 	if (map == NULL)
 		return;
 
-	TAILQ_REMOVE(&dev->maplist, map, link);
+	TAILQ_REMOVE(&dev->maplist_legacy, map, link);
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
@@ -349,7 +349,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 	struct drm_map *request = data;
 
 	DRM_LOCK();
-	TAILQ_FOREACH(map, &dev->maplist, link) {
+	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (map->handle == request->handle &&
 		    map->flags & _DRM_REMOVABLE)
 			break;

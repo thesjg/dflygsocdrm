@@ -391,7 +391,7 @@ static int drm_lastclose(struct drm_device *dev)
 		dev->sg = NULL;
 	}
 
-	TAILQ_FOREACH_MUTABLE(map, &dev->maplist, link, mapsave) {
+	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
 		if (!(map->flags & _DRM_DRIVER))
 			drm_rmmap(dev, map);
 	}
@@ -412,7 +412,7 @@ static int drm_load(struct drm_device *dev)
 
 	DRM_DEBUG("\n");
 
-	TAILQ_INIT(&dev->maplist);
+	TAILQ_INIT(&dev->maplist_legacy);
 
 	drm_mem_init();
 	drm_sysctl_init(dev);
@@ -786,7 +786,7 @@ drm_local_map_t *drm_getsarea(struct drm_device *dev)
 	drm_local_map_t *map;
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-	TAILQ_FOREACH(map, &dev->maplist, link) {
+	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (map->type == _DRM_SHM && (map->flags & _DRM_CONTAINS_LOCK))
 			return map;
 	}

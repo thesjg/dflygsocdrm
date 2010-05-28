@@ -154,7 +154,7 @@ int drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		return EINVAL;
 	}
 
-	TAILQ_FOREACH(mapinlist, &dev->maplist, link) {
+	TAILQ_FOREACH(mapinlist, &dev->maplist_legacy, link) {
 		if (i == idx) {
 			map->offset = mapinlist->offset;
 			map->size   = mapinlist->size;

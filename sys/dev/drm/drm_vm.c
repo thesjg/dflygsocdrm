@@ -75,7 +75,7 @@ int drm_mmap(struct dev_mmap_args *ap)
 				   for performance, even if the list was a
 				   bit longer. */
 	DRM_LOCK();
-	TAILQ_FOREACH(map, &dev->maplist, link) {
+	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (offset >= map->offset && offset < map->offset + map->size)
 			break;
 	}
@@ -83,7 +83,7 @@ int drm_mmap(struct dev_mmap_args *ap)
 	if (map == NULL) {
 		DRM_DEBUG("Can't find map, requested offset = %016lx\n",
 		    (unsigned long)offset);
-		TAILQ_FOREACH(map, &dev->maplist, link) {
+		TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 			DRM_DEBUG("map offset = %016lx, handle = %016lx\n",
 			    (unsigned long)map->offset,
 			    (unsigned long)map->handle);

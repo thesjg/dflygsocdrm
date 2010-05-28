@@ -1166,12 +1166,7 @@ struct drm_device {
 
 	/** \name Memory management */
 	/*@{ */
-#ifdef __linux__
 	struct list_head maplist;	/**< Linked list of regions */
-#else
-	/* Linked list of mappable regions. Protected by dev_lock */
-	drm_map_list_t	  maplist;
-#endif
 	int map_count;			/**< Number of mappable regions */
 	struct drm_open_hash map_hash;	/**< User token hash table for maps */
 
@@ -1334,6 +1329,8 @@ struct drm_device {
 	/*@} */
 
 /* Legacy drm */
+	/* Linked list of mappable regions. Protected by dev_lock */
+	drm_map_list_t	  maplist_legacy;
 	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
@@ -1759,7 +1756,7 @@ drm_core_findmap(struct drm_device *dev, unsigned long offset)
 	drm_local_map_t *map;
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-	TAILQ_FOREACH(map, &dev->maplist, link) {
+	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (map->offset == offset)
 			return map;
 	}
