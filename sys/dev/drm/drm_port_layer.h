@@ -137,19 +137,19 @@ struct work_struct {
 	int placeholder;
 };
 
-struct edid {
-	int placeholder;
-};
+/*
+ * Signals and interrupts
+ */
 
-/* IRQ from BSD drmP.h */
+#define _IOC_NR(n) ((n) & 0xff)
+
 typedef void			irqreturn_t;
 #define IRQ_HANDLED		/* nothing */
 #define IRQ_NONE		/* nothing */
 
-#define unlikely(x)            __builtin_expect(!!(x), 0)
-#define container_of(ptr, type, member) ({			\
-	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
-	(type *)( (char *)__mptr - offsetof(type,member) );})
+struct sigset_t {
+	int placeholder;
+};
 
 /* Memory management */
 #define PAGE_ALIGN(addr) round_page(addr)
@@ -179,22 +179,35 @@ typedef unsigned long resource_size_t;
 
 typedef unsigned long dma_addr_t;
 
-/* From older version of drmP.h */
+/* From legacy older version of drmP.h */
+
+/*
+ * C convenience
+ */
+
+#ifndef ARRAY_SIZE
+#define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
+#endif
+
 #ifndef DMA_BIT_MASK
 #define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
 #endif
 
 #define upper_32_bits(n) ((u32)(((n) >> 16) >> 16))
 
+#define unlikely(x)            __builtin_expect(!!(x), 0)
+#define container_of(ptr, type, member) ({			\
+	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	(type *)( (char *)__mptr - offsetof(type,member) );})
+
 /*
  * Time
  */
 
+#define HZ	hz
 #define jiffies			ticks
 
-struct timer_list {
-	int placeholder;
-};
+#define timer_list callout
 
 typedef unsigned long cycles_t;
 
@@ -202,13 +215,6 @@ typedef unsigned long cycles_t;
  * Processes and threads
  */
 struct fasync_struct {
-	int placeholder;
-};
-
-/*
- * Signals
- */
-struct sigset_t {
 	int placeholder;
 };
 
@@ -280,8 +286,12 @@ struct proc_dir_entry {
 	int placeholder;
 };
 
+struct inode {
+	int placeholder;
+};
+
 /*
- * PCI
+ * PCI and AGP
  */
 
 struct pci_driver {
@@ -293,9 +303,17 @@ struct pci_dev {
 	int irq;
 };
 
+struct agp_bridge_data {
+	int placeholder;
+};
+
 /*
  * Other device types
  */
+
+struct edid {
+	int placeholder;
+};
 
 struct edi {
 	int placeholder;
@@ -345,10 +363,6 @@ free(void *addr, struct malloc_type *type)
 	if (addr != NULL)
 		kfree(addr, type);
 }
-
-
-/* DragonFly drmP.h */
-#define ARRAY_SIZE(x)   (sizeof(x) / sizeof(x[0]))
 
 /* drm_buf_t is already defined as struct drm_buf */
 

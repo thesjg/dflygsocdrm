@@ -45,7 +45,7 @@ static int drm_hash_magic(drm_magic_t magic)
  */
 static struct drm_file *drm_find_file(struct drm_device *dev, drm_magic_t magic)
 {
-	drm_magic_entry_t *pt;
+	struct drm_magic_entry *pt;
 	int hash = drm_hash_magic(magic);
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
@@ -67,7 +67,7 @@ static int drm_add_magic(struct drm_device *dev, struct drm_file *priv,
 			 drm_magic_t magic)
 {
 	int		  hash;
-	drm_magic_entry_t *entry;
+	struct drm_magic_entry *entry;
 
 	DRM_DEBUG("%d\n", magic);
 
@@ -98,8 +98,8 @@ static int drm_add_magic(struct drm_device *dev, struct drm_file *priv,
  */
 static int drm_remove_magic(struct drm_device *dev, drm_magic_t magic)
 {
-	drm_magic_entry_t *prev = NULL;
-	drm_magic_entry_t *pt;
+	struct drm_magic_entry *prev = NULL;
+	struct drm_magic_entry *pt;
 	int		  hash;
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);

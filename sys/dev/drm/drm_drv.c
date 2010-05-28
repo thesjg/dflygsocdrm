@@ -56,7 +56,7 @@ MODULE_VERSION(drm, 1);
 MODULE_DEPEND(drm, agp, 1, 1, 1);
 MODULE_DEPEND(drm, pci, 1, 1, 1);
 
-static drm_ioctl_desc_t		  drm_ioctls[256] = {
+static struct drm_ioctl_desc drm_ioctls[256] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_VERSION, drm_version, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_UNIQUE, drm_getunique, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_MAGIC, drm_getmagic, 0),
@@ -331,7 +331,7 @@ static int drm_firstopen(struct drm_device *dev)
 
 static int drm_lastclose(struct drm_device *dev)
 {
-	drm_magic_entry_t *pt, *next;
+	struct drm_magic_entry *pt, *next;
 	drm_local_map_t *map, *mapsave;
 	int i;
 
@@ -704,7 +704,7 @@ int drm_ioctl(struct dev_ioctl_args *ap)
 	struct thread *p = curthread;
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	int retcode = 0;
-	drm_ioctl_desc_t *ioctl;
+	struct drm_ioctl_desc *ioctl;
 	int (*func)(struct drm_device *dev, void *data, struct drm_file *file_priv);
 	int nr = DRM_IOCTL_NR(cmd);
 	int is_driver_ioctl = 0;

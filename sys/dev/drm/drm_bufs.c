@@ -370,7 +370,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 
 
 static void drm_cleanup_buf_error(struct drm_device *dev,
-				  drm_buf_entry_t *entry)
+				  struct drm_buf_entry *entry)
 {
 	int i;
 
@@ -396,7 +396,7 @@ static void drm_cleanup_buf_error(struct drm_device *dev,
 static int drm_do_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *request)
 {
 	drm_device_dma_t *dma = dev->dma;
-	drm_buf_entry_t *entry;
+	struct drm_buf_entry *entry;
 	/*drm_agp_mem_t *agp_entry;
 	int valid*/
 	drm_buf_t *buf;
@@ -532,7 +532,7 @@ static int drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *reque
 	int size;
 	int total;
 	int page_order;
-	drm_buf_entry_t *entry;
+	struct drm_buf_entry *entry;
 	drm_buf_t *buf;
 	int alignment;
 	unsigned long offset;
@@ -677,7 +677,7 @@ static int drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *reque
 static int drm_do_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *request)
 {
 	drm_device_dma_t *dma = dev->dma;
-	drm_buf_entry_t *entry;
+	struct drm_buf_entry *entry;
 	drm_buf_t *buf;
 	unsigned long offset;
 	unsigned long agp_offset;

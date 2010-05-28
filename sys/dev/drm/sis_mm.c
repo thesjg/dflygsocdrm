@@ -374,7 +374,7 @@ int sis_final_context(struct drm_device *dev, int context)
 	return 1;
 }
 
-drm_ioctl_desc_t sis_ioctls[] = {
+struct drm_ioctl_desc sis_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_SIS_FB_ALLOC, sis_fb_alloc, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_SIS_FB_FREE, sis_fb_free, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_SIS_AGP_INIT, sis_ioctl_agp_init, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
