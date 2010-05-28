@@ -51,7 +51,7 @@ int drm_mmap_legacy(struct dev_mmap_args *ap)
                 return EACCES;
 
 	if (dev->dma && offset < ptoa(dev->dma->page_count)) {
-		drm_device_dma_t *dma = dev->dma;
+		struct drm_device_dma *dma = dev->dma;
 
 		DRM_SPINLOCK(&dev->dma_lock);
 

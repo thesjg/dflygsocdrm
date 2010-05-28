@@ -164,7 +164,7 @@ int drm_agp_enable_ioctl(struct drm_device *dev, void *data,
 
 int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 {
-	drm_agp_mem_t    *entry;
+	struct drm_agp_mem *entry;
 	void	         *handle;
 	unsigned long    pages;
 	u_int32_t	 type;
@@ -222,10 +222,10 @@ int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
 	return retcode;
 }
 
-static drm_agp_mem_t * drm_agp_lookup_entry(struct drm_device *dev,
+static struct drm_agp_mem * drm_agp_lookup_entry(struct drm_device *dev,
 					    void *handle)
 {
-	drm_agp_mem_t *entry;
+	struct drm_agp_mem *entry;
 
 	for (entry = dev->agp->memory; entry; entry = entry->next) {
 		if (entry->handle == handle) return entry;
@@ -235,7 +235,7 @@ static drm_agp_mem_t * drm_agp_lookup_entry(struct drm_device *dev,
 
 int drm_agp_unbind(struct drm_device *dev, struct drm_agp_binding *request)
 {
-	drm_agp_mem_t     *entry;
+	struct drm_agp_mem *entry;
 	int retcode;
 
 	if (!dev->agp || !dev->agp->acquired)
@@ -272,7 +272,7 @@ int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
 
 int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request)
 {
-	drm_agp_mem_t     *entry;
+	struct drm_agp_mem *entry;
 	int               retcode;
 	int               page;
 	
@@ -313,7 +313,7 @@ int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 
 int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 {
-	drm_agp_mem_t    *entry;
+	struct drm_agp_mem *entry;
 	
 	if (!dev->agp || !dev->agp->acquired)
 		return EINVAL;
@@ -356,10 +356,10 @@ int drm_agp_free_ioctl(struct drm_device *dev, void *data,
 	return retcode;
 }
 
-drm_agp_head_t *drm_agp_init(void)
+struct drm_agp_head *drm_agp_init(void)
 {
 	device_t agpdev;
-	drm_agp_head_t *head   = NULL;
+	struct drm_agp_head *head   = NULL;
 	int      agp_available = 1;
    
 	agpdev = DRM_AGP_FIND_DEVICE();

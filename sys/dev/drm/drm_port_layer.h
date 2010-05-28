@@ -364,8 +364,6 @@ free(void *addr, struct malloc_type *type)
 		kfree(addr, type);
 }
 
-/* drm_buf_t is already defined as struct drm_buf */
-
 /* idr */
 
 /* Brute force implementation of idr API

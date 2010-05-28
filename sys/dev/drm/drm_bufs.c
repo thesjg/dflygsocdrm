@@ -90,7 +90,7 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 {
 	drm_local_map_t *map;
 	int align;
-	/*drm_agp_mem_t *entry;
+	/*struct drm_agp_mem *entry;
 	int valid;*/
 
 	/* Only allow shared memory to be removable since we only keep enough
@@ -395,11 +395,11 @@ static void drm_cleanup_buf_error(struct drm_device *dev,
 
 static int drm_do_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *request)
 {
-	drm_device_dma_t *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf_entry *entry;
-	/*drm_agp_mem_t *agp_entry;
+	/*struct drm_agp_mem *agp_entry;
 	int valid*/
-	drm_buf_t *buf;
+	struct drm_buf *buf;
 	unsigned long offset;
 	unsigned long agp_offset;
 	int count;
@@ -410,7 +410,7 @@ static int drm_do_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *reque
 	int total;
 	int byte_count;
 	int i;
-	drm_buf_t **temp_buflist;
+	struct drm_buf **temp_buflist;
 
 	count = request->count;
 	order = drm_order(request->size);
@@ -526,21 +526,21 @@ static int drm_do_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *reque
 
 static int drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 {
-	drm_device_dma_t *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	int count;
 	int order;
 	int size;
 	int total;
 	int page_order;
 	struct drm_buf_entry *entry;
-	drm_buf_t *buf;
+	struct drm_buf *buf;
 	int alignment;
 	unsigned long offset;
 	int i;
 	int byte_count;
 	int page_count;
 	unsigned long *temp_pagelist;
-	drm_buf_t **temp_buflist;
+	struct drm_buf **temp_buflist;
 
 	count = request->count;
 	order = drm_order(request->size);
@@ -676,9 +676,9 @@ static int drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *reque
 
 static int drm_do_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *request)
 {
-	drm_device_dma_t *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf_entry *entry;
-	drm_buf_t *buf;
+	struct drm_buf *buf;
 	unsigned long offset;
 	unsigned long agp_offset;
 	int count;
@@ -689,7 +689,7 @@ static int drm_do_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *reques
 	int total;
 	int byte_count;
 	int i;
-	drm_buf_t **temp_buflist;
+	struct drm_buf **temp_buflist;
 
 	count = request->count;
 	order = drm_order(request->size);
@@ -901,7 +901,7 @@ int drm_addbufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 int drm_infobufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_device_dma_t *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf_info *request = data;
 	int i;
 	int count;
@@ -950,7 +950,7 @@ int drm_infobufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 int drm_markbufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_device_dma_t *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf_desc *request = data;
 	int order;
 
@@ -980,11 +980,11 @@ int drm_markbufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 int drm_freebufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_device_dma_t *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf_free *request = data;
 	int i;
 	int idx;
-	drm_buf_t *buf;
+	struct drm_buf *buf;
 	int retcode = 0;
 
 	DRM_DEBUG("%d\n", request->count);
@@ -1017,7 +1017,7 @@ int drm_freebufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 int drm_mapbufs(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-	drm_device_dma_t *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	int retcode = 0;
 	const int zero = 0;
 	vm_offset_t address;

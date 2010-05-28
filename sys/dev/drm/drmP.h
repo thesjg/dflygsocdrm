@@ -417,7 +417,7 @@ struct drm_vma_entry {
 /**
  * DMA buffer.
  */
-typedef struct drm_buf {
+struct drm_buf {
 	int idx;		       /**< Index into master buflist */
 	int total;		       /**< Buffer size */
 	int order;		       /**< log-base-2(total) */
@@ -443,7 +443,7 @@ typedef struct drm_buf {
 
 	int dev_priv_size;		 /**< Size of buffer private storage */
 	void *dev_private;		 /**< Per-buffer private storage */
-} drm_buf_t;
+};
 
 /** bufs is one longer than it has to be */
 struct drm_waitlist {
@@ -468,7 +468,7 @@ struct drm_freelist {
 	spinlock_t lock;
 };
 
-/* Is bus_addr_t always unsigned long? */
+/* legacy drm question: is bus_addr_t always unsigned long? */
 typedef struct drm_dma_handle {
 #ifdef __linux__
 	dma_addr_t busaddr;
@@ -566,11 +566,9 @@ struct drm_lock_data {
 	struct drm_file *file_priv;
 /* legacy drm field lock_queue is only used in drm_lock.c
  * as the memory address upon which to form a queue and then wake up
+ * field lock_queue formerly defined as int
  */
 	wait_queue_head_t lock_queue;	/**< Queue of blocked processes */
-#if 0
-	int		  lock_queue;	/* Queue of blocked processes	   */
-#endif
 	unsigned long lock_time;	/**< Time of last lock in jiffies */
 	spinlock_t spinlock;
 	uint32_t kernel_waiters;
@@ -586,24 +584,29 @@ struct drm_lock_data {
  * watermarks of bufs are only touched by the X Server, and thus not
  * concurrently accessed, so no locking is needed.
  */
-typedef struct drm_device_dma {
-	struct drm_buf_entry bufs[DRM_MAX_ORDER+1];
-	int		  buf_count;
-	drm_buf_t	  **buflist;	/* Vector of pointers info bufs	   */
-	int		  seg_count;
-	int		  page_count;
-	unsigned long	  *pagelist;
-	unsigned long	  byte_count;
+/**
+ * DMA data.
+ */
+struct drm_device_dma {
+
+	struct drm_buf_entry bufs[DRM_MAX_ORDER + 1];	/**< buffers, grouped by their size order */
+	int buf_count;			/**< total number of buffers */
+	struct drm_buf **buflist;		/**< Vector of pointers into drm_device_dma::bufs */
+	int seg_count;
+	int page_count;			/**< number of pages */
+	unsigned long *pagelist;	/**< page list */
+	unsigned long byte_count;
 	enum {
 		_DRM_DMA_USE_AGP = 0x01,
-		_DRM_DMA_USE_SG  = 0x02,
+		_DRM_DMA_USE_SG = 0x02,
 		_DRM_DMA_USE_FB = 0x04,
 		_DRM_DMA_USE_PCI_RO = 0x08
 	} flags;
-} drm_device_dma_t;
+
+};
 
 /* Handle is a void* not unsigned long? */
-typedef struct drm_agp_mem {
+struct drm_agp_mem {
 #ifdef __linux__
 	unsigned long handle;		/**< handle */
 #else
@@ -617,34 +620,41 @@ typedef struct drm_agp_mem {
 	void *handle_legacy;
 	struct drm_agp_mem *prev;
 	struct drm_agp_mem *next;
-} drm_agp_mem_t;
+};
 
-typedef struct drm_agp_head {
+/**
+ * AGP data.
+ *
+ * \sa drm_agp_init() and drm_device::agp.
+ */
+struct drm_agp_head {
 	DRM_AGP_KERN agp_info;		/**< AGP device information */
 #ifdef __linux__
 	struct list_head memory;
 #else
-	drm_agp_mem_t      *memory;
+	struct drm_agp_mem *memory;
 #endif
-	unsigned long      mode;
+	unsigned long mode;		/**< AGP mode */
 	struct agp_bridge_data *bridge;
-	int                enabled;
-	int                acquired;
-	unsigned long      base;
+	int enabled;			/**< whether the AGP bus as been enabled */
+	int acquired;			/**< whether the AGP device has been acquired */
+	unsigned long base;
 	int agp_mtrr;
-	int		   cant_use_aperture;
-	unsigned long	   page_mask;
-/* Legacy drm */
+	int cant_use_aperture;
+	unsigned long page_mask;
+
+/* legacy drm */
+	struct drm_agp_mem *memory_legacy;
 	const char         *chipset;
 	device_t	   agpdev;
 	int 		   mtrr;
 	struct agp_info    info;
-} drm_agp_head_t;
+};
 
 /**
  * Scatter-gather memory.
  */
-typedef struct drm_sg_mem {
+struct drm_sg_mem {
 	unsigned long handle;
 	void *virtual;
 	int pages;
@@ -653,7 +663,7 @@ typedef struct drm_sg_mem {
 
 /* legacy drm */
 	struct drm_dma_handle	 *dmah;		/* Handle to PCI memory  */
-} drm_sg_mem_t;
+};
 
 struct drm_sigdata {
 	int context;
@@ -738,7 +748,7 @@ struct drm_ati_pcigart_info {
 	drm_local_map_t mapping;
 	int table_size;
 
-/* legacy drm field(s) */
+/* legacy drm */
 	dma_addr_t member_mask;
 	struct drm_dma_handle *dmah; /* handle for ATI PCIGART table */
 };
@@ -804,7 +814,11 @@ struct drm_gem_object {
 	void *driver_private;
 };
 
+#ifdef __linux__
+#include "drm_crtc.h"
+#else
 #include "dev/drm/drm_crtc.h"
+#endif
 
 /* per-master structure */
 struct drm_master {
@@ -1441,7 +1455,7 @@ int	drm_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *request);
 /* DMA support (drm_dma.c) */
 int	drm_dma_setup(struct drm_device *dev);
 void	drm_dma_takedown(struct drm_device *dev);
-void	drm_free_buffer(struct drm_device *dev, drm_buf_t *buf);
+void	drm_free_buffer(struct drm_device *dev, struct drm_buf *buf);
 void	drm_reclaim_buffers(struct drm_device *dev, struct drm_file *file_priv);
 #define drm_core_reclaim_buffers drm_reclaim_buffers
 
@@ -1465,7 +1479,7 @@ int 	drm_modeset_ctl(struct drm_device *dev, void *data,
 /* AGP/PCI Express/GART support (drm_agpsupport.c) */
 int	drm_device_is_agp(struct drm_device *dev);
 int	drm_device_is_pcie(struct drm_device *dev);
-drm_agp_head_t *drm_agp_init(void);
+struct drm_agp_head *drm_agp_init(void);
 int	drm_agp_acquire(struct drm_device *dev);
 int	drm_agp_release(struct drm_device *dev);
 int	drm_agp_info(struct drm_device * dev, struct drm_agp_info *info);
@@ -1480,7 +1494,7 @@ int	drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request);
 int	drm_agp_unbind(struct drm_device *dev, struct drm_agp_binding *request);
 
 /* Scatter Gather Support (drm_scatter.c) */
-void	drm_sg_cleanup(drm_sg_mem_t *entry);
+void	drm_sg_cleanup(struct drm_sg_mem *entry);
 int	drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request);
 
 /* sysctl support (drm_sysctl.h) */

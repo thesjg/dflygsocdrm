@@ -365,8 +365,8 @@ static int drm_lastclose(struct drm_device *dev)
 
 	/* Clear AGP information */
 	if (dev->agp) {
-		drm_agp_mem_t *entry;
-		drm_agp_mem_t *nexte;
+		struct drm_agp_mem *entry;
+		struct drm_agp_mem *nexte;
 
 		/* Remove AGP resources, but leave dev->agp intact until
 		 * drm_unload is called.
