@@ -27,12 +27,12 @@
  * __FBSDID("$FreeBSD: src/sys/dev/drm/r600_cp.c,v 1.10 2009/08/23 14:55:57 rnoland Exp $");
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/radeon_drm.h"
-#include "dev/drm/radeon_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "radeon_drm.h"
+#include "radeon_drv.h"
 
-#include "dev/drm/r600_microcode.h"
+#include "r600_microcode.h"
 
 # define ATI_PCIGART_PAGE_SIZE		4096	/**< PCI GART page size */
 # define ATI_PCIGART_PAGE_MASK		(~(ATI_PCIGART_PAGE_SIZE-1))

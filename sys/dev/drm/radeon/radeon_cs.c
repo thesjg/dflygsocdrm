@@ -26,9 +26,9 @@
  * __FBSDID("$FreeBSD: src/sys/dev/drm/radeon_cs.c,v 1.2 2009/09/28 22:41:28 rnoland Exp $");
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/radeon_drm.h"
-#include "dev/drm/radeon_drv.h"
+#include "drmP.h"
+#include "radeon_drm.h"
+#include "radeon_drv.h"
 
 /* regs */
 #define AVIVO_D1MODE_VLINE_START_END                           0x6538

@@ -29,11 +29,11 @@
 
 #include <sys/cdefs.h>
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/drm_sarea.h"
-#include "dev/drm/radeon_drm.h"
-#include "dev/drm/radeon_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "drm_sarea.h"
+#include "radeon_drm.h"
+#include "radeon_drv.h"
 
 /* ================================================================
  * Helper functions for client state checking and fixup

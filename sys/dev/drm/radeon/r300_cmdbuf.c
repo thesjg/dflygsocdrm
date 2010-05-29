@@ -31,11 +31,11 @@
  *    Nicolai Haehnle <prefect_@gmx.net>
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/radeon_drm.h"
-#include "dev/drm/radeon_drv.h"
-#include "dev/drm/r300_reg.h"
+#include "drmP.h"
+#include "drm.h"
+#include "radeon_drm.h"
+#include "radeon_drv.h"
+#include "r300_reg.h"
 
 #define R300_SIMULTANEOUS_CLIPRECTS		4
 

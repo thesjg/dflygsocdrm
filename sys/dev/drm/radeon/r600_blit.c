@@ -25,10 +25,10 @@
  * __FBSDID("$FreeBSD: src/sys/dev/drm/r600_blit.c,v 1.5 2009/10/30 18:08:46 rnoland Exp $");
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/radeon_drm.h"
-#include "dev/drm/radeon_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "radeon_drm.h"
+#include "radeon_drv.h"
 
 static u32 r6xx_default_state[] =
 {
