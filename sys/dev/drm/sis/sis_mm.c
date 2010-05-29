@@ -35,10 +35,10 @@
 #include <linux/sisfb.h>
 #endif
 #endif
-#include "dev/drm/drmP.h"
-#include "dev/drm/sis_drm.h"
-#include "dev/drm/sis_drv.h"
-#include "dev/drm/sis_ds.h"
+#include "drmP.h"
+#include "sis_drm.h"
+#include "sis_drv.h"
+#include "sis_ds.h"
 
 #define MAX_CONTEXT 100
 #define VIDEO_TYPE 0

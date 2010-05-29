@@ -1,4 +1,4 @@
-/* mach64_drv.c -- ATI Rage 128 driver -*- linux-c -*-
+/* r128_drv.c -- ATI Rage 128 driver -*- linux-c -*-
  * Created: Mon Dec 13 09:47:27 1999 by faith@precisioninsight.com
  */
 /*-
@@ -28,41 +28,41 @@
  * Authors:
  *    Rickard E. (Rik) Faith <faith@valinux.com>
  *    Gareth Hughes <gareth@valinux.com>
+ *
  */
 
-#include <sys/types.h>
-
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/mach64_drm.h"
-#include "dev/drm/mach64_drv.h"
-#include "dev/drm/drm_pciids.h"
+#include "drmP.h"
+#include "drm.h"
+#include "r128_drm.h"
+#include "r128_drv.h"
+#include "drm_pciids.h"
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t mach64_pciidlist[] = {
-	mach64_PCI_IDS
+static drm_pci_id_list_t r128_pciidlist[] = {
+	r128_PCI_IDS
 };
 
-static void mach64_configure(struct drm_device *dev)
+static void r128_configure(struct drm_device *dev)
 {
 	dev->driver->driver_features =
 	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA |
-	    DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ;
+	    DRIVER_SG | DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ;
 
-	dev->driver->buf_priv_size	= 1; /* No dev_priv */
-	dev->driver->load		= mach64_driver_load;
-	dev->driver->lastclose		= mach64_driver_lastclose;
-	dev->driver->get_vblank_counter	= mach64_get_vblank_counter;
-	dev->driver->enable_vblank	= mach64_enable_vblank;
-	dev->driver->disable_vblank	= mach64_disable_vblank;
-	dev->driver->irq_preinstall	= mach64_driver_irq_preinstall;
-	dev->driver->irq_postinstall	= mach64_driver_irq_postinstall;
-	dev->driver->irq_uninstall	= mach64_driver_irq_uninstall;
-	dev->driver->irq_handler	= mach64_driver_irq_handler;
-	dev->driver->dma_ioctl		= mach64_dma_buffers;
+	dev->driver->buf_priv_size	= sizeof(drm_r128_buf_priv_t);
+	dev->driver->load		= r128_driver_load;
+	dev->driver->preclose		= r128_driver_preclose;
+	dev->driver->lastclose		= r128_driver_lastclose;
+	dev->driver->get_vblank_counter	= r128_get_vblank_counter;
+	dev->driver->enable_vblank	= r128_enable_vblank;
+	dev->driver->disable_vblank	= r128_disable_vblank;
+	dev->driver->irq_preinstall	= r128_driver_irq_preinstall;
+	dev->driver->irq_postinstall	= r128_driver_irq_postinstall;
+	dev->driver->irq_uninstall	= r128_driver_irq_uninstall;
+	dev->driver->irq_handler	= r128_driver_irq_handler;
+	dev->driver->dma_ioctl		= r128_cce_buffers;
 
-	dev->driver->ioctls		= mach64_ioctls;
-	dev->driver->max_ioctl		= mach64_max_ioctl;
+	dev->driver->ioctls		= r128_ioctls;
+	dev->driver->max_ioctl		= r128_max_ioctl;
 
 	dev->driver->name		= DRIVER_NAME;
 	dev->driver->desc		= DRIVER_DESC;
@@ -73,32 +73,31 @@ static void mach64_configure(struct drm_device *dev)
 }
 
 static int
-mach64_probe(device_t kdev)
+r128_probe(device_t kdev)
 {
-	return drm_probe(kdev, mach64_pciidlist);
+	return drm_probe(kdev, r128_pciidlist);
 }
 
 static int
-mach64_attach(device_t kdev)
+r128_attach(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 
 	dev->driver = malloc(sizeof(struct drm_driver), DRM_MEM_DRIVER,
 	    M_WAITOK | M_ZERO);
 
-	mach64_configure(dev);
+	r128_configure(dev);
 
-	return drm_attach(kdev, mach64_pciidlist);
+	return drm_attach(kdev, r128_pciidlist);
 }
 
-int
-mach64_driver_load(struct drm_device * dev, unsigned long flags)
+int r128_driver_load(struct drm_device * dev, unsigned long flags)
 {
-        return drm_vblank_init(dev, 1);
+	return drm_vblank_init(dev, 1);
 }
 
 static int
-mach64_detach(device_t kdev)
+r128_detach(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 	int ret;
@@ -110,21 +109,21 @@ mach64_detach(device_t kdev)
 	return ret;
 }
 
-static device_method_t mach64_methods[] = {
+static device_method_t r128_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_probe,		mach64_probe),
-	DEVMETHOD(device_attach,	mach64_attach),
-	DEVMETHOD(device_detach,	mach64_detach),
+	DEVMETHOD(device_probe,		r128_probe),
+	DEVMETHOD(device_attach,	r128_attach),
+	DEVMETHOD(device_detach,	r128_detach),
 
 	{ 0, 0 }
 };
 
-static driver_t mach64_driver = {
+static driver_t r128_driver = {
 	"drm",
-	mach64_methods,
+	r128_methods,
 	sizeof(struct drm_device)
 };
 
 extern devclass_t drm_devclass;
-DRIVER_MODULE(mach64, vgapci, mach64_driver, drm_devclass, 0, 0);
-MODULE_DEPEND(mach64, drm, 1, 1, 1);
+DRIVER_MODULE(r128, vgapci, r128_driver, drm_devclass, 0, 0);
+MODULE_DEPEND(r128, drm, 1, 1, 1);

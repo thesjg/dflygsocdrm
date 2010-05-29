@@ -34,10 +34,10 @@
  * CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/mach64_drm.h"
-#include "dev/drm/mach64_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "mach64_drm.h"
+#include "mach64_drv.h"
 
 /*******************************************************************/
 /** \name Engine, FIFO control */

@@ -26,10 +26,10 @@
  *
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/i915_drm.h"
-#include "dev/drm/i915_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "i915_drm.h"
+#include "i915_drv.h"
 
 /* This memory manager is integrated into the global/local lru
  * mechanisms used by the clients.  Specifically, it operates by

@@ -1,11 +1,17 @@
 # $DragonFly: src/sys/dev/drm/mga/Makefile,v 1.3 2008/04/05 18:12:29 hasso Exp $
 
-.PATH:	${.CURDIR}/..
+.PATH:	${.CURDIR}
 KMOD= 	mga
 NO_MAN=	YES
-SRCS=		mga_drv.c mga_state.c mga_warp.c mga_dma.c mga_irq.c
+SRCS= \
+	mga_dma.c \
+	mga_drv.c \
+	mga_irq.c \
+	mga_state.c \
+	mga_warp.c
+
 SRCS+=	device_if.h bus_if.h pci_if.h opt_drm.h
-CFLAGS+=	${DEBUG_FLAGS} -I. -I..
+CFLAGS+=	${DEBUG_FLAGS} -I. -I.. -I@/dev/drm -I@/dev/drm/mga
 
 .if defined(DRM_DEBUG)
 DRM_DEBUG_OPT= "\#define DRM_DEBUG 1"

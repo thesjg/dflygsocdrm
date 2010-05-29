@@ -23,9 +23,9 @@
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/savage_drm.h"
-#include "dev/drm/savage_drv.h"
+#include "drmP.h"
+#include "savage_drm.h"
+#include "savage_drv.h"
 
 /* Need a long timeout for shadow status updates can take a while
  * and so can waiting for events when the queue is full. */

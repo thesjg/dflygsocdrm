@@ -30,8 +30,8 @@
 #ifndef _I915_DRV_H_
 #define _I915_DRV_H_
 
-#include "dev/drm/drm_mm.h"
-#include "dev/drm/i915_reg.h"
+#include "drm_mm.h"
+#include "i915_reg.h"
 
 /* General customization:
  */

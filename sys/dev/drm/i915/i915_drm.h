@@ -31,7 +31,7 @@
  * subject to backwards-compatibility constraints.
  */
 
-#include "dev/drm/drm.h"
+#include "drm.h"
 
 /* Each region is a minimum of 16k, and there are at most 255 of them.
  */

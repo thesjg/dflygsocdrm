@@ -30,10 +30,10 @@
  *    Eric Anholt <anholt@FreeBSD.org>
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/r128_drm.h"
-#include "dev/drm/r128_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "r128_drm.h"
+#include "r128_drv.h"
 
 u32 r128_get_vblank_counter(struct drm_device *dev, int crtc)
 {

@@ -1,5 +1,4 @@
-/* tdfx_drv.c -- tdfx driver -*- linux-c -*-
- * Created: Thu Oct  7 10:38:32 1999 by faith@precisioninsight.com
+/* sis.c -- sis driver -*- linux-c -*-
  */
 /*-
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
@@ -12,11 +11,11 @@
  * the rights to use, copy, modify, merge, publish, distribute, sublicense,
  * and/or sell copies of the Software, and to permit persons to whom the
  * Software is furnished to do so, subject to the following conditions:
- *
+ * 
  * The above copyright notice and this permission notice (including the next
  * paragraph) shall be included in all copies or substantial portions of the
  * Software.
- *
+ * 
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
  * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
@@ -25,30 +24,29 @@
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
  *
- * Authors:
- *    Rickard E. (Rik) Faith <faith@valinux.com>
- *    Daryll Strauss <daryll@valinux.com>
- *    Gareth Hughes <gareth@valinux.com>
- *
  */
 
-#include "dev/drm/tdfx_drv.h"
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm_pciids.h"
+#include "drmP.h"
+#include "sis_drm.h"
+#include "sis_drv.h"
+#include "drm_pciids.h"
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t tdfx_pciidlist[] = {
-	tdfx_PCI_IDS
+static drm_pci_id_list_t sis_pciidlist[] = {
+	sis_PCI_IDS
 };
 
-static void tdfx_configure(struct drm_device *dev)
+static void sis_configure(struct drm_device *dev)
 {
 	dev->driver->driver_features =
-	    DRIVER_USE_MTRR;
+	    DRIVER_USE_AGP | DRIVER_USE_MTRR;
 
 	dev->driver->buf_priv_size	= 1; /* No dev_priv */
+	dev->driver->context_ctor	= sis_init_context;
+	dev->driver->context_dtor	= sis_final_context;
 
-	dev->driver->max_ioctl		= 0;
+	dev->driver->ioctls		= sis_ioctls;
+	dev->driver->max_ioctl		= sis_max_ioctl;
 
 	dev->driver->name		= DRIVER_NAME;
 	dev->driver->desc		= DRIVER_DESC;
@@ -59,26 +57,26 @@ static void tdfx_configure(struct drm_device *dev)
 }
 
 static int
-tdfx_probe(device_t kdev)
+sis_probe(device_t kdev)
 {
-	return drm_probe(kdev, tdfx_pciidlist);
+	return drm_probe(kdev, sis_pciidlist);
 }
 
 static int
-tdfx_attach(device_t kdev)
+sis_attach(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 
 	dev->driver = malloc(sizeof(struct drm_driver), DRM_MEM_DRIVER,
 	    M_WAITOK | M_ZERO);
 
-	tdfx_configure(dev);
+	sis_configure(dev);
 
-	return drm_attach(kdev, tdfx_pciidlist);
+	return drm_attach(kdev, sis_pciidlist);
 }
 
 static int
-tdfx_detach(device_t kdev)
+sis_detach(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 	int ret;
@@ -90,21 +88,21 @@ tdfx_detach(device_t kdev)
 	return ret;
 }
 
-static device_method_t tdfx_methods[] = {
+static device_method_t sis_methods[] = {
 	/* Device interface */
-	DEVMETHOD(device_probe,		tdfx_probe),
-	DEVMETHOD(device_attach,	tdfx_attach),
-	DEVMETHOD(device_detach,	tdfx_detach),
+	DEVMETHOD(device_probe,		sis_probe),
+	DEVMETHOD(device_attach,	sis_attach),
+	DEVMETHOD(device_detach,	sis_detach),
 
 	{ 0, 0 }
 };
 
-static driver_t tdfx_driver = {
+static driver_t sis_driver = {
 	"drm",
-	tdfx_methods,
+	sis_methods,
 	sizeof(struct drm_device)
 };
 
 extern devclass_t drm_devclass;
-DRIVER_MODULE(tdfx, vgapci, tdfx_driver, drm_devclass, 0, 0);
-MODULE_DEPEND(tdfx, drm, 1, 1, 1);
+DRIVER_MODULE(sisdrm, vgapci, sis_driver, drm_devclass, 0, 0);
+MODULE_DEPEND(sisdrm, drm, 1, 1, 1);

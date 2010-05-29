@@ -49,7 +49,7 @@ enum sis_family {
 #endif
 
 #ifdef SIS_HAVE_CORE_MM
-#include "dev/drm/drm_sman.h"
+#include "drm_sman.h"
 
 #define SIS_BASE (dev_priv->mmio)
 #define SIS_READ(reg)	 DRM_READ32(SIS_BASE, reg);
@@ -72,7 +72,7 @@ extern void sis_reclaim_buffers_locked(struct drm_device *dev,
 extern void sis_lastclose(struct drm_device *dev);
 
 #else
-#include "dev/drm/sis_ds.h"
+#include "sis_ds.h"
 
 typedef struct drm_sis_private {
 	memHeap_t *AGPHeap;

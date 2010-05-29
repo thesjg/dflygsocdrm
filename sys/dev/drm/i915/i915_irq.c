@@ -26,10 +26,10 @@
  *
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/i915_drm.h"
-#include "dev/drm/i915_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "i915_drm.h"
+#include "i915_drv.h"
 
 #define MAX_NOPID ((u32)~0)
 

@@ -35,10 +35,10 @@
  *    Leif Delgass <ldelgass@retinalburn.net>
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/mach64_drm.h"
-#include "dev/drm/mach64_drv.h"
+#include "drmP.h"
+#include "drm.h"
+#include "mach64_drm.h"
+#include "mach64_drv.h"
 
 irqreturn_t mach64_driver_irq_handler(DRM_IRQ_ARGS)
 {
