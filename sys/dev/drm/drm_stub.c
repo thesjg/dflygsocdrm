@@ -39,10 +39,6 @@
 
 #include "drmP.h"
 
-#if defined(__DragonFly__)
-#include <stdarg.h>
-#endif
-
 #ifdef __linux__
 #include "drm_core.h"
 #endif

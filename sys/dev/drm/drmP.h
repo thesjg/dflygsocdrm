@@ -980,15 +980,9 @@ struct drm_driver {
 	int major;
 	int minor;
 	int patchlevel;
-#ifdef __linux__
 	char *name;
 	char *desc;
 	char *date;
-#else
-	const char *name;		/* Simple driver name		   */
-	const char *desc;		/* Longer driver name		   */
-	const char *date;		/* Date of last major changes.	   */
-#endif
 
 	u32 driver_features;
 	int dev_priv_size;
@@ -1062,10 +1056,8 @@ struct drm_info_node {
 struct drm_minor {
 	int index;			/**< Minor device number */
 	int type;                       /**< Control or render */
-#ifdef __linux__
 	dev_t device;			/**< Device number for mknod */
 	struct device kdev;		/**< Linux device */
-#endif
 	struct drm_device *dev;
 
 	struct proc_dir_entry *proc_root;  /**< proc directory entry */
@@ -1146,11 +1138,7 @@ struct drm_device {
 	/** \name Context support */
 	/*@{ */
 	int irq_enabled;		/**< True if irq handler is enabled */
-#if __linux__
 	__volatile__ long context_flag;	/**< Context swapping flag */
-#else
-	atomic_t	  context_flag;	/* Context swapping flag	   */
-#endif
 	__volatile__ long interrupt_flag; /**< Interruption handler flag */
 	__volatile__ long dma_flag;	/**< DMA dispatch flag */
 	struct timer_list timer;	/**< Timer for delaying ctx switch */
@@ -1203,17 +1191,11 @@ struct drm_device {
 	struct drm_agp_head *agp;	/**< AGP data */
 
 	struct pci_dev *pdev;		/**< PCI device structure */
-#ifdef __linux__
 	int pci_vendor;			/**< PCI vendor id */
 	int pci_device;			/**< PCI device id */
 #ifdef __alpha__
 	struct pci_controller *hose;
 #endif
-#else /* legacy drm */
-	u_int16_t pci_vendor;		/* PCI vendor id */
-	u_int16_t pci_device;		/* PCI device id */
-#endif
-
 	struct drm_sg_mem *sg;	/**< Scatter gather memory */
 	int num_crtcs;                  /**< Number of CRTCs on this device */
 	void *dev_private;		/**< device private data */
@@ -1252,6 +1234,11 @@ struct drm_device {
 	/*@} */
 
 /* legacy drm */
+#if 0
+	atomic_t context_flag;
+	u_int16_t pci_vendor;		/* PCI vendor id */
+	u_int16_t pci_device;		/* PCI device id */
+#endif
 	/* Linked list of mappable regions. Protected by dev_lock */
 	drm_map_list_t	  maplist_legacy;
 	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */

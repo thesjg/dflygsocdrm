@@ -311,6 +311,10 @@ struct agp_bridge_data {
  * Other device types
  */
 
+struct device {
+	int placeholder;
+};
+
 struct edid {
 	int placeholder;
 };

@@ -59,7 +59,11 @@
 #include <sys/signalvar.h>
 #include <sys/poll.h>
 #include <sys/tree.h>
+
+#ifndef __DragonFly__ /* Appears superfluous */
 #include <sys/taskqueue.h>
+#endif
+
 #include <vm/vm.h>
 #include <vm/pmap.h>
 #include <vm/vm_extern.h>
@@ -86,6 +90,17 @@
 #include <bus/pci/pcireg.h>
 #include <sys/selinfo.h>
 #include <sys/bus.h>
+
+/* For dev_t which is apparently uint32_t on DragonFly */
+#include <sys/types.h>
+
+#ifdef __DragonFly__
+/* For va_start, va_end etc.
+ * Note this header on DragonFly only includes machine/stdarg.h
+ * then defines blah to be internal __blah.
+ */
+#include <stdarg.h>
+#endif
 
 #endif /* __KERNEL__ */
 #endif
