@@ -386,8 +386,8 @@ static int drm_lastclose(struct drm_device *dev)
 #endif
 		list_for_each_entry_safe(entry, tempe, &dev->agp->memory, head) {
 			if (entry->bound)
-				drm_agp_unbind_memory(entry->handle);
-			drm_agp_free_memory(entry->handle);
+				drm_agp_unbind_memory(entry->memory);
+			drm_agp_free_memory(entry->memory);
 			free(entry, DRM_MEM_AGPLISTS);
 		}
 		INIT_LIST_HEAD(&dev->agp->memory);

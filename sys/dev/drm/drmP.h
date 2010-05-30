@@ -607,9 +607,8 @@ struct drm_device_dma {
 
 /* Handle is a void* not unsigned long? */
 struct drm_agp_mem {
-#ifdef __linux__
 	unsigned long handle;		/**< handle */
-#else
+#if 0
 	void               *handle;
 #endif
 	DRM_AGP_MEM *memory;
@@ -617,9 +616,11 @@ struct drm_agp_mem {
 	int                pages;
 	struct list_head head;
 /* Legacy drm */
+#if 0
 	void *handle_legacy;
 	struct drm_agp_mem *prev;
 	struct drm_agp_mem *next;
+#endif
 };
 
 /**
@@ -1471,9 +1472,9 @@ int	drm_agp_release(struct drm_device *dev);
 int	drm_agp_info(struct drm_device * dev, struct drm_agp_info *info);
 int	drm_agp_enable(struct drm_device *dev, struct drm_agp_mode mode);
 void	*drm_agp_allocate_memory(size_t pages, u32 type);
-int	drm_agp_free_memory(void *handle);
-int	drm_agp_bind_memory(void *handle, off_t start);
-int	drm_agp_unbind_memory(void *handle);
+int	drm_agp_free_memory(DRM_AGP_MEM *handle);
+int	drm_agp_bind_memory(DRM_AGP_MEM *handle, off_t start);
+int	drm_agp_unbind_memory(DRM_AGP_MEM *handle);
 int	drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request);
 int	drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request);
 int	drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request);

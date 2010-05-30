@@ -165,6 +165,7 @@ int drm_agp_enable_ioctl(struct drm_device *dev, void *data,
 int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 {
 	struct drm_agp_mem *entry;
+	DRM_AGP_MEM *memory;
 	void	         *handle;
 	unsigned long    pages;
 	u_int32_t	 type;
@@ -181,14 +182,16 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	type = (u_int32_t) request->type;
 
 	DRM_UNLOCK();
-	handle = drm_agp_allocate_memory(pages, type);
+	memory = drm_agp_allocate_memory(pages, type);
 	DRM_LOCK();
-	if (handle == NULL) {
+	if (memory == NULL) {
 		free(entry, DRM_MEM_AGPLISTS);
 		return ENOMEM;
 	}
-	
-	entry->handle    = handle;
+
+/* Assume sizeof(unsigned long) >= sizeof(void *) */
+	entry->handle    = (unsigned long)memory;
+	entry->memory    = memory;
 	entry->bound     = 0;
 	entry->pages     = pages;
 #if 0
@@ -200,9 +203,9 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 #endif
 	list_add(&entry->head, &dev->agp->memory);
 
-	agp_memory_info(dev->agp->agpdev, entry->handle, &info);
+	agp_memory_info(dev->agp->agpdev, entry->memory, &info);
 
-	request->handle   = (unsigned long) entry->handle;
+	request->handle   = entry->handle;
         request->physical = info.ami_physical;
 
 	return 0;
@@ -226,7 +229,7 @@ int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
 }
 
 static struct drm_agp_mem * drm_agp_lookup_entry(struct drm_device *dev,
-					    void *handle)
+					    unsigned long handle)
 {
 	struct drm_agp_mem *entry;
 
@@ -250,12 +253,12 @@ int drm_agp_unbind(struct drm_device *dev, struct drm_agp_binding *request)
 	if (!dev->agp || !dev->agp->acquired)
 		return EINVAL;
 
-	entry = drm_agp_lookup_entry(dev, (void *)request->handle);
+	entry = drm_agp_lookup_entry(dev, request->handle);
 	if (entry == NULL || !entry->bound)
 		return EINVAL;
 
 	DRM_UNLOCK();
-	retcode = drm_agp_unbind_memory(entry->handle);
+	retcode = drm_agp_unbind_memory(entry->memory);
 	DRM_LOCK();
 
 	if (retcode == 0)
@@ -290,14 +293,14 @@ int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request)
 
 	DRM_DEBUG("agp_bind, page_size=%x\n", PAGE_SIZE);
 
-	entry = drm_agp_lookup_entry(dev, (void *)request->handle);
+	entry = drm_agp_lookup_entry(dev, request->handle);
 	if (entry == NULL || entry->bound)
 		return EINVAL;
 
 	page = (request->offset + PAGE_SIZE - 1) / PAGE_SIZE;
 
 	DRM_UNLOCK();
-	retcode = drm_agp_bind_memory(entry->handle, page);
+	retcode = drm_agp_bind_memory(entry->memory, page);
 	DRM_LOCK();
 	if (retcode == 0)
 		entry->bound = dev->agp->base + (page << PAGE_SHIFT);
@@ -327,7 +330,7 @@ int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 	if (!dev->agp || !dev->agp->acquired)
 		return EINVAL;
 
-	entry = drm_agp_lookup_entry(dev, (void*)request->handle);
+	entry = drm_agp_lookup_entry(dev, request->handle);
 	if (entry == NULL)
 		return EINVAL;
 
@@ -343,8 +346,8 @@ int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 
 	DRM_UNLOCK();
 	if (entry->bound)
-		drm_agp_unbind_memory(entry->handle);
-	drm_agp_free_memory(entry->handle);
+		drm_agp_unbind_memory(entry->memory);
+	drm_agp_free_memory(entry->memory);
 	DRM_LOCK();
 
 	free(entry, DRM_MEM_AGPLISTS);
@@ -411,7 +414,7 @@ void *drm_agp_allocate_memory(size_t pages, u32 type)
 	return agp_alloc_memory(agpdev, type, pages << AGP_PAGE_SHIFT);
 }
 
-int drm_agp_free_memory(void *handle)
+int drm_agp_free_memory(DRM_AGP_MEM *handle)
 {
 	device_t agpdev;
 
@@ -423,7 +426,7 @@ int drm_agp_free_memory(void *handle)
 	return 1;
 }
 
-int drm_agp_bind_memory(void *handle, off_t start)
+int drm_agp_bind_memory(DRM_AGP_MEM *handle, off_t start)
 {
 	device_t agpdev;
 
@@ -434,7 +437,7 @@ int drm_agp_bind_memory(void *handle, off_t start)
 	return agp_bind_memory(agpdev, handle, start * PAGE_SIZE);
 }
 
-int drm_agp_unbind_memory(void *handle)
+int drm_agp_unbind_memory(DRM_AGP_MEM *handle)
 {
 	device_t agpdev;
 

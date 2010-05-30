@@ -105,7 +105,10 @@ enum {
 	DRM_MIGHT_BE_AGP
 };
 
-#define DRM_AGP_MEM		struct agp_memory_info
+/* agp_memory_info() argument
+ * in drm_agp_alloc() from drm_agpsupport.c
+ */
+#define DRM_AGP_MEM		struct agp_memory
 
 /* Specific to BSD port of drm */
 /* drm_agpsupport.c */
