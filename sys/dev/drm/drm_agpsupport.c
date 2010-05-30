@@ -191,11 +191,14 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	entry->handle    = handle;
 	entry->bound     = 0;
 	entry->pages     = pages;
+#if 0
 	entry->prev      = NULL;
-	entry->next      = dev->agp->memory;
-	if (dev->agp->memory)
-		dev->agp->memory->prev = entry;
-	dev->agp->memory = entry;
+	entry->next      = dev->agp->memory_legacy;
+	if (dev->agp->memory_legacy)
+		dev->agp->memory_legacy->prev = entry;
+	dev->agp->memory_legacy = entry;
+#endif
+	list_add(&entry->head, &dev->agp->memory);
 
 	agp_memory_info(dev->agp->agpdev, entry->handle, &info);
 
@@ -227,8 +230,14 @@ static struct drm_agp_mem * drm_agp_lookup_entry(struct drm_device *dev,
 {
 	struct drm_agp_mem *entry;
 
-	for (entry = dev->agp->memory; entry; entry = entry->next) {
+#if 0
+	for (entry = dev->agp->memory_legacy; entry; entry = entry->next) {
 		if (entry->handle == handle) return entry;
+	}
+#endif
+	list_for_each_entry(entry, &dev->agp->memory, head) {
+		if (entry->handle == handle)
+			return entry;
 	}
 	return NULL;
 }
@@ -321,13 +330,16 @@ int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 	entry = drm_agp_lookup_entry(dev, (void*)request->handle);
 	if (entry == NULL)
 		return EINVAL;
-   
+
+#if 0
 	if (entry->prev)
 		entry->prev->next = entry->next;
 	else
-		dev->agp->memory  = entry->next;
+		dev->agp->memory_legacy  = entry->next;
 	if (entry->next)
 		entry->next->prev = entry->prev;
+#endif
+	list_del(&entry->head);
 
 	DRM_UNLOCK();
 	if (entry->bound)
@@ -376,7 +388,11 @@ struct drm_agp_head *drm_agp_init(void)
 		head->agpdev = agpdev;
 		agp_get_info(agpdev, &head->info);
 		head->base = head->info.ai_aperture_base;
-		head->memory = NULL;
+#if 0
+		head->memory_legacy = NULL;
+#endif
+	INIT_LIST_HEAD(&head->memory);
+
 		DRM_INFO("AGP at 0x%08lx %dMB\n",
 			 (long)head->info.ai_aperture_base,
 			 (int)(head->info.ai_aperture_size >> 20));

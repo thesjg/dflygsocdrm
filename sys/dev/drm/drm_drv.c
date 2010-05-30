@@ -365,20 +365,32 @@ static int drm_lastclose(struct drm_device *dev)
 
 	/* Clear AGP information */
 	if (dev->agp) {
+#if 0
 		struct drm_agp_mem *entry;
 		struct drm_agp_mem *nexte;
+#endif
+		struct drm_agp_mem *entry, *tempe;
 
 		/* Remove AGP resources, but leave dev->agp intact until
 		 * drm_unload is called.
 		 */
-		for (entry = dev->agp->memory; entry; entry = nexte) {
+#if 0
+		for (entry = dev->agp->memory_legacy; entry; entry = nexte) {
 			nexte = entry->next;
 			if (entry->bound)
 				drm_agp_unbind_memory(entry->handle);
 			drm_agp_free_memory(entry->handle);
 			free(entry, DRM_MEM_AGPLISTS);
 		}
-		dev->agp->memory = NULL;
+		dev->agp->memory_legacy = NULL;
+#endif
+		list_for_each_entry_safe(entry, tempe, &dev->agp->memory, head) {
+			if (entry->bound)
+				drm_agp_unbind_memory(entry->handle);
+			drm_agp_free_memory(entry->handle);
+			free(entry, DRM_MEM_AGPLISTS);
+		}
+		INIT_LIST_HEAD(&dev->agp->memory);
 
 		if (dev->agp->acquired)
 			drm_agp_release(dev);

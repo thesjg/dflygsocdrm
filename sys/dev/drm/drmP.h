@@ -629,9 +629,8 @@ struct drm_agp_mem {
  */
 struct drm_agp_head {
 	DRM_AGP_KERN agp_info;		/**< AGP device information */
-#ifdef __linux__
 	struct list_head memory;
-#else
+#if 0
 	struct drm_agp_mem *memory;
 #endif
 	unsigned long mode;		/**< AGP mode */
