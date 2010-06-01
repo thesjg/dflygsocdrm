@@ -27,6 +27,10 @@
  * __FBSDID("$FreeBSD: src/sys/dev/drm/drm_hashtab.h,v 1.1 2010/01/31 14:25:29 rnoland Exp $");
  **************************************************************************/
 
+/* Merger of FreeBSD src/sys/dev/drm/drm_hashtab.h
+ * with Linux 2.6.34 include/drm/drm_hashtab.h
+ */
+
 /*
  * Simple open hash tab implementation.
  *
@@ -37,18 +41,34 @@
 #ifndef DRM_HASHTAB_H
 #define DRM_HASHTAB_H
 
+#ifdef __linux__
+#include <linux/list.h>
+#endif
+
 #define drm_hash_entry(_ptr, _type, _member) container_of(_ptr, _type, _member)
 
 struct drm_hash_item {
+#ifdef __linux__
+	struct hlist_node head;
+#else
 	LIST_ENTRY(drm_hash_item) head;
+#endif
 	unsigned long key;
 };
 
 struct drm_open_hash {
+#ifndef __linux__
 	LIST_HEAD(drm_hash_item_list, drm_hash_item) *table;
+#endif
 	unsigned int  size;
 	unsigned int order;
+#ifdef __linux__
+	unsigned int fill;
+	struct hlist_head *table;
+	int use_vmalloc;
+#else
 	unsigned long mask;
+#endif
 };
 
 extern int drm_ht_create(struct drm_open_hash *ht, unsigned int order);

@@ -125,10 +125,12 @@
 
 #define spin_unlock_irqrestore(u, irqflags) spin_unlock(u)
 
+/* drm_crtc.h, struct drm_mode_config, field mutex and idr_mutex */
 struct mutex {
 	int placeholder;
 };
 
+/* drm_crtc.h, struct drm_mode_config, field output_poll_slow_work */
 struct delayed_slow_work {
 	int placeholder;
 };
@@ -311,7 +313,13 @@ struct agp_bridge_data {
  * Other device types
  */
 
+/* drm_crtc.h, struct drm_connector, field kdev */
 struct device {
+	int placeholder;
+};
+
+/* drm_crtc.h, struct drm_connector, field attr */
+struct device_attribute {
 	int placeholder;
 };
 
@@ -323,6 +331,7 @@ struct edi {
 	int placeholder;
 };
 
+/* drm_crtc.h function drm_get_edid() */
 struct i2c_adapter{
 	int placeholder;
 };

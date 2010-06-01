@@ -41,9 +41,14 @@
 #ifndef DRM_SMAN_H
 #define DRM_SMAN_H
 
+#ifdef __linux__
+#include "drmP.h"
+#include "drm_hashtab.h"
+#else
 #include "dev/drm/drm_hashtab.h"
 #include "dev/drm/drm_linux_list.h"
 #include "dev/drm/drm_mm.h"
+#endif
 
 /*
  * A class that is an abstration of a simple memory allocator.

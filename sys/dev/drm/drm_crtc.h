@@ -489,10 +489,8 @@ enum drm_connector_force {
  */
 struct drm_connector {
 	struct drm_device *dev;
-#if 0
 	struct device kdev;
 	struct device_attribute *attr;
-#endif
 	struct list_head head;
 
 	struct drm_mode_object base;

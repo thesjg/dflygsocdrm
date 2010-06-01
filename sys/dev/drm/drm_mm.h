@@ -36,10 +36,14 @@
 /*
  * Generic range manager structs
  */
-#include "dev/drm/drm_linux_list.h"
-#include "dev/drm/drm_port_layer.h"
+#ifdef __linux__
+#include <linux/list.h>
 #ifdef CONFIG_DEBUG_FS
 #include <linux/seq_file.h>
+#endif
+#else
+#include "dev/drm/drm_port_layer.h"
+#include "dev/drm/drm_linux_list.h"
 #endif
 
 struct drm_mm_node {
@@ -135,8 +139,10 @@ static inline struct drm_mm *drm_get_mm(struct drm_mm_node *block)
 }
 
 extern void drm_mm_debug_table(struct drm_mm *mm, const char *prefix);
+#ifdef __linux__
 #ifdef CONFIG_DEBUG_FS
 int drm_mm_dump_table(struct seq_file *m, struct drm_mm *mm);
+#endif
 #endif
 
 #endif
