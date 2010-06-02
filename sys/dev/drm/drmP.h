@@ -1375,7 +1375,6 @@ extern long drm_compat_ioctl(struct file *filp,
 int	drm_probe(device_t kdev, drm_pci_id_list_t *idlist);
 int	drm_attach(device_t kdev, drm_pci_id_list_t *idlist);
 int	drm_detach(device_t kdev);
-extern drm_local_map_t	*drm_getsarea(struct drm_device *dev);
 
 				/* Device support (drm_fops.h) */
 /* newer functions */
@@ -1688,42 +1687,223 @@ extern DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data *bridge, size
 extern DRM_AGP_MEM *drm_agp_allocate_memory(size_t pages, u32 type);
 #endif
 
+extern int drm_agp_free_memory(DRM_AGP_MEM * handle);
+extern int drm_agp_bind_memory(DRM_AGP_MEM * handle, off_t start);
+extern int drm_agp_unbind_memory(DRM_AGP_MEM * handle);
+
+/* new */
+extern void drm_agp_chipset_flush(struct drm_device *dev);
+
+/* legacy */
 int	drm_device_is_agp(struct drm_device *dev);
 int	drm_device_is_pcie(struct drm_device *dev);
-int	drm_agp_free_memory(DRM_AGP_MEM *handle);
-int	drm_agp_bind_memory(DRM_AGP_MEM *handle, off_t start);
-int	drm_agp_unbind_memory(DRM_AGP_MEM *handle);
+
+				/* Stub support (drm_stub.h) */
+/* shared */
+/* drm_drv.c */
+extern struct drm_local_map *drm_getsarea(struct drm_device *dev);
+
+/* new */
+extern int drm_setmaster_ioctl(struct drm_device *dev, void *data,
+			       struct drm_file *file_priv);
+extern int drm_dropmaster_ioctl(struct drm_device *dev, void *data,
+				struct drm_file *file_priv);
+struct drm_master *drm_master_create(struct drm_minor *minor);
+extern struct drm_master *drm_master_get(struct drm_master *master);
+extern void drm_master_put(struct drm_master **master);
+extern int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
+		       struct drm_driver *driver);
+extern void drm_put_dev(struct drm_device *dev);
+extern int drm_put_minor(struct drm_minor **minor);
+extern unsigned int drm_debug;
+
+extern struct class *drm_class;
+extern struct proc_dir_entry *drm_proc_root;
+extern struct dentry *drm_debugfs_root;
+
+extern struct idr drm_minors_idr;
+
+				/* Proc support (drm_proc.h) */
+extern int drm_proc_init(struct drm_minor *minor, int minor_id,
+			 struct proc_dir_entry *root);
+extern int drm_proc_cleanup(struct drm_minor *minor, struct proc_dir_entry *root);
+
+				/* Debugfs support */
+#if defined(CONFIG_DEBUG_FS)
+extern int drm_debugfs_init(struct drm_minor *minor, int minor_id,
+			    struct dentry *root);
+extern int drm_debugfs_create_files(struct drm_info_list *files, int count,
+				    struct dentry *root, struct drm_minor *minor);
+extern int drm_debugfs_remove_files(struct drm_info_list *files, int count,
+                                    struct drm_minor *minor);
+extern int drm_debugfs_cleanup(struct drm_minor *minor);
+#endif
+
+				/* Info file support */
+#ifdef __linux__
+/* conflicts with legacy drm_sysctl.c */
+extern int drm_name_info(struct seq_file *m, void *data);
+extern int drm_vm_info(struct seq_file *m, void *data);
+extern int drm_bufs_info(struct seq_file *m, void *data);
+extern int drm_vblank_info(struct seq_file *m, void *data);
+extern int drm_clients_info(struct seq_file *m, void* data);
+#endif
+extern int drm_queues_info(struct seq_file *m, void *data);
+extern int drm_gem_name_info(struct seq_file *m, void *data);
+extern int drm_gem_object_info(struct seq_file *m, void* data);
+
+#if DRM_DEBUG_CODE
+extern int drm_vma_info(struct seq_file *m, void *data);
+#endif
+
+				/* Scatter Gather Support (drm_scatter.h) */
+/* shared */
+/* Scatter Gather Support (drm_scatter.c) */
+extern void drm_sg_cleanup(struct drm_sg_mem * entry);
+extern int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+extern int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request);
+extern int drm_sg_free(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
+
+			       /* ATI PCIGART support (ati_pcigart.h) */
+/* shared */
+/* ATI PCIGART support (ati_pcigart.c) */
+extern int drm_ati_pcigart_init(struct drm_device *dev,
+				struct drm_ati_pcigart_info * gart_info);
+extern int drm_ati_pcigart_cleanup(struct drm_device *dev,
+				   struct drm_ati_pcigart_info * gart_info);
+#ifdef __linux__
+extern drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
+				       size_t align);
+#else
+drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
+				size_t align, dma_addr_t maxaddr);
+#endif
+
+/* consistent PCI memory functions (drm_pci.c) */
+extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 
 /* new */
 
-/* Scatter Gather Support (drm_scatter.c) */
-void	drm_sg_cleanup(struct drm_sg_mem *entry);
-int	drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request);
+extern void __drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 
+			       /* sysfs support (drm_sysfs.c) */
+struct drm_sysfs_class;
+extern struct class *drm_sysfs_create(struct module *owner, char *name);
+extern void drm_sysfs_destroy(void);
+extern int drm_sysfs_device_add(struct drm_minor *minor);
+extern void drm_sysfs_hotplug_event(struct drm_device *dev);
+extern void drm_sysfs_device_remove(struct drm_minor *minor);
+extern char *drm_get_connector_status_name(enum drm_connector_status status);
+extern int drm_sysfs_connector_add(struct drm_connector *connector);
+extern void drm_sysfs_connector_remove(struct drm_connector *connector);
+
+/* Graphics Execution Manager library functions (drm_gem.c) */
+int drm_gem_init(struct drm_device *dev);
+void drm_gem_destroy(struct drm_device *dev);
+void drm_gem_object_release(struct drm_gem_object *obj);
+void drm_gem_object_free(struct kref *kref);
+void drm_gem_object_free_unlocked(struct kref *kref);
+struct drm_gem_object *drm_gem_object_alloc(struct drm_device *dev,
+					    size_t size);
+int drm_gem_object_init(struct drm_device *dev,
+			struct drm_gem_object *obj, size_t size);
+void drm_gem_object_handle_free(struct kref *kref);
+void drm_gem_vm_open(struct vm_area_struct *vma);
+void drm_gem_vm_close(struct vm_area_struct *vma);
+int drm_gem_mmap(struct file *filp, struct vm_area_struct *vma);
+
+#ifdef __linux__
+static inline void
+drm_gem_object_reference(struct drm_gem_object *obj)
+{
+	kref_get(&obj->refcount);
+}
+
+static inline void
+drm_gem_object_unreference(struct drm_gem_object *obj)
+{
+	if (obj != NULL)
+		kref_put(&obj->refcount, drm_gem_object_free);
+}
+
+static inline void
+drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
+{
+	if (obj != NULL)
+		kref_put(&obj->refcount, drm_gem_object_free_unlocked);
+}
+#endif
+
+int drm_gem_handle_create(struct drm_file *file_priv,
+			  struct drm_gem_object *obj,
+			  u32 *handlep);
+
+#ifdef __linux__
+static inline void
+drm_gem_object_handle_reference(struct drm_gem_object *obj)
+{
+	drm_gem_object_reference(obj);
+	kref_get(&obj->handlecount);
+}
+
+static inline void
+drm_gem_object_handle_unreference(struct drm_gem_object *obj)
+{
+	if (obj == NULL)
+		return;
+
+	/*
+	 * Must bump handle count first as this may be the last
+	 * ref, in which case the object would disappear before we
+	 * checked for a name
+	 */
+	kref_put(&obj->handlecount, drm_gem_object_handle_free);
+	drm_gem_object_unreference(obj);
+}
+
+static inline void
+drm_gem_object_handle_unreference_unlocked(struct drm_gem_object *obj)
+{
+	if (obj == NULL)
+		return;
+
+	/*
+	* Must bump handle count first as this may be the last
+	* ref, in which case the object would disappear before we
+	* checked for a name
+	*/
+	kref_put(&obj->handlecount, drm_gem_object_handle_free);
+	drm_gem_object_unreference_unlocked(obj);
+}
+#endif
+
+struct drm_gem_object *drm_gem_object_lookup(struct drm_device *dev,
+					     struct drm_file *filp,
+					     u32 handle);
+int drm_gem_close_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+int drm_gem_flink_ioctl(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+int drm_gem_open_ioctl(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
+void drm_gem_open(struct drm_device *dev, struct drm_file *file_private);
+void drm_gem_release(struct drm_device *dev, struct drm_file *file_private);
+
+extern void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev);
+extern void drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev);
+extern void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev);
+
+/* legacy */
 /* sysctl support (drm_sysctl.h) */
 extern int		drm_sysctl_init(struct drm_device *dev);
 extern int		drm_sysctl_cleanup(struct drm_device *dev);
 
-/* ATI PCIGART support (ati_pcigart.c) */
-int	drm_ati_pcigart_init(struct drm_device *dev,
-				struct drm_ati_pcigart_info *gart_info);
-int	drm_ati_pcigart_cleanup(struct drm_device *dev,
-				struct drm_ati_pcigart_info *gart_info);
-
 /* DMA support (drm_dma.c) */
 int	drm_dma(struct drm_device *dev, void *data, struct drm_file *file_priv);
 
-/* Scatter Gather Support (drm_scatter.c) */
-int	drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
-int	drm_sg_free(struct drm_device *dev, void *data,
-		    struct drm_file *file_priv);
-
-/* consistent PCI memory functions (drm_pci.c) */
-drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
-				size_t align, dma_addr_t maxaddr);
-void	drm_pci_free(struct drm_device *dev, drm_dma_handle_t *dmah);
-
+#if 0
 /* Inline replacements for drm_alloc and friends */
 static __inline__ void *
 drm_alloc(size_t size, struct malloc_type *area)
@@ -1742,7 +1922,9 @@ drm_free(void *pt, size_t size, struct malloc_type *area)
 {
 	free(pt, area);
 }
+#endif
 
+#if 0
 /* Inline replacements for DRM_IOREMAP macros */
 static __inline__ void
 drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev)
@@ -1760,6 +1942,7 @@ drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
 	if ( map->handle && map->size )
 		drm_ioremapfree(map);
 }
+#endif
 
 static __inline__ struct drm_local_map *
 drm_core_findmap(struct drm_device *dev, unsigned long offset)

@@ -287,10 +287,12 @@ struct seq_file {
 	int placeholder;
 };
 
+/* drmP.h drm_stub.h */
 struct dentry {
 	int placeholder;
 };
 
+/* drmP.h drm_stub.h */
 struct proc_dir_entry {
 	int placeholder;
 };
@@ -304,6 +306,11 @@ struct inode {
  */
 
 struct pci_driver {
+	int placeholder;
+};
+
+/* drmP.h drm_stub.h */
+struct pci_device_id {
 	int placeholder;
 };
 
@@ -350,6 +357,10 @@ typedef unsigned long pm_message_t;
  */
 
 #define EXPORT_SYMBOL(sym)
+
+struct module {
+	int placeholder;
+};
 
 /* drm_mm.c function drm_mm_takedown() */
 #define BUG_ON(cond)

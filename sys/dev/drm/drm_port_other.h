@@ -226,4 +226,23 @@ d_read_t drm_read_legacy;
 d_poll_t drm_poll_legacy;
 d_mmap_t drm_mmap_legacy;
 
+/* Inline replacements for drm_alloc and friends */
+static __inline__ void *
+drm_alloc(size_t size, struct malloc_type *area)
+{
+	return malloc(size, area, M_NOWAIT);
+}
+
+static __inline__ void *
+drm_calloc(size_t nmemb, size_t size, struct malloc_type *area)
+{
+	return malloc(size * nmemb, area, M_NOWAIT | M_ZERO);
+}
+
+static __inline__ void
+drm_free(void *pt, size_t size, struct malloc_type *area)
+{
+	free(pt, area);
+}
+
 #endif

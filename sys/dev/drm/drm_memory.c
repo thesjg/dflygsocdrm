@@ -115,3 +115,19 @@ drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
 	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
 	return mem_range_attr_set(&mrdesc, &act);
 }
+
+void drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev)
+{
+	map->handle = drm_ioremap_wc(dev, map);
+}
+
+void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
+{
+	map->handle = drm_ioremap(dev, map);
+}
+
+void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
+{
+	if ( map->handle && map->size )
+		drm_ioremapfree(map);
+}
