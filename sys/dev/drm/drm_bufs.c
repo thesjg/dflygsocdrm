@@ -293,7 +293,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
-void drm_rmmap(struct drm_device *dev, drm_local_map_t *map)
+void drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 {
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
 
@@ -816,7 +816,7 @@ int drm_addbufs_agp(struct drm_device *dev, struct drm_buf_desc *request)
 	return ret;
 }
 
-int drm_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *request)
+static int drm_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *request)
 {
 	int order, ret;
 

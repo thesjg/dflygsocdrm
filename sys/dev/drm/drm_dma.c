@@ -97,7 +97,7 @@ void drm_free_buffer(struct drm_device *dev, struct drm_buf *buf)
 	buf->used     = 0;
 }
 
-void drm_reclaim_buffers(struct drm_device *dev, struct drm_file *file_priv)
+void drm_core_reclaim_buffers(struct drm_device *dev, struct drm_file *file_priv)
 {
 	struct drm_device_dma *dma = dev->dma;
 	int		 i;

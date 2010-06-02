@@ -403,7 +403,7 @@ struct drm_agp_head *drm_agp_init(void)
 	return head;
 }
 
-void *drm_agp_allocate_memory(size_t pages, u32 type)
+DRM_AGP_MEM *drm_agp_allocate_memory(size_t pages, u32 type)
 {
 	device_t agpdev;
 

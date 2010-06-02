@@ -682,7 +682,7 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !dev->driver->reclaim_buffers_locked)
-		drm_reclaim_buffers(dev, file_priv);
+		drm_core_reclaim_buffers(dev, file_priv);
 
 	funsetown(dev->buf_sigio);
 
