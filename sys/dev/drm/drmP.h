@@ -564,7 +564,7 @@ struct drm_lock_data {
 	struct drm_hw_lock *hw_lock;	/**< Hardware lock */
 	/** Private of lock holder's file (NULL=kernel) */
 	struct drm_file *file_priv;
-/* legacy drm field lock_queue is only used in drm_lock.c
+/* legacy drm implementation of field lock_queue is only used in drm_lock.c
  * as the memory address upon which to form a queue and then wake up
  * field lock_queue formerly defined as int
  */
@@ -605,22 +605,15 @@ struct drm_device_dma {
 
 };
 
-/* Handle is a void* not unsigned long? */
+/**
+ * AGP memory entry.  Stored as a doubly linked list.
+ */
 struct drm_agp_mem {
 	unsigned long handle;		/**< handle */
-#if 0
-	void               *handle;
-#endif
 	DRM_AGP_MEM *memory;
 	unsigned long      bound; /* address */
 	int                pages;
 	struct list_head head;
-/* Legacy drm */
-#if 0
-	void *handle_legacy;
-	struct drm_agp_mem *prev;
-	struct drm_agp_mem *next;
-#endif
 };
 
 /**
@@ -631,9 +624,6 @@ struct drm_agp_mem {
 struct drm_agp_head {
 	DRM_AGP_KERN agp_info;		/**< AGP device information */
 	struct list_head memory;
-#if 0
-	struct drm_agp_mem *memory;
-#endif
 	unsigned long mode;		/**< AGP mode */
 	struct agp_bridge_data *bridge;
 	int enabled;			/**< whether the AGP bus as been enabled */
@@ -745,7 +735,7 @@ struct drm_ati_pcigart_info {
 	dma_addr_t bus_addr;
 	dma_addr_t table_mask;
 	struct drm_dma_handle *table_handle;
-	drm_local_map_t mapping;
+	struct drm_local_map mapping;
 	int table_size;
 
 /* legacy drm */
@@ -994,11 +984,6 @@ struct drm_driver {
 	struct list_head device_list;
 
 /* legacy drm */
-/* dma_flush do not seem to be used anywhere */
-	int	(*dma_flush_block_and_flush)(struct drm_device *, int context,
-					     enum drm_lock_flags flags);
-	int	(*dma_flush_unblock)(struct drm_device *, int context,
-				     enum drm_lock_flags flags);
 	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
 	int	max_ioctl;
 	int	buf_priv_size;
@@ -1374,33 +1359,88 @@ static inline int drm_mtrr_del(int handle, unsigned long offset,
 /*@{*/
 
 				/* Driver support (drm_drv.h) */
+/* shared functions */
+extern int drm_lastclose(struct drm_device *dev);
+
+/* newer functions */
 extern int drm_init(struct drm_driver *driver);
 extern void drm_exit(struct drm_driver *driver);
+extern long drm_ioctl(struct file *filp,
+		      unsigned int cmd, unsigned long arg);
 extern long drm_compat_ioctl(struct file *filp,
 			     unsigned int cmd, unsigned long arg);
 
-				/* Device support (drm_fops.h) */
-extern int drm_stub_open(struct inode *inode, struct file *filp);
-extern int drm_fasync(int fd, struct file *filp, int on);
-extern int drm_release(struct inode *inode, struct file *filp);
-
 /* Device setup support (drm_drv.c) */
+/* legacy functions */
 int	drm_probe(device_t kdev, drm_pci_id_list_t *idlist);
 int	drm_attach(device_t kdev, drm_pci_id_list_t *idlist);
 int	drm_detach(device_t kdev);
-
-
 extern drm_local_map_t	*drm_getsarea(struct drm_device *dev);
 
+				/* Device support (drm_fops.h) */
+/* newer functions */
+extern int drm_open(struct inode *inode, struct file *filp);
+extern int drm_stub_open(struct inode *inode, struct file *filp);
+extern int drm_fasync(int fd, struct file *filp, int on);
+extern ssize_t drm_read(struct file *filp, char __user *buffer,
+			size_t count, loff_t *offset);
+extern int drm_release(struct inode *inode, struct file *filp);
+
 /* File operations helpers (drm_fops.c) */
+/* legacy functions */
 extern int		drm_open_helper(struct cdev *kdev, int flags, int fmt,
 					 DRM_STRUCTPROC *p,
 					struct drm_device *dev);
 extern struct drm_file	*drm_find_file_by_proc(struct drm_device *dev,
 					DRM_STRUCTPROC *p);
 
+				/* Mapping support (drm_vm.h) */
+extern int drm_mmap(struct file *filp, struct vm_area_struct *vma);
+extern int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma);
+extern void drm_vm_open_locked(struct vm_area_struct *vma);
+extern resource_size_t drm_core_get_map_ofs(struct drm_local_map * map);
+extern resource_size_t drm_core_get_reg_ofs(struct drm_device *dev);
+extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
+
+				/* Memory management support (drm_memory.h) */
+#ifdef __linux__
+#include "drm_memory.h"
+#endif
+
+/* newer functions */
+
+extern int drm_mem_info(char *buf, char **start, off_t offset,
+			int request, int *eof, void *data);
+extern DRM_AGP_MEM *drm_alloc_agp(struct drm_device *dev, int pages, u32 type);
+extern int drm_free_agp(DRM_AGP_MEM * handle, int pages);
+extern int drm_bind_agp(DRM_AGP_MEM * handle, unsigned int start);
+extern DRM_AGP_MEM *drm_agp_bind_pages(struct drm_device *dev,
+				       struct page **pages,
+				       unsigned long num_pages,
+				       uint32_t gtt_offset,
+				       uint32_t type);
+extern int drm_unbind_agp(DRM_AGP_MEM * handle);
+
+/* shared functions */
+extern void drm_mem_init(void);
+
+/* Neither declaration below appears to be used in any version of drm */
+#ifdef __linux__
+extern void *drm_realloc(void *oldpt, size_t oldsize, size_t size, int area);
+#else
+static __inline__ void *
+drm_realloc(void *oldpt, size_t oldsize, size_t size,
+    struct malloc_type *area)
+{
+	return reallocf(oldpt, size, area, M_NOWAIT);
+}
+#endif
+
 /* Memory management support (drm_memory.c) */
+/* legacy functions */
+#if 0
 void	drm_mem_init(void);
+#endif
 void	drm_mem_uninit(void);
 void	*drm_ioremap_wc(struct drm_device *dev, drm_local_map_t *map);
 void	*drm_ioremap(struct drm_device *dev, drm_local_map_t *map);
@@ -1624,13 +1664,6 @@ static __inline__ void *
 drm_calloc(size_t nmemb, size_t size, struct malloc_type *area)
 {
 	return malloc(size * nmemb, area, M_NOWAIT | M_ZERO);
-}
-
-static __inline__ void *
-drm_realloc(void *oldpt, size_t oldsize, size_t size,
-    struct malloc_type *area)
-{
-	return reallocf(oldpt, size, area, M_NOWAIT);
 }
 
 static __inline__ void

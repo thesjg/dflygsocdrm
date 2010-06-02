@@ -329,7 +329,7 @@ static int drm_firstopen(struct drm_device *dev)
 	return 0;
 }
 
-static int drm_lastclose(struct drm_device *dev)
+int drm_lastclose(struct drm_device *dev)
 {
 	struct drm_magic_entry *pt, *next;
 	drm_local_map_t *map, *mapsave;

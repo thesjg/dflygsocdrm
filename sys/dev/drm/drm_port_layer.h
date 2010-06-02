@@ -139,6 +139,10 @@ struct work_struct {
 	int placeholder;
 };
 
+struct poll_table_struct {
+	int placeholder;
+};
+
 /*
  * Signals and interrupts
  */
@@ -221,8 +225,11 @@ struct fasync_struct {
 };
 
 /*
- * Int types
+ * Integer types
  */
+
+/* drmP.h, declaration of function drm_read() */
+#define loff_t	off_t
 
 /* i915_drv.h */
 typedef boolean_t bool;
