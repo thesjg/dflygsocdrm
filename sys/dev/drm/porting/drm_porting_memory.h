@@ -1,4 +1,4 @@
-/* drm_port_memory.h -- Header for Direct Rendering Manager other OS -*- linux-c -*-
+/* drm_porting_memory.h -- Header for Direct Rendering Manager other OS -*- linux-c -*-
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -24,8 +24,8 @@
  *
  */
 
-#ifndef _DRM_PORT_MEMORY_H_
-#define _DRM_PORT_MEMORY_H_
+#ifndef _DRM_PORTING_MEMORY_H_
+#define _DRM_PORTING_MEMORY_H_
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 

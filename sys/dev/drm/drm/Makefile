@@ -1,9 +1,11 @@
 # $DragonFly: src/sys/dev/drm/drm/Makefile,v 1.1 2008/04/05 18:12:29 hasso Exp $
 
-.PATH:	${.CURDIR}/..
+.PATH:	${.CURDIR}/../porting ${.CURDIR}/..
 KMOD	= drm
 NO_MAN	= YES
 SRCS    = \
+	drm_porting_subr_hash.c \
+	drm_porting_layer.c \
 	ati_pcigart.c \
 	drm_agpsupport.c \
 	drm_auth.c \
@@ -20,8 +22,6 @@ SRCS    = \
 	drm_memory.c \
 	drm_mm.c \
 	drm_pci.c \
-	drm_port_layer.c \
-	drm_port_subr_hash.c \
 	drm_scatter.c \
 	drm_sman.c \
 	drm_stub.c \

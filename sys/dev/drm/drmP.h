@@ -113,7 +113,7 @@
 #include <asm/pgalloc.h>
 
 #else /* Other OS porting layer */
-#include "dev/drm/drm_port_layer.h"
+#include "dev/drm/porting/drm_porting_layer.h"
 #endif
 
 #include "dev/drm/drm.h"
@@ -134,8 +134,8 @@ struct drm_device;
 #ifdef __linux__
 #include "drm_os_linux.h"
 #else /* Other OS drm-related declarations */
-#include "dev/drm/drm_port_transition.h"  /* Legacy drm.h */
-#include "dev/drm/drm_port_other.h"  /* Legacy drmP.h */
+#include "dev/drm/porting/drm_porting_transition.h"  /* Legacy drm.h */
+#include "dev/drm/porting/drm_porting_other.h"  /* Legacy drmP.h */
 #endif
 
 #include "dev/drm/drm_hashtab.h"

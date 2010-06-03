@@ -36,7 +36,7 @@
  */
 
 #include "dev/drm/drmP.h"
-#include "dev/drm/drm_port_hash.h"
+#include "dev/drm/porting/drm_porting_hash.h"
 
 /* From FreeBSD's sys/systm.h */
 #ifndef HASH_NOWAIT
@@ -49,7 +49,7 @@
 /*
  * General routine to allocate a hash table with control of memory flags.
  */
-void *
+static void *
 drm_hashinit_flags(int elements, struct malloc_type *type, u_long *hashmask,
     int flags)
 {
@@ -105,6 +105,7 @@ drm_hashdestroy(void *vhashtbl, struct malloc_type *type, u_long hashmask)
 	free(hashtbl, type);
 }
 
+#if 0
 static const int primes[] = { 1, 13, 31, 61, 127, 251, 509, 761, 1021, 1531,
 			2039, 2557, 3067, 3583, 4093, 4603, 5119, 5623, 6143,
 			6653, 7159, 7673, 8191, 12281, 16381, 24571, 32749 };
@@ -135,3 +136,4 @@ drm_phashinit(int elements, struct malloc_type *type, u_long *nentries)
 	*nentries = hashsize;
 	return (hashtbl);
 }
+#endif

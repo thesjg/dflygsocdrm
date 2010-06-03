@@ -1,4 +1,4 @@
-/* drm_port_layer.c -- Implementation Direct Rendering Manager other OS -*- linux-c -*-
+/* drm_porting_layer.c -- Implementation Direct Rendering Manager other OS -*- linux-c -*-
  *
  * Permission is hereby granted, free of charge, to any person obtaining a
  * copy of this software and associated documentation files (the "Software"),
@@ -24,7 +24,7 @@
  *
  */
 
-#include "dev/drm/drm_port_layer.h"
+#include "dev/drm/porting/drm_porting_layer.h"
 
 #include <sys/tree.h>
 

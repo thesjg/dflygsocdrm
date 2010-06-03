@@ -1,5 +1,5 @@
 /**
- * \file drm_port_other.h
+ * \file drm_porting_other.h
  * Declarations in previous BSD version of drmP.h
  * not in current Linux drmP.h
  *
@@ -32,8 +32,8 @@
  * OTHER DEALINGS IN THE SOFTWARE.
  */
 
-#ifndef _DRM_PORT_OTHER_H_
-#define _DRM_PORT_OTHER_H_
+#ifndef _DRM_PORTING_OTHER_H_
+#define _DRM_PORTING_OTHER_H_
 
 /* #include "dev/drm/drm_internal.h" */
 

@@ -42,7 +42,7 @@
 #include <linux/seq_file.h>
 #endif
 #else
-#include "dev/drm/drm_port_layer.h"
+#include "dev/drm/porting/drm_porting_layer.h"
 #include "dev/drm/drm_linux_list.h"
 #endif
 

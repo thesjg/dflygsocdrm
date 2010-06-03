@@ -44,7 +44,7 @@
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm_mm.h"
 #include "dev/drm/drm_linux_list.h"
-#include "dev/drm/drm_port_memory.h"
+#include "dev/drm/porting/drm_porting_memory.h"
 
 #define MM_UNUSED_TARGET 4
 

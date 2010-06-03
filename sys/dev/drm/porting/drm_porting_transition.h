@@ -1,5 +1,5 @@
 /**
- * \file drm_port_transition.h
+ * \file drm_porting_transition.h
  * Header for obsoleted declarations for the Direct Rendering Manager
  *
  * \author Rickard E. (Rik) Faith <faith@valinux.com>

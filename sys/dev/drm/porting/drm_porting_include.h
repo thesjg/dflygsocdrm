@@ -1,4 +1,5 @@
-/* drm_port_include.h -- Private header for Direct Rendering Manager -*- linux-c -*-
+/* drm_porting_include.h derived from drmP.h
+ * drmP.h -- Private header for Direct Rendering Manager -*- linux-c -*-
  * Created: Mon Jan  4 10:05:05 1999 by faith@precisioninsight.com
  */
 /*-
@@ -31,12 +32,8 @@
  *
  */
 
-#ifndef _DRM_PORT_INCLUDE_H_
-#define _DRM_PORT_INCLUDE_H_
-
-/* Derived from drmP.h
- *
- */
+#ifndef _DRM_PORTING_INCLUDE_H_
+#define _DRM_PORTING_INCLUDE_H_
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
