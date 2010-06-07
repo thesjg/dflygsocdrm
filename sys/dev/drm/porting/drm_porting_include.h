@@ -88,8 +88,15 @@
 #include <sys/selinfo.h>
 #include <sys/bus.h>
 
+/* For struct mtx, mtx_init, mtx_lock, mtx_unlock */
+#include <sys/mutex.h>
+#include <sys/mutex2.h>
+
 /* For dev_t which is apparently uint32_t on DragonFly */
 #include <sys/types.h>
+
+/* For atomic operations for kref */
+#include <machine/atomic.h>
 
 #ifdef __DragonFly__
 /* For va_start, va_end etc.

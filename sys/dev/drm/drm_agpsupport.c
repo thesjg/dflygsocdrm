@@ -166,7 +166,9 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 {
 	struct drm_agp_mem *entry;
 	DRM_AGP_MEM *memory;
+#if 0
 	void	         *handle;
+#endif
 	unsigned long    pages;
 	u_int32_t	 type;
 	struct agp_memory_info info;

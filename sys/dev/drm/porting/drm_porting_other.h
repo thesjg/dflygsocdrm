@@ -105,11 +105,6 @@ enum {
 	DRM_MIGHT_BE_AGP
 };
 
-/* agp_memory_info() argument
- * in drm_agp_alloc() from drm_agpsupport.c
- */
-#define DRM_AGP_MEM		struct agp_memory
-
 /* Specific to BSD port of drm */
 /* drm_agpsupport.c */
 #define DRM_AGP_FIND_DEVICE()	agp_find_device()
@@ -215,8 +210,10 @@ struct drm_msi_blacklist_entry
 /* Legacy drm defined in drm_drv.c */
 extern int	drm_debug_flag;
 
+#if 0
 /* Deduced from drm_agpsupport function drm_agp_info() */
 typedef struct drm_agp_info	DRM_AGP_KERN;
+#endif
 
 /* legacy drm */
 d_ioctl_t drm_ioctl_legacy;

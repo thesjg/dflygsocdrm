@@ -30,6 +30,14 @@
 
 MALLOC_DECLARE(DRM_MEM_DEFAULT);
 
+/**********************************************************
+ * DATA STRUCTURES                                        *
+ **********************************************************/
+
+/*
+ * idr
+ */
+
 /* Brute force implementation of idr API
  * using current red-black tree backing
  *
@@ -163,4 +171,194 @@ idr_replace(struct idr *pidr, void *newData, int id) {
 void
 idr_destroy(struct idr *pidr) {
    free(pidr, DRM_MEM_DEFAULT);
+}
+
+/**********************************************************
+ * PROCESSES AND THREADS                                  *
+ **********************************************************/
+
+/*
+ * Tasks
+ */
+
+/* file ttm/ttm_lock.c, function ttm_lock_init() */
+/* UNIMPLEMENTED */
+void
+init_waitqueue_head(wait_queue_head_t *wqh) {
+	;
+}
+
+/* file ttm/ttm_lock.c, function ttm_read_unlock() */
+/* UNIMPLEMENTED */
+void
+wake_up_all(wait_queue_head_t *wqh) {
+	;
+}
+
+/* file ttm/ttm_lock.c, function ttm_read_lock() */
+/* UNIMPLEMENTED */
+int
+wait_event(wait_queue_head_t *wqh, bool condition) {
+	return -1;
+}
+
+/* file ttm/ttm_lock.c, function ttm_read_lock() */
+/* UNIMPLEMENTED */
+int
+wait_event_interruptible(wait_queue_head_t *wqh, bool condition) {
+	return -1;
+}
+
+/* file ttm_memory.c, function ttm_mem_global_init() */
+/* UNIMPLEMENTED */
+struct workqueue *
+create_singlethread_workqueue(char *name) {
+	return (struct workqueue *)NULL;
+}
+
+/* file ttm_memory.c, function ttm_check_swapping() */
+/* UNIMPLEMENTED */
+void
+queue_work(struct workqueue * wq, struct work *work) {
+	;
+}
+
+/* file ttm_memory.c, function ttm_mem_global_release() */
+/* UNIMPLEMENTED */
+void
+flush_workqueue(struct workqueue *wq) {
+	;
+}
+
+/* UNIMPLEMENTED */
+void
+destroy_workqueue(struct workqueue *wq) {
+	;
+}
+
+/* file ttm_bo_c, function ttm_vm_fault() */
+/* UNIMPLEMENTED */
+void
+set_need_resched(void) {
+	;
+}
+
+/* file ttm_bo_c, function ttm_bo_lock_delayed_workqueue() */
+/* UNIMPLEMENTED */
+void
+cancel_delayed_work_sync(struct delayed_work *wq) {
+	;
+}
+
+/* file ttm_bo_c, function ttm_bo_device_release() */
+/* UNIMPLEMENTED */
+void
+cancel_delayed_work(struct delayed_work *wq) {
+	;
+}
+
+/* file ttm_bo_c, function ttm_bo_device_release() */
+/* UNIMPLEMENTED */
+void
+flush_scheduled_work(void) {
+	;
+}
+
+/**********************************************************
+ * VIRTUAL MEMORY                                         *
+ **********************************************************/
+
+/*
+ * pages
+ */
+
+/* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
+/* UNIMPLEMENTED */
+void
+__free_page(struct page *page) {
+	;
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
+/* UNIMPLEMENTED */
+struct page *
+alloc_page(int gfp_flags) {
+	return (struct page *)NULL;
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
+/* UNIMPLEMENTED */
+unsigned long
+page_address(struct page *page) {
+	return 0;
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
+/* UNIMPLEMENTED */
+void
+clear_page(unsigned long handle) {
+	;
+}
+
+/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
+/* UNIMPLEMENTED */
+bool
+PageHighMem(struct page *page) {
+	return (bool)1;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_free_user_pages() */
+/* UNIMPLEMENTED */
+bool
+PageReserved(struct page *page) {
+	return (bool)1;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+void
+set_page_dirty(struct page *to_page) {
+	;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+void
+mark_page_accessible(struct page *to_page) {
+	;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+void
+page_cache_release(struct page *to_page) {
+	;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_free_user_pages() */
+void
+set_page_dirty_lock(struct page *page) {
+	;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
+int
+set_pages_wb(struct page *p, uint32_t val) {
+	return 0;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
+int
+set_memory_wc(unsigned long page_address, uint32_t val) {
+	return 0;
+}
+
+/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
+bool
+page_to_pfn(struct page *page) {
+	return (bool)1;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapin() */
+/* Fourth argument NULL all calls in drm */
+struct page *
+read_mapping_page(struct address_space *swap_space, int i, void *ptr) {
+	return (struct page *)NULL;
 }

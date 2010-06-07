@@ -31,6 +31,9 @@
 
 /* Many of these implementations are rather fake, but good enough. */
 
+#ifndef _DRM_ATOMIC_H_
+#define _DRM_ATOMIC_H_
+
 typedef u_int32_t atomic_t;
 
 #define atomic_set(p, v)	(*(p) = (v))
@@ -89,3 +92,5 @@ find_first_zero_bit(volatile void *p, int max)
 	}
 	return max;
 }
+
+#endif
