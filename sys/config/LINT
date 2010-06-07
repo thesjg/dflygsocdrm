@@ -2730,6 +2730,7 @@ device		pmtimer		# adjust the system clock after resume
 # savagedrm:	Savage cards
 # sisdrm:	Sis cards
 # tdfxdrm:	3dfx Voodoo 3/4/5 and Banshee
+# ttmdrm:	TTM memory manager for drm
 #
 # DRM_DEBUG:	include debug printfs, very slow
 #
@@ -2744,6 +2745,7 @@ device		radeondrm
 device		savagedrm
 device		sisdrm
 device		tdfxdrm
+device		ttmdrm
 
 options 	DRM_DEBUG
 options 	DRM_LINUX

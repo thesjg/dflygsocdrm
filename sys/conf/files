@@ -1674,6 +1674,7 @@ crypto/via/padlock_cipher.c		optional padlock
 crypto/via/padlock_hash.c		optional padlock
 dev/drm/porting/drm_porting_layer.c	optional drm
 dev/drm/porting/drm_porting_subr_hash.c	optional drm
+dev/drm/ttm/ttm_global.c		optional ttmdrm drm
 dev/drm/ati_pcigart.c			optional drm
 dev/drm/drm_agpsupport.c		optional drm
 dev/drm/drm_auth.c			optional drm

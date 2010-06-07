@@ -85,6 +85,10 @@
 #endif
 
 #define unlikely(x)            __builtin_expect(!!(x), 0)
+
+/* DragonFly BSD sys/cdefs.h __predict_true */
+#define likely(x)              __builtin_expect(!!(x), 1)
+
 #define container_of(ptr, type, member) ({			\
 	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
 	(type *)( (char *)__mptr - offsetof(type,member) );})
@@ -223,6 +227,11 @@ free(void *addr, struct malloc_type *type)
 #define KERN_DEBUG "debug::"
 #define KERN_ERR   "error::"
 #define KERN_INFO  "info::"
+
+/* file ttm/ttm_page_alloc.h, function ttm_page_alloc_debugfs() */
+struct seq_file {
+	int placeholder;
+};
 
 /*
  * File mode permissions
@@ -425,7 +434,10 @@ current_euid(void) {
  **********************************************************/
 
 /* file ttm/ttm_bo.c, function ttm_bo_mem_space() */
-#define ERESTARTSYS /* UNIMPLEMENTED */
+/* Positive, larger than any in sys/errno.h */
+#define ERESTARTSYS 110
+
+/* DragonFlyBSD defines ERESTART -1 */
 
 #define _IOC_NR(n) ((n) & 0xff)
 
@@ -942,10 +954,6 @@ static __inline__ void
 si_meminfo(struct sysinfo *si) {
 	;
 }
-
-struct seq_file {
-	int placeholder;
-};
 
 /* drmP.h drm_stub.h */
 struct dentry {
