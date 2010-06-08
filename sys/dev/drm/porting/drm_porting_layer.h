@@ -40,13 +40,45 @@
 
 #define EXPORT_SYMBOL(sym)
 
+/* file ttm/ttm_module.c, epilogue */
+static __inline__ void
+MODULE_AUTHOR(const char *names) {
+	;
+}
+
+static __inline__ void
+MODULE_DESCRIPTION(const char *description) {
+	;
+}
+
+static __inline__ void
+MODULE_LICENSE(const char *license) {
+	;
+}
+
+/* file ttm/ttm_module.c, epilogue */
+static __inline__ void
+module_init(void (*func)(void)) {
+	;
+}
+
+/* file ttm/ttm_module.c, epilogue */
+static __inline__ void
+module_exit(void (*func)(void)) {
+	;
+}
+
 /* Called in drm_drawable.c, function drm_update_drawable_info().
  * Negative of error indicators sometimes assigned to (void *).
  * Tests return value from idr_replace().
  * Assume pointers are no more than 64-bit and
  * that the last page of possible virtual memory is unmapped.
  */
-#define IS_ERR(ptr) (((uint64_t)ptr) > ((uint64_t)((int64_t)(-0x800))))
+#define IS_ERR(ptr) (((uint64_t)ptr) > ((uint64_t)((int64_t)(-0x0800))))
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+/* What else can it be but the actual error? */
+#define PTR_ERR(ptr) ((int)(-((intptr_t)ptr)))
 
 /* drm_mm.c function drm_mm_takedown() */
 /* file ttm/ttm_global.c, function ttm_global_release() */
@@ -63,6 +95,17 @@
 #ifndef __user
 #define __user
 #endif
+
+/* file ttm/ttm_module.c, function  ttm_init() */
+#ifndef __init
+#define __init
+#endif
+
+/* file ttm/ttm_module.c, function  ttm_init() */
+#ifndef __exit
+#define __exit
+#endif
+
 #ifndef __iomem
 #define __iomem
 #endif
@@ -228,16 +271,25 @@ free(void *addr, struct malloc_type *type)
 #define KERN_ERR   "error::"
 #define KERN_INFO  "info::"
 
+/* file drm_cache.c, function drm_clflush_pages() */
+#define WARN_ON_ONCE() /* UNIMPLEMENTED */
+
 /* file ttm/ttm_page_alloc.h, function ttm_page_alloc_debugfs() */
 struct seq_file {
 	int placeholder;
 };
 
+/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_debugfs() */
+#define seq_printf(seq_file, ...) /* UNIMPLEMENTED */
+
 /*
  * File mode permissions
  */
-
-#define S_IRUGO /* UNIMPLEMENTED */
+/* In analogy to sys/stats.h, interpret
+ * R to mean read
+ * UGO to mean user, group, other
+ */
+#define S_IRUGO  S_IRUSR|S_IRGRP|S_IROTH
 
 /**********************************************************
  * DATA STRUCTURES                                        *
@@ -418,6 +470,9 @@ current_euid(void) {
 /* #define POLLIN      0x0001 */
 /* #define POLLRDNORM  0x0040 */
 
+/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
+typedef uint32_t gfp_t;
+
 #define __GFP_COLD      0x0004
 #define __GFP_COMP      0x0008
 #define __GFP_DMA32     0x0010
@@ -465,22 +520,6 @@ preempt_disable(void) {
 
 static __inline__ void
 preempt_enable(void) {
-	;
-}
-
-/**********************************************************
- * SYNCHRONIZATION                                        *
- **********************************************************/
-
-/* file drm_fops.c, function drm_stub_open() */
-static __inline__ void
-lock_kernel(void) {
-	;
-}
-
-/* file drm_fops.c, function drm_stub_open() */
-static __inline__ void
-unlock_kernel(void) {
 	;
 }
 
@@ -695,33 +734,46 @@ kobject_uevent_env(struct kobject *kobj, uint32_t flags, char *event[]) {
  * Tasks
  */
 
-/* Wait queues */
+/*
+ * Wait queues
+ */
+
 #define wait_queue_head_t atomic_t
 
 /* file ttm/ttm_module.c, preamble */
 #define DECLARE_WAIT_QUEUE_HEAD(a) (a) /* UNIMPLEMENTED */
 
 /* file ttm/ttm_lock.c, function ttm_lock_init() */
-void
-init_waitqueue_head(wait_queue_head_t *wqh);
+static __inline__ void
+init_waitqueue_head(wait_queue_head_t *wqh) {
+	;
+}
+
+/* file ttm/ttm_lock.c, function ttm_read_lock() */
+/* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
+static __inline__ int
+wait_event(wait_queue_head_t *wqh, int condition) {
+	return 0;
+}
+
+/* file ttm/ttm_lock.c, function ttm_read_lock() */
+/* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
+static __inline__ int
+wait_event_interruptible(wait_queue_head_t *wqh, int condition) {
+	return 0;
+}
 
 /* file ttm/ttm_lock.c, function ttm_read_unlock() */
-void
-wake_up_all(wait_queue_head_t *wqh);
+static __inline__ void
+wake_up_all(wait_queue_head_t *wqh) {
+	;
+}
 
 /* file drm_fops.c, function drm_release() */
 static __inline__ void
 wake_up_interruptible_all(wait_queue_head_t *wqh) {
 	;
 }
-
-/* file ttm/ttm_lock.c, function ttm_read_lock() */
-int
-wait_event(wait_queue_head_t *wqh, bool condition);
-
-/* file ttm/ttm_lock.c, function ttm_read_lock() */
-int
-wait_event_interruptible(wait_queue_head_t *wqh, bool condition);
 
 /* file ttm_memory.c, function ttm_mem_global_init() */
 struct work {
@@ -763,6 +815,7 @@ queue_work(struct workqueue * wq, struct work *work);
 void
 flush_workqueue(struct workqueue *wq);
 
+/* file ttm_memory.c, function ttm_mem_global_release() */
 void
 destroy_workqueue(struct workqueue *wq);
 
@@ -810,8 +863,15 @@ struct delayed_slow_work {
 
 /* file ttm/ttm_page_alloc.c, function ttm_pool_manager() */
 struct shrinker {
-	int placeholder;
+	int (*shrink)(int shrink_pages, gfp_t gfp_mask);
+	unsigned long seeks;
 };
+
+/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink_init() */
+static __inline__ void
+register_shrinker(struct shrinker *shrink) {
+	;
+}
 
 static __inline__ void
 unregister_shrinker(struct shrinker *shrink) {
@@ -848,10 +908,12 @@ struct address_space {
 };
 
 /* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
+/* file ttm/ttm_bo.c, function ttm_bo_global_kobj_release() */
 void
 __free_page(struct page *page);
 
 /* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
+/* file ttm/ttm_bo.c, function ttm_bo_global_init() */
 struct page *
 alloc_page(int gfp_flags);
 
@@ -877,7 +939,7 @@ set_page_dirty(struct page *to_page);
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 void
-mark_page_accessible(struct page *to_page);
+mark_page_accessed(struct page *to_page);
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 void
@@ -896,6 +958,7 @@ int
 set_memory_wc(unsigned long page_address, uint32_t val);
 
 /* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
+/* File ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
 bool
 page_to_pfn(struct page *page);
 
@@ -956,11 +1019,6 @@ si_meminfo(struct sysinfo *si) {
 }
 
 /* drmP.h drm_stub.h */
-struct dentry {
-	int placeholder;
-};
-
-/* drmP.h drm_stub.h */
 struct proc_dir_entry {
 	int placeholder;
 };
@@ -1001,6 +1059,57 @@ schedule(void) {
 static __inline__ int
 time_after_eq(unsigned long jiffies, unsigned long _end) {
 	return 0;
+}
+
+/**********************************************************
+ * SYNCHRONIZATION                                        *
+ **********************************************************/
+
+/* file drm_cache.c, function drm_cache_flush_clflush() */
+/* DragonFly BSD only runs so far on i386 and x64_86 */
+#define CONFIG_X86 1
+
+/* file drm_fops.c, function drm_stub_open() */
+static __inline__ void
+lock_kernel(void) {
+	;
+}
+
+/* file drm_fops.c, function drm_stub_open() */
+static __inline__ void
+unlock_kernel(void) {
+	;
+}
+
+/* file drm_cache.c, function drm_cache_flush_clflush() */
+/* Previous version of drmP.h for DRM_MEMORYBARRIER() */
+#if defined(__i386__)
+#define mb()				__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#elif defined(__alpha__)
+#define mb()				alpha_mb();
+#elif defined(__x86_64__)
+#define mb()				__asm __volatile( \
+					"lock; addl $0,0(%%rsp)" : : : "memory");
+#endif
+
+/* file drm_cache.c, function drm_clflush_pages() */
+#define wbinvd()	__asm __volatile( \
+			"wbinvd");
+
+/* file drm_cache.c, function drm_clflush_pages() */
+static __inline__ void
+clflush(uint32_t location) {
+	;
+}
+
+/* file drm_cache.c, function drm_clflush_pages() */
+#define cpu_has_clflush 1
+
+/* file drm_cache.c, function drm_clflush_pages() */
+static __inline__ int
+on_each_cpu(void (*handler)(void *data), void *data, uint32_t flags) {
+	return 1;
 }
 
 /*
@@ -1072,12 +1181,18 @@ kmap_atomic_prot(struct page *page, uint32_t flag, pgprot_t prot)
 
 /* file ttm/ttm_bo_util.c, function ttm_copy_io_ttm_page() */
 static __inline void *
-kmap(struct page *d) {
+kmap(struct page *page) {
+	return (void *)NULL;
+}
+
+/* file ttm/ttm_bo_util.c, function ttm_copy_io_ttm_page() */
+static __inline void *
+kmap_atomic(struct page *page, int flags) {
 	return (void *)NULL;
 }
 
 static __inline__ void
-kunmap(struct page *d) {
+kunmap(struct page *page) {
 	;
 }
 
@@ -1239,12 +1354,24 @@ struct file_operations {
 	int (*open)(struct inode *inode, struct file *file);
 };
 
+/* drmP.h drm_stub.h */
+struct dentry {
+	struct inode *d_inode;
+};
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+struct DRM_FILE_PATH {
+	struct dentry dentry;
+};
+
 /* file drm_fops.c, function drm_open() */
 struct file {
 /* file drm_fops.c, function drm_stub_open() */
 	struct file_operations *f_op;
 /* file drm_fops.c, function drm_open_helper() */
 	void *private_data;
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+	struct DRM_FILE_PATH *f_path;
 };
 
 /* file drm_fops.c, function drm_stub_open() */
@@ -1289,6 +1416,12 @@ fasync_helper(
 	return 0;
 }
 
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+static __inline__ struct file *
+shmem_file_setup(char *name, unsigned long num_pages, uint32_t flags) {
+	return (struct file *)NULL;
+}
+
 /*
  * General device abstraction
  */
@@ -1303,6 +1436,12 @@ struct device {
     struct device_type *type;
     void (*release)(struct device *dev);
 };
+
+/* file ttm/ttm_module.c, function ttm_init() */
+static __inline__ int
+dev_set_name(struct device *device, char *name) {
+	return 0;
+}
 
 /**********************************************************
  * BUS AND DEVICE CLASSES                                 *

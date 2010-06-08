@@ -4,7 +4,18 @@
 KMOD	= ttm
 NO_MAN	= YES
 SRCS    = \
-	ttm_global.c
+	ttm_agp_backend.c \
+	ttm_bo.c \
+	ttm_bo_util.c \
+	ttm_bo_vm.c \
+	ttm_execbuf_util.c \
+	ttm_global.c \
+	ttm_lock.c \
+	ttm_memory.c \
+	ttm_module.c \
+	ttm_object.c \
+	ttm_page_alloc.c \
+	ttm_tt.c
 
 SRCS   += device_if.h bus_if.h pci_if.h opt_drm.h
 CFLAGS += ${DEBUG_FLAGS} -I. -I.. -I@/dev/drm -I@/dev/drm/ttm

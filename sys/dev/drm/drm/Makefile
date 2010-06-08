@@ -10,6 +10,7 @@ SRCS    = \
 	drm_agpsupport.c \
 	drm_auth.c \
 	drm_bufs.c \
+	drm_cache.c \
 	drm_context.c \
 	drm_dma.c \
 	drm_drawable.c \

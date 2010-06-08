@@ -181,34 +181,6 @@ idr_destroy(struct idr *pidr) {
  * Tasks
  */
 
-/* file ttm/ttm_lock.c, function ttm_lock_init() */
-/* UNIMPLEMENTED */
-void
-init_waitqueue_head(wait_queue_head_t *wqh) {
-	;
-}
-
-/* file ttm/ttm_lock.c, function ttm_read_unlock() */
-/* UNIMPLEMENTED */
-void
-wake_up_all(wait_queue_head_t *wqh) {
-	;
-}
-
-/* file ttm/ttm_lock.c, function ttm_read_lock() */
-/* UNIMPLEMENTED */
-int
-wait_event(wait_queue_head_t *wqh, bool condition) {
-	return -1;
-}
-
-/* file ttm/ttm_lock.c, function ttm_read_lock() */
-/* UNIMPLEMENTED */
-int
-wait_event_interruptible(wait_queue_head_t *wqh, bool condition) {
-	return -1;
-}
-
 /* file ttm_memory.c, function ttm_mem_global_init() */
 /* UNIMPLEMENTED */
 struct workqueue *
@@ -322,7 +294,7 @@ set_page_dirty(struct page *to_page) {
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 void
-mark_page_accessible(struct page *to_page) {
+mark_page_accessed(struct page *to_page) {
 	;
 }
 

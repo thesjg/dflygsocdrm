@@ -52,5 +52,8 @@ MALLOC_DECLARE(DRM_MEM_DEFAULT);
 /* Every use of kzalloc() in Linux 2.6.34 drm is with flag GFP_KERNEL */
 #define kzalloc(sizealloc, flag) kmalloc(sizealloc, M_WAITOK|M_ZERO)
 
+/* file drm_memory_util.h */
+#define kcalloc(n, sizealloc, flag) kmalloc((n * sizealloc), M_WAITOK|M_ZERO)
+
 #endif /* __KERNEL__ */
 #endif
