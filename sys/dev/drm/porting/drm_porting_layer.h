@@ -208,6 +208,10 @@ typedef boolean_t bool;
 #define cpu_to_le32(x) htole32(x)
 #define le32_to_cpu(x) le32toh(x)
 
+/* drmP.h struct drm_local_map */
+/* file drm_bufs.c, function drm_get_resource_start() */
+typedef unsigned long resource_size_t;
+
 /**********************************************************
  * Atomic instructions                                    *
  **********************************************************/
@@ -941,6 +945,18 @@ PageHighMem(struct page *page);
 bool
 PageReserved(struct page *page);
 
+/* file drm_pci.c, function __drm_pci_free() */
+static __inline__ struct page *
+virt_to_page(unsigned long addr) {
+	return (struct page *)NULL;
+}
+
+/* file drm_pci.c, function __drm_pci_free() */
+static __inline__ void
+ClearPageReserved(struct page *page) {
+	;
+}
+
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 void
 set_page_dirty(struct page *to_page);
@@ -1030,21 +1046,6 @@ si_meminfo(struct sysinfo *si) {
 struct proc_dir_entry {
 	int placeholder;
 };
-
-/* drmP.h struct drm_local_map */
-typedef unsigned long resource_size_t;
-
-/*
- * DMA
- */
-
-typedef unsigned long dma_addr_t;
-
-/* From legacy older version of drmP.h */
-
-#ifndef DMA_BIT_MASK
-#define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
-#endif
 
 /*
  * Time
@@ -1227,36 +1228,99 @@ vm_get_page_prot(uint32_t flags){
 	return 0;
 }
 
+/*
+ * Kernel to / from user
+ */
+
+#define VERIFY_WRITE 0x0002 /* UNIMPLEMENTED */
+
+/* file drm_ioc32.c, function compat_drm_version() */
+/* Allocate on user stack? */
+static __inline__ void *
+compat_alloc_user_space(size_t size) {
+	return NULL;
+}
+
+static __inline__ int
+access_ok(uint32_t flags, void *ptr, size_t size) {
+	return 0;
+}
+
+/* file drm_ioc32.c, function compat_drm_version() */
+static __inline__ int
+__put_user(void * src, void *dest) {
+	return 0;
+}
+
+/* file drm_crtc.c, function drm_mode_getresources() */
+static __inline__ int
+put_user(void * src, void *dest) {
+	return 0;
+}
+
+/* file drm_crtc.c, function drm_mode_setcrtc() */
+static __inline__ int
+__get_user(void *dest, void *src) {
+	return 0;
+}
+
+/* file drm_crtc.c, function drm_mode_setcrtc() */
+static __inline__ int
+get_user(void *dest, void *src) {
+	return 0;
+}
+
 /* file ttm/ttm_bo_vm.c, function ttm_bo_io() */
+/* file drm_bufs.c, function drm_freebufs() */
+/* legacy drmP.h DRM_COPY_FROM_USER() */
 static __inline__ int
 copy_from_user(
-	char *virtual,
-	const char __user *wbuf,
+	void *kaddr,
+	void __user *uaddr,
 	size_t iosize
 ) {
-	return 0;
+	return copyin(uaddr, kaddr, iosize);
 }
 
-/* file ttm/ttm_bo_vm.c,
- * function ttm_bo_io() */
+/* file ttm/ttm_bo_vm.c, function ttm_bo_io() */
+/* file drm_bufs.c, function drm_mapbufs() */
+/* legacy drmP.h DRM_COPY_TO_USER() */
 static __inline__ int
 copy_to_user(
-    const char __user *rbuf,
-    char *virtual,
-    size_t iosize
+	void *uaddr,
+	void *kaddr,
+	size_t iosize
 ) {
-	return 0;
+	return copyout(kaddr, uaddr, iosize);
 }
 
+/* file drm_bufs.c, function drm_addbufs_agp() */
+/* memset() declared in sys/libkern.h on DragonFly */
+#if 0
 static __inline__ void
-memcpy_fromio(void *dst, void *src, unsigned long size) {
+memset(void * handle, uint32_t zero, int size) {
 	;
 }
+#endif
+
+/* file drm_bufs.c, function drm_addbufs_pci() */
+/* memcpy() declared in sys/systm.h on DragonFly */
+#if 0
+static __inline__ void *
+memcpy(void *src, void *dst, size_t size) {
+	return NULL;
+}
+#endif
 
 /* file ati_pcigart.c, function drm_ati_pcigart_init() */
 /* directive __iomem */
 static __inline__ void
 memset_io(void * handle, uint32_t zero, int size) {
+	;
+}
+
+static __inline__ void
+memcpy_fromio(void *dst, void *src, unsigned long size) {
 	;
 }
 
@@ -1303,30 +1367,76 @@ vm_insert_mixed(
 }
 
 /*
+ * MTRR
+ */
+
+/* file drm_bufs.c, function drm_addmap_core() */
+#define MTRR_TYPE_WRCOMB	0x0001
+
+static __inline__ int
+mtrr_add(
+	unsigned long offset,
+	unsigned long size,
+	uint32_t type,
+	uint32_t flagsOne
+) {
+	return 0;
+}
+
+static __inline__ int
+mtrr_del(
+	int mtrr,
+	unsigned long offset,
+	unsigned long size
+) {
+	return 0;
+}
+
+/*
+ * mmap
+ */
+
+/* MAP_SHARED defined in sys/mman.h on DragonFly */
+
+/* file drm_bufs.c, function drm_mapbufs() */
+static __inline__ unsigned long
+do_mmap(
+	struct file *filp,
+	uint32_t offset,
+	unsigned long size,
+	uint32_t protFlags,
+	uint32_t mapFlags,
+	unsigned long token
+) {
+	return 0;
+}
+
+/*
  * I/O and memory
  */
 
-/* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
+/* file drm_bufs.c, function drm_addmap_core() */
 static __inline__ void *
-ioremap_wc(
-    unsigned long basePlusOffset,
-    unsigned long size
-) {
+ioremap(unsigned long offset, unsigned long size) {
 	return (void *)NULL;
 }
 
 /* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
 static __inline__ void *
-ioremap_nocache(
-    unsigned long basePlusOffset,
-    unsigned long size
-) {
+ioremap_wc(unsigned long basePlusOffset, unsigned long size) {
+	return (void *)NULL;
+}
+
+/* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
+static __inline__ void *
+ioremap_nocache(unsigned long basePlusOffset, unsigned long size) {
 	return (void *)NULL;
 }
 
 /* file ttm/ttm_bo_util.c, function ttm_mem_reg_iounmap() */
+/* file drm_bufs.c, function drm_rmmap_locked() */
 static __inline__ void
-iounmap(void *virtual){
+iounmap(void *virtual) {
 	;
 }
 
@@ -1430,6 +1540,12 @@ shmem_file_setup(char *name, unsigned long num_pages, uint32_t flags) {
 	return (struct file *)NULL;
 }
 
+/* file drm_bufs.c, function drm_rmmap_locked() */
+static __inline__ void
+vfree(void *handle) {
+	;
+}
+
 /*
  * General device abstraction
  */
@@ -1470,8 +1586,32 @@ struct pci_device_id {
 
 struct pci_dev {
 /* drmP.h, return value from drm_dev_to_irq() */
+	struct device dev;
 	int irq;
 };
+
+/*
+ * DMA
+ */
+
+typedef unsigned long dma_addr_t;
+
+/* From legacy older version of drmP.h */
+
+#ifndef DMA_BIT_MASK
+#define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
+#endif
+
+/* file drm_pci.c, function __drm_pci_free() */
+static __inline__ void
+dma_free_coherent(
+	struct device *dev,
+	size_t size,
+	void *vaddr,
+	dma_addr_t busaddr
+) {
+	;
+}
 
 /* file ttm/ttm_agp_backend.c, function ttm_agp_populate() */
 /* file drm_agpsupport.c, function drm_agp_allocate_memory() */
@@ -1623,6 +1763,10 @@ static __inline__ void
 map_page_into_agp(struct page *page) {
 	;
 }
+
+/**********************************************************
+ * FRAMEBUFFER                                            *
+ **********************************************************/
 
 /* drm_crtc.h, struct drm_connector, field attr */
 struct device_attribute {

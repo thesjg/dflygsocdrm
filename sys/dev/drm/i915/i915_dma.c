@@ -83,7 +83,7 @@ static int i915_init_phys_hws(struct drm_device *dev)
 	/* Program Hardware Status Page */
 	DRM_UNLOCK();
 	dev_priv->status_page_dmah =
-		drm_pci_alloc(dev, PAGE_SIZE, PAGE_SIZE, 0xffffffff);
+		drm_pci_alloc(dev, PAGE_SIZE, PAGE_SIZE);
 	DRM_LOCK();
 	if (!dev_priv->status_page_dmah) {
 		DRM_ERROR("Can not allocate hardware status page\n");

@@ -229,7 +229,7 @@ int drm_addmap(struct drm_device * dev, unsigned long offset,
 		align = map->size;
 		if ((align & (align - 1)) != 0)
 			align = PAGE_SIZE;
-		map->dmah = drm_pci_alloc(dev, map->size, align, 0xfffffffful);
+		map->dmah = drm_pci_alloc(dev, map->size, align);
 		if (map->dmah == NULL) {
 			free(map, DRM_MEM_MAPS);
 			DRM_LOCK();
@@ -293,12 +293,94 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
-void drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
+/* newer UNIMPLEMENTED */
+/**
+ * Remove a map private from list and deallocate resources if the mapping
+ * isn't in use.
+ *
+ * Searches the map on drm_device::maplist, removes it from the list, see if
+ * its being used, and free any associate resource (such as MTRR's) if it's not
+ * being on use.
+ *
+ * \sa drm_addmap
+ */
+int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
+{
+	struct drm_map_list *r_list = NULL, *list_t;
+	drm_dma_handle_t dmah;
+	int found = 0;
+	struct drm_master *master;
+
+	/* Find the list entry for the map and remove it */
+	list_for_each_entry_safe(r_list, list_t, &dev->maplist, head) {
+		if (r_list->map == map) {
+			master = r_list->master;
+			list_del(&r_list->head);
+			drm_ht_remove_key(&dev->map_hash,
+					  r_list->user_token >> PAGE_SHIFT);
+#ifdef __linux__
+			kfree(r_list);
+#else
+			free(r_list, DRM_MEM_MAPS);
+#endif
+			found = 1;
+			break;
+		}
+	}
+
+	if (!found)
+		return -EINVAL;
+
+	switch (map->type) {
+	case _DRM_REGISTERS:
+		iounmap(map->handle);
+		/* FALLTHROUGH */
+	case _DRM_FRAME_BUFFER:
+		if (drm_core_has_MTRR(dev) && map->mtrr >= 0) {
+			int retcode;
+			retcode = mtrr_del(map->mtrr, map->offset, map->size);
+			DRM_DEBUG("mtrr_del=%d\n", retcode);
+		}
+		break;
+	case _DRM_SHM:
+		vfree(map->handle);
+		if (master) {
+			if (dev->sigdata.lock == master->lock.hw_lock)
+				dev->sigdata.lock = NULL;
+			master->lock.hw_lock = NULL;   /* SHM removed */
+			master->lock.file_priv = NULL;
+			wake_up_interruptible_all(&master->lock.lock_queue);
+		}
+		break;
+	case _DRM_AGP:
+	case _DRM_SCATTER_GATHER:
+		break;
+	case _DRM_CONSISTENT:
+		dmah.vaddr = map->handle;
+		dmah.busaddr = map->offset;
+		dmah.size = map->size;
+		__drm_pci_free(dev, &dmah);
+		break;
+	case _DRM_GEM:
+		DRM_ERROR("tried to rmmap GEM object\n");
+		break;
+	}
+#ifdef __linux__
+	kfree(map);
+#else
+	free(map, DRM_MEM_MAPS);
+#endif
+
+	return 0;
+}
+EXPORT_SYMBOL(drm_rmmap_locked);
+
+int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 {
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
 
 	if (map == NULL)
-		return;
+		return -EINVAL;
 
 	TAILQ_REMOVE(&dev->maplist_legacy, map, link);
 
@@ -336,6 +418,7 @@ void drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 	}
 
 	free(map, DRM_MEM_MAPS);
+	return 0;
 }
 
 /* Remove a map private from list and deallocate resources if the mapping
@@ -588,8 +671,7 @@ static int drm_do_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *reque
 
 	while (entry->buf_count < count) {
 		DRM_SPINUNLOCK(&dev->dma_lock);
-		drm_dma_handle_t *dmah = drm_pci_alloc(dev, size, alignment,
-		    0xfffffffful);
+		drm_dma_handle_t *dmah = drm_pci_alloc(dev, size, alignment);
 		DRM_SPINLOCK(&dev->dma_lock);
 		if (dmah == NULL) {
 			/* Set count correctly so we free the proper amount. */

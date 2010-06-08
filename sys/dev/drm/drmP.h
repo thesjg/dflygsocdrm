@@ -695,7 +695,6 @@ struct drm_vblank_info {
 	int inmodeset;			/* Display driver is setting mode */
 };
 
-#ifdef __linux__
 /**
  * Mappings list
  */
@@ -707,9 +706,8 @@ struct drm_map_list {
 	struct drm_master *master;
 	struct drm_mm_node *file_offset_node;	/**< fake offset */
 };
-#else /* legacy drm */
-typedef TAILQ_HEAD(drm_map_list, drm_local_map) drm_map_list_t;
-#endif
+/* legacy drm */
+typedef TAILQ_HEAD(drm_map_list_legacy, drm_local_map) drm_map_list_t_legacy;
 
 /**
  * Context handle list
@@ -1225,7 +1223,7 @@ struct drm_device {
 	u_int16_t pci_device;		/* PCI device id */
 #endif
 	/* Linked list of mappable regions. Protected by dev_lock */
-	drm_map_list_t	  maplist_legacy;
+	drm_map_list_t_legacy maplist_legacy;
 	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
@@ -1567,6 +1565,7 @@ extern int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc * request
 #if 0
 int	drm_addbufs_sg(struct drm_device *dev, struct drm_buf_desc *request);
 #endif
+/* Does not seem to be called outside of drivers */
 #ifdef __linux__
 extern int drm_addmap(struct drm_device *dev, resource_size_t offset,
 		      unsigned int size, enum drm_map_type type,
@@ -1579,9 +1578,8 @@ int	drm_addmap(struct drm_device *dev, unsigned long offset,
 #endif
 extern int drm_addmap_ioctl(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
-#ifdef __linux__
 extern int drm_rmmap(struct drm_device *dev, struct drm_local_map *map);
-#else
+#if 0
 extern void drm_rmmap(struct drm_device *dev, struct drm_local_map *map);
 #endif
 extern int drm_rmmap_ioctl(struct drm_device *dev, void *data,
@@ -1771,10 +1769,9 @@ extern int drm_ati_pcigart_init(struct drm_device *dev,
 				struct drm_ati_pcigart_info * gart_info);
 extern int drm_ati_pcigart_cleanup(struct drm_device *dev,
 				   struct drm_ati_pcigart_info * gart_info);
-#ifdef __linux__
 extern drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
 				       size_t align);
-#else
+#if 0
 drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
 				size_t align, dma_addr_t maxaddr);
 #endif

@@ -838,7 +838,7 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 	DRM_UNLOCK();
 #endif
 	cpu_addr_dmah =
-	    drm_pci_alloc(dev, 0x1000, 0x1000, 0xfffffffful);
+	    drm_pci_alloc(dev, 0x1000, 0x1000);
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 	DRM_LOCK();
 #endif

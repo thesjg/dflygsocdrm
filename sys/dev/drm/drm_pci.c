@@ -51,9 +51,12 @@ drm_pci_busdma_callback(void *arg, bus_dma_segment_t *segs, int nsegs, int error
  * memory block.
  */
 drm_dma_handle_t *
-drm_pci_alloc(struct drm_device *dev, size_t size,
-	      size_t align, dma_addr_t maxaddr)
+drm_pci_alloc(struct drm_device *dev, size_t size, size_t align)
 {
+
+/* All calls to drm_pci_alloc in legacy drm set maxaddr to this value */
+	dma_addr_t maxaddr = 0xfffffffful;
+
 	drm_dma_handle_t *dmah;
 	int ret;
 
@@ -123,6 +126,32 @@ drm_pci_free(struct drm_device *dev, drm_dma_handle_t *dmah)
 	bus_dma_tag_destroy(dmah->tag);
 
 	free(dmah, DRM_MEM_DMA);
+}
+
+/* newer UNIMPLEMENTED */
+
+/**
+ * \brief Free a PCI consistent memory block without freeing its descriptor.
+ *
+ * This function is for internal use in the Linux-specific DRM core code.
+ */
+void __drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
+{
+#if 1
+	unsigned long addr;
+	size_t sz;
+#endif
+
+	if (dmah->vaddr) {
+		/* XXX - Is virt_to_page() legal for consistent mem? */
+		/* Unreserve */
+		for (addr = (unsigned long)dmah->vaddr, sz = dmah->size;
+		     sz > 0; addr += PAGE_SIZE, sz -= PAGE_SIZE) {
+			ClearPageReserved(virt_to_page(addr));
+		}
+		dma_free_coherent(&dev->pdev->dev, dmah->size, dmah->vaddr,
+				  dmah->busaddr);
+	}
 }
 
 /*@}*/
