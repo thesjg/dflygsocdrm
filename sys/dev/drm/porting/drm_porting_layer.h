@@ -160,6 +160,14 @@ typedef u_int8_t  u8;
 /* i915_drv.h */
 typedef boolean_t bool;
 
+/* file drm_agpsupport.c, function drm_agp_bind_pages() */
+#ifndef true
+#define true (bool)1
+#endif
+
+#ifndef false
+#define false (bool)0
+#endif
 
 /* On DragonFly at least
  * sizeof(size_t) == sizeof(unsigned long)
@@ -1578,7 +1586,13 @@ typedef struct DRM_AGP_KERN {
 
 /* file drm_agpsupport.c, function drm_agp_alloc() */
 /* agp_memory_info() argument */
-#define DRM_AGP_MEM		struct agp_memory
+typedef struct DRM_AGP_MEM {
+	struct agp_memory *memory;
+/* file drm_agpsupport.c, function drm_agp_bind_pages() */
+	unsigned long page_count;
+	bool is_flushed;
+	struct page **pages;
+} DRM_AGP_MEM;
 
 /* file drm_agpsupport.c, function drm_agp_alloc() */
 /* DRM_AGP_MEM should also have some extra members

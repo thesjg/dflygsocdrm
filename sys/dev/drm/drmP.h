@@ -1652,9 +1652,8 @@ extern void drm_vblank_post_modeset(struct drm_device *dev, int crtc);
 
 /* shared */
 /* AGP/PCI Express/GART support (drm_agpsupport.c) */
-#ifdef __linux__
 extern struct drm_agp_head *drm_agp_init(struct drm_device *dev);
-#else
+#if 0
 struct drm_agp_head *drm_agp_init(void);
 #endif
 extern int drm_agp_acquire(struct drm_device *dev);
@@ -1681,9 +1680,8 @@ extern int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
 extern int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request);
 extern int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
-#ifdef __linux__
 extern DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data *bridge, size_t pages, u32 type);
-#else
+#if 0
 extern DRM_AGP_MEM *drm_agp_allocate_memory(size_t pages, u32 type);
 #endif
 
