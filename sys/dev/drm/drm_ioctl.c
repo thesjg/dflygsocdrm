@@ -33,7 +33,15 @@
  * information and reporting DRM information to userland.
  */
 
+#ifdef __linux__
+#include "drmP.h"
+#include "drm_core.h"
+
+#include "linux/pci.h"
+#else
 #include "dev/drm/drmP.h"
+#include "drm_core.h"
+#endif
 
 /*
  * Beginning in revision 1.1 of the DRM interface, getunique will return
@@ -227,8 +235,10 @@ int drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return 0;
 }
 
+#if 0
 #define DRM_IF_MAJOR	1
 #define DRM_IF_MINOR	2
+#endif
 
 int drm_setversion(struct drm_device *dev, void *data,
 		   struct drm_file *file_priv)

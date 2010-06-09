@@ -942,4 +942,227 @@ int drm_init(struct drm_driver *driver)
 
 EXPORT_SYMBOL(drm_init);
 
+void drm_exit(struct drm_driver *driver)
+{
+	struct drm_device *dev, *tmp;
+	DRM_DEBUG("\n");
+
+	if (driver->driver_features & DRIVER_MODESET) {
+		pci_unregister_driver(&driver->pci_driver);
+	} else {
+		list_for_each_entry_safe(dev, tmp, &driver->device_list, driver_item)
+			drm_put_dev(dev);
+	}
+
+	DRM_INFO("Module unloaded\n");
+}
+
+EXPORT_SYMBOL(drm_exit);
+
+/** File operations structure */
+static const struct file_operations drm_stub_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_stub_open
+};
+
+static int __init drm_core_init(void)
+{
+	int ret = -ENOMEM;
+
+	idr_init(&drm_minors_idr);
+
+	if (register_chrdev(DRM_MAJOR, "drm", &drm_stub_fops))
+		goto err_p1;
+
+#ifdef __linux__
+	drm_class = drm_sysfs_create(THIS_MODULE, "drm");
+	if (IS_ERR(drm_class)) {
+		printk(KERN_ERR "DRM: Error creating drm class.\n");
+		ret = PTR_ERR(drm_class);
+		goto err_p2;
+	}
+
+	drm_proc_root = proc_mkdir("dri", NULL);
+	if (!drm_proc_root) {
+		DRM_ERROR("Cannot create /proc/dri\n");
+		ret = -1;
+		goto err_p3;
+	}
+
+	drm_debugfs_root = debugfs_create_dir("dri", NULL);
+	if (!drm_debugfs_root) {
+		DRM_ERROR("Cannot create /sys/kernel/debug/dri\n");
+		ret = -1;
+		goto err_p3;
+	}
+#endif
+
+	DRM_INFO("Initialized %s %d.%d.%d %s\n",
+		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
+	return 0;
+#ifdef __linux__
+err_p3:
+	drm_sysfs_destroy();
+err_p2:
+	unregister_chrdev(DRM_MAJOR, "drm");
+
+	idr_destroy(&drm_minors_idr);
+#endif
+err_p1:
+	return ret;
+}
+
+static void __exit drm_core_exit(void)
+{
+#ifdef __linux__
+	remove_proc_entry("dri", NULL);
+	debugfs_remove(drm_debugfs_root);
+	drm_sysfs_destroy();
+#endif
+
+	unregister_chrdev(DRM_MAJOR, "drm");
+
+	idr_destroy(&drm_minors_idr);
+}
+
+module_init(drm_core_init);
+module_exit(drm_core_exit);
+
+/**
+ * Copy and IOCTL return string to user space
+ */
+static int drm_copy_field(char *buf, size_t *buf_len, const char *value)
+{
+	int len;
+
+	/* don't overflow userbuf */
+	len = strlen(value);
+	if (len > *buf_len)
+		len = *buf_len;
+
+	/* let userspace know exact length of driver value (which could be
+	 * larger than the userspace-supplied buffer) */
+	*buf_len = strlen(value);
+
+	/* finally, try filling in the userbuf */
+	if (len && buf)
+		if (copy_to_user(buf, value, len))
+			return -EFAULT;
+	return 0;
+}
+
+/**
+ * Called whenever a process performs an ioctl on /dev/drm.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument.
+ * \return zero on success or negative number on failure.
+ *
+ * Looks up the ioctl function in the ::ioctls table, checking for root
+ * previleges if so required, and dispatches to the respective function.
+ */
+long drm_ioctl(struct file *filp,
+	      unsigned int cmd, unsigned long arg)
+{
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev;
+	struct drm_ioctl_desc *ioctl;
+	drm_ioctl_t *func;
+	unsigned int nr = DRM_IOCTL_NR(cmd);
+	int retcode = -EINVAL;
+	char stack_kdata[128];
+	char *kdata = NULL;
+
+	dev = file_priv->minor->dev;
+	atomic_inc(&dev->ioctl_count);
+	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
+	++file_priv->ioctl_count;
+
+	DRM_DEBUG("pid=%d, cmd=0x%02x, nr=0x%02x, dev 0x%lx, auth=%d\n",
+		  task_pid_nr(current), cmd, nr,
+		  (long)old_encode_dev(file_priv->minor->device),
+		  file_priv->authenticated);
+
+	if ((nr >= DRM_CORE_IOCTL_COUNT) &&
+	    ((nr < DRM_COMMAND_BASE) || (nr >= DRM_COMMAND_END)))
+		goto err_i1;
+	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
+	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
+		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
+	else if ((nr >= DRM_COMMAND_END) || (nr < DRM_COMMAND_BASE)) {
+		ioctl = &drm_ioctls[nr];
+		cmd = ioctl->cmd;
+	} else
+		goto err_i1;
+
+	/* Do not trust userspace, use our own definition */
+	func = ioctl->func;
+	/* is there a local override? */
+	if ((nr == DRM_IOCTL_NR(DRM_IOCTL_DMA)) && dev->driver->dma_ioctl)
+		func = dev->driver->dma_ioctl;
+
+	if (!func) {
+		DRM_DEBUG("no function\n");
+		retcode = -EINVAL;
+	} else if (((ioctl->flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN)) ||
+		   ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
+		   ((ioctl->flags & DRM_MASTER) && !file_priv->is_master) ||
+		   (!(ioctl->flags & DRM_CONTROL_ALLOW) && (file_priv->minor->type == DRM_MINOR_CONTROL))) {
+		retcode = -EACCES;
+	} else {
+		if (cmd & (IOC_IN | IOC_OUT)) {
+			if (_IOC_SIZE(cmd) <= sizeof(stack_kdata)) {
+				kdata = stack_kdata;
+			} else {
+#ifdef __linux__
+				kdata = kmalloc(_IOC_SIZE(cmd), GFP_KERNEL);
+#else
+				kdata = malloc(_IOC_SIZE(cmd), DRM_MEM_IOCTLS, M_WAITOK);
+#endif
+				if (!kdata) {
+					retcode = -ENOMEM;
+					goto err_i1;
+				}
+			}
+		}
+
+		if (cmd & IOC_IN) {
+			if (copy_from_user(kdata, (void __user *)arg,
+					   _IOC_SIZE(cmd)) != 0) {
+				retcode = -EFAULT;
+				goto err_i1;
+			}
+		}
+		if (ioctl->flags & DRM_UNLOCKED)
+			retcode = func(dev, kdata, file_priv);
+		else {
+			lock_kernel();
+			retcode = func(dev, kdata, file_priv);
+			unlock_kernel();
+		}
+
+		if (cmd & IOC_OUT) {
+			if (copy_to_user((void __user *)arg, kdata,
+					 _IOC_SIZE(cmd)) != 0)
+				retcode = -EFAULT;
+		}
+	}
+
+      err_i1:
+	if (kdata != stack_kdata)
+#ifdef __linux__
+		kfree(kdata);
+#else
+		free(kdata, DRM_MEM_IOCTLS);
+#endif
+	atomic_dec(&dev->ioctl_count);
+	if (retcode)
+		DRM_DEBUG("ret = %x\n", retcode);
+	return retcode;
+}
+
+EXPORT_SYMBOL(drm_ioctl);
+
 #endif /* DRM_LINUX */

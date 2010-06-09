@@ -56,6 +56,14 @@
 /* file drm_stub.c */
 #define module_param_named(arg, ...)
 
+/* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
+/* file drm_drv.c, struct drm_stub_fops */
+struct module {
+	int placeholder;
+};
+
+#define THIS_MODULE (struct module *)NULL;
+
 /* file ttm/ttm_module.c, epilogue */
 static __inline__ void
 module_init(void (*func)(void)) {
@@ -97,11 +105,13 @@ module_exit(void (*func)(void)) {
 #endif
 
 /* file ttm/ttm_module.c, function  ttm_init() */
+/* file drm_drv.c, function  drm_core_init */
 #ifndef __init
 #define __init
 #endif
 
 /* file ttm/ttm_module.c, function  ttm_init() */
+/* file drm_drv.c, function  drm_core_exit */
 #ifndef __exit
 #define __exit
 #endif
@@ -519,6 +529,9 @@ typedef uint32_t gfp_t;
 /* DragonFlyBSD defines ERESTART -1 */
 
 #define _IOC_NR(n) ((n) & 0xff)
+
+/* file drm_drv.c, function drm_ioctl() */
+#define _IOC_SIZE(cmd) sizeof(unigned long)
 
 typedef void			irqreturn_t;
 #define IRQ_HANDLED		/* nothing */
@@ -1547,6 +1560,8 @@ iminor(struct inode *inode) {
 
 /* file drm_fops.c, function drm_stub_open() */
 struct file_operations {
+/* file drm_drv.c, struct drm_stub_fops */
+	struct module *owner;
 	int (*open)(struct inode *inode, struct file *file);
 };
 
@@ -1592,6 +1607,25 @@ fops_get(struct file_operations *fops) {
 static __inline__ void
 fops_put(struct file_operations *fops) {
 	;
+}
+
+/* file drm_drv.c, function drm_core_init() */
+static __inline__ int
+register_chrdev(
+	uint32_t flags,
+	const char *name,
+	struct file_operations *fops
+) {
+	return 0;
+}
+
+/* file drm_drv.c, function drm_core_init() */
+static __inline__ int
+unregister_chrdev(
+	uint32_t flags,
+	const char *name
+) {
+	return 0;
 }
 
 /* file drm_fops.c, function drm_poll() */
@@ -1992,11 +2026,6 @@ struct i2c_driver {
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_driver */
 struct i2c_client {
-	int placeholder;
-};
-
-/* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
-struct module {
 	int placeholder;
 };
 
