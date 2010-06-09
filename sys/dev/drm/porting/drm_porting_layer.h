@@ -41,20 +41,20 @@
 #define EXPORT_SYMBOL(sym)
 
 /* file ttm/ttm_module.c, epilogue */
-static __inline__ void
-MODULE_AUTHOR(const char *names) {
-	;
-}
+/* file drm_stub.c */
+#define MODULE_AUTHOR(arg, ...)
 
-static __inline__ void
-MODULE_DESCRIPTION(const char *description) {
-	;
-}
+/* file drm_stub.c */
+#define MODULE_DESCRIPTION(arg, ...)
 
-static __inline__ void
-MODULE_LICENSE(const char *license) {
-	;
-}
+/* file drm_stub.c */
+#define MODULE_LICENSE(arg, ...)
+
+/* file drm_stub.c */
+#define MODULE_PARM_DESC(arg, ...)
+
+/* file drm_stub.c */
+#define module_param_named(arg, ...)
 
 /* file ttm/ttm_module.c, epilogue */
 static __inline__ void
@@ -485,6 +485,16 @@ current_euid(void) {
 /* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
 typedef uint32_t gfp_t;
 
+#ifdef GFP_ATOMIC
+#undef GFP_ATOMIC
+#endif
+#define GFP_ATOMIC   M_NOWAIT
+
+#ifdef GFP_KERNEL
+#undef GFP_KERNEL
+#endif
+#define GFP_KERNEL   M_WAITOK
+
 #define __GFP_COLD      0x0004
 #define __GFP_COMP      0x0008
 #define __GFP_DMA32     0x0010
@@ -761,6 +771,12 @@ init_waitqueue_head(wait_queue_head_t *wqh) {
 	;
 }
 
+/* file drm_dma.c, function drm_free_buffer() */
+static __inline__ int
+waitqueue_active(wait_queue_head_t *wqh) {
+	return 0;
+}
+
 /* file ttm/ttm_lock.c, function ttm_read_lock() */
 /* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
 static __inline__ int
@@ -775,9 +791,21 @@ wait_event_interruptible(wait_queue_head_t *wqh, int condition) {
 	return 0;
 }
 
+/* file drm_context.c, function drm_context_switch_complete() */
+static __inline__ void
+wake_up(wait_queue_head_t *wqh) {
+	;
+}
+
 /* file ttm/ttm_lock.c, function ttm_read_unlock() */
 static __inline__ void
 wake_up_all(wait_queue_head_t *wqh) {
+	;
+}
+
+/* file drm_fops.c, function drm_release() */
+static __inline__ void
+wake_up_interruptible(wait_queue_head_t *wqh) {
 	;
 }
 
@@ -930,6 +958,7 @@ struct page *
 alloc_page(int gfp_flags);
 
 /* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
+/* file drm_scatter.c, function drm_sg_alloc() */
 unsigned long
 page_address(struct page *handle);
 
@@ -951,10 +980,22 @@ virt_to_page(unsigned long addr) {
 	return (struct page *)NULL;
 }
 
+/* file drm_scatter.c, function drm_sg_alloc() */
+static __inline__ void
+SetPageReserved(struct page *page) {
+	;
+}
+
 /* file drm_pci.c, function __drm_pci_free() */
 static __inline__ void
 ClearPageReserved(struct page *page) {
 	;
+}
+
+/* file drm_scatter.c, function drm_sg_alloc() */
+static __inline__ unsigned long
+ScatterHandle(unsigned long virtualAddr) {
+	return 0;
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
@@ -1042,19 +1083,12 @@ si_meminfo(struct sysinfo *si) {
 	;
 }
 
-/* drmP.h drm_stub.h */
-struct proc_dir_entry {
-	int placeholder;
-};
-
 /*
  * Time
  */
 
 #define HZ	hz
 #define jiffies			ticks
-
-#define timer_list callout
 
 typedef unsigned long cycles_t;
 
@@ -1121,6 +1155,42 @@ on_each_cpu(void (*handler)(void *data), void *data, uint32_t flags) {
 	return 1;
 }
 
+#define timer_list callout
+
+/* file drm_drv.c, function drm_lastclose() */
+static __inline__ void
+init_timer(struct timer_list *timer){
+	;
+}
+
+/* file drm_irq.c, function drm_vblank_init() */
+static __inline__ void
+setup_timer(
+	struct timer_list *timer,
+	void (*func)(unsigned long arg),
+	unsigned long arg
+){
+	;
+}
+
+/* file drm_irq.c, function drm_vblank_put() */
+static __inline__ void
+mod_timer(struct timer_list *timer, unsigned long delta){
+	;
+}
+
+/* file drm_drv.c, function drm_lastclose() */
+static __inline__ void
+del_timer(struct timer_list *timer){
+	;
+}
+
+/* file i915/intel_display.c */
+static __inline__ void
+del_timer_sync(struct timer_list *timer){
+	;
+}
+
 /*
  * Processes and threads
  */
@@ -1145,6 +1215,7 @@ MALLOC_DECLARE(DRM_MEM_SGLISTS);
 MALLOC_DECLARE(DRM_MEM_DRAWABLE);
 MALLOC_DECLARE(DRM_MEM_MM);
 MALLOC_DECLARE(DRM_MEM_HASHTAB);
+MALLOC_DECLARE(DRM_MEM_DEFAULT);
 
 /**********************************************************
  * I/O                                                    *
@@ -1472,6 +1543,16 @@ struct file_operations {
 	int (*open)(struct inode *inode, struct file *file);
 };
 
+/* file drm_stub.c */
+struct class {
+	int placeholder;
+};
+
+/* drmP.h drm_stub.h */
+struct proc_dir_entry {
+	int placeholder;
+};
+
 /* drmP.h drm_stub.h */
 struct dentry {
 	struct inode *d_inode;
@@ -1567,28 +1648,107 @@ dev_set_name(struct device *device, char *name) {
 	return 0;
 }
 
+/* file drm_stub.c, function drm_get_minor() */
+static __inline__ dev_t
+MKDEV(int major, int minor) {
+	return 0;
+}
+
 /**********************************************************
  * BUS AND DEVICE CLASSES                                 *
  **********************************************************/
 
 /*
- * PCI and AGP
+ * PCI
  */
 
-struct pci_driver {
-	int placeholder;
-};
 
 /* drmP.h drm_stub.h */
+/* file drm_drv.c, function drm_init() */
 struct pci_device_id {
-	int placeholder;
+	uint32_t vendor;
+	uint32_t device;
+	uint32_t subvendor;
+	uint32_t subdevice;
+	uint32_t class;
+	uint32_t class_mask;
+/* file drm_stub.c, function drm_get_dev() */
+	unsigned long driver_data;
+};
+
+/* file drm_drv.c, function drm_init() */
+struct pci_driver {
+	struct pci_device_id *id_table;
 };
 
 struct pci_dev {
 /* drmP.h, return value from drm_dev_to_irq() */
 	struct device dev;
 	int irq;
+/* file drm_drv.c, function drm_init() */
+	uint32_t class;
+	uint32_t vendor;
+	uint32_t device;
 };
+
+/* file drm_drv.c, function drm_init() */
+static __inline__ int
+pci_register_driver(struct pci_driver *driver) {
+	return -1;
+}
+
+/* file drm_drv.c, function drm_init() */
+static __inline__ int
+pci_unregister_driver(struct pci_driver *driver) {
+	return -1;
+}
+
+/* file drm_drv.c, function drm_init() */
+static __inline__ void
+pci_dev_get(struct pci_dev *pdev) {
+	;
+}
+
+/* file drm_drv.c, function drm_init() */
+static __inline__ struct pci_dev *
+pci_get_subsys(
+	uint32_t vendor,
+	uint32_t device,
+	uint32_t subvendor,
+	uint32_t subdevice
+) {
+	return NULL;
+}
+
+/* file drm_stub.c, function drm_get_dev() */
+static __inline__ int
+pci_enable_device(struct pci_dev *pdev) {
+	return 0;
+}
+
+/* file drm_stub.c, function drm_get_dev() */
+static __inline__ int
+pci_disable_device(struct pci_dev *pdev) {
+	return 0;
+}
+
+/* file drm_drv.c, function drm_init() */
+static __inline__ void
+pci_set_master(struct pci_dev *pdev) {
+	;
+}
+
+/* file drm_stub.c, function drm_get_dev() */
+static __inline__ void
+pci_set_drvdata(struct pci_dev *pdev, void *data) {
+	;
+}
+
+/* file drm_stub.c, function drm_get_dev() */
+static __inline__ char *
+pci_name(struct pci_dev *pdev) {
+	return "0";
+}
 
 /*
  * DMA

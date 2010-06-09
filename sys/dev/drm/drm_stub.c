@@ -39,13 +39,10 @@
 
 #include "drmP.h"
 
-#ifdef __linux__
 #include "drm_core.h"
-#endif
 
 unsigned int drm_debug = 0;	/* 1 to enable debug output */
 
-#ifdef __linux__
 EXPORT_SYMBOL(drm_debug);
 
 MODULE_AUTHOR(CORE_AUTHOR);
@@ -60,7 +57,6 @@ struct idr drm_minors_idr;
 struct class *drm_class;
 struct proc_dir_entry *drm_proc_root;
 struct dentry *drm_debugfs_root;
-#endif
 
 void drm_ut_debug_printk(unsigned int request_level,
 			 const char *prefix,
@@ -78,7 +74,6 @@ void drm_ut_debug_printk(unsigned int request_level,
 	}
 }
 
-#ifdef __linux__
 EXPORT_SYMBOL(drm_ut_debug_printk);
 static int drm_minor_get_id(struct drm_device *dev, int type)
 {
@@ -120,7 +115,11 @@ struct drm_master *drm_master_create(struct drm_minor *minor)
 {
 	struct drm_master *master;
 
+#ifdef __linux__
 	master = kzalloc(sizeof(*master), GFP_KERNEL);
+#else
+	master = malloc(sizeof(*master), DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+#endif
 	if (!master)
 		return NULL;
 
@@ -163,7 +162,11 @@ static void drm_master_destroy(struct kref *kref)
 	}
 
 	if (master->unique) {
+#ifdef __linux__
 		kfree(master->unique);
+#else
+		free(master->unique, DRM_MEM_DRIVER);
+#endif
 		master->unique = NULL;
 		master->unique_len = 0;
 	}
@@ -171,12 +174,20 @@ static void drm_master_destroy(struct kref *kref)
 	list_for_each_entry_safe(pt, next, &master->magicfree, head) {
 		list_del(&pt->head);
 		drm_ht_remove_item(&master->magiclist, &pt->hash_item);
+#ifdef __linux__
 		kfree(pt);
+#else
+		free(pt, DRM_MEM_MAGIC);
+#endif
 	}
 
 	drm_ht_remove(&master->magiclist);
 
+#ifdef __linux__
 	kfree(master);
+#else
+	free(master, DRM_MEM_DEFAULT);
+#endif
 }
 
 void drm_master_put(struct drm_master **master)
@@ -306,7 +317,11 @@ static int drm_fill_in_dev(struct drm_device * dev, struct pci_dev *pdev,
 	}
 
 	if (driver->driver_features & DRIVER_GEM) {
+#ifdef __linux__
 		retcode = drm_gem_init(dev);
+#else /* inserted just to compile */
+		retcode = 0;
+#endif
 		if (retcode) {
 			DRM_ERROR("Cannot initialize graphics execution "
 				  "manager (GEM)\n");
@@ -320,7 +335,6 @@ static int drm_fill_in_dev(struct drm_device * dev, struct pci_dev *pdev,
 	drm_lastclose(dev);
 	return retcode;
 }
-
 
 /**
  * Get a secondary minor number.
@@ -345,7 +359,11 @@ static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int t
 	if (minor_id < 0)
 		return minor_id;
 
+#ifdef __linux__
 	new_minor = kzalloc(sizeof(struct drm_minor), GFP_KERNEL);
+#else
+	new_minor = malloc(sizeof(struct drm_minor), DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+#endif
 	if (!new_minor) {
 		ret = -ENOMEM;
 		goto err_idr;
@@ -360,7 +378,11 @@ static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int t
 	idr_replace(&drm_minors_idr, new_minor, minor_id);
 
 	if (type == DRM_MINOR_LEGACY) {
+#ifdef __linux__
 		ret = drm_proc_init(new_minor, minor_id, drm_proc_root);
+#else /* to compile */
+		ret = 0;
+#endif
 		if (ret) {
 			DRM_ERROR("DRM: Failed to initialize /proc/dri.\n");
 			goto err_mem;
@@ -369,14 +391,22 @@ static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int t
 		new_minor->proc_root = NULL;
 
 #if defined(CONFIG_DEBUG_FS)
+#ifdef __linux__
 	ret = drm_debugfs_init(new_minor, minor_id, drm_debugfs_root);
+#else /* to compile */
+	ret = 0;
+#endif
 	if (ret) {
 		DRM_ERROR("DRM: Failed to initialize /sys/kernel/debug/dri.\n");
 		goto err_g2;
 	}
 #endif
 
+#ifdef __linux__
 	ret = drm_sysfs_device_add(new_minor);
+#else /* to compile */
+	ret = 0;
+#endif
 	if (ret) {
 		printk(KERN_ERR
 		       "DRM: Error sysfs_device_add.\n");
@@ -389,10 +419,12 @@ static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int t
 
 
 err_g2:
+#ifdef __linux__
 	if (new_minor->type == DRM_MINOR_LEGACY)
 		drm_proc_cleanup(new_minor, drm_proc_root);
+#endif
 err_mem:
-	kfree(new_minor);
+	free(new_minor, DRM_MEM_DEFAULT);
 err_idr:
 	idr_remove(&drm_minors_idr, minor_id);
 	*minor = NULL;
@@ -418,7 +450,11 @@ int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
 
 	DRM_DEBUG("\n");
 
+#ifdef __linux__
 	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+#else
+	dev = malloc(sizeof(*dev), DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+#endif
 	if (!dev)
 		return -ENOMEM;
 
@@ -450,7 +486,11 @@ int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
 
         /* setup the grouping for the legacy output */
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
+#ifdef __linux__
 		ret = drm_mode_group_init_legacy_group(dev, &dev->primary->mode_group);
+#else
+		ret = 0;
+#endif
 		if (ret)
 			goto err_g4;
 	}
@@ -471,7 +511,11 @@ err_g3:
 err_g2:
 	pci_disable_device(pdev);
 err_g1:
+#ifdef __linux__
 	kfree(dev);
+#else
+	free(dev, DRM_MEM_DEFAULT);
+#endif
 	return ret;
 }
 EXPORT_SYMBOL(drm_get_dev);
@@ -491,6 +535,7 @@ int drm_put_minor(struct drm_minor **minor_p)
 	struct drm_minor *minor = *minor_p;
 
 	DRM_DEBUG("release secondary minor %d\n", minor->index);
+#ifdef __linux__
 
 	if (minor->type == DRM_MINOR_LEGACY)
 		drm_proc_cleanup(minor, drm_proc_root);
@@ -499,10 +544,15 @@ int drm_put_minor(struct drm_minor **minor_p)
 #endif
 
 	drm_sysfs_device_remove(minor);
+#endif /* __linux__ */
 
 	idr_remove(&drm_minors_idr, minor->index);
 
+#ifdef __linux__
 	kfree(minor);
+#else
+	free(minor, DRM_MEM_DEFAULT);
+#endif
 	*minor_p = NULL;
 	return 0;
 }
@@ -518,7 +568,9 @@ int drm_put_minor(struct drm_minor **minor_p)
 void drm_put_dev(struct drm_device *dev)
 {
 	struct drm_driver *driver;
+#ifdef __linux
 	struct drm_map_list *r_list, *list_temp;
+#endif
 
 	DRM_DEBUG("\n");
 
@@ -542,6 +594,7 @@ void drm_put_dev(struct drm_device *dev)
 	if (dev->driver->unload)
 		dev->driver->unload(dev);
 
+#ifdef __linux__
 	if (drm_core_has_AGP(dev) && dev->agp) {
 		kfree(dev->agp);
 		dev->agp = NULL;
@@ -568,6 +621,6 @@ void drm_put_dev(struct drm_device *dev)
 		dev->devname = NULL;
 	}
 	kfree(dev);
+#endif
 }
 EXPORT_SYMBOL(drm_put_dev);
-#endif /* __linux__ */

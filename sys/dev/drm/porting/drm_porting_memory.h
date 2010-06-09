@@ -39,8 +39,6 @@
 #endif
 #define GFP_KERNEL   M_WAITOK
 
-MALLOC_DECLARE(DRM_MEM_DEFAULT);
-
 #define drm_kmalloc(ptr, flag)    malloc(ptr, DRM_MEM_DEFAULT, flag)
 
 #define drm_kfree(ptr)            free(ptr, DRM_MEM_DEFAULT)

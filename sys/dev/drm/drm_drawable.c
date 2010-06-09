@@ -172,3 +172,101 @@ void drm_drawable_free_all(struct drm_device *dev)
 	}
 	DRM_SPINUNLOCK(&dev->drw_lock);
 }
+
+/* newer UNIMPLEMENTED */
+int drm_update_drawable_info(struct drm_device *dev, void *data, struct drm_file *file_priv)
+{
+	struct drm_update_draw *update = data;
+	unsigned long irqflags;
+	struct drm_clip_rect *rects;
+	struct drm_drawable_info *info;
+	int err;
+
+	info = idr_find(&dev->drw_idr, update->handle);
+	if (!info) {
+#ifdef __linux__
+		info = kzalloc(sizeof(*info), GFP_KERNEL);
+#else
+		info = malloc(sizeof(*info), DRM_MEM_DRAWABLE, M_WAITOK | M_ZERO);
+#endif
+		if (!info)
+			return -ENOMEM;
+		if (IS_ERR(idr_replace(&dev->drw_idr, info, update->handle))) {
+			DRM_ERROR("No such drawable %d\n", update->handle);
+#ifdef __linux__
+			kfree(info);
+#else
+			free(info, DRM_MEM_DRAWABLE);
+#endif
+			return -EINVAL;
+		}
+	}
+
+	switch (update->type) {
+	case DRM_DRAWABLE_CLIPRECTS:
+		if (update->num == 0)
+			rects = NULL;
+		else if (update->num != info->num_rects) {
+#ifdef __linux__
+			rects = kmalloc(update->num *
+					sizeof(struct drm_clip_rect),
+					GFP_KERNEL);
+#else
+			rects = malloc(update->num *
+					sizeof(struct drm_clip_rect), DRM_MEM_DRAWABLE,
+					M_WAITOK);
+#endif
+		} else
+			rects = info->rects;
+
+		if (update->num && !rects) {
+			DRM_ERROR("Failed to allocate cliprect memory\n");
+			err = -ENOMEM;
+			goto error;
+		}
+
+		if (update->num && DRM_COPY_FROM_USER(rects,
+						     (struct drm_clip_rect __user *)
+						     (unsigned long)update->data,
+						     update->num *
+						     sizeof(*rects))) {
+			DRM_ERROR("Failed to copy cliprects from userspace\n");
+			err = -EFAULT;
+			goto error;
+		}
+
+		spin_lock_irqsave(&dev->drw_lock, irqflags);
+
+		if (rects != info->rects) {
+#ifdef __linux__
+			kfree(info->rects);
+#else
+			free(info->rects, DRM_MEM_DRAWABLE);
+#endif
+		}
+
+		info->rects = rects;
+		info->num_rects = update->num;
+
+		spin_unlock_irqrestore(&dev->drw_lock, irqflags);
+
+		DRM_DEBUG("Updated %d cliprects for drawable %d\n",
+			  info->num_rects, update->handle);
+		break;
+	default:
+		DRM_ERROR("Invalid update type %d\n", update->type);
+		return -EINVAL;
+	}
+
+	return 0;
+
+error:
+	if (rects != info->rects)
+#ifdef __linux__
+		kfree(rects);
+#else
+		free(rects, DRM_MEM_DRAWABLE);
+#endif
+
+	return err;
+}
