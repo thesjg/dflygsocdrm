@@ -454,11 +454,13 @@ idr_destroy(struct idr *pidr);
 /* current is either the current thread or current process */
 /* DragonFly BSD has curthread of type struct thread *     */
 
-typedef struct thread *DRM_CURRENT_THREAD;
+typedef struct thread DRM_CURRENT_THREAD;
+
+#define current curthread
 
 /* file drm_fops.c, function drm_open_helper() */
 static __inline__ pid_t
-task_pid_nr(DRM_CURRENT_THREAD current) {
+task_pid_nr(DRM_CURRENT_THREAD *cur) {
 	return 0;
 }
 
@@ -530,7 +532,7 @@ struct sigset_t {
 /* file ttm/ttm_lock.c, function __ttm_read_lock() */
 /* UNIMPLEMENTED */
 static __inline__ void
-send_sig(uint32_t signal, DRM_CURRENT_THREAD current, uint32_t flags) {
+send_sig(uint32_t signal, DRM_CURRENT_THREAD *cur, uint32_t flags) {
 	;
 }
 
@@ -582,6 +584,10 @@ preempt_enable(void) {
         } while (0)
 
 #define spin_unlock_irqrestore(u, irqflags) spin_unlock(u)
+
+/* file drm_fops.c, function drm_reclaim_locked_buffers() */
+#define spin_lock_bh(l)    spin_lock(l)    /* UNIMPLEMENTED */
+#define spin_unlock_bh(l)  spin_unlock(l)  /* UNIMPLEMENTED */
 
 /* drm_crtc.h, struct drm_mode_config, field mutex and idr_mutex */
 /* file ttm/ttm_global.c, function ttm_global_init() */
@@ -780,14 +786,15 @@ waitqueue_active(wait_queue_head_t *wqh) {
 /* file ttm/ttm_lock.c, function ttm_read_lock() */
 /* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
 static __inline__ int
-wait_event(wait_queue_head_t *wqh, int condition) {
+wait_event(wait_queue_head_t wqh, int condition) {
 	return 0;
 }
 
 /* file ttm/ttm_lock.c, function ttm_read_lock() */
 /* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
+/* file drm_fops.c, function drm_read() */
 static __inline__ int
-wait_event_interruptible(wait_queue_head_t *wqh, int condition) {
+wait_event_interruptible(wait_queue_head_t wqh, int condition) {
 	return 0;
 }
 
@@ -1571,6 +1578,8 @@ struct file {
 	void *private_data;
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 	struct DRM_FILE_PATH *f_path;
+/* file drm_fops.c, function drm_open_helper () */
+	uint32_t f_flags;
 };
 
 /* file drm_fops.c, function drm_stub_open() */
@@ -1610,7 +1619,7 @@ fasync_helper(
 	int fd,
 	struct file *filp,
 	int on,
-	struct fasync_struct *buf_async
+	struct fasync_struct **buf_async
 ) {
 	return 0;
 }
@@ -1651,6 +1660,12 @@ dev_set_name(struct device *device, char *name) {
 /* file drm_stub.c, function drm_get_minor() */
 static __inline__ dev_t
 MKDEV(int major, int minor) {
+	return 0;
+}
+
+/* file drm_fops.c, function drm_fasync() */
+static __inline__ long
+old_encode_dev(dev_t device) {
 	return 0;
 }
 

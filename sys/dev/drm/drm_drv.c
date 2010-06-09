@@ -637,7 +637,7 @@ int drm_open_legacy(struct dev_open_args *ap)
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
 
-	retcode = drm_open_helper(kdev, flags, fmt, p, dev);
+	retcode = drm_open_helper_legacy(kdev, flags, fmt, p, dev);
 
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);

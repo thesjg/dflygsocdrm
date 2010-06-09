@@ -106,5 +106,11 @@
 #include <stdarg.h>
 #endif
 
+/* for curthread */
+#ifdef __DragonFly__
+#include <sys/globaldata.h>
+#include <machine/globaldata.h>
+#endif
+
 #endif /* __KERNEL__ */
 #endif

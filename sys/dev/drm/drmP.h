@@ -1385,7 +1385,7 @@ extern int drm_release(struct inode *inode, struct file *filp);
 
 /* File operations helpers (drm_fops.c) */
 /* legacy functions */
-extern int		drm_open_helper(struct cdev *kdev, int flags, int fmt,
+extern int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt,
 					 DRM_STRUCTPROC *p,
 					struct drm_device *dev);
 extern struct drm_file	*drm_find_file_by_proc(struct drm_device *dev,
