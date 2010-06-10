@@ -248,6 +248,12 @@ atomic_cmpxchg(atomic_t *reserved, uint32_t v0, uint32_t v1){
 	return atomic_cmpset_int(reserved, v0, v1);
 }
 
+/* file drm_irq.c, function drm_vblank_put() */
+static __inline__ uint32_t
+atomic_dec_and_test(atomic_t *refcount){
+	return atomic_fetchadd_int(refcount, -1) == 1;
+}
+
 /* file ttm/ttm_page_alloc.c, struct ttm_pool_manager */
 #define ATOMIC_INIT(n)  (n)
 
@@ -360,6 +366,16 @@ list_cut_position(struct list_head *pages, struct list_head *list, struct list_h
 	p->next = list->next;
 }
 
+/* file drm_irq.c, function drm_handle_vblank_events() */
+static __inline__ void
+list_move_tail(struct list_head *link, struct list_head *list) {
+	list->prev = link->prev;
+	link->prev->next = list->next;
+	list->prev->next = link->next;
+	link->next->prev = list->prev;
+	list_empty(link);
+}
+
 /*
  * red-black trees
  */
@@ -468,6 +484,9 @@ typedef struct thread DRM_CURRENT_THREAD;
 
 #define current curthread
 
+/* file drm_vm.c, function drm_vm_open_locked() */
+/* Need to find pid associated with current, current->pid */
+
 /* file drm_fops.c, function drm_open_helper() */
 static __inline__ pid_t
 task_pid_nr(DRM_CURRENT_THREAD *cur) {
@@ -522,6 +541,38 @@ typedef uint32_t gfp_t;
  * SIGNALS AND INTERRUPTS                                 *
  **********************************************************/
 
+/*
+ * IRQ
+ */
+/* legacy drm drmP.h */
+
+typedef void			irqreturn_t;
+#define IRQ_HANDLED		/* nothing */
+#define IRQ_NONE		/* nothing */
+
+#define DRM_IRQ_ARGS		void *arg
+
+/* file drm_irq.c, function drm_irq_install() */
+static __inline__ int
+request_irq(
+	int irq,
+	irqreturn_t (*irqhandler)(DRM_IRQ_ARGS),
+	uint32_t flags,
+	char *name,
+	void *dev
+) {
+	return 0;
+}
+
+/* file drm_irq.c, function drm_irq_uninstall() */
+static __inline__ int
+free_irq(
+	int irq,
+	void *dev
+) {
+	return 0;
+}
+
 /* file ttm/ttm_bo.c, function ttm_bo_mem_space() */
 /* Positive, larger than any in sys/errno.h */
 #define ERESTARTSYS 110
@@ -532,10 +583,6 @@ typedef uint32_t gfp_t;
 
 /* file drm_drv.c, function drm_ioctl() */
 #define _IOC_SIZE(cmd) sizeof(unigned long)
-
-typedef void			irqreturn_t;
-#define IRQ_HANDLED		/* nothing */
-#define IRQ_NONE		/* nothing */
 
 /* Appears to be used nowhere */
 struct sigset_t {
@@ -967,37 +1014,16 @@ struct address_space {
 	int placeholder;
 };
 
-/* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
-/* file ttm/ttm_bo.c, function ttm_bo_global_kobj_release() */
-void
-__free_page(struct page *page);
-
-/* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
-/* file ttm/ttm_bo.c, function ttm_bo_global_init() */
-struct page *
-alloc_page(int gfp_flags);
-
-/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
-/* file drm_scatter.c, function drm_sg_alloc() */
-unsigned long
-page_address(struct page *handle);
-
-/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
-void
-clear_page(unsigned long handle);
-
 /* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
-bool
-PageHighMem(struct page *page);
+static __inline__ int
+PageHighMem(struct page *page) {
+	return 0;
+}
 
 /* file ttm/ttm_tt.c, function ttm_tt_free_user_pages() */
-bool
-PageReserved(struct page *page);
-
-/* file drm_pci.c, function __drm_pci_free() */
-static __inline__ struct page *
-virt_to_page(unsigned long addr) {
-	return (struct page *)NULL;
+static __inline__ int
+PageReserved(struct page *page) {
+	return 0;
 }
 
 /* file drm_scatter.c, function drm_sg_alloc() */
@@ -1018,39 +1044,87 @@ ScatterHandle(unsigned long virtualAddr) {
 	return 0;
 }
 
-/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-void
-set_page_dirty(struct page *to_page);
+/* file i915/i195_gem.c */
+static __inline__ void
+SetPageDirty(struct page *page) {
+	;
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
+/* file ttm/ttm_bo.c, function ttm_bo_global_kobj_release() */
+static __inline__ void
+__free_page(struct page *page) {
+	;
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
+/* file ttm/ttm_bo.c, function ttm_bo_global_init() */
+static __inline__ struct page *
+alloc_page(int gfp_flags) {
+	return NULL;
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
+/* file drm_scatter.c, function drm_sg_alloc() */
+static __inline__ unsigned long
+page_address(struct page *page) {
+	return 0;
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
+static __inline__ void
+clear_page(unsigned long handle) {
+	;
+}
+
+/* file drm_pci.c, function __drm_pci_free() */
+static __inline__ struct page *
+virt_to_page(unsigned long addr) {
+	return (struct page *)NULL;
+}
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-void
-mark_page_accessed(struct page *to_page);
+static __inline__ void
+mark_page_accessed(struct page *to_page) {
+	;
+}
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-void
-page_cache_release(struct page *to_page);
+static __inline__ void
+page_cache_release(struct page *to_page) {
+	;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+static __inline__ void
+set_page_dirty(struct page *to_page) {
+	;
+}
 
 /* file ttm/ttm_tt.c, function ttm_tt_free_user_pages() */
-void
-set_page_dirty_lock(struct page *page);
+static __inline__ void
+set_page_dirty_lock(struct page *page) {
+	;
+}
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
-int
-set_pages_wb(struct page *p, uint32_t val);
+static __inline__ int
+set_pages_wb(struct page *p, uint32_t val) {
+	return 0;
+}
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
-int
-set_memory_wc(unsigned long page_address, uint32_t val);
-
-/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
-/* File ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
-bool
-page_to_pfn(struct page *page);
+static __inline__ int
+set_memory_wc(unsigned long page_address, uint32_t val) {
+	return 0;
+}
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapin() */
 /* Fourth argument NULL all calls in drm */
-struct page *
-read_mapping_page(struct address_space *swap_space, int i, void *ptr);
+static __inline__ struct page *
+read_mapping_page(struct address_space *swap_space, int i, void *ptr) {
+	return NULL;
+}
 
 /* file ttm/ttm_bo.c, function ttm_bo_unmap_virtual() */
 static __inline__ void
@@ -1121,6 +1195,17 @@ schedule(void) {
 /* file drm_fops.c, function drm_reclaim_locked_buffers() */
 static __inline__ int
 time_after_eq(unsigned long jiffies, unsigned long _end) {
+	return 0;
+}
+
+/* file drm_irq., function drm_handle_vblank_events() */
+/* On DragonFly include sys/time.h */
+/* man gettimeofday, but how.tv_sec and how.tv_usec are long? */
+static __inline__ int
+do_gettimeofday(struct timeval *now) {
+#if 0
+	return gettimeofday(now, NULL);
+#endif
 	return 0;
 }
 
@@ -1249,10 +1334,8 @@ MALLOC_DECLARE(DRM_MEM_DEFAULT);
 typedef unsigned long pgprot_t; /* UNIMPLEMENTED */
 
 /* file drm_info.c, function drm_vma_info() */
-static __inline__ unsigned long
-pgprot_val(pgprot_t prot) {
-	return 0;
-}
+/* file drm_vm.c, function drm_mmap_lock() needs to return lvalue? */
+#define pgprot_val(prot) prot
 
 /* file ttm/ttm_bo_util.c, function ttm_io_prot() */
 static __inline__ pgprot_t
@@ -1299,24 +1382,6 @@ kunmap(struct page *page) {
 static __inline__ void
 kunmap_atomic(void *dst, uint32_t flag) {
 	;
-}
-
-/* file ttm/ttm_bo_util.c, function ttm_copy_io_ttm_page() */
-static __inline__ void *
-vmap(struct page **pages, uint32_t one, uint32_t zero, pgprot_t prot)
-{
-	return (void *)NULL;
-}
-
-static __inline__ void
-vunmap(void *dst) {
-	;
-}
-
-/* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
-static __inline__ pgprot_t
-vm_get_page_prot(uint32_t flags){
-	return 0;
 }
 
 /*
@@ -1426,25 +1491,48 @@ memcpy_toio(void *dst, void *src, unsigned long value) {
  */
 
 /* file ttm_bo_c, function ttm_vm_fault() */
-#define VM_FAULT_NOPAGE
-#define VM_FAULT_SIGBUS
-#define VM_FAULT_OOM
+#define VM_FAULT_NOPAGE 0x0001
+#define VM_FAULT_SIGBUS 0x0002
+#define VM_FAULT_OOM    0x0004
 
 /* file ttm_bo_c, function ttm_bo_mmap() */
-#define VM_RESERVED
-#define VM_IO
-#define VM_MIXEDMAP
-#define VM_DONTEXPAND
+#define VM_RESERVED     0x0008
+#define VM_IO           0x0010
+#define VM_MIXEDMAP     0x0020
+#define VM_DONTEXPAND   0x0040
+
+/* file drm_memory.c, function agp_remap() */
+#define VM_IOREMAP      0x0080
+#define VM_WRITE        0x0100
+#define VM_MAYWRITE     0x0200
 
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
 struct vm_area_struct {
 /* file drm_vm.c, function drm_mmap_locked() */
 	pgprot_t vm_page_prot;
 	uint32_t vm_flags;
+/* file drm_vm.c, function drm_do_vm_fault() */
+	struct file *vm_file;
+	unsigned long vm_pgoff;
+	unsigned long vm_start;
+/* file drm_vm.c, function drm_do_shm_close() */
+	unsigned long vm_end;
+/* file drm_vm.c, function drm_do_shm_fault() */
+	void *vm_private_data;
+	const struct vm_operations_struct *vm_ops;
 };
 
+/* file drm_vm.c, function drm_do_vm_fault() */
+struct vm_fault {
+	void *virtual_address;
+	struct page* page;
+};
+
+/* file drm_vm.c, struct drm_vm_ops */
 struct vm_operations_struct {
-	int placeholder;
+	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
+	void (*open)(struct vm_area_struct *vma);
+	void (*close)(struct vm_area_struct *vma);
 };
 
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
@@ -1454,6 +1542,28 @@ vm_insert_mixed(
 	unsigned long address,
 	unsigned long pfn
 ) {
+	return 0;
+}
+
+/*
+ * Physical memory
+ */
+
+/* file drm_vm.c, function drm_do_vm_fault () */
+static __inline__ void
+get_page(struct page *page) {
+	;
+}
+
+/* file drm_vm.c, function drm_do_shm_fault () */
+static __inline__ struct page *
+vmalloc_to_page(void *handle) {
+	return NULL;
+}
+
+/* file drm_vm.c, function drm_do_vm_fault () */
+static __inline__ int
+page_count(struct page *page) {
 	return 0;
 }
 
@@ -1541,6 +1651,37 @@ ioread32(uint32_t *location) {
 static __inline__ void
 iowrite32(uint32_t src, uint32_t *dstP) {
 	;
+}
+
+/* file drm_vm.c, function drm_mmap_locked() */
+static __inline__ pgprot_t
+io_remap_pfn_range(
+	struct vm_area_struct *vma,
+	unsigned long vm_start,
+	unsigned long offset,
+	unsigned long end,
+	pgprot_t vm_page_prot
+) {
+	return 0;
+}
+
+/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
+/* File ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
+static __inline__ unsigned long
+page_to_pfn(struct page *page) {
+	return 0;
+}
+
+/* file drm_vm.c, function drm_mmap_locked() */
+static __inline__ pgprot_t
+remap_pfn_range(
+	struct vm_area_struct *vma,
+	unsigned long vm_start,
+	unsigned long pfn,
+	unsigned long end,
+	pgprot_t vm_page_prot
+) {
+	return 0;
 }
 
 /*
@@ -1664,10 +1805,45 @@ shmem_file_setup(char *name, unsigned long num_pages, uint32_t flags) {
 	return (struct file *)NULL;
 }
 
+/*
+ * Large memory allocation
+ */
+
+/* For now just treat the same as regular allocation */
+/* file drm_memory.c, function agp_remap() */
+static __inline__ void *
+vmalloc(size_t size) {
+	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK);
+}
+
 /* file drm_bufs.c, function drm_rmmap_locked() */
 static __inline__ void
 vfree(void *handle) {
+	free(handle, DRM_MEM_DEFAULT);
+}
+
+/* file drm_memory.c, function agp_remap() */
+/* file ttm/ttm_bo_util.c, function ttm_copy_io_ttm_page() */
+static __inline__ void *
+vmap(
+	struct page **pages,
+	size_t num_pages,
+	uint32_t vm_flags,
+	pgprot_t type
+) {
+	return (void *)NULL;
+}
+
+/* file ttm/ttm_bo_util.c, function ttm_copy_io_ttm_page() */
+static __inline__ void
+vunmap(void *dst) {
 	;
+}
+
+/* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
+static __inline__ pgprot_t
+vm_get_page_prot(uint32_t flags){
+	return 0;
 }
 
 /*
@@ -1708,9 +1884,34 @@ old_encode_dev(dev_t device) {
  **********************************************************/
 
 /*
+ * DMA
+ */
+
+typedef unsigned long dma_addr_t;
+
+/* From legacy older version of drmP.h */
+
+#ifndef DMA_BIT_MASK
+#define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
+#endif
+
+/* file drm_pci.c, function __drm_pci_free() */
+static __inline__ void
+dma_free_coherent(
+	struct device *dev,
+	size_t size,
+	void *vaddr,
+	dma_addr_t busaddr
+) {
+	;
+}
+
+/*
  * PCI
  */
 
+/* file drm_vm.c, function drm_mmap_locked() */
+#define PCI_VENDOR_ID_APPLE 0x0001
 
 /* drmP.h drm_stub.h */
 /* file drm_drv.c, function drm_init() */
@@ -1738,6 +1939,7 @@ struct pci_dev {
 	uint32_t class;
 	uint32_t vendor;
 	uint32_t device;
+	void *devfn;
 };
 
 /* file drm_drv.c, function drm_init() */
@@ -1799,28 +2001,53 @@ pci_name(struct pci_dev *pdev) {
 	return "0";
 }
 
-/*
- * DMA
- */
+/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
+#define PCI_DMA_BIDIRECTIONAL 0x0001
 
-typedef unsigned long dma_addr_t;
-
-/* From legacy older version of drmP.h */
-
-#ifndef DMA_BIT_MASK
-#define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
-#endif
-
-/* file drm_pci.c, function __drm_pci_free() */
-static __inline__ void
-dma_free_coherent(
-	struct device *dev,
-	size_t size,
-	void *vaddr,
-	dma_addr_t busaddr
+/* file ati_pcigart.c, function drm_ati_pcigart_init() */
+static __inline__ dma_addr_t
+pci_map_page(
+	struct pci_dev *pdev,
+	struct page *page,
+	unsigned long offset,
+	unsigned long pagesize,
+	uint32_t flags
 ) {
-	;
+	return 0;
 }
+
+/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
+static __inline__ int
+pci_unmap_page(
+	struct pci_dev *pdev,
+	dma_addr_t busaddri,
+	unsigned long pagesize,
+	uint32_t flags
+) {
+	return 0;
+}
+
+/* file ati_pcigart.c, function drm_ati_pcigart_init() */
+static __inline__ int
+pci_set_dma_mask(struct pci_dev *pdev, dma_addr_t table_mask) {
+	return 0;
+}
+
+/* file drm_irq.c, function drm_irq_by_busid() */
+static __inline__ int
+PCI_SLOT(void *devfn) {
+	return 0;
+}
+
+/* file drm_irq.c, function drm_irq_by_busid() */
+static __inline__ int
+PCI_FUNC(void *devfn) {
+	return 0;
+}
+
+/**********************************************************
+ * AGP                                                    *
+ **********************************************************/
 
 /* file ttm/ttm_agp_backend.c, function ttm_agp_populate() */
 /* file drm_agpsupport.c, function drm_agp_allocate_memory() */
@@ -1974,6 +2201,36 @@ map_page_into_agp(struct page *page) {
 }
 
 /**********************************************************
+ * VGA                                                    *
+ **********************************************************/
+
+enum vga_switcheroo_state {
+	VGA_SWITCHEROO_ON
+};
+
+/* file drm_irq.c, function drm_irq_install() */
+/* file i915/i915_dma.c, function i915_load_modeset_init() */
+static __inline__ int
+vga_client_register(
+	struct pci_dev *pdev,
+	void *cookie,
+	void (*func)(void *cookie, bool state),
+	unsigned (*decode)(void *cookie, bool state)
+) {
+	return 0;
+}
+
+/* file i915/i915_dma.c, function i915_load_modeset_init() */
+static __inline__ int
+vga_switcheroo_register_client(
+	struct pci_dev *pdev,
+	void (*set_state)(struct pci_dev *pdev, enum vga_switcheroo_state state),
+	bool (*can_switch)(struct pci_dev *pdev)
+) {
+	return 0;
+}
+
+/**********************************************************
  * FRAMEBUFFER                                            *
  **********************************************************/
 
@@ -2003,7 +2260,13 @@ typedef unsigned long pm_message_t;
 #undef CONFIG_DEBUG_FS
 #endif
 
-#define _PAGE_NO_CACHE  0x400
+#define _PAGE_NO_CACHE  0x0400
+
+/* file drm_memory.c, function agp_remap() */
+#define PAGE_AGP 0x0001
+
+/* file drm_vm.c, function drm_mmap_dma() */
+#define _PAGE_RW 0x0080
 
 /**********************************************************
  * I2C                                                    *

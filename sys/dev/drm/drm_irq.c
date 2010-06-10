@@ -476,3 +476,99 @@ void drm_handle_vblank(struct drm_device *dev, int crtc)
 	DRM_WAKEUP(&dev->vblank[crtc].queue);
 }
 
+/* newer UNIMPLEMENTED */
+void drm_vblank_off(struct drm_device *dev, int crtc)
+{
+	unsigned long irqflags;
+
+	spin_lock_irqsave(&dev->vbl_lock, irqflags);
+	dev->driver->disable_vblank(dev, crtc);
+	DRM_WAKEUP(&dev->vbl_queue[crtc]);
+	dev->vblank_enabled[crtc] = 0;
+	dev->last_vblank[crtc] = dev->driver->get_vblank_counter(dev, crtc);
+	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
+}
+EXPORT_SYMBOL(drm_vblank_off);
+
+/**
+ * drm_vblank_pre_modeset - account for vblanks across mode sets
+ * @dev: DRM device
+ * @crtc: CRTC in question
+ * @post: post or pre mode set?
+ *
+ * Account for vblank events across mode setting events, which will likely
+ * reset the hardware frame counter.
+ */
+void drm_vblank_pre_modeset(struct drm_device *dev, int crtc)
+{
+	/* vblank is not initialized (IRQ not installed ?) */
+	if (!dev->num_crtcs)
+		return;
+	/*
+	 * To avoid all the problems that might happen if interrupts
+	 * were enabled/disabled around or between these calls, we just
+	 * have the kernel take a reference on the CRTC (just once though
+	 * to avoid corrupting the count if multiple, mismatch calls occur),
+	 * so that interrupts remain enabled in the interim.
+	 */
+	if (!dev->vblank_inmodeset[crtc]) {
+		dev->vblank_inmodeset[crtc] = 0x1;
+		if (drm_vblank_get(dev, crtc) == 0)
+			dev->vblank_inmodeset[crtc] |= 0x2;
+	}
+}
+EXPORT_SYMBOL(drm_vblank_pre_modeset);
+
+void drm_vblank_post_modeset(struct drm_device *dev, int crtc)
+{
+	unsigned long irqflags;
+
+	if (dev->vblank_inmodeset[crtc]) {
+		spin_lock_irqsave(&dev->vbl_lock, irqflags);
+		dev->vblank_disable_allowed = 1;
+		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
+
+		if (dev->vblank_inmodeset[crtc] & 0x2)
+			drm_vblank_put(dev, crtc);
+
+		dev->vblank_inmodeset[crtc] = 0;
+	}
+}
+EXPORT_SYMBOL(drm_vblank_post_modeset);
+
+void drm_handle_vblank_events(struct drm_device *dev, int crtc)
+{
+	struct drm_pending_vblank_event *e, *t;
+	struct timeval now;
+	unsigned long flags;
+	unsigned int seq;
+
+	do_gettimeofday(&now);
+	seq = drm_vblank_count(dev, crtc);
+
+	spin_lock_irqsave(&dev->event_lock, flags);
+
+	list_for_each_entry_safe(e, t, &dev->vblank_event_list, base.link) {
+		if (e->pipe != crtc)
+			continue;
+		if ((seq - e->event.sequence) > (1<<23))
+			continue;
+
+		DRM_DEBUG("vblank event on %d, current %d\n",
+			  e->event.sequence, seq);
+
+		e->event.sequence = seq;
+#ifdef __linux__
+		e->event.tv_sec = now.tv_sec;
+		e->event.tv_usec = now.tv_usec;
+#else
+		e->event.tv_sec = (uint32_t)now.tv_sec;
+		e->event.tv_usec = (uint32_t)now.tv_usec;
+#endif
+		drm_vblank_put(dev, e->pipe);
+		list_move_tail(&e->base.link, &e->base.file_priv->event_list);
+		wake_up_interruptible(&e->base.file_priv->event_wait);
+	}
+
+	spin_unlock_irqrestore(&dev->event_lock, flags);
+}

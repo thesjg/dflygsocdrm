@@ -112,5 +112,10 @@
 #include <machine/globaldata.h>
 #endif
 
+/* for gettimeofday */
+#ifdef __DragonFly__
+#include <sys/time.h>
+#endif
+
 #endif /* __KERNEL__ */
 #endif

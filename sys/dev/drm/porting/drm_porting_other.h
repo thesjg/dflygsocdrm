@@ -84,8 +84,6 @@
 
 #define DRM_CURRENTPID		curthread->td_proc->p_pid
 
-#define DRM_IRQ_ARGS		void *arg
-
 /* Specific to BSD port of drm */
 /* drm_drv.c drm_ioctl() and drm_vm.c drm_mmap() */
 #define drm_get_device_from_kdev(_kdev) (_kdev->si_drv1)

@@ -28,8 +28,6 @@
 
 #include <sys/tree.h>
 
-MALLOC_DECLARE(DRM_MEM_DEFAULT);
-
 /**********************************************************
  * DATA STRUCTURES                                        *
  **********************************************************/
@@ -239,98 +237,3 @@ flush_scheduled_work(void) {
 /**********************************************************
  * VIRTUAL MEMORY                                         *
  **********************************************************/
-
-/*
- * pages
- */
-
-/* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
-/* UNIMPLEMENTED */
-void
-__free_page(struct page *page) {
-	;
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
-/* UNIMPLEMENTED */
-struct page *
-alloc_page(int gfp_flags) {
-	return (struct page *)NULL;
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
-/* UNIMPLEMENTED */
-unsigned long
-page_address(struct page *page) {
-	return 0;
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
-/* UNIMPLEMENTED */
-void
-clear_page(unsigned long handle) {
-	;
-}
-
-/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
-/* UNIMPLEMENTED */
-bool
-PageHighMem(struct page *page) {
-	return (bool)1;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_free_user_pages() */
-/* UNIMPLEMENTED */
-bool
-PageReserved(struct page *page) {
-	return (bool)1;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-void
-set_page_dirty(struct page *to_page) {
-	;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-void
-mark_page_accessed(struct page *to_page) {
-	;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-void
-page_cache_release(struct page *to_page) {
-	;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_free_user_pages() */
-void
-set_page_dirty_lock(struct page *page) {
-	;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
-int
-set_pages_wb(struct page *p, uint32_t val) {
-	return 0;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
-int
-set_memory_wc(unsigned long page_address, uint32_t val) {
-	return 0;
-}
-
-/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
-bool
-page_to_pfn(struct page *page) {
-	return (bool)1;
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_swapin() */
-/* Fourth argument NULL all calls in drm */
-struct page *
-read_mapping_page(struct address_space *swap_space, int i, void *ptr) {
-	return (struct page *)NULL;
-}
