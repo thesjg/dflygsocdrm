@@ -9,20 +9,26 @@ SRCS    = \
 	ati_pcigart.c \
 	drm_agpsupport.c \
 	drm_auth.c \
+	drm_buffer.c \
 	drm_bufs.c \
 	drm_cache.c \
 	drm_context.c \
+	drm_crtc.c \
 	drm_dma.c \
 	drm_drawable.c \
 	drm_drv.c \
+	drm_edid.c \
 	drm_fops.c \
+	drm_gem.c \
 	drm_hashtab.c \
 	drm_ioctl.c \
 	drm_irq.c \
 	drm_lock.c \
 	drm_memory.c \
 	drm_mm.c \
+	drm_modes.c \
 	drm_pci.c \
+	drm_proc.c \
 	drm_scatter.c \
 	drm_sman.c \
 	drm_stub.c \

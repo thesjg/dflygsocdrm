@@ -36,13 +36,10 @@
 #include <linux/moduleparam.h>
 #include <linux/slab.h>
 #endif
-
 #include "drmP.h"
-
 #include "drm_core.h"
 
 unsigned int drm_debug = 0;	/* 1 to enable debug output */
-
 EXPORT_SYMBOL(drm_debug);
 
 MODULE_AUTHOR(CORE_AUTHOR);
@@ -57,7 +54,6 @@ struct idr drm_minors_idr;
 struct class *drm_class;
 struct proc_dir_entry *drm_proc_root;
 struct dentry *drm_debugfs_root;
-
 void drm_ut_debug_printk(unsigned int request_level,
 			 const char *prefix,
 			 const char *function_name,
@@ -73,7 +69,6 @@ void drm_ut_debug_printk(unsigned int request_level,
 		va_end(args);
 	}
 }
-
 EXPORT_SYMBOL(drm_ut_debug_printk);
 static int drm_minor_get_id(struct drm_device *dev, int type)
 {
@@ -486,7 +481,7 @@ int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
 
         /* setup the grouping for the legacy output */
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-#ifdef __linux__
+#ifdef __linux__ /* enable when import drm_crtc.c */
 		ret = drm_mode_group_init_legacy_group(dev, &dev->primary->mode_group);
 #else
 		ret = 0;

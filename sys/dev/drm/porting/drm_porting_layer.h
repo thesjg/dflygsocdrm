@@ -127,6 +127,9 @@ module_exit(void (*func)(void)) {
 # define DEPRECATED
 #endif
 
+/* file drm_edid.c, function drm_cvt_modes() */
+#define unitialized_var(width)  width=0
+
 /* From legacy older version of drmP.h */
 
 /**********************************************************
@@ -218,6 +221,13 @@ typedef boolean_t bool;
 #define cpu_to_le32(x) htole32(x)
 #define le32_to_cpu(x) le32toh(x)
 
+/* file drm_edid.c, function drm_mode_detailed() */
+/* On DragonFly sys/endian.h */
+#define le16_to_cpu(x) le16toh(x)
+
+/* file drm_edid.c, function drm_mode_detailed() */
+#define cpu_to_le16(x) htole16(x)
+
 /* drmP.h struct drm_local_map */
 /* file drm_bufs.c, function drm_get_resource_start() */
 typedef unsigned long resource_size_t;
@@ -262,6 +272,12 @@ atomic_dec_and_test(atomic_t *refcount){
  **********************************************************/
 
 /*
+ * Math
+ */
+
+/* file drm_edid.c, macro MODE_REFRESH_DIFF() */
+#define abs(x) (x) > 0 ? (x) : -(x)
+/*
  * Memory management
  */
 
@@ -288,6 +304,9 @@ free(void *addr, struct malloc_type *type)
 #define printf	kprintf
 #define snprintf ksnprintf
 
+/* file drm_edid.c, function edid_block_valid() */
+#define print_hex_dump_bytes(arg, ...) /* UNIMPLEMENTED */
+
 /*
  * Print messages
  */
@@ -295,10 +314,12 @@ free(void *addr, struct malloc_type *type)
 /* For file drm_stub.c, function drm_ut_debug_printk() */
 /* DRM_MEM_ERROR appears unused and so is drm_mem_stats */
 
-#define KERN_DEBUG "debug::"
-#define KERN_ERR   "error::"
-#define KERN_INFO  "info::"
+#define KERN_DEBUG   "debug::"
+#define KERN_ERR     "error::"
+#define KERN_INFO    "info::"
 
+/* file drm_edid.c, function drm_mode_detailed() */
+#define KERN_WARNING "warning::"
 /* file drm_cache.c, function drm_clflush_pages() */
 #define WARN_ON_ONCE() /* UNIMPLEMENTED */
 
@@ -374,6 +395,16 @@ list_move_tail(struct list_head *link, struct list_head *list) {
 	list->prev->next = link->next;
 	link->next->prev = list->prev;
 	list_empty(link);
+}
+
+/* file drm_modes.c, function drm_mode_sort() */
+static __inline__ void
+list_sort(
+	void *priv,
+	struct list_head *list,
+	int (*compare)(void *priv, struct list_head *lh_a, struct list_head *lh_b)
+) {
+	;
 }
 
 /*
@@ -649,6 +680,10 @@ preempt_enable(void) {
 #define spin_lock_bh(l)    spin_lock(l)    /* UNIMPLEMENTED */
 #define spin_unlock_bh(l)  spin_unlock(l)  /* UNIMPLEMENTED */
 
+/*
+ * Mutex
+ */
+
 /* drm_crtc.h, struct drm_mode_config, field mutex and idr_mutex */
 /* file ttm/ttm_global.c, function ttm_global_init() */
 
@@ -656,9 +691,12 @@ preempt_enable(void) {
 
 /* file ttm/ttm_global.c, function ttm_global_item_ref() */
 
-#define mutex_init(l)   mtx_init(l)
-#define mutex_lock(l)   mtx_lock_ex_quick(l, "mtx")
-#define mutex_unlock(l) mtx_unlock_ex(l)
+#define mutex_init(l)      mtx_init(l)
+#define mutex_lock(l)      mtx_lock_ex_quick(l, "mtx")
+#define mutex_unlock(l)    mtx_unlock_ex(l)
+
+/* file drm_gem.c, function drm_gem_object_free() */
+#define mutex_is_locked(l) mtx_islocked(l)
 
 /* file ttm/ttm_object.c,
  * function ttm_object_file() */
@@ -1038,12 +1076,6 @@ ClearPageReserved(struct page *page) {
 	;
 }
 
-/* file drm_scatter.c, function drm_sg_alloc() */
-static __inline__ unsigned long
-ScatterHandle(unsigned long virtualAddr) {
-	return 0;
-}
-
 /* file i915/i195_gem.c */
 static __inline__ void
 SetPageDirty(struct page *page) {
@@ -1321,6 +1353,9 @@ MALLOC_DECLARE(DRM_MEM_DRAWABLE);
 MALLOC_DECLARE(DRM_MEM_MM);
 MALLOC_DECLARE(DRM_MEM_HASHTAB);
 MALLOC_DECLARE(DRM_MEM_DEFAULT);
+MALLOC_DECLARE(DRM_MEM_GEM);
+MALLOC_DECLARE(DRM_MEM_TTM);
+MALLOC_DECLARE(DRM_MEM_KMS);
 
 /**********************************************************
  * I/O                                                    *
@@ -1338,6 +1373,7 @@ typedef unsigned long pgprot_t; /* UNIMPLEMENTED */
 #define pgprot_val(prot) prot
 
 /* file ttm/ttm_bo_util.c, function ttm_io_prot() */
+/* file drm_gem.c, function drm_gem_mmap() */
 static __inline__ pgprot_t
 pgprot_writecombine(pgprot_t prot) {
 	return 0;
@@ -1410,7 +1446,7 @@ __put_user(void * src, void *dest) {
 
 /* file drm_crtc.c, function drm_mode_getresources() */
 static __inline__ int
-put_user(void * src, void *dest) {
+put_user(long src, void *dest) {
 	return 0;
 }
 
@@ -1422,13 +1458,14 @@ __get_user(void *dest, void *src) {
 
 /* file drm_crtc.c, function drm_mode_setcrtc() */
 static __inline__ int
-get_user(void *dest, void *src) {
+get_user(long dest, void *src) {
 	return 0;
 }
 
 /* file ttm/ttm_bo_vm.c, function ttm_bo_io() */
 /* file drm_bufs.c, function drm_freebufs() */
 /* legacy drmP.h DRM_COPY_FROM_USER() */
+/* file drm_crtc.c, function drm_mode_gamma_set_ioctl() */
 static __inline__ int
 copy_from_user(
 	void *kaddr,
@@ -1441,6 +1478,7 @@ copy_from_user(
 /* file ttm/ttm_bo_vm.c, function ttm_bo_io() */
 /* file drm_bufs.c, function drm_mapbufs() */
 /* legacy drmP.h DRM_COPY_TO_USER() */
+/* file drm_crtc.c, function drm_mode_getblob_ioctl() */
 static __inline__ int
 copy_to_user(
 	void *uaddr,
@@ -1506,6 +1544,10 @@ memcpy_toio(void *dst, void *src, unsigned long value) {
 #define VM_WRITE        0x0100
 #define VM_MAYWRITE     0x0200
 
+/*file drm_gem.c, function drm_gem_object_init() */
+#define VM_NORESERVE    0x0400
+#define VM_PFNMAP       0x0800
+
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
 struct vm_area_struct {
 /* file drm_vm.c, function drm_mmap_locked() */
@@ -1513,11 +1555,14 @@ struct vm_area_struct {
 	uint32_t vm_flags;
 /* file drm_vm.c, function drm_do_vm_fault() */
 	struct file *vm_file;
+/* file drm_vm.c, function drm_do_vm_fault() */
+/* file drm_gem.c, function drm_gem_mmap() */
 	unsigned long vm_pgoff;
 	unsigned long vm_start;
 /* file drm_vm.c, function drm_do_shm_close() */
 	unsigned long vm_end;
 /* file drm_vm.c, function drm_do_shm_fault() */
+/* file drm_gem.c, function drm_gem_vm_close() */
 	void *vm_private_data;
 	const struct vm_operations_struct *vm_ops;
 };
@@ -1738,6 +1783,12 @@ struct file {
 	uint32_t f_flags;
 };
 
+/* file drm_gem.c, function drm_gem_object_alloc() */
+static __inline__ void
+fput(struct file *filp) {
+	;
+}
+
 /* file drm_fops.c, function drm_stub_open() */
 static __inline__ struct file_operations *
 fops_get(struct file_operations *fops) {
@@ -1816,6 +1867,14 @@ vmalloc(size_t size) {
 	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK);
 }
 
+/* For now just treat the same as regular allocation */
+/* file drm_scatter.c, function drm_vmalloc_dma() */
+static __inline__ void *
+vmalloc_32(size_t size) {
+	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK);
+}
+
+
 /* file drm_bufs.c, function drm_rmmap_locked() */
 static __inline__ void
 vfree(void *handle) {
@@ -1841,6 +1900,7 @@ vunmap(void *dst) {
 }
 
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
+/* file drm_gem.c, function drm_gem_mmap() */
 static __inline__ pgprot_t
 vm_get_page_prot(uint32_t flags){
 	return 0;
@@ -1860,6 +1920,15 @@ struct device {
     struct device_type *type;
     void (*release)(struct device *dev);
 };
+
+/* file drm_edid.c, function do_get_edid() */
+/*
+ * Function actually takes
+ *    struct device *dev,
+ *    const char *format,
+ *    variable number of arguments
+ */
+#define dev_warn(arg, ...) /* UNIMPLEMENTED */
 
 /* file ttm/ttm_module.c, function ttm_init() */
 static __inline__ int
@@ -2234,12 +2303,11 @@ vga_switcheroo_register_client(
  * FRAMEBUFFER                                            *
  **********************************************************/
 
+/* file drm_mode.c, function drm_mode_equal() */
+#define KHZ2PICOS(clock) (clock) /* UNIMPLEMENTED */
+
 /* drm_crtc.h, struct drm_connector, field attr */
 struct device_attribute {
-	int placeholder;
-};
-
-struct edid {
 	int placeholder;
 };
 
@@ -2272,10 +2340,26 @@ typedef unsigned long pm_message_t;
  * I2C                                                    *
  **********************************************************/
 
+/* file drm_edid.c, function drm_do_probe_ddc_edid() */
+#define I2C_M_RD 0x0001
+
 /* file drm_crtc.h, function drm_get_edid() */
+/* file drm_edid.c, function drm_do_probe_ddc_edid() */
 struct i2c_adapter{
 	int placeholder;
 };
+
+struct i2c_msg {
+	int addr;
+	int flags;
+	int len;
+	char *buf;
+};
+
+static __inline__ int
+i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
+	return 0;
+}
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_init */
 struct i2c_board_info {

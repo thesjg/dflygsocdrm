@@ -61,6 +61,9 @@ MALLOC_DEFINE(DRM_MEM_MM, "drm_sman", "DRM MEMORY MANAGER Data Structures");
 MALLOC_DEFINE(DRM_MEM_HASHTAB, "drm_hashtab", "DRM HASHTABLE Data Structures");
 /* Default for kmalloc() and kfree() equivalent */
 MALLOC_DEFINE(DRM_MEM_DEFAULT, "drm_default", "DRM DEFAULT Data Structures");
+MALLOC_DEFINE(DRM_MEM_GEM, "drm_gem", "DRM GEM Data Structures");
+MALLOC_DEFINE(DRM_MEM_TTM, "drm_ttm", "DRM TTM Data Structures");
+MALLOC_DEFINE(DRM_MEM_KMS, "drm_kms", "DRM KMS Data Structures");
 
 /**
  * Called when "/proc/dri/%dev%/mem" is read.

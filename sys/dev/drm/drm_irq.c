@@ -30,8 +30,17 @@
  * handing interrupt handlers off to the drivers.
  */
 
+#ifdef __linux__
+#include "drmP.h"
+
+#include <linux/interrupt.h>	/* For task queue support */
+#include <linux/slab.h>
+
+#include <linux/vgaarb.h>
+#else
 #include "dev/drm/drmP.h"
 #include "dev/drm/drm.h"
+#endif
 
 int drm_irq_by_busid(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)
@@ -536,6 +545,7 @@ void drm_vblank_post_modeset(struct drm_device *dev, int crtc)
 }
 EXPORT_SYMBOL(drm_vblank_post_modeset);
 
+#ifdef __linux__ /* enable when update drm_handle_vblank */
 void drm_handle_vblank_events(struct drm_device *dev, int crtc)
 {
 	struct drm_pending_vblank_event *e, *t;
@@ -543,7 +553,11 @@ void drm_handle_vblank_events(struct drm_device *dev, int crtc)
 	unsigned long flags;
 	unsigned int seq;
 
+#ifdef __linux__
 	do_gettimeofday(&now);
+#else
+	microtime(&now);
+#endif
 	seq = drm_vblank_count(dev, crtc);
 
 	spin_lock_irqsave(&dev->event_lock, flags);
@@ -572,3 +586,4 @@ void drm_handle_vblank_events(struct drm_device *dev, int crtc)
 
 	spin_unlock_irqrestore(&dev->event_lock, flags);
 }
+#endif /* __linux__ */

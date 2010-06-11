@@ -1809,7 +1809,6 @@ void drm_gem_vm_open(struct vm_area_struct *vma);
 void drm_gem_vm_close(struct vm_area_struct *vma);
 int drm_gem_mmap(struct file *filp, struct vm_area_struct *vma);
 
-#ifdef __linux__
 static inline void
 drm_gem_object_reference(struct drm_gem_object *obj)
 {
@@ -1829,13 +1828,11 @@ drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
 	if (obj != NULL)
 		kref_put(&obj->refcount, drm_gem_object_free_unlocked);
 }
-#endif
 
 int drm_gem_handle_create(struct drm_file *file_priv,
 			  struct drm_gem_object *obj,
 			  u32 *handlep);
 
-#ifdef __linux__
 static inline void
 drm_gem_object_handle_reference(struct drm_gem_object *obj)
 {
@@ -1872,7 +1869,6 @@ drm_gem_object_handle_unreference_unlocked(struct drm_gem_object *obj)
 	kref_put(&obj->handlecount, drm_gem_object_handle_free);
 	drm_gem_object_unreference_unlocked(obj);
 }
-#endif
 
 struct drm_gem_object *drm_gem_object_lookup(struct drm_device *dev,
 					     struct drm_file *filp,

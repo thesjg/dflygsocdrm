@@ -34,7 +34,46 @@
  * by drm_ati_pcigart_init().
  */
 
+#ifdef __linux__
+#include <linux/vmalloc.h>
+#include <linux/slab.h>
+#include "drmP.h"
+#else
 #include "dev/drm/drmP.h"
+#endif
+
+#define DEBUG_SCATTER 0
+
+/* newer UNIMPLEMENTED */
+static inline void *drm_vmalloc_dma(unsigned long size)
+{
+#if defined(__powerpc__) && defined(CONFIG_NOT_COHERENT_CACHE)
+	return __vmalloc(size, GFP_KERNEL, PAGE_KERNEL | _PAGE_NO_CACHE);
+#else
+	return vmalloc_32(size);
+#endif
+}
+
+/* shared API */
+
+void
+drm_sg_cleanup(struct drm_sg_mem *entry)
+{
+	struct drm_dma_handle *dmah = entry->dmah;
+
+	bus_dmamap_unload(dmah->tag, dmah->map);
+	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
+	bus_dma_tag_destroy(dmah->tag);
+	free(dmah, DRM_MEM_DMA);
+	free(entry->busaddr, DRM_MEM_PAGES);
+	free(entry, DRM_MEM_SGLISTS);
+}
+
+#ifdef _LP64
+# define ScatterHandle(x) (unsigned int)((x >> 32) + (x & ((1L << 32) - 1)))
+#else
+# define ScatterHandle(x) (unsigned int)(x)
+#endif
 
 static void drm_sg_alloc_cb(void *arg, bus_dma_segment_t *segs,
 			    int nsegs, int error);
@@ -152,19 +191,6 @@ drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
 	DRM_DEBUG("\n");
 
 	return drm_sg_alloc(dev, request);
-}
-
-void
-drm_sg_cleanup(struct drm_sg_mem *entry)
-{
-	struct drm_dma_handle *dmah = entry->dmah;
-
-	bus_dmamap_unload(dmah->tag, dmah->map);
-	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
-	bus_dma_tag_destroy(dmah->tag);
-	free(dmah, DRM_MEM_DMA);
-	free(entry->busaddr, DRM_MEM_PAGES);
-	free(entry, DRM_MEM_SGLISTS);
 }
 
 int
