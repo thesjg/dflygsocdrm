@@ -28,9 +28,6 @@
  * Authors: Thomas Hellstrom <thellstrom-at-vmware-dot-com>
  */
 
-#include <ttm/ttm_module.h>
-#include <ttm/ttm_bo_driver.h>
-#include <ttm/ttm_placement.h>
 #ifdef __linux__
 #include <linux/mm.h>
 #include <linux/rbtree.h>
@@ -38,6 +35,9 @@
 #include <linux/uaccess.h>
 #else
 #include "porting/drm_porting_layer.h"
+#include <ttm/ttm_module.h>
+#include <ttm/ttm_bo_driver.h>
+#include <ttm/ttm_placement.h>
 #endif
 
 #define TTM_BO_VM_NUM_PREFAULT 16

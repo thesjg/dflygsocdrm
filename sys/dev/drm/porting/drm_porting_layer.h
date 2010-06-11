@@ -65,16 +65,22 @@ struct module {
 #define THIS_MODULE (struct module *)NULL;
 
 /* file ttm/ttm_module.c, epilogue */
+#if 0
 static __inline__ void
-module_init(void (*func)(void)) {
+module_init(int (*func)(void)) {
 	;
 }
+#endif
+#define module_init(arg) /* UNIMPLEMENTED */
 
+#if 0
 /* file ttm/ttm_module.c, epilogue */
 static __inline__ void
 module_exit(void (*func)(void)) {
 	;
 }
+#endif
+#define module_exit(arg) /* UNIMPLEMENTED */
 
 /* Called in drm_drawable.c, function drm_update_drawable_info().
  * Negative of error indicators sometimes assigned to (void *).
@@ -414,15 +420,26 @@ list_sort(
 /* file ttm_bo.c, function ttm_bo_vm_insert() */
 struct rb_node {
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-    struct rb_node *rb_left;
-    struct rb_node *rb_right;
+	struct rb_node *rb_left;
+	struct rb_node *rb_right;
+	struct rb_node *rb_parent;
+	int color;
 };
 
 /* file ttm/ttm_bo.c, function ttm_bo_release() */
 struct rb_root {
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-    struct rb_node rb_node;
+    struct rb_node *rb_node;
 };
+
+#define DRM_RB_ROOT  {                        \
+.rb_node =	{                             \
+	.rb_left =   (struct rb_node *)NULL,  \
+	.rb_right =  (struct rb_node *)NULL,  \
+	.rb_parent = (struct rb_node *)NULL,  \
+	.color =     0                        \
+		}                             \
+}
 
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
 /* Used implementation from drm_linux_list.h */
@@ -567,6 +584,10 @@ typedef uint32_t gfp_t;
 
 /* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
 #define GFP_DMA32       0x0200
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
+#define GFP_HIGHUSER    0x0400
+#define GFP_USER        0x0800
 
 /**********************************************************
  * SIGNALS AND INTERRUPTS                                 *
@@ -803,7 +824,7 @@ struct sysfs_ops {
 	ssize_t (*store)(
 		struct kobject *kobj,
 		struct attribute *attr,
-		char *buffer,
+		const char *buffer,
 		size_t size
 	);
 };
@@ -811,8 +832,8 @@ struct sysfs_ops {
 /* file ttm/ttm_memory.c, static struct such as ttm_mem_zone_kobj_type */
 struct kobj_type {
 	void (*release) (struct kobject *kobj);
-	struct sysfs_ops *sysfs_ops;
-	struct attribute *default_attrs[];
+	const struct sysfs_ops *sysfs_ops;
+	struct attribute **default_attrs;
 };
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
@@ -822,14 +843,21 @@ kobject_init(struct kobject *kobj, struct kobj_type *type) {
 	;
 }
 
+/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
+/* UNIMPLEMENTED */
+static __inline__ int
+kobject_add(struct kobject *kobj, struct kobject *glob, char *name) {
+	return 0;
+}
+
 /* file ttm/ttm_memory.c, function ttm_mem_init_kernel_zone() */
 /* UNIMPLEMENTED */
 static __inline__ int
 kobject_init_and_add(
 	struct kobject *zone,
-	struct kobj_type type,
+	struct kobj_type *type,
 	struct kobject *glob,
-	char *name
+	const char *name
 ) {
 	return 1;
 }
@@ -867,7 +895,7 @@ kobject_uevent_env(struct kobject *kobj, uint32_t flags, char *event[]) {
 #define wait_queue_head_t atomic_t
 
 /* file ttm/ttm_module.c, preamble */
-#define DECLARE_WAIT_QUEUE_HEAD(a) (a) /* UNIMPLEMENTED */
+#define DECLARE_WAIT_QUEUE_HEAD(var) wait_queue_head_t var /* UNIMPLEMENTED */
 
 /* file ttm/ttm_lock.c, function ttm_lock_init() */
 static __inline__ void
@@ -949,24 +977,32 @@ struct workqueue_struct {
 };
 
 /* file ttm_memory.c, function ttm_mem_global_init() */
-struct workqueue *
-create_singlethread_workqueue(char *name);
+static __inline__ struct workqueue_struct *
+create_singlethread_workqueue(const char *name) {
+	return NULL;
+}
 
 /* file ttm_memory.c, function ttm_check_swapping() */
-void
-queue_work(struct workqueue * wq, struct work *work);
+static __inline__ int
+queue_work(struct workqueue_struct *swap_queue, struct work_struct *work) {
+	return 0;
+}
 
 /* file ttm_memory.c, function ttm_mem_global_release() */
-void
-flush_workqueue(struct workqueue *wq);
+static __inline__ int
+flush_workqueue(struct workqueue_struct *swap_queue) {
+	return 0;
+}
 
 /* file ttm_memory.c, function ttm_mem_global_release() */
-void
-destroy_workqueue(struct workqueue *wq);
+static __inline__ int
+destroy_workqueue(struct workqueue_struct *swap_queue) {
+	return 0;
+}
 
 /* file ttm_bo_c, function ttm_bo_cleanup_refs() */
 struct delayed_work {
-	int placeholder;
+	struct work_struct work;
 };
 
 /* file ttm_bo_c, function ttm_bo_cleanup_refs() */
@@ -980,26 +1016,37 @@ void INIT_DELAYED_WORK(
 
 /* file ttm_bo_c,
  * function ttm_bo_cleanup_refs() */
-void schedule_delayed_work(
+static __inline__ int
+schedule_delayed_work(
     struct delayed_work *wq,
     unsigned long time
-);
+) {
+	return 0;
+}
 
 /* file ttm_bo_c, function ttm_vm_fault() */
-void
-set_need_resched(void);
+static __inline__ int
+set_need_resched(void) {
+	return 0;
+}
+
+/* file ttm_bo_c, function ttm_bo_device_release() */
+static __inline__ int
+cancel_delayed_work(struct delayed_work *wq) {
+	return 0;
+}
 
 /* file ttm_bo_c, function ttm_bo_lock_delayed_workqueue() */
-void
-cancel_delayed_work_sync(struct delayed_work *wq);
+static __inline__ int
+cancel_delayed_work_sync(struct delayed_work *wq) {
+	return 0;
+}
 
 /* file ttm_bo_c, function ttm_bo_device_release() */
-void
-cancel_delayed_work(struct delayed_work *wq);
-
-/* file ttm_bo_c, function ttm_bo_device_release() */
-void
-flush_scheduled_work(void);
+static __inline__ int
+flush_scheduled_work(void) {
+	return 0;
+}
 
 /* drm_crtc.h, struct drm_mode_config, field output_poll_slow_work */
 struct delayed_slow_work {
@@ -1096,6 +1143,12 @@ alloc_page(int gfp_flags) {
 	return NULL;
 }
 
+/* file ttm/ttm_tt.c, function ttm_free_user_pages() */
+static __inline__ int
+put_page(struct page *page) {
+	return 0;
+}
+
 /* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
 /* file drm_scatter.c, function drm_sg_alloc() */
 static __inline__ unsigned long
@@ -1142,6 +1195,12 @@ set_page_dirty_lock(struct page *page) {
 /* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
 static __inline__ int
 set_pages_wb(struct page *p, uint32_t val) {
+	return 0;
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_set_page_caching() */
+static __inline__ int
+set_pages_uc(struct page *p, uint32_t val) {
 	return 0;
 }
 
@@ -1768,17 +1827,17 @@ struct dentry {
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 struct DRM_FILE_PATH {
-	struct dentry dentry;
+	struct dentry *dentry;
 };
 
 /* file drm_fops.c, function drm_open() */
 struct file {
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+	struct DRM_FILE_PATH f_path;
 /* file drm_fops.c, function drm_stub_open() */
 	struct file_operations *f_op;
 /* file drm_fops.c, function drm_open_helper() */
 	void *private_data;
-/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-	struct DRM_FILE_PATH *f_path;
 /* file drm_fops.c, function drm_open_helper () */
 	uint32_t f_flags;
 };
@@ -1917,8 +1976,9 @@ struct device_type {
 };
 
 struct device {
-    struct device_type *type;
-    void (*release)(struct device *dev);
+	struct kobject kobj;
+	struct device_type *type;
+	void (*release)(struct device *dev);
 };
 
 /* file drm_edid.c, function do_get_edid() */

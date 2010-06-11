@@ -25,10 +25,10 @@
  *
  **************************************************************************/
 
+#ifdef __linux__
 #include "ttm/ttm_memory.h"
 #include "ttm/ttm_module.h"
 #include "ttm/ttm_page_alloc.h"
-#ifdef __linux__
 #include <linux/spinlock.h>
 #include <linux/sched.h>
 #include <linux/wait.h>
@@ -37,6 +37,9 @@
 #include <linux/slab.h>
 #else
 #include "porting/drm_porting_layer.h"
+#include "ttm/ttm_memory.h"
+#include "ttm/ttm_module.h"
+#include "ttm/ttm_page_alloc.h"
 #include "porting/drm_porting_memory.h"
 #endif
 

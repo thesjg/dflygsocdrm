@@ -202,6 +202,7 @@ extern int ttm_vt_lock(struct ttm_lock *lock, bool interruptible,
  */
 extern int ttm_vt_unlock(struct ttm_lock *lock);
 
+#ifdef __linux__ /* redundant */
 /**
  * ttm_write_unlock
  *
@@ -222,6 +223,7 @@ extern void ttm_write_unlock(struct ttm_lock *lock);
  * -ERESTARTSYS If interrupted by a signal and interruptible is true.
  */
 extern int ttm_write_lock(struct ttm_lock *lock, bool interruptible);
+#endif /* __linux__ */
 
 /**
  * ttm_lock_set_kill

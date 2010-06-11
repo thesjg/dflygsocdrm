@@ -36,9 +36,6 @@
  * reset the pointer to NULL.
  */
 
-#include "ttm/ttm_module.h"
-#include "ttm/ttm_bo_driver.h"
-#include "ttm/ttm_placement.h"
 #ifdef __linux__
 #include <linux/jiffies.h>
 #include <linux/slab.h>
@@ -48,6 +45,9 @@
 #include <linux/module.h>
 #else
 #include "porting/drm_porting_layer.h"
+#include "ttm/ttm_module.h"
+#include "ttm/ttm_bo_driver.h"
+#include "ttm/ttm_placement.h"
 #include "porting/drm_porting_memory.h"
 #endif
 
@@ -236,9 +236,15 @@ static int ttm_bo_del_from_lru(struct ttm_buffer_object *bo)
 	return put_count;
 }
 
+#ifdef __linux__
 int ttm_bo_reserve_locked(struct ttm_buffer_object *bo,
 			  bool interruptible,
 			  bool no_wait, bool use_sequence, uint32_t sequence)
+#else
+static int ttm_bo_reserve_locked(struct ttm_buffer_object *bo,
+			  bool interruptible,
+			  bool no_wait, bool use_sequence, uint32_t sequence)
+#endif
 {
 	struct ttm_bo_global *glob = bo->glob;
 	int ret;
@@ -344,8 +350,13 @@ static int ttm_bo_add_ttm(struct ttm_buffer_object *bo, bool zero_alloc)
 			break;
 		}
 
+#ifdef __linux__
 		ret = ttm_tt_set_user(bo->ttm, current,
 				      bo->buffer_start, bo->num_pages);
+#else /* to compile */
+		ret = ttm_tt_set_user(bo->ttm, (struct task_struct *)NULL,
+				      bo->buffer_start, bo->num_pages);
+#endif
 		if (unlikely(ret != 0))
 			ttm_tt_destroy(bo->ttm);
 		break;
@@ -999,10 +1010,17 @@ int ttm_bo_wait_cpu(struct ttm_buffer_object *bo, bool no_wait)
 }
 EXPORT_SYMBOL(ttm_bo_wait_cpu);
 
+#ifdef __linux__
 int ttm_bo_move_buffer(struct ttm_buffer_object *bo,
 			struct ttm_placement *placement,
 			bool interruptible, bool no_wait_reserve,
 			bool no_wait_gpu)
+#else
+static int ttm_bo_move_buffer(struct ttm_buffer_object *bo,
+			struct ttm_placement *placement,
+			bool interruptible, bool no_wait_reserve,
+			bool no_wait_gpu)
+#endif
 {
 	struct ttm_bo_global *glob = bo->glob;
 	int ret = 0;
@@ -1537,7 +1555,9 @@ int ttm_bo_device_init(struct ttm_bo_device *bdev,
 	if (unlikely(ret != 0))
 		goto out_no_sys;
 
+#ifdef __linux__
 	bdev->addr_space_rb = RB_ROOT;
+#endif
 	ret = drm_mm_init(&bdev->addr_space_mm, file_page_offset, 0x10000000);
 	if (unlikely(ret != 0))
 		goto out_no_addr_mm;

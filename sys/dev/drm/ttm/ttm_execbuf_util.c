@@ -25,15 +25,15 @@
  *
  **************************************************************************/
 
-#include "ttm/ttm_execbuf_util.h"
-#include "ttm/ttm_bo_driver.h"
-#include "ttm/ttm_placement.h"
 #ifdef __linux__
 #include <linux/wait.h>
 #include <linux/sched.h>
 #include <linux/module.h>
 #else
 #include "porting/drm_porting_layer.h"
+#include "ttm/ttm_execbuf_util.h"
+#include "ttm/ttm_bo_driver.h"
+#include "ttm/ttm_placement.h"
 #endif
 
 void ttm_eu_backoff_reservation(struct list_head *list)

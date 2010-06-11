@@ -49,9 +49,9 @@
  * for fast lookup of ref objects given a base object.
  */
 
+#ifdef __linux__
 #include "ttm/ttm_object.h"
 #include "ttm/ttm_module.h"
-#ifdef __linux__
 #include <linux/list.h>
 #include <linux/spinlock.h>
 #include <linux/slab.h>
@@ -59,6 +59,8 @@
 #include <asm/atomic.h>
 #else
 #include "porting/drm_porting_layer.h"
+#include "ttm/ttm_object.h"
+#include "ttm/ttm_module.h"
 #include "porting/drm_porting_memory.h"
 #endif
 

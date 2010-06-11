@@ -28,7 +28,6 @@
  * Authors: Thomas Hellstrom <thellstrom-at-vmware-dot-com>
  */
 
-#include "ttm/ttm_module.h"
 #ifdef __linux__
 #include <linux/mutex.h>
 #include <linux/slab.h>
@@ -36,6 +35,7 @@
 #else
 #include "porting/drm_porting_layer.h"
 #endif
+#include "ttm/ttm_module.h"
 
 struct ttm_global_item {
 	struct mutex mutex;
@@ -75,7 +75,11 @@ int ttm_global_item_ref(struct ttm_global_reference *ref)
 
 	mutex_lock(&item->mutex);
 	if (item->refcount == 0) {
+#ifdef __linux__
 		item->object = kzalloc(ref->size, GFP_KERNEL);
+#else
+		item->object = malloc(ref->size, DRM_MEM_TTM, M_WAITOK | M_ZERO);
+#endif
 		if (unlikely(item->object == NULL)) {
 			ret = -ENOMEM;
 			goto out_err;

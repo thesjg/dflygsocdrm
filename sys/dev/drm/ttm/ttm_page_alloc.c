@@ -42,9 +42,9 @@
 
 #include <asm/atomic.h>
 #include <asm/agp.h>
-#else
+#else /* __linux__ */
 #include "porting/drm_porting_layer.h"
-#endif
+#endif /* __linux__ */
 
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_page_alloc.h"
@@ -114,15 +114,21 @@ struct ttm_pool_manager {
 	atomic_t		page_alloc_inited;
 	struct ttm_pool_opts	options;
 
+#ifdef __linux__
 	union {
+#endif
 		struct ttm_page_pool	pools[NUM_POOLS];
+#ifdef __linux__
 		struct {
+#endif
 			struct ttm_page_pool	wc_pool;
 			struct ttm_page_pool	uc_pool;
 			struct ttm_page_pool	wc_pool_dma32;
 			struct ttm_page_pool	uc_pool_dma32;
+#ifdef __linux__
 		} ;
 	};
+#endif
 };
 
 static struct attribute ttm_page_pool_max = {
@@ -223,7 +229,7 @@ static struct ttm_pool_manager _manager = {
 	.page_alloc_inited	= ATOMIC_INIT(0)
 };
 
-#ifndef CONFIG_X86
+/* #ifndef CONFIG_X86 __linux__ */
 static int set_pages_array_wb(struct page **pages, int addrinarray)
 {
 #ifdef TTM_HAS_AGP
@@ -256,7 +262,7 @@ static int set_pages_array_uc(struct page **pages, int addrinarray)
 #endif
 	return 0;
 }
-#endif
+/* #endif __linux__ */
 
 /**
  * Select the right pool or requested caching state and ttm flags. */

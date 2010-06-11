@@ -28,8 +28,6 @@
  * Authors: Thomas Hellstrom <thellstrom-at-vmware-dot-com>
  */
 
-#include "ttm/ttm_lock.h"
-#include "ttm/ttm_module.h"
 #ifdef __linux__
 #include <asm/atomic.h>
 #include <linux/errno.h>
@@ -39,6 +37,8 @@
 #else
 #include "porting/drm_porting_layer.h"
 #endif
+#include "ttm/ttm_lock.h"
+#include "ttm/ttm_module.h"
 
 #define TTM_WRITE_LOCK_PENDING    (1 << 0)
 #define TTM_VT_LOCK_PENDING       (1 << 1)
