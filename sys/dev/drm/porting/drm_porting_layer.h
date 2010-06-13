@@ -2738,5 +2738,13 @@ i2c_del_driver(struct i2c_driver *driver) {
 	return 0;
 }
 
+/**********************************************************
+ * FIRMWARE                                               *
+ **********************************************************/
+
+struct firmware {
+	int placeholder;
+};
+
 #endif /* __KERNEL__ */
 #endif
