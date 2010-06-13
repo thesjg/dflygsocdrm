@@ -380,9 +380,9 @@ typedef struct drm_radeon_private {
 
 	u32 scratch_ages[5];
 
-/* #ifdef __linux__ */
+#ifdef __linux__
 	int have_z_offset;
-/* #endif __linux__ */
+#endif
 
 	/* starting from here on, data is preserved accross an open */
 	uint32_t flags;		/* see radeon_chip_flags */
@@ -415,7 +415,7 @@ typedef struct drm_radeon_private {
 	int r700_sc_prim_fifo_size;
 	int r700_sc_hiz_tile_fifo_size;
 	int r700_sc_earlyz_tile_fifo_fize;
-/* #ifdef __linux__ */
+#ifdef __linux__
 	int r600_group_size;
 	int r600_npipes;
 	int r600_nbanks;
@@ -423,18 +423,18 @@ typedef struct drm_radeon_private {
 	struct mutex cs_mutex;
 	u32 cs_id_scnt;
 	u32 cs_id_wcnt;
-/* #endif */
+#endif
 	/* r6xx/r7xx drm blit vertex buffer */
 	struct drm_buf *blit_vb;
 
-/* #ifdef __linux__ */
+#ifdef __linux__
 	/* firmware */
 	const struct firmware *me_fw, *pfp_fw;
-/* #else */
+#else
 	/* CS */
 	struct drm_radeon_cs_priv cs;
 	struct drm_buf *cs_buf;
-/* #endif __linux__ */
+#endif
 } drm_radeon_private_t;
 
 typedef struct drm_radeon_buf_priv {
