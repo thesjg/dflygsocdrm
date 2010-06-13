@@ -2742,11 +2742,10 @@ i2c_del_driver(struct i2c_driver *driver) {
  * FIRMWARE                                               *
  **********************************************************/
 
-#if 0
+/* file radeon_drv.h, struct drm_radeon_private */
 struct firmware {
 	int placeholder;
 };
-#endif
 
 #endif /* __KERNEL__ */
 #endif
