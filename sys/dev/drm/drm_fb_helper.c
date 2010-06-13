@@ -42,7 +42,11 @@ MODULE_AUTHOR("David Airlie, Jesse Barnes");
 MODULE_DESCRIPTION("DRM KMS helper");
 MODULE_LICENSE("GPL and additional rights");
 
+#ifdef __linux__
 static LIST_HEAD(kernel_fb_helper_list);
+#else
+static struct list_head kernel_fb_helper_list;
+#endif /* __linux__ */
 
 /* simple single crtc case helper function */
 int drm_fb_helper_single_add_all_connectors(struct drm_fb_helper *fb_helper)
@@ -280,9 +284,11 @@ int drm_fb_helper_panic(struct notifier_block *n, unsigned long ununsed,
 }
 EXPORT_SYMBOL(drm_fb_helper_panic);
 
+#ifdef __linux__
 static struct notifier_block paniced = {
 	.notifier_call = drm_fb_helper_panic,
 };
+#endif /* __linux__ */
 
 /**
  * drm_fb_helper_restore - restore the framebuffer console (kernel) config
@@ -424,7 +430,11 @@ static void drm_fb_helper_crtc_free(struct drm_fb_helper *helper)
 	int i;
 
 	for (i = 0; i < helper->connector_count; i++)
+#ifdef __linux__
 		kfree(helper->connector_info[i]);
+#else
+		free(helper->connector_info[i], DRM_MEM_KMS);
+#endif /* __linux__ */
 #ifdef __linux__
 	kfree(helper->connector_info);
 #else
@@ -908,7 +918,6 @@ EXPORT_SYMBOL(drm_fb_helper_single_fb_probe);
 void drm_fb_helper_fill_fix(struct fb_info *info, uint32_t pitch,
 			    uint32_t depth)
 {
-#ifdef __linux__ /* UNIMPLEMENTED */
 	info->fix.type = FB_TYPE_PACKED_PIXELS;
 	info->fix.visual = depth == 8 ? FB_VISUAL_PSEUDOCOLOR :
 		FB_VISUAL_TRUECOLOR;
@@ -920,7 +929,6 @@ void drm_fb_helper_fill_fix(struct fb_info *info, uint32_t pitch,
 	info->fix.type_aux = 0;
 
 	info->fix.line_length = pitch;
-#endif /* __linux__ UNIMPLEMENTED */
 	return;
 }
 EXPORT_SYMBOL(drm_fb_helper_fill_fix);
@@ -928,7 +936,6 @@ EXPORT_SYMBOL(drm_fb_helper_fill_fix);
 void drm_fb_helper_fill_var(struct fb_info *info, struct drm_fb_helper *fb_helper,
 			    uint32_t fb_width, uint32_t fb_height)
 {
-#ifdef __linux__
 	struct drm_framebuffer *fb = fb_helper->fb;
 	info->pseudo_palette = fb_helper->pseudo_palette;
 	info->var.xres_virtual = fb->width;
@@ -996,7 +1003,6 @@ void drm_fb_helper_fill_var(struct fb_info *info, struct drm_fb_helper *fb_helpe
 
 	info->var.xres = fb_width;
 	info->var.yres = fb_height;
-#endif /* __linux__ UNIMPLEMENTED */
 }
 EXPORT_SYMBOL(drm_fb_helper_fill_var);
 
