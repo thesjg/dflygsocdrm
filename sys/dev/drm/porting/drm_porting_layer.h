@@ -2742,9 +2742,11 @@ i2c_del_driver(struct i2c_driver *driver) {
  * FIRMWARE                                               *
  **********************************************************/
 
+#if 0
 struct firmware {
 	int placeholder;
 };
+#endif
 
 #endif /* __KERNEL__ */
 #endif
