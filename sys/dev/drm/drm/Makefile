@@ -14,13 +14,18 @@ SRCS    = \
 	drm_cache.c \
 	drm_context.c \
 	drm_crtc.c \
+	drm_crtc_helper.c \
 	drm_dma.c \
+	drm_dp_i2c_helper.c \
 	drm_drawable.c \
 	drm_drv.c \
+	drm_encoder_slave.c \
 	drm_edid.c \
+	drm_fb_helper.c \
 	drm_fops.c \
 	drm_gem.c \
 	drm_hashtab.c \
+	drm_info.c \
 	drm_ioctl.c \
 	drm_irq.c \
 	drm_lock.c \

@@ -62,7 +62,25 @@ struct module {
 	int placeholder;
 };
 
-#define THIS_MODULE (struct module *)NULL;
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+static __inline__ int
+request_module(char *modalias) {
+	return 0;
+}
+
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+static __inline__ int
+try_module_get(struct module *module) {
+	return 0;
+}
+
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+static __inline__ int
+module_put(struct module *module) {
+	return 0;
+}
+
+#define THIS_MODULE (struct module *)NULL
 
 /* file ttm/ttm_module.c, epilogue */
 #if 0
@@ -288,6 +306,13 @@ atomic_dec_and_test(atomic_t *refcount){
 
 /* file drm_edid.c, macro MODE_REFRESH_DIFF() */
 #define abs(x) (x) > 0 ? (x) : -(x)
+
+/* file drm_fb_helper.c, function drm_fb_helper_connector_parse_command_line() */
+static __inline__ long
+simple_strtol(const char *nptr, char **endptr, int base) {
+	return strtol(nptr, endptr, base);
+}
+
 /*
  * Memory management
  */
@@ -334,13 +359,17 @@ free(void *addr, struct malloc_type *type)
 /* file drm_cache.c, function drm_clflush_pages() */
 #define WARN_ON_ONCE() /* UNIMPLEMENTED */
 
+/* file drm_crtc_helper, function drm_encoder_crtc_ok() */
+#define WARN(cond, ...) if (cond) kprintf(__VA_ARGS__)
+
 /* file ttm/ttm_page_alloc.h, function ttm_page_alloc_debugfs() */
 struct seq_file {
-	int placeholder;
+/* file drm_info.c, function drm_name_info() */
+	void *private;
 };
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_alloc_debugfs() */
-#define seq_printf(seq_file, ...) /* UNIMPLEMENTED */
+#define seq_printf(seq_file, ...) kprintf(__VA_ARGS__) /* UNIMPLEMENTED */
 
 /*
  * File mode permissions
@@ -972,6 +1001,12 @@ INIT_WORK(
 #endif
 #define INIT_WORK(a, b) /* UNIMPLEMENTED */
 
+/* file drm_fb_helper.c, function drm_fb_helper.sysrq() */
+static __inline__ int
+schedule_work(struct work *work) {
+	return 0;
+}
+
 struct workqueue {
 	int placeholder;
 };
@@ -1053,10 +1088,80 @@ flush_scheduled_work(void) {
 	return 0;
 }
 
-/* drm_crtc.h, struct drm_mode_config, field output_poll_slow_work */
-struct delayed_slow_work {
+/* drm_crtc_helper.c, function output_poll_output() */
+struct slow_work {
 	int placeholder;
 };
+
+/* drm_crtc.h, struct drm_mode_config, field output_poll_slow_work */
+/* drm_crtc_helper.c, function output_poll_execute() */
+struct delayed_slow_work {
+	struct slow_work work;
+};
+
+/* drm_crtc_helper.c, struct output_poll_ops */
+struct slow_work_ops {
+	void (*execute)(struct slow_work *work);
+};
+
+/* drm_crtc_helper.c, function output_poll_execute() */
+static __inline__ int
+delayed_slow_work_enqueue(struct delayed_slow_work *delayed_work, uint32_t flags) {
+	return 0;
+}
+
+/* drm_crtc_helper.c, function output_poll_execute() */
+static __inline__ int
+slow_work_register_user(struct module *thisModule) {
+	return 0;
+}
+
+/* drm_crtc_helper.c, function output_poll_fini() */
+static __inline__ int
+slow_work_unregister_user(struct module *thisModule) {
+	return 0;
+}
+
+/* drm_crtc_helper.c, function drm_kms_helper_poll_init() */
+static __inline__ int
+delayed_slow_work_init(struct delayed_slow_work *delayed_work, struct slow_work_ops *ops) {
+	return 0;
+}
+
+/* drm_crtc_helper.c, function drm_kms_helper_poll_fini() */
+static __inline__ int
+delayed_slow_work_cancel(struct delayed_slow_work *delayed_work) {
+	return 0;
+}
+
+/* drm_fb_helper.c, struct block_paniced */
+struct notifier_block {
+	int (*notifier_call)(struct notifier_block *n, unsigned long ununsed, void *panic_str);
+};
+
+/* drm_fb_helper.c, struct sysrq_drm_fb_helper_restore_op */
+struct tty_struct {
+	int placeholder;
+};
+
+/* drm_fb_helper.c, struct sysrq_drm_fb_helper_restore_op */
+struct sysrq_key_op {
+	void (*handler)(int dummy1, struct tty_struct *dummy3);
+	const char *help_msg;
+	const char *action_msg;
+};
+
+/* drm_fb_helper.c, function drm_fb_helper_fini() */
+static __inline__ int
+register_sysrq_key(char v, struct sysrq_key_op *op) {
+	return 0;
+}
+
+/* drm_fb_helper.c, function drm_fb_helper_fini() */
+static __inline__ int
+unregister_sysrq_key(char v, struct sysrq_key_op *op) {
+	return 0;
+}
 
 /* file ttm/ttm_page_alloc.c, function ttm_pool_manager() */
 struct shrinker {
@@ -1533,7 +1638,7 @@ get_user(long dest, void *src) {
 static __inline__ int
 copy_from_user(
 	void *kaddr,
-	void __user *uaddr,
+	const void __user *uaddr,
 	size_t iosize
 ) {
 	return copyin(uaddr, kaddr, iosize);
@@ -1546,7 +1651,7 @@ copy_from_user(
 static __inline__ int
 copy_to_user(
 	void *uaddr,
-	void *kaddr,
+	const void *kaddr,
 	size_t iosize
 ) {
 	return copyout(kaddr, uaddr, iosize);
@@ -2063,6 +2168,8 @@ struct pci_device_id {
 /* file drm_drv.c, function drm_init() */
 struct pci_driver {
 	struct pci_device_id *id_table;
+/* file drm_info.c, function drm_name_info() */
+	char *name;
 };
 
 struct pci_dev {
@@ -2368,8 +2475,134 @@ vga_switcheroo_register_client(
  * FRAMEBUFFER                                            *
  **********************************************************/
 
+/* file drm_fb_helper.c */
+#define FB_BLANK_UNBLANK        1
+#define FB_BLANK_NORMAL         2
+#define FB_BLANK_HSYNC_SUSPEND  3
+#define FB_BLANK_VSYNC_SUSPEND  4
+#define FB_BLANK_POWERDOWN      5
+
+/* file drm_fb_helper.c, function setcolreg() */
+#define FB_VISUAL_TRUECOLOR     6
+
+/* file drm_fb_helper.c, function drm_helper_fill_fix() */
+#define FB_VISUAL_PSEUDOCOLOR   7
+#define FB_TYPE_PACKED_PIXELS   8
+#define FB_ACCEL_NONE           9
+
+/* file drm_fb_helper.c, function drm_fb_helper_fill_var() */
+#define FB_ACTIVATE_NOW        10
+
 /* file drm_mode.c, function drm_mode_equal() */
 #define KHZ2PICOS(clock) (clock) /* UNIMPLEMENTED */
+
+struct DRM_FB_COLOR {
+	uint16_t offset;
+	uint16_t length;
+};
+
+/* file drm_fb_helper.c, function setcolreg() */
+struct fb_fix_screeninfo {
+	int bits_per_pixel;
+	int xres;
+	int yres;
+	long pixclock;
+/* file drm_fb_helper.c, function drm_fb_helper_pan_display() */
+	uint32_t xoffset;
+	uint32_t yoffset;
+	struct DRM_FB_COLOR red;
+	struct DRM_FB_COLOR green;
+	struct DRM_FB_COLOR blue;
+	struct DRM_FB_COLOR transp;
+/* file drm_fb_helper.c, function drm_fb_helper_single_fb_probe() */
+	char *id;
+/* file drm_fb_helper.c, function drm_helper_fill_fix() */
+	uint32_t type;
+	uint32_t type_aux;
+	uint32_t xpanstep;
+	uint32_t ypanstep;
+	uint32_t xwrapstep;
+	uint32_t ywrapstep;
+	uint32_t visual;
+	uint32_t accel;
+	uint32_t line_length;
+};
+
+/* file drm_fb_helper.c, function setcolreg() */
+struct fb_var_screeninfo {
+	int bits_per_pixel;
+	int xres;
+	int yres;
+	long pixclock;
+/* file drm_fb_helper.c, function drm_fb_helper_pan_display() */
+	uint32_t xoffset;
+	uint32_t yoffset;
+	struct DRM_FB_COLOR red;
+	struct DRM_FB_COLOR green;
+	struct DRM_FB_COLOR blue;
+	struct DRM_FB_COLOR transp;
+/* file drm_fb_helper.c, function drm_fb_helper_single_fb_probe() */
+	char *id;
+/* file drm_fb_helper.c, function drm_helper_fill_fix() */
+	uint32_t type;
+	uint32_t visual;
+	uint32_t type_aux;
+	uint32_t xpanstep;
+	uint32_t ypanstep;
+	uint32_t xwrapstep;
+	uint32_t ywrapstep;
+	uint32_t line_length;
+/* file drm_fb_helper.c, function drm_fb_helper_fill_var() */
+	uint32_t xres_virtual;
+	uint32_t yres_virtual;
+	uint32_t activate;
+	uint32_t height;
+	uint32_t width;
+};
+
+/*file drm_fb_helper.h, function drm_fb_helper_blank() */
+struct fb_info {
+	struct fb_var_screeninfo var;
+	struct fb_fix_screeninfo fix;
+	void *pseudo_palette;
+	void *par;
+	uint32_t node;
+};
+
+/*file drm_fb_helper.h, function drm_fb_helper_setcmap() */
+struct fb_cmap {
+	uint16_t *red;
+	uint16_t *green;
+	uint16_t *blue;
+	uint16_t *transp;
+	int start;
+	int len;
+};
+
+/* file drm_fb_helper.c, function drm_fb_helper_parse_command_line() */
+static __inline__ int
+fb_get_options(const char *name, char **option) {
+	return 0;
+}
+
+/* file drm_fb_helper.c, function drm_fb_helper_single_fb_probe() */
+static __inline__ int
+register_framebuffer(struct fb_info *info) {
+	return 0;
+}
+
+/* file radeon/radeon_fb.c */
+static __inline__ int
+unregister_framebuffer(struct fb_info *info) {
+	return 0;
+}
+
+/*
+ * Framebuffer global variables
+ */
+#define DEFAULT_FB_MODE_OPTION "default fb mode option"
+
+extern const char *fb_mode_option;
 
 /* drm_crtc.h, struct drm_connector, field attr */
 struct device_attribute {
@@ -2405,22 +2638,54 @@ typedef unsigned long pm_message_t;
  * I2C                                                    *
  **********************************************************/
 
+/* file drm_encoder_slave.c, function i2c_algo_dp_aux_functionality() */
+#define I2C_FUNC_I2C                    0x0001
+#define I2C_FUNC_SMBUS_EMUL             0x0002
+#define I2C_FUNC_SMBUS_READ_BLOCK_DATA  0x0004
+#define I2C_FUNC_SMBUS_BLOCK_PROC_CALL  0x0008
+#define I2C_FUNC_10BIT_ADDR             0x0010
+
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+#define I2C_MODULE_PREFIX "iic"
+#define I2C_NAME_SIZE 32
+
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 #define I2C_M_RD 0x0001
+
+struct i2c_algorithm;
+
+/* file drm_edid.c, function drm_do_probe_ddc_edid() */
+struct i2c_msg {
+/* spec seems to say 10-bit addresses possible */
+/* file radeon_i2c.c, function radeon_i2c_get_byte() */
+/* file drm_dp_i2c_helper.c, function i2c_algo_dp_aux_xfer() */
+	uint16_t addr;
+	uint32_t flags;
+/* file drm_dp_i2c_helper.c, function i2c_algo_dp_aux_xfer() */
+	uint16_t len;
+	char *buf;
+};
 
 /* file drm_crtc.h, function drm_get_edid() */
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 struct i2c_adapter{
-	int placeholder;
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+	struct module *owner;
+/* file drm_dp_i2c_helper.c, function i2c_algo_dp_aux_transaction() */
+	void *algo_data;
+/* file drm_dp_i2c_helper.c, function i2c_dp_aux_prepare_bus() */
+	uint32_t retries;
+	const struct i2c_algorithm *algo;
 };
 
-struct i2c_msg {
-	int addr;
-	int flags;
-	int len;
-	char *buf;
+/* file drm_dp_i2c_helper.c, struct i2c_dp_aux_algo */
+struct i2c_algorithm {
+	int (*master_xfer)(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
+	uint32_t (*functionality)(struct i2c_adapter *adapter);
 };
 
+/* file drm_crtc.h, function drm_get_edid() */
+/* file drm_edid.c, function drm_do_probe_ddc_edid() */
 static __inline__ int
 i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
 	return 0;
@@ -2428,18 +2693,50 @@ i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_init */
 struct i2c_board_info {
-	int placeholder;
+	char *type;
 };
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_driver */
 struct i2c_driver {
-	int placeholder;
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+	struct i2c_adapter driver;
 };
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_driver */
 struct i2c_client {
-	int placeholder;
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+	struct i2c_driver *driver;
 };
+
+/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
+static __inline__ struct i2c_client *
+i2c_new_device(struct i2c_adapter *adap, const struct i2c_board_info *info) {
+	return NULL;
+}
+
+/* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
+static __inline__ int
+i2c_register_driver(struct module *owner, struct i2c_driver *driver) {
+	return 0;
+}
+
+/* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
+static __inline__ int
+i2c_unregister_device(struct i2c_client *client) {
+	return 0;
+}
+
+/* file drm_encoder_slave.c, function i2c_dp_aux_add_bus() */
+static __inline__ int
+i2c_add_adapter(struct i2c_adapter *adapter) {
+	return 0;
+}
+
+/* file drm_encoder_slave.h, function drm_i2c_encoder_unregister() */
+static __inline__ int
+i2c_del_driver(struct i2c_driver *driver) {
+	return 0;
+}
 
 #endif /* __KERNEL__ */
 #endif

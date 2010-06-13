@@ -31,21 +31,21 @@
 
 #include <sys/sysctl.h>
 
-static int	   drm_name_info DRM_SYSCTL_HANDLER_ARGS;
-static int	   drm_vm_info DRM_SYSCTL_HANDLER_ARGS;
-static int	   drm_clients_info DRM_SYSCTL_HANDLER_ARGS;
-static int	   drm_bufs_info DRM_SYSCTL_HANDLER_ARGS;
-static int	   drm_vblank_info DRM_SYSCTL_HANDLER_ARGS;
+static int	   drm_name_info_legacy DRM_SYSCTL_HANDLER_ARGS;
+static int	   drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS;
+static int	   drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS;
+static int	   drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS;
+static int	   drm_vblank_info_legacy DRM_SYSCTL_HANDLER_ARGS;
 
 struct drm_sysctl_list {
 	const char *name;
 	int	   (*f) DRM_SYSCTL_HANDLER_ARGS;
 } drm_sysctl_list[] = {
-	{"name",    drm_name_info},
-	{"vm",	    drm_vm_info},
-	{"clients", drm_clients_info},
-	{"bufs",    drm_bufs_info},
-	{"vblank",    drm_vblank_info},
+	{"name",    drm_name_info_legacy},
+	{"vm",	    drm_vm_info_legacy},
+	{"clients", drm_clients_info_legacy},
+	{"bufs",    drm_bufs_info_legacy},
+	{"vblank",    drm_vblank_info_legacy},
 };
 #define DRM_SYSCTL_ENTRIES (sizeof(drm_sysctl_list)/sizeof(drm_sysctl_list[0]))
 
@@ -127,7 +127,7 @@ do {								\
 		goto done;					\
 } while (0)
 
-static int drm_name_info DRM_SYSCTL_HANDLER_ARGS
+static int drm_name_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
 	struct drm_device *dev = arg1;
 	char buf[128];
@@ -152,7 +152,7 @@ done:
 	return retcode;
 }
 
-static int drm_vm_info DRM_SYSCTL_HANDLER_ARGS
+static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
 	struct drm_device *dev = arg1;
 	drm_local_map_t *map, *tempmaps;
@@ -212,7 +212,7 @@ done:
 	return retcode;
 }
 
-static int drm_bufs_info DRM_SYSCTL_HANDLER_ARGS
+static int drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
 	struct drm_device	 *dev = arg1;
 	struct drm_device_dma *dma = dev->dma;
@@ -269,7 +269,7 @@ done:
 	return retcode;
 }
 
-static int drm_clients_info DRM_SYSCTL_HANDLER_ARGS
+static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
 	struct drm_device *dev = arg1;
 	struct drm_file *priv, *tempprivs;
@@ -313,7 +313,7 @@ done:
 	return retcode;
 }
 
-static int drm_vblank_info DRM_SYSCTL_HANDLER_ARGS
+static int drm_vblank_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
 	struct drm_device *dev = arg1;
 	char buf[128];

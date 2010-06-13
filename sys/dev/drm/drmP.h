@@ -114,7 +114,7 @@
 
 #else /* Other OS porting layer */
 #include "dev/drm/porting/drm_porting_layer.h"
-#endif
+#endif /* __linux__ */
 
 #include "dev/drm/drm.h"
 
@@ -124,7 +124,7 @@
 #define __OS_HAS_AGP (defined(CONFIG_AGP) || (defined(CONFIG_AGP_MODULE) && defined(MODULE)))
 #else
 #define __OS_HAS_AGP	1
-#endif
+#endif /* __linux__ */
 
 #define __OS_HAS_MTRR (defined(CONFIG_MTRR))
 
@@ -136,7 +136,7 @@ struct drm_device;
 #else /* Other OS drm-related declarations */
 #include "dev/drm/porting/drm_porting_transition.h"  /* Legacy drm.h */
 #include "dev/drm/porting/drm_porting_other.h"  /* Legacy drmP.h */
-#endif
+#endif /* __linux__ */
 
 #include "dev/drm/drm_hashtab.h"
 #include "dev/drm/drm_mm.h"
@@ -1736,14 +1736,11 @@ extern int drm_debugfs_cleanup(struct drm_minor *minor);
 #endif
 
 				/* Info file support */
-#ifdef __linux__
-/* conflicts with legacy drm_sysctl.c */
 extern int drm_name_info(struct seq_file *m, void *data);
 extern int drm_vm_info(struct seq_file *m, void *data);
 extern int drm_bufs_info(struct seq_file *m, void *data);
 extern int drm_vblank_info(struct seq_file *m, void *data);
 extern int drm_clients_info(struct seq_file *m, void* data);
-#endif
 extern int drm_queues_info(struct seq_file *m, void *data);
 extern int drm_gem_name_info(struct seq_file *m, void *data);
 extern int drm_gem_object_info(struct seq_file *m, void* data);

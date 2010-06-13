@@ -170,3 +170,9 @@ void
 idr_destroy(struct idr *pidr) {
    free(pidr, DRM_MEM_DEFAULT);
 }
+
+/**********************************************************
+ * FRAMEBUFFER                                            *
+ **********************************************************/
+
+const char *fb_mode_option = DEFAULT_FB_MODE_OPTION;
