@@ -160,6 +160,9 @@ module_exit(void (*func)(void)) {
  * C declarations and extensions                          *
  **********************************************************/
 
+/* radeon_cp.c, function */
+#define max_t(type, a, b) ((type)(a) > (type)(b)) ? (type)(a) : (type)(b)
+
 #ifndef ARRAY_SIZE
 #define ARRAY_SIZE(x) (sizeof(x)/sizeof(x[0]))
 #endif
@@ -2117,6 +2120,10 @@ static __inline__ long
 old_encode_dev(dev_t device) {
 	return 0;
 }
+
+/* file radeon_object.h, function radeon_bo_reserve() */
+/* takes struct device *dev as first argument */
+#define dev_err(arg, ...) /* UNIMPLEMENTED */
 
 /**********************************************************
  * BUS AND DEVICE CLASSES                                 *

@@ -2073,6 +2073,66 @@ error:
 	return ret;
 }
 
+int radeon_master_create(struct drm_device *dev, struct drm_master *master)
+{
+	struct drm_radeon_master_private *master_priv;
+#ifdef __linux__
+	unsigned long sareapage;
+	int ret;
+#endif /* __linux */
+
+#ifdef __linux__
+	master_priv = kzalloc(sizeof(*master_priv), GFP_KERNEL);
+#else
+	master_priv = malloc(sizeof(*master_priv), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
+	if (!master_priv)
+		return -ENOMEM;
+
+#ifdef __linux__
+	/* prebuild the SAREA */
+	sareapage = max_t(unsigned long, SAREA_MAX, PAGE_SIZE);
+	ret = drm_addmap(dev, 0, sareapage, _DRM_SHM, _DRM_CONTAINS_LOCK,
+			 &master_priv->sarea);
+	if (ret) {
+		DRM_ERROR("SAREA setup failed\n");
+		kfree(master_priv);
+		return ret;
+	}
+	master_priv->sarea_priv = master_priv->sarea->handle + sizeof(struct drm_sarea);
+	master_priv->sarea_priv->pfCurrentPage = 0;
+#endif /* __linux__ */
+
+	master->driver_priv = master_priv;
+	return 0;
+}
+
+void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
+{
+	struct drm_radeon_master_private *master_priv = master->driver_priv;
+
+	if (!master_priv)
+		return;
+
+#ifdef __linux__
+	if (master_priv->sarea_priv &&
+	    master_priv->sarea_priv->pfCurrentPage != 0)
+		radeon_cp_dispatch_flip(dev, master);
+
+	master_priv->sarea_priv = NULL;
+	if (master_priv->sarea)
+		drm_rmmap_locked(dev, master_priv->sarea);
+#endif /* __linux__ */
+
+#ifdef __linux__
+	kfree(master_priv);
+#else
+	free(master_priv, DRM_MEM_DRIVER);
+#endif
+
+	master->driver_priv = NULL;
+}
+
 /* Create mappings for registers and framebuffer so userland doesn't necessarily
  * have to find them.
  */
