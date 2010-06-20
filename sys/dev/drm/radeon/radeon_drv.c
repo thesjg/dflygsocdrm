@@ -36,6 +36,7 @@
 #include "drm_pciids.h"
 
 int radeon_no_wb;
+int radeon_modeset = -1;
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t radeon_pciidlist[] = {
@@ -79,6 +80,39 @@ static void radeon_configure(struct drm_device *dev)
 /* newer */
 	dev->driver->num_ioctls = radeon_max_ioctl;
 }
+
+static struct drm_driver driver_old = {
+	.driver_features =
+	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA | DRIVER_SG |
+	    DRIVER_HAVE_IRQ | DRIVER_HAVE_DMA,
+	.dev_priv_size = sizeof(drm_radeon_buf_priv_t),
+	.buf_priv_size	= sizeof(drm_radeon_buf_priv_t),
+	.load = radeon_driver_load,
+	.firstopen = radeon_driver_firstopen,
+	.open = radeon_driver_open,
+	.preclose = radeon_driver_preclose,
+	.postclose = radeon_driver_postclose,
+	.lastclose = radeon_driver_lastclose,
+	.unload = radeon_driver_unload,
+	.get_vblank_counter = radeon_get_vblank_counter,
+	.enable_vblank = radeon_enable_vblank,
+	.disable_vblank = radeon_disable_vblank,
+	.irq_preinstall = radeon_driver_irq_preinstall,
+	.irq_postinstall = radeon_driver_irq_postinstall,
+	.irq_uninstall = radeon_driver_irq_uninstall,
+	.irq_handler = radeon_driver_irq_handler,
+	.ioctls = radeon_ioctls,
+	.dma_ioctl = radeon_cp_buffers,
+
+	.name = DRIVER_NAME,
+	.desc = DRIVER_DESC,
+	.date = DRIVER_DATE,
+	.major = DRIVER_MAJOR,
+	.minor = DRIVER_MINOR,
+	.patchlevel = DRIVER_PATCHLEVEL,
+};
+
+static struct drm_driver *driver;
 
 static int
 radeon_probe(device_t kdev)
@@ -128,5 +162,71 @@ static driver_t radeon_driver = {
 };
 
 extern devclass_t drm_devclass;
-DRIVER_MODULE(radeon, vgapci, radeon_driver, drm_devclass, 0, 0);
+
+static int __init radeon_init(void)
+{
+	driver = &driver_old;
+	driver->max_ioctl = radeon_max_ioctl;
+	driver->num_ioctls = radeon_max_ioctl;
+#ifdef CONFIG_VGA_CONSOLE
+	if (vgacon_text_force() && radeon_modeset == -1) {
+		DRM_INFO("VGACON disable radeon kernel modesetting.\n");
+		driver = &driver_old;
+		driver->driver_features &= ~DRIVER_MODESET;
+		radeon_modeset = 0;
+	}
+#endif
+	/* if enabled by default */
+	if (radeon_modeset == -1) {
+#ifdef CONFIG_DRM_RADEON_KMS
+		DRM_INFO("radeon defaulting to kernel modesetting.\n");
+		radeon_modeset = 1;
+#else
+		DRM_INFO("radeon defaulting to userspace modesetting.\n");
+		radeon_modeset = 0;
+#endif
+	}
+#ifdef __linux__
+	if (radeon_modeset == 1) {
+		DRM_INFO("radeon kernel modesetting enabled.\n");
+		driver = &kms_driver;
+		driver->driver_features |= DRIVER_MODESET;
+		driver->num_ioctls = radeon_max_kms_ioctl;
+		radeon_register_atpx_handler();
+	}
+	/* if the vga console setting is enabled still
+	 * let modprobe override it */
+	return drm_init(driver);
+#else
+	kprintf("Called radeon_init() and loaded radeon driver\n");
+	return 0;
+#endif /* __linux__ */
+}
+
+static void __exit radeon_exit(void)
+{
+#ifdef __linux__
+	drm_exit(driver);
+	radeon_unregister_atpx_handler();
+#endif /* __linux__ */
+	kprintf("Called radeon_exit() and unloaded radeon driver\n");
+}
+
+static int radeon_handler(module_t mod, int what, void *arg) {
+	int err = 0;
+	switch(what) {
+	case MOD_LOAD:
+		radeon_init();
+		break;
+	case MOD_UNLOAD:
+		radeon_exit();
+		break;
+	default:
+		err = EINVAL;
+		break;
+	}
+	return (err);
+}
+
+DRIVER_MODULE(radeon, vgapci, radeon_driver, drm_devclass, radeon_handler, 0);
 MODULE_DEPEND(radeon, drm, 1, 1, 1);

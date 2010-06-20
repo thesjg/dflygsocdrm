@@ -499,64 +499,6 @@ static __inline__ void
 rb_erase(struct rb_node * vm_node, struct rb_root * addr_space_rb) {
 	;
 }
-
-/*
- * idr
- */
-
-/* Brute force implementation of idr API
- * using current red-black tree backing
- *
- * Adapted from FreeBSD port of drm_drawable.c
- */
-
-struct drm_rb_info {
-	void *data;
-	int handle;
-	RB_ENTRY(drm_rb_info) tree;
-};
-
-int
-drm_rb_compare(struct drm_rb_info *a, struct drm_rb_info *b);
-
-RB_HEAD(drm_rb_tree, drm_rb_info);
-
-RB_PROTOTYPE(drm_rb_tree, drm_rb_info, tree, drm_rb_compare);
-
-struct idr {
-	struct drm_rb_tree *tree;
-};
-
-void idr_init(struct idr *pidr);
-
-void *idr_find(struct idr *pidr, int id);
-
-/* Every mention of idr_pre_get has GPP_KERNEL */
-int
-idr_pre_get(struct idr *pidr, unsigned int flags);
-
-int
-idr_get_new_above(struct idr * pidr, void *data, int floor, int *id);
-
-int
-idr_get_new(struct idr *pidr, void *data, int *id);
-
-void
-idr_remove(struct idr *pidr, int id);
-
-void
-idr_remove_all(struct idr *pidr);
-
-void
-idr_for_each(struct idr *pidr,
-	int (*func)(int id, void *ptr, void *data), void * data);
-
-void *
-idr_replace(struct idr *pidr, void *newData, int id);
-
-void
-idr_destroy(struct idr *pidr);
-
 /**********************************************************
  * GLOBAL DATA                                            *
  **********************************************************/
@@ -804,6 +746,67 @@ static __inline__ void
 up_write(DRM_RWSEMAPHORE *rwlock) {
 	mutex_unlock(rwlock);
 }
+
+
+/**********************************************************
+ * idr                                                    *
+ **********************************************************/
+
+/* Brute force implementation of idr API
+ * using current red-black tree backing
+ *
+ * Adapted from FreeBSD port of drm_drawable.c
+ */
+
+struct drm_rb_info {
+	void *data;
+	int handle;
+	RB_ENTRY(drm_rb_info) tree;
+};
+
+int
+drm_rb_compare(struct drm_rb_info *a, struct drm_rb_info *b);
+
+RB_HEAD(drm_rb_tree, drm_rb_info);
+
+RB_PROTOTYPE(drm_rb_tree, drm_rb_info, tree, drm_rb_compare);
+
+struct idr {
+	struct drm_rb_tree tree;
+	spinlock_t idr_lock;
+	struct drm_rb_info *available;
+	int filled_below;
+};
+
+void idr_init(struct idr *pidr);
+
+void *idr_find(struct idr *pidr, int id);
+
+/* Every mention of idr_pre_get has GPP_KERNEL */
+int
+idr_pre_get(struct idr *pidr, unsigned int flags);
+
+int
+idr_get_new_above(struct idr * pidr, void *data, int floor, int *id);
+
+int
+idr_get_new(struct idr *pidr, void *data, int *id);
+
+void
+idr_remove(struct idr *pidr, int id);
+
+void
+idr_remove_all(struct idr *pidr);
+
+void
+idr_for_each(struct idr *pidr,
+	int (*func)(int id, void *ptr, void *data), void * data);
+
+void *
+idr_replace(struct idr *pidr, void *newData, int id);
+
+void
+idr_destroy(struct idr *pidr);
 
 /*
  * Reference counting
@@ -1525,6 +1528,7 @@ MALLOC_DECLARE(DRM_MEM_DRAWABLE);
 MALLOC_DECLARE(DRM_MEM_MM);
 MALLOC_DECLARE(DRM_MEM_HASHTAB);
 MALLOC_DECLARE(DRM_MEM_DEFAULT);
+MALLOC_DECLARE(DRM_MEM_IDR);
 MALLOC_DECLARE(DRM_MEM_GEM);
 MALLOC_DECLARE(DRM_MEM_TTM);
 MALLOC_DECLARE(DRM_MEM_KMS);

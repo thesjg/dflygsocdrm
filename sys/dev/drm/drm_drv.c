@@ -53,10 +53,6 @@ static drm_pci_id_list_t *drm_find_description(int vendor, int device,
 #define DRIVER_SOFTC(unit) \
 	((struct drm_device *)devclass_get_softc(drm_devclass, unit))
 
-MODULE_VERSION(drm, 1);
-MODULE_DEPEND(drm, agp, 1, 1, 1);
-MODULE_DEPEND(drm, pci, 1, 1, 1);
-
 static struct drm_ioctl_desc drm_ioctls[256] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_VERSION, drm_version, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_UNIQUE, drm_getunique, 0),
@@ -849,46 +845,93 @@ drm_local_map_t *drm_getsarea(struct drm_device *dev)
 	return NULL;
 }
 
-#if DRM_LINUX
-
-#include <sys/sysproto.h>
-
-MODULE_DEPEND(DRIVER_NAME, linux, 1, 1, 1);
-
-#define LINUX_IOCTL_DRM_MIN		0x6400
-#define LINUX_IOCTL_DRM_MAX		0x64ff
-
-static linux_ioctl_function_t drm_linux_ioctl;
-static struct linux_ioctl_handler drm_handler = {drm_linux_ioctl, 
-    LINUX_IOCTL_DRM_MIN, LINUX_IOCTL_DRM_MAX};
-
-SYSINIT(drm_register, SI_SUB_KLD, SI_ORDER_MIDDLE, 
-    linux_ioctl_register_handler, &drm_handler);
-SYSUNINIT(drm_unregister, SI_SUB_KLD, SI_ORDER_MIDDLE, 
-    linux_ioctl_unregister_handler, &drm_handler);
-
-/* The bits for in/out are switched on Linux */
-#define LINUX_IOC_IN	IOC_OUT
-#define LINUX_IOC_OUT	IOC_IN
-
-static int
-drm_linux_ioctl(DRM_STRUCTPROC *p, struct linux_ioctl_args* args)
+static int __init drm_core_init(void)
 {
-	int error;
-	int cmd = args->cmd;
+	int ret = -ENOMEM;
 
-	args->cmd &= ~(LINUX_IOC_IN | LINUX_IOC_OUT);
-	if (cmd & LINUX_IOC_IN)
-		args->cmd |= IOC_IN;
-	if (cmd & LINUX_IOC_OUT)
-		args->cmd |= IOC_OUT;
-	
-	error = ioctl(p, (struct ioctl_args *)args);
+	idr_init(&drm_minors_idr);
 
-	return error;
+#ifdef __linux__
+	if (register_chrdev(DRM_MAJOR, "drm", &drm_stub_fops))
+		goto err_p1;
+
+	drm_class = drm_sysfs_create(THIS_MODULE, "drm");
+	if (IS_ERR(drm_class)) {
+		printk(KERN_ERR "DRM: Error creating drm class.\n");
+		ret = PTR_ERR(drm_class);
+		goto err_p2;
+	}
+
+	drm_proc_root = proc_mkdir("dri", NULL);
+	if (!drm_proc_root) {
+		DRM_ERROR("Cannot create /proc/dri\n");
+		ret = -1;
+		goto err_p3;
+	}
+
+	drm_debugfs_root = debugfs_create_dir("dri", NULL);
+	if (!drm_debugfs_root) {
+		DRM_ERROR("Cannot create /sys/kernel/debug/dri\n");
+		ret = -1;
+		goto err_p3;
+	}
+#endif /* __linux__ */
+
+	DRM_INFO("Initialized %s %d.%d.%d %s\n",
+		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
+	return 0;
+#ifdef __linux__
+err_p3:
+	drm_sysfs_destroy();
+err_p2:
+	unregister_chrdev(DRM_MAJOR, "drm");
+
+	idr_destroy(&drm_minors_idr);
+err_p1:
+	return ret;
+#endif /* __linux */
 }
 
-/* newer UNIMPLEMENTED */
+static void __exit drm_core_exit(void)
+{
+#ifdef __linux__
+	remove_proc_entry("dri", NULL);
+	debugfs_remove(drm_debugfs_root);
+	drm_sysfs_destroy();
+
+	unregister_chrdev(DRM_MAJOR, "drm");
+#endif /* __linux__ */
+
+	idr_destroy(&drm_minors_idr);
+}
+
+static int drm_handler(module_t mod, int what, void *arg) {
+	int err = 0;
+	switch(what) {
+	case MOD_LOAD:
+		drm_core_init();
+		break;
+	case MOD_UNLOAD:
+		drm_core_exit();
+		break;
+	default:
+		err = EINVAL;
+		break;
+	}
+	return (err);
+}
+
+static moduledata_t drm_data= {
+	"drm",
+	drm_handler,
+	0
+};
+
+MODULE_VERSION(drm, 1);
+DECLARE_MODULE(drm, drm_data, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
+MODULE_DEPEND(drm, agp, 1, 1, 1);
+MODULE_DEPEND(drm, pci, 1, 1, 1);
+
 /**
  * Module initialization. Called via init_module at module load time, or via
  * linux/init/main.c (this is not currently supported).
@@ -904,14 +947,17 @@ drm_linux_ioctl(DRM_STRUCTPROC *p, struct linux_ioctl_args* args)
  */
 int drm_init(struct drm_driver *driver)
 {
+#ifdef __linux__
 	struct pci_dev *pdev = NULL;
 	const struct pci_device_id *pid;
 	int i;
+#endif /* __linux__ */
 
 	DRM_DEBUG("\n");
 
 	INIT_LIST_HEAD(&driver->device_list);
 
+#ifdef __linux__
 	if (driver->driver_features & DRIVER_MODESET)
 		return pci_register_driver(&driver->pci_driver);
 
@@ -937,6 +983,7 @@ int drm_init(struct drm_driver *driver)
 			drm_get_dev(pdev, pid, driver);
 		}
 	}
+#endif /* __linux__ */
 	return 0;
 }
 
@@ -944,6 +991,7 @@ EXPORT_SYMBOL(drm_init);
 
 void drm_exit(struct drm_driver *driver)
 {
+#ifdef __linux__
 	struct drm_device *dev, *tmp;
 	DRM_DEBUG("\n");
 
@@ -953,77 +1001,59 @@ void drm_exit(struct drm_driver *driver)
 		list_for_each_entry_safe(dev, tmp, &driver->device_list, driver_item)
 			drm_put_dev(dev);
 	}
+#endif /* __linux__ */
 
 	DRM_INFO("Module unloaded\n");
 }
 
 EXPORT_SYMBOL(drm_exit);
 
+#if DRM_LINUX
+
+#include <sys/sysproto.h>
+
+MODULE_DEPEND(DRIVER_NAME, linux, 1, 1, 1);
+
+#define LINUX_IOCTL_DRM_MIN		0x6400
+#define LINUX_IOCTL_DRM_MAX		0x64ff
+
+static linux_ioctl_function_t drm_linux_ioctl;
+static struct linux_ioctl_handler drm_handler = {drm_linux_ioctl,
+    LINUX_IOCTL_DRM_MIN, LINUX_IOCTL_DRM_MAX};
+
+SYSINIT(drm_register, SI_SUB_KLD, SI_ORDER_MIDDLE,
+    linux_ioctl_register_handler, &drm_handler);
+SYSUNINIT(drm_unregister, SI_SUB_KLD, SI_ORDER_MIDDLE,
+    linux_ioctl_unregister_handler, &drm_handler);
+
+/* The bits for in/out are switched on Linux */
+#define LINUX_IOC_IN	IOC_OUT
+#define LINUX_IOC_OUT	IOC_IN
+
+static int
+drm_linux_ioctl(DRM_STRUCTPROC *p, struct linux_ioctl_args* args)
+{
+	int error;
+	int cmd = args->cmd;
+
+	args->cmd &= ~(LINUX_IOC_IN | LINUX_IOC_OUT);
+	if (cmd & LINUX_IOC_IN)
+		args->cmd |= IOC_IN;
+	if (cmd & LINUX_IOC_OUT)
+		args->cmd |= IOC_OUT;
+
+	error = ioctl(p, (struct ioctl_args *)args);
+
+	return error;
+}
+
+/* newer UNIMPLEMENTED */
+
 /** File operations structure */
 static const struct file_operations drm_stub_fops = {
 	.owner = THIS_MODULE,
 	.open = drm_stub_open
 };
-
-static int __init drm_core_init(void)
-{
-	int ret = -ENOMEM;
-
-	idr_init(&drm_minors_idr);
-
-	if (register_chrdev(DRM_MAJOR, "drm", &drm_stub_fops))
-		goto err_p1;
-
-#ifdef __linux__
-	drm_class = drm_sysfs_create(THIS_MODULE, "drm");
-	if (IS_ERR(drm_class)) {
-		printk(KERN_ERR "DRM: Error creating drm class.\n");
-		ret = PTR_ERR(drm_class);
-		goto err_p2;
-	}
-
-	drm_proc_root = proc_mkdir("dri", NULL);
-	if (!drm_proc_root) {
-		DRM_ERROR("Cannot create /proc/dri\n");
-		ret = -1;
-		goto err_p3;
-	}
-
-	drm_debugfs_root = debugfs_create_dir("dri", NULL);
-	if (!drm_debugfs_root) {
-		DRM_ERROR("Cannot create /sys/kernel/debug/dri\n");
-		ret = -1;
-		goto err_p3;
-	}
-#endif
-
-	DRM_INFO("Initialized %s %d.%d.%d %s\n",
-		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
-	return 0;
-#ifdef __linux__
-err_p3:
-	drm_sysfs_destroy();
-err_p2:
-	unregister_chrdev(DRM_MAJOR, "drm");
-
-	idr_destroy(&drm_minors_idr);
-#endif
-err_p1:
-	return ret;
-}
-
-static void __exit drm_core_exit(void)
-{
-#ifdef __linux__
-	remove_proc_entry("dri", NULL);
-	debugfs_remove(drm_debugfs_root);
-	drm_sysfs_destroy();
-#endif
-
-	unregister_chrdev(DRM_MAJOR, "drm");
-
-	idr_destroy(&drm_minors_idr);
-}
 
 module_init(drm_core_init);
 module_exit(drm_core_exit);
