@@ -41,12 +41,12 @@
 
 int radeon_modeset = -1;
 
-#ifdef __linux__
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t radeon_pciidlist[] = {
 	radeon_PCI_IDS
 };
 
+#ifdef __linux__
 static void radeon_configure(struct drm_device *dev)
 {
 	dev->driver->driver_features =
@@ -238,7 +238,66 @@ static moduledata_t drmtest_data= {
 	0
 };
 
+static int
+radeon_probe(device_t kdev)
+{
+	return drm_probe(kdev, radeon_pciidlist);
+}
+
+static int
+radeon_attach(device_t kdev)
+{
+#if 0
+	struct drm_device *dev = device_get_softc(kdev);
+
+	dev->driver = malloc(sizeof(struct drm_driver), DRM_MEM_DRIVER,
+	    M_WAITOK | M_ZERO);
+
+	radeon_configure(dev);
+
+	return drm_attach(kdev, radeon_pciidlist);
+#endif
+	return 0;
+}
+
+static int
+radeon_detach(device_t kdev)
+{
+#if 0
+	struct drm_device *dev = device_get_softc(kdev);
+	int ret;
+
+	ret = drm_detach(kdev);
+
+	free(dev->driver, DRM_MEM_DRIVER);
+
+	return ret;
+#endif
+	return 0;
+}
+
+static device_method_t radeon_methods[] = {
+	/* Device interface */
+	DEVMETHOD(device_probe,		radeon_probe),
+	DEVMETHOD(device_attach,	radeon_attach),
+	DEVMETHOD(device_detach,	radeon_detach),
+
+	{ 0, 0 }
+};
+
+static driver_t radeon_driver = {
+	"drmtest",
+	radeon_methods,
+	sizeof(struct drm_driver)
+};
+
 MODULE_VERSION(drmtest, 1);
+
+extern devclass_t drm_devclass;
+DRIVER_MODULE(drmtest, vgapci, radeon_driver, drm_devclass, drmtest_handler, 0);
+
 MODULE_DEPEND(drmtest, drm, 1, 1, 1);
 
+#if 0
 DECLARE_MODULE(drmtest, drmtest_data, SI_SUB_EXEC, SI_ORDER_ANY);
+#endif
