@@ -184,6 +184,9 @@ typedef u_int32_t u32;
 typedef u_int16_t u16;
 typedef u_int8_t  u8;
 
+/* i915/i915.drv.h, struct drm_i915_error_buffer */
+typedef int32_t s32;
+
 /* radeon_drm.h typedef drm_radeon_setparam_t, member value
  * Linux version has __s64
  * BSD version has int64_t

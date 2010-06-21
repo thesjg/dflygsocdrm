@@ -30,8 +30,14 @@
 #ifndef _I915_DRV_H_
 #define _I915_DRV_H_
 
+#if 0
 #include "drm_mm.h"
+#endif
 #include "i915_reg.h"
+#include "intel_bios.h"
+#ifdef __linux__
+#include <linux/io-mapping.h>
+#endif /* __linux__ */
 
 /* General customization:
  */
@@ -45,6 +51,11 @@
 enum i915_pipe {
 	PIPE_A = 0,
 	PIPE_B,
+};
+
+enum plane {
+	PLANE_A = 0,
+	PLANE_B,
 };
 
 #define I915_NUM_PIPE	2
@@ -71,8 +82,22 @@ enum i915_pipe {
 #define WATCH_INACTIVE	0
 #define WATCH_PWRITE	0
 
+#define I915_GEM_PHYS_CURSOR_0 1
+#define I915_GEM_PHYS_CURSOR_1 2
+#define I915_GEM_PHYS_OVERLAY_REGS 3
+#define I915_MAX_PHYS_OBJECT (I915_GEM_PHYS_OVERLAY_REGS)
+
+struct drm_i915_gem_phys_object {
+	int id;
+	struct page **page_list;
+	drm_dma_handle_t *handle;
+	struct drm_gem_object *cur_obj;
+};
+
 typedef struct _drm_i915_ring_buffer {
+#ifndef __linux__
 	int tail_mask;
+#endif /* __linux__ */
 	unsigned long Size;
 	u8 *virtual_start;
 	int head;
@@ -103,22 +128,157 @@ struct intel_opregion {
 	int enabled;
 };
 
+struct drm_i915_master_private {
+	drm_local_map_t *sarea;
+	struct _drm_i915_sarea *sarea_priv;
+};
+#define I915_FENCE_REG_NONE -1
+
+struct drm_i915_fence_reg {
+	struct drm_gem_object *obj;
+	struct list_head lru_list;
+};
+
+struct sdvo_device_mapping {
+	u8 dvo_port;
+	u8 slave_addr;
+	u8 dvo_wiring;
+	u8 initialized;
+	u8 ddc_pin;
+};
+
+struct drm_i915_error_state {
+	u32 eir;
+	u32 pgtbl_er;
+	u32 pipeastat;
+	u32 pipebstat;
+	u32 ipeir;
+	u32 ipehr;
+	u32 instdone;
+	u32 acthd;
+	u32 instpm;
+	u32 instps;
+	u32 instdone1;
+	u32 seqno;
+	u64 bbaddr;
+	struct timeval time;
+	struct drm_i915_error_object {
+		int page_count;
+		u32 gtt_offset;
+		u32 *pages[0];
+	} *ringbuffer, *batchbuffer[2];
+	struct drm_i915_error_buffer {
+		size_t size;
+		u32 name;
+		u32 seqno;
+		u32 gtt_offset;
+		u32 read_domains;
+		u32 write_domain;
+		u32 fence_reg;
+		s32 pinned:2;
+		u32 tiling:2;
+		u32 dirty:1;
+		u32 purgeable:1;
+	} *active_bo;
+	u32 active_bo_count;
+};
+
+struct drm_i915_display_funcs {
+	void (*dpms)(struct drm_crtc *crtc, int mode);
+	bool (*fbc_enabled)(struct drm_device *dev);
+	void (*enable_fbc)(struct drm_crtc *crtc, unsigned long interval);
+	void (*disable_fbc)(struct drm_device *dev);
+	int (*get_display_clock_speed)(struct drm_device *dev);
+	int (*get_fifo_size)(struct drm_device *dev, int plane);
+	void (*update_wm)(struct drm_device *dev, int planea_clock,
+			  int planeb_clock, int sr_hdisplay, int pixel_size);
+	/* clock updates for mode set */
+	/* cursor updates */
+	/* render clock increase/decrease */
+	/* display clock increase/decrease */
+	/* pll clock increase/decrease */
+	/* clock gating init */
+};
+
+struct intel_overlay;
+
+struct intel_device_info {
+	u8 is_mobile : 1;
+	u8 is_i8xx : 1;
+	u8 is_i85x : 1;
+	u8 is_i915g : 1;
+	u8 is_i9xx : 1;
+	u8 is_i945gm : 1;
+	u8 is_i965g : 1;
+	u8 is_i965gm : 1;
+	u8 is_g33 : 1;
+	u8 need_gfx_hws : 1;
+	u8 is_g4x : 1;
+	u8 is_pineview : 1;
+	u8 is_ironlake : 1;
+	u8 is_gen6 : 1;
+	u8 has_fbc : 1;
+	u8 has_rc6 : 1;
+	u8 has_pipe_cxsr : 1;
+	u8 has_hotplug : 1;
+	u8 cursor_needs_physical : 1;
+};
+
+enum no_fbc_reason {
+	FBC_STOLEN_TOO_SMALL, /* not enough space to hold compressed buffers */
+	FBC_UNSUPPORTED_MODE, /* interlace or doublescanned mode */
+	FBC_MODE_TOO_LARGE, /* mode too large for compression */
+	FBC_BAD_PLANE, /* fbc not supported on plane */
+	FBC_NOT_TILED, /* buffer not tiled */
+};
+
+enum intel_pch {
+	PCH_IBX,	/* Ibexpeak PCH */
+	PCH_CPT,	/* Cougarpoint PCH */
+};
+
+struct intel_fbdev;
+
 typedef struct drm_i915_private {
 	struct drm_device *dev;
 
+#ifndef __linux__
 	drm_local_map_t *sarea;
 	drm_local_map_t *mmio_map;
 
 	drm_i915_sarea_t *sarea_priv;
+#endif /* __linux__ */
+/* newer */
+	const struct intel_device_info *info;
+
+	int has_gem;
+
+	void __iomem *regs;
+
+	struct pci_dev *bridge_dev;
+/* end newer */
 	drm_i915_ring_buffer_t ring;
 
 	drm_dma_handle_t *status_page_dmah;
 	void *hw_status_page;
+/* newer */
+	void *seqno_page;
+/* end newer */
 	dma_addr_t dma_status_page;
 	uint32_t counter;
+/* newer */
 	unsigned int status_gfx_addr;
+/* end newer */
+	unsigned int seqno_gfx_addr;
+
 	drm_local_map_t hws_map;
 	struct drm_gem_object *hws_obj;
+/* newer */
+	struct drm_gem_object *seqno_obj;
+	struct drm_gem_object *pwrctx;
+
+	struct resource mch_res;
+/* end newer */
 
 	unsigned int cpp;
 	int back_offset;
@@ -127,14 +287,31 @@ typedef struct drm_i915_private {
 	int page_flipping;
 
 	wait_queue_head_t irq_queue;
+/* newer */
+	atomic_t irq_received;
+/* end newer */
 	/** Protects user_irq_refcount and irq_mask_reg */
 	DRM_SPINTYPE user_irq_lock;
 	/** Refcount for i915_user_irq_get() versus i915_user_irq_put(). */
 	int user_irq_refcount;
-	/** Cached value of IER to avoid reads in updating the bitfield */
+/* newer */
+	u32 trace_irq_seqno;
+/* end newer */
+	/** Cached value of IMR to avoid reads in updating the bitfield */
 	u32 irq_mask_reg;
 	u32 pipestat[2];
+/* newer */
+	/** splitted irq regs for graphics and display engine on Ironlake,
+	    irq_mask_reg is still used for display irq. */
+	u32 gt_irq_mask_reg;
+	u32 gt_irq_enable_reg;
+	u32 de_irq_enable_reg;
+	u32 pch_irq_mask_reg;
+	u32 pch_irq_enable_reg;
 
+	u32 hotplug_supported_mask;
+	struct work_struct hotplug_work;
+/* end newer */
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
 	struct mem_block *agp_heap;
