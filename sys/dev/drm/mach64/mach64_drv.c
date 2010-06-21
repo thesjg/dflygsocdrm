@@ -50,6 +50,7 @@ static void mach64_configure(struct drm_device *dev)
 	    DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ;
 
 	dev->driver->buf_priv_size	= 1; /* No dev_priv */
+	dev->driver->dev_priv_size	= 1; /* No dev_priv */
 	dev->driver->load		= mach64_driver_load;
 	dev->driver->lastclose		= mach64_driver_lastclose;
 	dev->driver->get_vblank_counter	= mach64_get_vblank_counter;
@@ -71,6 +72,56 @@ static void mach64_configure(struct drm_device *dev)
 	dev->driver->minor		= DRIVER_MINOR;
 	dev->driver->patchlevel		= DRIVER_PATCHLEVEL;
 }
+
+static struct drm_driver driver = {
+	.driver_features =
+	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA |
+	    DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ,
+
+	.buf_priv_size = 1, /* No dev_priv */
+	.dev_priv_size = 1, /* No dev_priv */
+	.load = mach64_driver_load,
+	.lastclose = mach64_driver_lastclose,
+	.get_vblank_counter = mach64_get_vblank_counter,
+	.enable_vblank = mach64_enable_vblank,
+	.disable_vblank = mach64_disable_vblank,
+	.irq_preinstall = mach64_driver_irq_preinstall,
+	.irq_postinstall = mach64_driver_irq_postinstall,
+	.irq_uninstall = mach64_driver_irq_uninstall,
+	.irq_handler = mach64_driver_irq_handler,
+#ifdef __linux__
+	.reclaim_buffers = drm_core_reclaim_buffers,
+	.get_map_ofs = drm_core_get_map_ofs,
+	.get_reg_ofs = drm_core_get_reg_ofs,
+#endif /* __linux__ */
+	.ioctls = mach64_ioctls,
+	.dma_ioctl = mach64_dma_buffers,
+#ifdef __linux__
+	.fops = {
+		.owner = THIS_MODULE,
+		.open = drm_open,
+		.release = drm_release,
+		.unlocked_ioctl = drm_ioctl,
+		.mmap = drm_mmap,
+		.poll = drm_poll,
+		.fasync = drm_fasync,
+#ifdef CONFIG_COMPAT
+		.compat_ioctl = mach64_compat_ioctl,
+#endif
+	},
+	.pci_driver = {
+		.name = DRIVER_NAME,
+		.id_table = pciidlist,
+	},
+#endif /* __linux__ */
+
+	.name = DRIVER_NAME,
+	.desc = DRIVER_DESC,
+	.date = DRIVER_DATE,
+	.major = DRIVER_MAJOR,
+	.minor = DRIVER_MINOR,
+	.patchlevel = DRIVER_PATCHLEVEL,
+};
 
 static int
 mach64_probe(device_t kdev)
@@ -126,5 +177,43 @@ static driver_t mach64_driver = {
 };
 
 extern devclass_t drm_devclass;
-DRIVER_MODULE(mach64, vgapci, mach64_driver, drm_devclass, 0, 0);
+
+static int __init mach64_init(void)
+{
+	driver.max_ioctl = mach64_max_ioctl;
+	driver.num_ioctls = mach64_max_ioctl;
+#ifdef __linux__
+	return drm_init(&driver);
+#else
+	kprintf("Called mach64_init() and loaded mach64 driver\n");
+	return 0;
+#endif /* __linux__ */
+}
+
+static void __exit mach64_exit(void)
+{
+#ifdef __linux__
+	drm_exit(&driver);
+#else
+	kprintf("Called mach64_exit() and unloaded mach64 driver\n");
+#endif /* __linux__ */
+}
+
+static int mach64_handler(module_t mod, int what, void *arg) {
+	int err = 0;
+	switch(what) {
+	case MOD_LOAD:
+		mach64_init();
+		break;
+	case MOD_UNLOAD:
+		mach64_exit();
+		break;
+	default:
+		err = EINVAL;
+		break;
+	}
+	return (err);
+}
+
+DRIVER_MODULE(mach64, vgapci, mach64_driver, drm_devclass, mach64_handler, 0);
 MODULE_DEPEND(mach64, drm, 1, 1, 1);

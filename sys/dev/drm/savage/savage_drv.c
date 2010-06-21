@@ -44,6 +44,7 @@ static void savage_configure(struct drm_device *dev)
 	    DRIVER_HAVE_DMA;
 
 	dev->driver->buf_priv_size	= sizeof(drm_savage_buf_priv_t);
+	dev->driver->dev_priv_size	= sizeof(drm_savage_buf_priv_t);
 	dev->driver->load		= savage_driver_load;
 	dev->driver->firstopen		= savage_driver_firstopen;
 	dev->driver->lastclose		= savage_driver_lastclose;
@@ -61,6 +62,46 @@ static void savage_configure(struct drm_device *dev)
 	dev->driver->minor		= DRIVER_MINOR;
 	dev->driver->patchlevel		= DRIVER_PATCHLEVEL;
 }
+
+static struct drm_driver driver = {
+	.driver_features =
+	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_HAVE_DMA | DRIVER_PCI_DMA,
+	.dev_priv_size = sizeof(drm_savage_buf_priv_t),
+	.load = savage_driver_load,
+	.firstopen = savage_driver_firstopen,
+	.lastclose = savage_driver_lastclose,
+	.unload = savage_driver_unload,
+#ifdef __linux__
+	.reclaim_buffers = savage_reclaim_buffers,
+	.get_map_ofs = drm_core_get_map_ofs,
+	.get_reg_ofs = drm_core_get_reg_ofs,
+#endif /* __linux__ */
+	.ioctls = savage_ioctls,
+	.dma_ioctl = savage_bci_buffers,
+#ifdef __linux__
+	.fops = {
+		 .owner = THIS_MODULE,
+		 .open = drm_open,
+		 .release = drm_release,
+		 .unlocked_ioctl = drm_ioctl,
+		 .mmap = drm_mmap,
+		 .poll = drm_poll,
+		 .fasync = drm_fasync,
+	},
+
+	.pci_driver = {
+		 .name = DRIVER_NAME,
+		 .id_table = pciidlist,
+	},
+#endif /* __linux__ */
+
+	.name = DRIVER_NAME,
+	.desc = DRIVER_DESC,
+	.date = DRIVER_DATE,
+	.major = DRIVER_MAJOR,
+	.minor = DRIVER_MINOR,
+	.patchlevel = DRIVER_PATCHLEVEL,
+};
 
 static int
 savage_probe(device_t kdev)
@@ -110,5 +151,51 @@ static driver_t savage_driver = {
 };
 
 extern devclass_t drm_devclass;
-DRIVER_MODULE(savage, vgapci, savage_driver, drm_devclass, 0, 0);
+
+static int __init savage_init(void)
+{
+	driver.max_ioctl = savage_max_ioctl;
+	driver.num_ioctls = savage_max_ioctl;
+#ifdef __linux__
+	return drm_init(&driver);
+#else
+	kprintf("Called savage_init() and loaded savage driver\n");
+	return 0;
+#endif /* __linux__ */
+}
+
+static void __exit savage_exit(void)
+{
+#ifdef __linux__
+	drm_exit(&driver);
+#else
+	kprintf("Called savage_exit() and unloaded savage driver\n");
+#endif /* __linux__ */
+}
+
+static int savage_handler(module_t mod, int what, void *arg) {
+	int err = 0;
+	switch(what) {
+	case MOD_LOAD:
+		savage_init();
+		break;
+	case MOD_UNLOAD:
+		savage_exit();
+		break;
+	default:
+		err = EINVAL;
+		break;
+	}
+	return (err);
+}
+
+DRIVER_MODULE(savage, vgapci, savage_driver, drm_devclass, savage_handler, 0);
 MODULE_DEPEND(savage, drm, 1, 1, 1);
+#ifdef __linux__
+module_init(savage_init);
+module_exit(savage_exit);
+
+MODULE_AUTHOR(DRIVER_AUTHOR);
+MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_LICENSE("GPL and additional rights");
+#endif /* __linux__ */

@@ -33,15 +33,152 @@
 #include "drm.h"
 #include "radeon_drm.h"
 #include "radeon_drv.h"
+
 #include "drm_pciids.h"
+#ifdef __linux__
+#include <linux/console.h>
+#endif /* __linux__ */
+
+/*
+ * KMS wrapper.
+ * - 2.0.0 - initial interface
+ * - 2.1.0 - add square tiling interface
+ * - 2.2.0 - add r6xx/r7xx const buffer support
+ * - 2.3.0 - add MSPOS + 3D texture + r500 VAP regs
+ * - 2.4.0 - add crtc id query
+ */
+#define KMS_DRIVER_MAJOR	2
+#define KMS_DRIVER_MINOR	4
+#define KMS_DRIVER_PATCHLEVEL	0
+int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags);
+int radeon_driver_unload_kms(struct drm_device *dev);
+int radeon_driver_firstopen_kms(struct drm_device *dev);
+void radeon_driver_lastclose_kms(struct drm_device *dev);
+int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv);
+void radeon_driver_postclose_kms(struct drm_device *dev,
+				 struct drm_file *file_priv);
+void radeon_driver_preclose_kms(struct drm_device *dev,
+				struct drm_file *file_priv);
+int radeon_suspend_kms(struct drm_device *dev, pm_message_t state);
+int radeon_resume_kms(struct drm_device *dev);
+u32 radeon_get_vblank_counter_kms(struct drm_device *dev, int crtc);
+int radeon_enable_vblank_kms(struct drm_device *dev, int crtc);
+void radeon_disable_vblank_kms(struct drm_device *dev, int crtc);
+void radeon_driver_irq_preinstall_kms(struct drm_device *dev);
+int radeon_driver_irq_postinstall_kms(struct drm_device *dev);
+void radeon_driver_irq_uninstall_kms(struct drm_device *dev);
+irqreturn_t radeon_driver_irq_handler_kms(DRM_IRQ_ARGS);
+int radeon_dma_ioctl_kms(struct drm_device *dev, void *data,
+			 struct drm_file *file_priv);
+int radeon_gem_object_init(struct drm_gem_object *obj);
+void radeon_gem_object_free(struct drm_gem_object *obj);
+extern struct drm_ioctl_desc radeon_ioctls_kms[];
+extern int radeon_max_kms_ioctl;
+int radeon_mmap(struct file *filp, struct vm_area_struct *vma);
+#if defined(CONFIG_DEBUG_FS)
+int radeon_debugfs_init(struct drm_minor *minor);
+void radeon_debugfs_cleanup(struct drm_minor *minor);
+#endif
 
 int radeon_no_wb;
 int radeon_modeset = -1;
+#ifdef __linux__
+int radeon_dynclks = -1;
+int radeon_r4xx_atom = 0;
+int radeon_agpmode = 0;
+int radeon_vram_limit = 0;
+int radeon_gart_size = 512; /* default gart size */
+int radeon_benchmarking = 0;
+int radeon_testing = 0;
+int radeon_connector_table = 0;
+int radeon_tv = 1;
+int radeon_new_pll = -1;
+int radeon_audio = 1;
+int radeon_disp_priority = 0;
+int radeon_hw_i2c = 0;
+
+MODULE_PARM_DESC(no_wb, "Disable AGP writeback for scratch registers");
+module_param_named(no_wb, radeon_no_wb, int, 0444);
+
+MODULE_PARM_DESC(modeset, "Disable/Enable modesetting");
+module_param_named(modeset, radeon_modeset, int, 0400);
+
+MODULE_PARM_DESC(dynclks, "Disable/Enable dynamic clocks");
+module_param_named(dynclks, radeon_dynclks, int, 0444);
+
+MODULE_PARM_DESC(r4xx_atom, "Enable ATOMBIOS modesetting for R4xx");
+module_param_named(r4xx_atom, radeon_r4xx_atom, int, 0444);
+
+MODULE_PARM_DESC(vramlimit, "Restrict VRAM for testing");
+module_param_named(vramlimit, radeon_vram_limit, int, 0600);
+
+MODULE_PARM_DESC(agpmode, "AGP Mode (-1 == PCI)");
+module_param_named(agpmode, radeon_agpmode, int, 0444);
+
+MODULE_PARM_DESC(gartsize, "Size of PCIE/IGP gart to setup in megabytes (32,64, etc)\n");
+module_param_named(gartsize, radeon_gart_size, int, 0600);
+
+MODULE_PARM_DESC(benchmark, "Run benchmark");
+module_param_named(benchmark, radeon_benchmarking, int, 0444);
+
+MODULE_PARM_DESC(test, "Run tests");
+module_param_named(test, radeon_testing, int, 0444);
+
+MODULE_PARM_DESC(connector_table, "Force connector table");
+module_param_named(connector_table, radeon_connector_table, int, 0444);
+
+MODULE_PARM_DESC(tv, "TV enable (0 = disable)");
+module_param_named(tv, radeon_tv, int, 0444);
+
+MODULE_PARM_DESC(new_pll, "Select new PLL code");
+module_param_named(new_pll, radeon_new_pll, int, 0444);
+
+MODULE_PARM_DESC(audio, "Audio enable (0 = disable)");
+module_param_named(audio, radeon_audio, int, 0444);
+
+MODULE_PARM_DESC(disp_priority, "Display Priority (0 = auto, 1 = normal, 2 = high)");
+module_param_named(disp_priority, radeon_disp_priority, int, 0444);
+
+MODULE_PARM_DESC(hw_i2c, "hw i2c engine enable (0 = disable)");
+module_param_named(hw_i2c, radeon_hw_i2c, int, 0444);
+
+static int radeon_suspend(struct drm_device *dev, pm_message_t state)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		return 0;
+
+	/* Disable *all* interrupts */
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS600)
+		RADEON_WRITE(R500_DxMODE_INT_MASK, 0);
+	RADEON_WRITE(RADEON_GEN_INT_CNTL, 0);
+	return 0;
+}
+
+static int radeon_resume(struct drm_device *dev)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		return 0;
+
+	/* Restore interrupt registers */
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS600)
+		RADEON_WRITE(R500_DxMODE_INT_MASK, dev_priv->r500_disp_irq_reg);
+	RADEON_WRITE(RADEON_GEN_INT_CNTL, dev_priv->irq_enable_reg);
+	return 0;
+}
+#endif /* __linux__ */
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t radeon_pciidlist[] = {
 	radeon_PCI_IDS
 };
+
+#if defined(CONFIG_DRM_RADEON_KMS)
+MODULE_DEVICE_TABLE(pci, pciidlist);
+#endif
 
 static void radeon_configure(struct drm_device *dev)
 {
@@ -50,7 +187,7 @@ static void radeon_configure(struct drm_device *dev)
 	    DRIVER_SG | DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ;
 
 /* newer */
-	dev->driver->dev_priv_size = sizeof(drm_radeon_buf_priv_t);
+	dev->driver->dev_priv_size 	= sizeof(drm_radeon_buf_priv_t);
 	dev->driver->buf_priv_size	= sizeof(drm_radeon_buf_priv_t);
 	dev->driver->load		= radeon_driver_load;
 	dev->driver->unload		= radeon_driver_unload;
@@ -83,8 +220,13 @@ static void radeon_configure(struct drm_device *dev)
 
 static struct drm_driver driver_old = {
 	.driver_features =
+#ifdef __linux__
+	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA | DRIVER_SG |
+	    DRIVER_HAVE_IRQ | DRIVER_HAVE_DMA | DRIVER_IRQ_SHARED,
+#else
 	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA | DRIVER_SG |
 	    DRIVER_HAVE_IRQ | DRIVER_HAVE_DMA,
+#endif /* __linux__ */
 	.dev_priv_size = sizeof(drm_radeon_buf_priv_t),
 	.buf_priv_size	= sizeof(drm_radeon_buf_priv_t),
 	.load = radeon_driver_load,
@@ -94,15 +236,48 @@ static struct drm_driver driver_old = {
 	.postclose = radeon_driver_postclose,
 	.lastclose = radeon_driver_lastclose,
 	.unload = radeon_driver_unload,
+#ifdef __linux__
+	.suspend = radeon_suspend,
+	.resume = radeon_resume,
+#endif /* __linux__ */
 	.get_vblank_counter = radeon_get_vblank_counter,
 	.enable_vblank = radeon_enable_vblank,
 	.disable_vblank = radeon_disable_vblank,
+#ifdef __linux__
+	.master_create = radeon_master_create,
+	.master_destroy = radeon_master_destroy,
+#endif /* __linux__ */
 	.irq_preinstall = radeon_driver_irq_preinstall,
 	.irq_postinstall = radeon_driver_irq_postinstall,
 	.irq_uninstall = radeon_driver_irq_uninstall,
 	.irq_handler = radeon_driver_irq_handler,
+#ifdef __linux__
+	.reclaim_buffers = drm_core_reclaim_buffers,
+	.get_map_ofs = drm_core_get_map_ofs,
+	.get_reg_ofs = drm_core_get_reg_ofs,
+#endif /* __linux__ */
 	.ioctls = radeon_ioctls,
 	.dma_ioctl = radeon_cp_buffers,
+#ifdef __linux__
+	.fops = {
+		 .owner = THIS_MODULE,
+		 .open = drm_open,
+		 .release = drm_release,
+		 .unlocked_ioctl = drm_ioctl,
+		 .mmap = drm_mmap,
+		 .poll = drm_poll,
+		 .fasync = drm_fasync,
+		 .read = drm_read,
+#ifdef CONFIG_COMPAT
+		 .compat_ioctl = radeon_compat_ioctl,
+#endif
+	},
+
+	.pci_driver = {
+		 .name = DRIVER_NAME,
+		 .id_table = pciidlist,
+	},
+#endif /* __linux__ */
 
 	.name = DRIVER_NAME,
 	.desc = DRIVER_DESC,
@@ -111,6 +286,101 @@ static struct drm_driver driver_old = {
 	.minor = DRIVER_MINOR,
 	.patchlevel = DRIVER_PATCHLEVEL,
 };
+
+#ifdef __linux__
+static struct drm_driver kms_driver;
+
+static int __devinit
+radeon_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
+{
+	return drm_get_dev(pdev, ent, &kms_driver);
+}
+
+static void
+radeon_pci_remove(struct pci_dev *pdev)
+{
+	struct drm_device *dev = pci_get_drvdata(pdev);
+
+	drm_put_dev(dev);
+}
+
+static int
+radeon_pci_suspend(struct pci_dev *pdev, pm_message_t state)
+{
+	struct drm_device *dev = pci_get_drvdata(pdev);
+	return radeon_suspend_kms(dev, state);
+}
+
+static int
+radeon_pci_resume(struct pci_dev *pdev)
+{
+	struct drm_device *dev = pci_get_drvdata(pdev);
+	return radeon_resume_kms(dev);
+}
+
+static struct drm_driver kms_driver = {
+	.driver_features =
+	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA | DRIVER_SG |
+	    DRIVER_HAVE_IRQ | DRIVER_HAVE_DMA | DRIVER_IRQ_SHARED | DRIVER_GEM,
+	.dev_priv_size = 0,
+	.load = radeon_driver_load_kms,
+	.firstopen = radeon_driver_firstopen_kms,
+	.open = radeon_driver_open_kms,
+	.preclose = radeon_driver_preclose_kms,
+	.postclose = radeon_driver_postclose_kms,
+	.lastclose = radeon_driver_lastclose_kms,
+	.unload = radeon_driver_unload_kms,
+	.suspend = radeon_suspend_kms,
+	.resume = radeon_resume_kms,
+	.get_vblank_counter = radeon_get_vblank_counter_kms,
+	.enable_vblank = radeon_enable_vblank_kms,
+	.disable_vblank = radeon_disable_vblank_kms,
+#if defined(CONFIG_DEBUG_FS)
+	.debugfs_init = radeon_debugfs_init,
+	.debugfs_cleanup = radeon_debugfs_cleanup,
+#endif
+	.irq_preinstall = radeon_driver_irq_preinstall_kms,
+	.irq_postinstall = radeon_driver_irq_postinstall_kms,
+	.irq_uninstall = radeon_driver_irq_uninstall_kms,
+	.irq_handler = radeon_driver_irq_handler_kms,
+	.reclaim_buffers = drm_core_reclaim_buffers,
+	.get_map_ofs = drm_core_get_map_ofs,
+	.get_reg_ofs = drm_core_get_reg_ofs,
+	.ioctls = radeon_ioctls_kms,
+	.gem_init_object = radeon_gem_object_init,
+	.gem_free_object = radeon_gem_object_free,
+	.dma_ioctl = radeon_dma_ioctl_kms,
+	.fops = {
+		 .owner = THIS_MODULE,
+		 .open = drm_open,
+		 .release = drm_release,
+		 .unlocked_ioctl = drm_ioctl,
+		 .mmap = radeon_mmap,
+		 .poll = drm_poll,
+		 .fasync = drm_fasync,
+		 .read = drm_read,
+#ifdef CONFIG_COMPAT
+		 .compat_ioctl = radeon_kms_compat_ioctl,
+#endif
+	},
+
+	.pci_driver = {
+		 .name = DRIVER_NAME,
+		 .id_table = pciidlist,
+		 .probe = radeon_pci_probe,
+		 .remove = radeon_pci_remove,
+		 .suspend = radeon_pci_suspend,
+		 .resume = radeon_pci_resume,
+	},
+
+	.name = DRIVER_NAME,
+	.desc = DRIVER_DESC,
+	.date = DRIVER_DATE,
+	.major = KMS_DRIVER_MAJOR,
+	.minor = KMS_DRIVER_MINOR,
+	.patchlevel = KMS_DRIVER_PATCHLEVEL,
+};
+#endif /* __linux__ */
 
 static struct drm_driver *driver;
 
@@ -230,3 +500,11 @@ static int radeon_handler(module_t mod, int what, void *arg) {
 
 DRIVER_MODULE(radeon, vgapci, radeon_driver, drm_devclass, radeon_handler, 0);
 MODULE_DEPEND(radeon, drm, 1, 1, 1);
+#ifdef __linux__
+module_init(radeon_init);
+module_exit(radeon_exit);
+
+MODULE_AUTHOR(DRIVER_AUTHOR);
+MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_LICENSE("GPL and additional rights");
+#endif /* __linux__ */
