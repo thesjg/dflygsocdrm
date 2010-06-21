@@ -1,7 +1,6 @@
 /* mga_drv.c -- Matrox G200/G400 driver -*- linux-c -*-
  * Created: Mon Dec 13 01:56:22 1999 by jhartmann@precisioninsight.com
- */
-/*-
+ *
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
@@ -28,61 +27,21 @@
  * Authors:
  *    Rickard E. (Rik) Faith <faith@valinux.com>
  *    Gareth Hughes <gareth@valinux.com>
- *
  */
 
 #include "drmP.h"
 #include "drm.h"
 #include "mga_drm.h"
 #include "mga_drv.h"
+
 #include "drm_pciids.h"
+
+static int mga_driver_device_is_agp(struct drm_device * dev);
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static drm_pci_id_list_t mga_pciidlist[] = {
 	mga_PCI_IDS
 };
-
-/**
- * Determine if the device really is AGP or not.
- *
- * In addition to the usual tests performed by \c drm_device_is_agp, this
- * function detects PCI G450 cards that appear to the system exactly like
- * AGP G450 cards.
- *
- * \param dev   The device to be tested.
- *
- * \returns
- * If the device is a PCI G450, zero is returned.  Otherwise non-zero is
- * returned.
- *
- * \bug
- * This function needs to be filled in!  The implementation in
- * linux-core/mga_drv.c shows what needs to be done.
- */
-static int mga_driver_device_is_agp(struct drm_device * dev)
-{
-	device_t bus;
-
-	/* There are PCI versions of the G450.  These cards have the
-	 * same PCI ID as the AGP G450, but have an additional PCI-to-PCI
-	 * bridge chip.  We detect these cards, which are not currently
-	 * supported by this driver, by looking at the device ID of the
-	 * bus the "card" is on.  If vendor is 0x3388 (Hint Corp) and the
-	 * device is 0x0021 (HB6 Universal PCI-PCI bridge), we reject the
-	 * device.
-	 */
-#if __FreeBSD_version >= 700010
-	bus = device_get_parent(device_get_parent(dev->device));
-#else
-	bus = device_get_parent(dev->device);
-#endif
-	if (pci_get_device(dev->device) == 0x0525 &&
-	    pci_get_vendor(bus) == 0x3388 &&
-	    pci_get_device(bus) == 0x0021)
-		return DRM_IS_NOT_AGP;
-	else
-		return DRM_MIGHT_BE_AGP;
-}
 
 static void mga_configure(struct drm_device *dev)
 {
@@ -115,6 +74,63 @@ static void mga_configure(struct drm_device *dev)
 	dev->driver->minor		= DRIVER_MINOR;
 	dev->driver->patchlevel		= DRIVER_PATCHLEVEL;
 }
+
+static struct drm_driver driver = {
+	.driver_features =
+#ifdef __linux__
+	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA |
+	    DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED,
+#else
+	    DRIVER_USE_AGP | DRIVER_REQUIRE_AGP | DRIVER_USE_MTRR |
+	    DRIVER_HAVE_DMA | DRIVER_HAVE_IRQ,
+#endif /* __linux__ */
+	.buf_priv_size = sizeof(drm_mga_buf_priv_t),
+	.dev_priv_size = sizeof(drm_mga_buf_priv_t),
+	.load = mga_driver_load,
+	.unload = mga_driver_unload,
+	.lastclose = mga_driver_lastclose,
+	.dma_quiescent = mga_driver_dma_quiescent,
+	.device_is_agp = mga_driver_device_is_agp,
+	.get_vblank_counter = mga_get_vblank_counter,
+	.enable_vblank = mga_enable_vblank,
+	.disable_vblank = mga_disable_vblank,
+	.irq_preinstall = mga_driver_irq_preinstall,
+	.irq_postinstall = mga_driver_irq_postinstall,
+	.irq_uninstall = mga_driver_irq_uninstall,
+	.irq_handler = mga_driver_irq_handler,
+#ifdef __linux__
+	.reclaim_buffers = drm_core_reclaim_buffers,
+	.get_map_ofs = drm_core_get_map_ofs,
+	.get_reg_ofs = drm_core_get_reg_ofs,
+#endif /* __linux__ */
+	.ioctls = mga_ioctls,
+	.dma_ioctl = mga_dma_buffers,
+#ifdef __linux__
+	.fops = {
+		.owner = THIS_MODULE,
+		.open = drm_open,
+		.release = drm_release,
+		.unlocked_ioctl = drm_ioctl,
+		.mmap = drm_mmap,
+		.poll = drm_poll,
+		.fasync = drm_fasync,
+#ifdef CONFIG_COMPAT
+		.compat_ioctl = mga_compat_ioctl,
+#endif
+	},
+	.pci_driver = {
+		.name = DRIVER_NAME,
+		.id_table = pciidlist,
+	},
+#endif /* __linux__ */
+
+	.name = DRIVER_NAME,
+	.desc = DRIVER_DESC,
+	.date = DRIVER_DATE,
+	.major = DRIVER_MAJOR,
+	.minor = DRIVER_MINOR,
+	.patchlevel = DRIVER_PATCHLEVEL,
+};
 
 static int
 mga_probe(device_t kdev)
@@ -164,5 +180,104 @@ static driver_t mga_driver = {
 };
 
 extern devclass_t drm_devclass;
-DRIVER_MODULE(mga, vgapci, mga_driver, drm_devclass, 0, 0);
+
+static int __init mga_init(void)
+{
+	driver.max_ioctl = mga_max_ioctl;
+	driver.num_ioctls = mga_max_ioctl;
+#ifdef __linux__
+	return drm_init(&driver);
+#else
+	kprintf("Called mga_init() and loaded mga driver\n");
+	return 0;
+#endif /* __linux__ */
+}
+
+static void __exit mga_exit(void)
+{
+#ifdef __linux__
+	drm_exit(&driver);
+#else
+	kprintf("Called mga_exit() and unloaded mga driver\n");
+#endif /* __linux__ */
+}
+
+static int mga_handler(module_t mod, int what, void *arg) {
+	int err = 0;
+	switch(what) {
+	case MOD_LOAD:
+		mga_init();
+		break;
+	case MOD_UNLOAD:
+		mga_exit();
+		break;
+	default:
+		err = EINVAL;
+		break;
+	}
+	return (err);
+}
+
+DRIVER_MODULE(mga, vgapci, mga_driver, drm_devclass, mga_handler, 0);
 MODULE_DEPEND(mga, drm, 1, 1, 1);
+
+#ifdef __linux__
+module_init(mga_init);
+module_exit(mga_exit);
+
+MODULE_AUTHOR(DRIVER_AUTHOR);
+MODULE_DESCRIPTION(DRIVER_DESC);
+MODULE_LICENSE("GPL and additional rights");
+#endif /* __linux__ */
+
+/**
+ * Determine if the device really is AGP or not.
+ *
+ * In addition to the usual tests performed by \c drm_device_is_agp, this
+ * function detects PCI G450 cards that appear to the system exactly like
+ * AGP G450 cards.
+ *
+ * \param dev   The device to be tested.
+ *
+ * \returns
+ * If the device is a PCI G450, zero is returned.  Otherwise non-zero is
+ * returned.
+ */
+static int mga_driver_device_is_agp(struct drm_device * dev)
+{
+#ifdef __linux__
+	const struct pci_dev *const pdev = dev->pdev;
+#else
+	device_t bus;
+#endif
+
+	/* There are PCI versions of the G450.  These cards have the
+	 * same PCI ID as the AGP G450, but have an additional PCI-to-PCI
+	 * bridge chip.  We detect these cards, which are not currently
+	 * supported by this driver, by looking at the device ID of the
+	 * bus the "card" is on.  If vendor is 0x3388 (Hint Corp) and the
+	 * device is 0x0021 (HB6 Universal PCI-PCI bridge), we reject the
+	 * device.
+	 */
+#ifdef __linux__
+	if ((pdev->device == 0x0525) && pdev->bus->self
+	    && (pdev->bus->self->vendor == 0x3388)
+	    && (pdev->bus->self->device == 0x0021)) {
+		return 0;
+	}
+
+	return 2;
+#else /* not __linux__ */
+#if __FreeBSD_version >= 700010
+	bus = device_get_parent(device_get_parent(dev->device));
+#else
+	bus = device_get_parent(dev->device);
+#endif /* __FreeBSD_version */
+	if (pci_get_device(dev->device) == 0x0525 &&
+	    pci_get_vendor(bus) == 0x3388 &&
+	    pci_get_device(bus) == 0x0021)
+		return DRM_IS_NOT_AGP;
+	else
+		return DRM_MIGHT_BE_AGP;
+#endif /* __linux__ */
+}
