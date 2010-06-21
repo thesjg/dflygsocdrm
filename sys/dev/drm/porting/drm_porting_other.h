@@ -138,6 +138,11 @@ enum {
 #define DRM_READ32(map, offset)						\
 	*(volatile u_int32_t *)(((vm_offset_t)(map)->handle) +		\
 	    (vm_offset_t)(offset))
+/* extension for i915/i915_drv.h */
+#define DRM_READ64(map, offset)						\
+	*(volatile u_int64_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset))
+
 #define DRM_WRITE8(map, offset, val)					\
 	*(volatile u_int8_t *)(((vm_offset_t)(map)->handle) +		\
 	    (vm_offset_t)(offset)) = val
@@ -146,6 +151,10 @@ enum {
 	    (vm_offset_t)(offset)) = val
 #define DRM_WRITE32(map, offset, val)					\
 	*(volatile u_int32_t *)(((vm_offset_t)(map)->handle) +		\
+	    (vm_offset_t)(offset)) = val
+/* extension for i915/i915_drv.h */
+#define DRM_WRITE64(map, offset, val)					\
+	*(volatile u_int64_t *)(((vm_offset_t)(map)->handle) +		\
 	    (vm_offset_t)(offset)) = val
 
 #define DRM_VERIFYAREA_READ( uaddr, size )		\
