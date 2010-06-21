@@ -205,6 +205,8 @@ int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
 
 	id_entry = drm_find_description(vendor, device, idlist);
 	if (id_entry != NULL) {
+		DRM_INFO("drm_probe: vendor %8x, device %8x, name %s, get_desc %s\n",
+			vendor, device, id_entry->name, device_get_desc(kdev));
 		if (!device_get_desc(kdev)) {
 			DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
 			device_set_desc(kdev, id_entry->name);
@@ -847,7 +849,9 @@ drm_local_map_t *drm_getsarea(struct drm_device *dev)
 
 static int __init drm_core_init(void)
 {
+#ifdef __linux__
 	int ret = -ENOMEM;
+#endif /* __linux__ */
 
 	idr_init(&drm_minors_idr);
 
