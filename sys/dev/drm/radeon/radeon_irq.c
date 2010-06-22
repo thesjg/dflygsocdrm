@@ -220,6 +220,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 		if (stat & RADEON_CRTC2_VBLANK_STAT)
 			drm_handle_vblank(dev, 1);
 	}
+#ifndef __linux__
 	if (dev->msi_enabled) {
 		switch(dev_priv->flags & RADEON_FAMILY_MASK) {
 			case CHIP_RS400:
@@ -248,6 +249,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 				break;
 		}
 	}
+#endif /* __linux__ */
 	return IRQ_HANDLED;
 }
 
@@ -324,15 +326,15 @@ int radeon_irq_emit(struct drm_device *dev, void *data, struct drm_file *file_pr
 	drm_radeon_irq_emit_t *emit = data;
 	int result;
 
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
-		return -EINVAL;
-
-	LOCK_TEST_WITH_RETURN(dev, file_priv);
-
 	if (!dev_priv) {
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
 	}
+
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		return -EINVAL;
+
+	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
 	result = radeon_emit_irq(dev);
 
@@ -355,6 +357,9 @@ int radeon_irq_wait(struct drm_device *dev, void *data, struct drm_file *file_pr
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
 	}
+
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
+		return -EINVAL;
 
 	return radeon_wait_irq(dev, irqwait->irq_seq);
 }
@@ -387,6 +392,8 @@ int radeon_driver_irq_postinstall(struct drm_device * dev)
 	atomic_set(&dev_priv->swi_emitted, 0);
 	DRM_INIT_WAITQUEUE(&dev_priv->swi_queue);
 
+	dev->max_vblank_count = 0x001fffff;
+
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 		return 0;
 
@@ -401,8 +408,9 @@ void radeon_driver_irq_uninstall(struct drm_device * dev)
 	    (drm_radeon_private_t *) dev->dev_private;
 	if (!dev_priv)
 		return;
-
+#ifndef __linux__
 	dev_priv->irq_enabled = 0;
+#endif /* __linux__ */
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 		return;
