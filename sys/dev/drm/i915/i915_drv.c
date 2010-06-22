@@ -455,6 +455,7 @@ int i965_reset(struct drm_device *dev, u8 flags)
 	return 0;
 }
 
+#ifdef __linux__
 static int __devinit
 i915_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -468,6 +469,7 @@ i915_pci_remove(struct pci_dev *pdev)
 
 	drm_put_dev(dev);
 }
+#endif /* __linux__ */
 
 static int i915_pm_suspend(struct device *dev)
 {
