@@ -74,7 +74,6 @@ idr_find(struct idr *pidr, int id) {
 	return result->data;
 }
 
-/* Using red-black tree hopefully never run out of memory */
 int
 idr_pre_get(struct idr *pidr, unsigned int flags) {
 	struct drm_rb_info *allocate;

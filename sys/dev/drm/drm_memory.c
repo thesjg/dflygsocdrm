@@ -1,5 +1,15 @@
-/*-
- *Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+/**
+ * \file drm_memory.c
+ * Memory management wrappers for DRM
+ *
+ * \author Rickard E. (Rik) Faith <faith@valinux.com>
+ * \author Gareth Hughes <gareth@valinux.com>
+ */
+
+/*
+ * Created: Thu Feb  4 14:00:34 1999 by faith@valinux.com
+ *
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
@@ -36,7 +46,7 @@
  * has been stripped out for now.
  */
 
-#include "dev/drm/drmP.h"
+#include "drmP.h"
 
 MALLOC_DEFINE(DRM_MEM_DMA, "drm_dma", "DRM DMA Data Structures");
 MALLOC_DEFINE(DRM_MEM_SAREA, "drm_sarea", "DRM SAREA Data Structures");
@@ -61,6 +71,7 @@ MALLOC_DEFINE(DRM_MEM_MM, "drm_sman", "DRM MEMORY MANAGER Data Structures");
 MALLOC_DEFINE(DRM_MEM_HASHTAB, "drm_hashtab", "DRM HASHTABLE Data Structures");
 /* Default for kmalloc() and kfree() equivalent */
 MALLOC_DEFINE(DRM_MEM_DEFAULT, "drm_default", "DRM DEFAULT Data Structures");
+MALLOC_DEFINE(DRM_MEM_STUB, "drm_stub", "DRM STUB Data Structures");
 MALLOC_DEFINE(DRM_MEM_IDR, "drm_idr", "DRM idr Data Structures");
 MALLOC_DEFINE(DRM_MEM_GEM, "drm_gem", "DRM GEM Data Structures");
 MALLOC_DEFINE(DRM_MEM_TTM, "drm_ttm", "DRM TTM Data Structures");
@@ -85,77 +96,7 @@ int drm_mem_info(char *buf, char **start, off_t offset,
 	return 0;
 }
 
-void drm_mem_init(void)
-{
-}
-
-void drm_mem_uninit(void)
-{
-}
-
-void *drm_ioremap_wc(struct drm_device *dev, drm_local_map_t *map)
-{
-#if 0 /* XXX */
-	return pmap_mapdev_attr(map->offset, map->size, PAT_WRITE_COMBINING);
-#endif
-	return pmap_mapdev(map->offset, map->size);
-}
-
-void *drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
-{
-	return pmap_mapdev(map->offset, map->size);
-}
-
-void drm_ioremapfree(drm_local_map_t *map)
-{
-	pmap_unmapdev((vm_offset_t) map->handle, map->size);
-}
-
-int
-drm_mtrr_add(unsigned long offset, size_t size, int flags)
-{
-	int act;
-	struct mem_range_desc mrdesc;
-
-	mrdesc.mr_base = offset;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = flags;
-	act = MEMRANGE_SET_UPDATE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	return mem_range_attr_set(&mrdesc, &act);
-}
-
-int
-drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
-{
-	int act;
-	struct mem_range_desc mrdesc;
-
-	mrdesc.mr_base = offset;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = flags;
-	act = MEMRANGE_SET_REMOVE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	return mem_range_attr_set(&mrdesc, &act);
-}
-
-void drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev)
-{
-	map->handle = drm_ioremap_wc(dev, map);
-}
-
-void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
-{
-	map->handle = drm_ioremap(dev, map);
-}
-
-void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
-{
-	if ( map->handle && map->size )
-		drm_ioremapfree(map);
-}
-
-/* newer UNIMPLEMENTED */
+/* newer UNIMPLEMENTED agp_remap, probably not needed */
 #if __OS_HAS_AGP
 static void *agp_remap(unsigned long offset, unsigned long size,
 		       struct drm_device * dev)
@@ -234,3 +175,79 @@ static inline void *agp_remap(unsigned long offset, unsigned long size,
 }
 
 #endif				/* agp */
+
+/* legacy API */
+
+void *drm_ioremap_wc(struct drm_device *dev, drm_local_map_t *map)
+{
+#if 0 /* XXX */
+	return pmap_mapdev_attr(map->offset, map->size, PAT_WRITE_COMBINING);
+#endif
+	return pmap_mapdev(map->offset, map->size);
+}
+
+void *drm_ioremap(struct drm_device *dev, drm_local_map_t *map)
+{
+	return pmap_mapdev(map->offset, map->size);
+}
+
+void drm_ioremapfree(drm_local_map_t *map)
+{
+	pmap_unmapdev((vm_offset_t) map->handle, map->size);
+}
+
+/* IMPLEMENTED newer API */
+
+void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
+{
+	map->handle = drm_ioremap(dev, map);
+}
+
+void drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev)
+{
+	map->handle = drm_ioremap_wc(dev, map);
+}
+
+void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
+{
+	if ( map->handle && map->size )
+		drm_ioremapfree(map);
+}
+
+/* NO-OPS */
+void drm_mem_init(void)
+{
+}
+
+void drm_mem_uninit(void)
+{
+}
+
+/* legacy, UNIMPLEMENTED how to know if MTRR available */
+int
+drm_mtrr_add(unsigned long offset, size_t size, int flags)
+{
+	int act;
+	struct mem_range_desc mrdesc;
+
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_UPDATE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	return mem_range_attr_set(&mrdesc, &act);
+}
+
+int
+drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
+{
+	int act;
+	struct mem_range_desc mrdesc;
+
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_REMOVE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	return mem_range_attr_set(&mrdesc, &act);
+}

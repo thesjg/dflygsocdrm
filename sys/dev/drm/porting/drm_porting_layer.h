@@ -811,9 +811,9 @@ idr_replace(struct idr *pidr, void *newData, int id);
 void
 idr_destroy(struct idr *pidr);
 
-/*
- * Reference counting
- */
+/**********************************************************
+ * kref reference counting                                *
+ **********************************************************/
 
 /* file ttm_object.c, function ttm_object_file() */
 struct kref {
@@ -1470,6 +1470,17 @@ on_each_cpu(void (*handler)(void *data), void *data, uint32_t flags) {
 	return 1;
 }
 
+/**********************************************************
+ * timer                                                  *
+ **********************************************************/
+
+/*
+ * There is a problem that a callout requires void * arguments
+ * whereas a Linux timer_list requires unsigned long arguments
+ * (arguments which are then cast to pointers)
+ */
+
+/* &dev->vblank_disable_timer is being used in drm_irq.c */
 #define timer_list callout
 
 /* file drm_drv.c, function drm_lastclose() */
@@ -1479,11 +1490,17 @@ init_timer(struct timer_list *timer){
 }
 
 /* file drm_irq.c, function drm_vblank_init() */
+/* CHANGE vblank_disable_fn() in drm_irq.c to void * arg */
+/* CHANGE i915_hangcheck_elapsed() in i915_irq.c to void * arg */
+/* CHANGE r600_audio_update_hdmi() in r600_audio.c to void * arg */
+/* CHANGE intel_gpu_idle_timer() in intel_display.c to void * arg */
+/* CHANGE intel_crtc_idle_timer() in intel_display.c to void * arg */
+/* CHANGE via_dmablit_timer() in via_dmablit.c to void * arg */
 static __inline__ void
 setup_timer(
 	struct timer_list *timer,
-	void (*func)(unsigned long arg),
-	unsigned long arg
+	void (*func)(void *arg),
+	void *arg
 ){
 	;
 }
@@ -1531,6 +1548,7 @@ MALLOC_DECLARE(DRM_MEM_DRAWABLE);
 MALLOC_DECLARE(DRM_MEM_MM);
 MALLOC_DECLARE(DRM_MEM_HASHTAB);
 MALLOC_DECLARE(DRM_MEM_DEFAULT);
+MALLOC_DECLARE(DRM_MEM_STUB);
 MALLOC_DECLARE(DRM_MEM_IDR);
 MALLOC_DECLARE(DRM_MEM_GEM);
 MALLOC_DECLARE(DRM_MEM_TTM);

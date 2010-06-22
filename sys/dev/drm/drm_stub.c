@@ -113,7 +113,7 @@ struct drm_master *drm_master_create(struct drm_minor *minor)
 #ifdef __linux__
 	master = kzalloc(sizeof(*master), GFP_KERNEL);
 #else
-	master = malloc(sizeof(*master), DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+	master = malloc(sizeof(*master), DRM_MEM_STUB, M_WAITOK | M_ZERO);
 #endif
 	if (!master)
 		return NULL;
@@ -159,7 +159,7 @@ static void drm_master_destroy(struct kref *kref)
 	if (master->unique) {
 #ifdef __linux__
 		kfree(master->unique);
-#else
+#else /* allocated in drm_ioctl.c */
 		free(master->unique, DRM_MEM_DRIVER);
 #endif
 		master->unique = NULL;
@@ -171,7 +171,7 @@ static void drm_master_destroy(struct kref *kref)
 		drm_ht_remove_item(&master->magiclist, &pt->hash_item);
 #ifdef __linux__
 		kfree(pt);
-#else
+#else /* allocated in drm_auth.c */
 		free(pt, DRM_MEM_MAGIC);
 #endif
 	}
@@ -181,7 +181,7 @@ static void drm_master_destroy(struct kref *kref)
 #ifdef __linux__
 	kfree(master);
 #else
-	free(master, DRM_MEM_DEFAULT);
+	free(master, DRM_MEM_STUB);
 #endif
 }
 
@@ -357,7 +357,7 @@ static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int t
 #ifdef __linux__
 	new_minor = kzalloc(sizeof(struct drm_minor), GFP_KERNEL);
 #else
-	new_minor = malloc(sizeof(struct drm_minor), DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+	new_minor = malloc(sizeof(struct drm_minor), DRM_MEM_STUB, M_WAITOK | M_ZERO);
 #endif
 	if (!new_minor) {
 		ret = -ENOMEM;
@@ -419,7 +419,7 @@ err_g2:
 		drm_proc_cleanup(new_minor, drm_proc_root);
 #endif
 err_mem:
-	free(new_minor, DRM_MEM_DEFAULT);
+	free(new_minor, DRM_MEM_STUB);
 err_idr:
 	idr_remove(&drm_minors_idr, minor_id);
 	*minor = NULL;
@@ -546,7 +546,7 @@ int drm_put_minor(struct drm_minor **minor_p)
 #ifdef __linux__
 	kfree(minor);
 #else
-	free(minor, DRM_MEM_DEFAULT);
+	free(minor, DRM_MEM_STUB);
 #endif
 	*minor_p = NULL;
 	return 0;
