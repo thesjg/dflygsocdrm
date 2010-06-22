@@ -8,7 +8,7 @@ SRCS    = \
 	r600_blit.c \
 	r600_cp.c \
 	radeon_cp.c \
-	radeon_cs.c \
+	radeon_cs_legacy.c \
 	radeon_drv.c \
 	radeon_irq.c \
 	radeon_mem.c \

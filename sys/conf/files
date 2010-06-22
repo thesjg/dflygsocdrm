@@ -1742,7 +1742,7 @@ dev/drm/radeon/r300_cmdbuf.c		optional radeondrm drm
 dev/drm/radeon/r600_blit.c		optional radeondrm drm
 dev/drm/radeon/r600_cp.c		optional radeondrm drm
 dev/drm/radeon/radeon_cp.c		optional radeondrm drm
-dev/drm/radeon/radeon_cs.c		optional radeondrm drm
+dev/drm/radeon/radeon_cs_legacy.c	optional radeondrm drm
 dev/drm/radeon/radeon_drv.c		optional radeondrm drm
 dev/drm/radeon/radeon_irq.c		optional radeondrm drm
 dev/drm/radeon/radeon_mem.c		optional radeondrm drm
