@@ -234,8 +234,12 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 	else
 		dev->device = kdev;
 
+	pci_enable_busmaster(dev->device);
+
+#if 0
 	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
 				DRM_DEV_MODE, "dri/card%d", unit);
+#endif
 
 	dev->pci_domain = 0;
 	dev->pci_bus = pci_get_bus(dev->device);
@@ -463,6 +467,8 @@ static int drm_load(struct drm_device *dev)
 {
 	int i, retcode;
 
+	int unit;
+
 	DRM_DEBUG("\n");
 
 	TAILQ_INIT(&dev->maplist_legacy);
@@ -487,7 +493,9 @@ static int drm_load(struct drm_device *dev)
 		/* Shared code returns -errno. */
 		retcode = -dev->driver->load(dev,
 		    dev->id_entry->driver_private);
+#if 0
 		pci_enable_busmaster(dev->device);
+#endif
 		DRM_UNLOCK();
 		if (retcode != 0)
 			goto error;
@@ -515,6 +523,10 @@ static int drm_load(struct drm_device *dev)
 		DRM_ERROR("Cannot allocate memory for context bitmap.\n");
 		goto error;
 	}
+
+	unit = device_get_unit(dev->device);
+	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
+				DRM_DEV_MODE, "dri/card%d", unit);
 
 	DRM_INFO("Initialized %s %d.%d.%d %s\n",
 	    dev->driver->name,
