@@ -717,6 +717,31 @@ typedef struct mtx rwlock_t;
 #define read_lock(l)    mtx_lock_sh_quick(l, NULL)
 #define read_unlock(l)  mtx_unlock_sh(l)
 
+/* file radeon_pm.c, function radeon_dynpm_idle_work_handler() */
+static __inline__ void
+read_lock_irqsave(rwlock_t *lock, unsigned long flags) {
+	;
+}
+
+/* file radeon_pm.c, function radeon_dynpm_idle_work_handler() */
+static __inline__ void
+read_lock_irqrestore(rwlock_t *lock, unsigned long flags) {
+	;
+}
+
+/* file radeon_fence.c, function radeon_fence_emit() */
+static __inline__ void
+write_lock_irqsave(rwlock_t *lock, unsigned long flags) {
+	;
+}
+
+/* file radeon_fence.c, function radeon_fence_emit() */
+static __inline__ void
+write_lock_irqrestore(rwlock_t *lock, unsigned long flags) {
+	;
+}
+
+
 /*
  * Semaphores
  */
@@ -974,6 +999,7 @@ wake_up(wait_queue_head_t *wqh) {
 }
 
 /* file ttm/ttm_lock.c, function ttm_read_unlock() */
+/* file radeon_fence.c, function radeon_fence_process() */
 static __inline__ void
 wake_up_all(wait_queue_head_t *wqh) {
 	;
@@ -1080,6 +1106,8 @@ set_need_resched(void) {
 }
 
 /* file ttm_bo_c, function ttm_bo_device_release() */
+/* file radeon_pm.c, function radeon_set_pm_method() */
+/* file radeon_pm.c, function radeon_pm_compute_clocks() */
 static __inline__ int
 cancel_delayed_work(struct delayed_work *wq) {
 	return 0;
@@ -1094,6 +1122,16 @@ cancel_delayed_work_sync(struct delayed_work *wq) {
 /* file ttm_bo_c, function ttm_bo_device_release() */
 static __inline__ int
 flush_scheduled_work(void) {
+	return 0;
+}
+
+/* file radeon_pm.c, function radeon_pm_compute_clocks() */
+static __inline__ int
+queue_delayed_work(
+	struct workqueue_struct *wq,
+	struct delayed_work *dynpm_idle_work,
+	unsigned long jiffies
+) {
 	return 0;
 }
 
@@ -1142,11 +1180,6 @@ static __inline__ int
 delayed_slow_work_cancel(struct delayed_slow_work *delayed_work) {
 	return 0;
 }
-
-/* drm_fb_helper.c, struct block_paniced */
-struct notifier_block {
-	int (*notifier_call)(struct notifier_block *n, unsigned long ununsed, void *panic_str);
-};
 
 /* drm_fb_helper.c, struct sysrq_drm_fb_helper_restore_op */
 struct tty_struct {
@@ -1329,6 +1362,18 @@ set_memory_wc(unsigned long page_address, uint32_t val) {
 	return 0;
 }
 
+/* file radeon_gart.c, function radeon_gart_table_ram_alloc() */
+static __inline__ void
+set_memory_uc(unsigned long ptr, unsigned long size) {
+	;
+}
+
+/* file radeon_gart.c, function radeon_gart_table_ram_free() */
+static __inline__ void
+set_memory_wb(unsigned long ptr, unsigned long size) {
+	;
+}
+
 /* file ttm/ttm_tt.c, function ttm_tt_swapin() */
 /* Fourth argument NULL all calls in drm */
 static __inline__ struct page *
@@ -1388,7 +1433,7 @@ si_meminfo(struct sysinfo *si) {
 }
 
 /*
- * Time
+ * TIME Time
  */
 
 #define HZ	hz
@@ -1408,6 +1453,12 @@ time_after_eq(unsigned long jiffies, unsigned long _end) {
 	return 0;
 }
 
+/* file radeon_fence.c, function radeon_fence_poll_locked() */
+static __inline__ int
+time_after(unsigned long jiffies, unsigned long _end) {
+	return 0;
+}
+
 /* file drm_irq., function drm_handle_vblank_events() */
 /* On DragonFly include sys/time.h */
 /* man gettimeofday, but how.tv_sec and how.tv_usec are long? */
@@ -1417,6 +1468,12 @@ do_gettimeofday(struct timeval *now) {
 	return gettimeofday(now, NULL);
 #endif
 	return 0;
+}
+
+/* file radeon_i2c.c, function r500_hw_i2c_xfer() */
+static __inline__ void
+udelay(int delay) {
+	DELAY(delay);
 }
 
 /**********************************************************
@@ -1553,6 +1610,7 @@ MALLOC_DECLARE(DRM_MEM_IDR);
 MALLOC_DECLARE(DRM_MEM_GEM);
 MALLOC_DECLARE(DRM_MEM_TTM);
 MALLOC_DECLARE(DRM_MEM_KMS);
+MALLOC_DECLARE(DRM_MEM_FENCE);
 
 /**********************************************************
  * I/O                                                    *
@@ -1725,7 +1783,8 @@ memcpy_toio(void *dst, void *src, unsigned long value) {
  * I/O and virtual memory
  */
 
-/* file ttm_bo_c, function ttm_vm_fault() */
+/* file ttm_bo.c, function ttm_vm_fault() */
+/* file radeon_ttm.c, function radeon_ttm_fault() */
 #define VM_FAULT_NOPAGE 0x0001
 #define VM_FAULT_SIGBUS 0x0002
 #define VM_FAULT_OOM    0x0004
@@ -1754,12 +1813,14 @@ struct vm_area_struct {
 	struct file *vm_file;
 /* file drm_vm.c, function drm_do_vm_fault() */
 /* file drm_gem.c, function drm_gem_mmap() */
+/* file radeon_mmap.c, function radeon_mmap() */
 	unsigned long vm_pgoff;
 	unsigned long vm_start;
 /* file drm_vm.c, function drm_do_shm_close() */
 	unsigned long vm_end;
 /* file drm_vm.c, function drm_do_shm_fault() */
 /* file drm_gem.c, function drm_gem_vm_close() */
+/* file radeon_ttm.c, function radeon_ttm_fault() */
 	void *vm_private_data;
 	const struct vm_operations_struct *vm_ops;
 };
@@ -1771,6 +1832,7 @@ struct vm_fault {
 };
 
 /* file drm_vm.c, struct drm_vm_ops */
+/* file radeon_ttm.c, function radeon_ttm_fault() */
 struct vm_operations_struct {
 	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
 	void (*open)(struct vm_area_struct *vma);
@@ -2150,6 +2212,40 @@ old_encode_dev(dev_t device) {
 /* takes struct device *dev as first argument */
 #define dev_err(arg, ...) /* UNIMPLEMENTED */
 
+/* drm_crtc.h, struct drm_connector, field attr */
+/* radeon_pm.c, function radeon_set_pm_method(), unused arg */
+/* file radeon_pm.c, struct power_profile */
+struct device_attribute {
+	uint32_t perm;
+	ssize_t (*get)(struct device *dev, struct device_attribute *attr, char *buf);
+	ssize_t (*set)(struct device *dev, struct device_attribute *attr, char *buf, size_t count);
+};
+
+/* file radeon_pm.c, struct power_profile */
+#define DEVICE_ATTR(name, perms, getter, setter) \
+struct device_attribute dev_attr_##name { \
+	.perm = perms; \
+	.get = getter; \
+	.set = setter; \
+};
+/* file radeon_pm.c, function radeon_pm_init() */
+static __inline__ int
+device_create_file(
+	struct device *dev,
+	struct device_attribute *attr
+) {
+	return 0;
+}
+
+/* file radeon_pm.c, function radeon_pm_fini() */
+static __inline__ int
+device_remove_file(
+	struct device *dev,
+	struct device_attribute *attr
+) {
+	return 0;
+}
+
 /**********************************************************
  * BUS AND DEVICE CLASSES                                 *
  **********************************************************/
@@ -2177,9 +2273,9 @@ dma_free_coherent(
 	;
 }
 
-/*
- * PCI
- */
+/**********************************************************
+ * PCI                                                    *
+ **********************************************************/
 
 /* file drm_vm.c, function drm_mmap_locked() */
 #define PCI_VENDOR_ID_APPLE 0x0001
@@ -2214,6 +2310,35 @@ struct pci_dev {
 	uint32_t device;
 	void *devfn;
 };
+
+/* file radeon_gart.c, function radeon_gart_table_ram_alloc() */
+static __inline__ void *
+pci_alloc_consistent(
+	struct pci_dev *dev,
+	unsigned table_size,
+	dma_addr_t table_addr
+) {
+	return (void *)NULL;
+}
+
+/* file radeon_gart.c, function radeon_gart_table_ram_alloc() */
+static __inline__ void
+pci_free_consistent(
+	struct pci_dev *dev,
+	unsigned table_size,
+	dma_addr_t table_addr
+) {
+	return;
+}
+
+/* file radeon_pm.c, function radeon_get_pm_method() */
+static __inline__ void *
+pci_get_drvdata(struct pci_dev *pdev) {
+	return NULL;
+}
+
+/* file radeon_pm.c, function radeon_get_pm_method() */
+#define to_pci_dev(dev) container_of(dev, struct pci_dev, dev)
 
 /* file drm_drv.c, function drm_init() */
 static __inline__ int
@@ -2275,9 +2400,11 @@ pci_name(struct pci_dev *pdev) {
 }
 
 /* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
+/* file radeon_gart.c, function radeon_gart_unbind() */
 #define PCI_DMA_BIDIRECTIONAL 0x0001
 
 /* file ati_pcigart.c, function drm_ati_pcigart_init() */
+/* file radeon_gart.c, function radeon_gart_bind() */
 static __inline__ dma_addr_t
 pci_map_page(
 	struct pci_dev *pdev,
@@ -2290,13 +2417,20 @@ pci_map_page(
 }
 
 /* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
+/* file radeon_gart.c, function radeon_gart_unbind() */
 static __inline__ int
 pci_unmap_page(
 	struct pci_dev *pdev,
-	dma_addr_t busaddri,
+	dma_addr_t pages_addr,
 	unsigned long pagesize,
 	uint32_t flags
 ) {
+	return 0;
+}
+
+/* file radeon_gart.c, function radeon_gart_bind() */
+static __inline__ int
+pci_dma_mapping_error(struct pci_dev *pdev, dma_addr_t pages_addr) {
 	return 0;
 }
 
@@ -2503,27 +2637,36 @@ vga_switcheroo_register_client(
 	return 0;
 }
 
+/* file radeon_kms.c, function radeon_driver_firstopen_kms() */
+static __inline__ int
+vga_switcheroo_process_delayed_switch(void) {
+	return 0;
+}
+
 /**********************************************************
  * FRAMEBUFFER                                            *
  **********************************************************/
 
 /* file drm_fb_helper.c */
-#define FB_BLANK_UNBLANK        1
-#define FB_BLANK_NORMAL         2
-#define FB_BLANK_HSYNC_SUSPEND  3
-#define FB_BLANK_VSYNC_SUSPEND  4
-#define FB_BLANK_POWERDOWN      5
+#define FB_BLANK_UNBLANK        0x0001
+#define FB_BLANK_NORMAL         0x0002
+#define FB_BLANK_HSYNC_SUSPEND  0x0004
+#define FB_BLANK_VSYNC_SUSPEND  0x0008
+#define FB_BLANK_POWERDOWN      0x0010
 
 /* file drm_fb_helper.c, function setcolreg() */
-#define FB_VISUAL_TRUECOLOR     6
+#define FB_VISUAL_TRUECOLOR     0x0020
 
 /* file drm_fb_helper.c, function drm_helper_fill_fix() */
-#define FB_VISUAL_PSEUDOCOLOR   7
-#define FB_TYPE_PACKED_PIXELS   8
-#define FB_ACCEL_NONE           9
+#define FB_VISUAL_PSEUDOCOLOR   0x0040
+#define FB_TYPE_PACKED_PIXELS   0x0080
+#define FB_ACCEL_NONE           0x0100
 
 /* file drm_fb_helper.c, function drm_fb_helper_fill_var() */
-#define FB_ACTIVATE_NOW        10
+#define FB_ACTIVATE_NOW         0x0200
+
+/* file radeon_fb.c, function radeonfb_create() */
+#define FBINFO_DEFAULT          0x0400
 
 /* file drm_mode.c, function drm_mode_equal() */
 #define KHZ2PICOS(clock) (clock) /* UNIMPLEMENTED */
@@ -2558,6 +2701,11 @@ struct fb_fix_screeninfo {
 	uint32_t visual;
 	uint32_t accel;
 	uint32_t line_length;
+/* file radeon_fb.c, function radeonfb_create() */
+	unsigned long mmio_start;
+	unsigned long mmio_len;
+	unsigned long smem_start;
+	unsigned long smem_len;
 };
 
 /* file drm_fb_helper.c, function setcolreg() */
@@ -2592,6 +2740,11 @@ struct fb_var_screeninfo {
 	uint32_t width;
 };
 
+/* file radeon_fb.c, function radeonfb_create() */
+struct DRM_FB_PIXMAP {
+	int placeholder;
+};
+
 /*file drm_fb_helper.h, function drm_fb_helper_blank() */
 struct fb_info {
 	struct fb_var_screeninfo var;
@@ -2599,6 +2752,8 @@ struct fb_info {
 	void *pseudo_palette;
 	void *par;
 	uint32_t node;
+/* file radeon_fb.c, function radeonfb_create() */
+	uint32_t flags;
 };
 
 /*file drm_fb_helper.h, function drm_fb_helper_setcmap() */
@@ -2629,17 +2784,18 @@ unregister_framebuffer(struct fb_info *info) {
 	return 0;
 }
 
+/* file radeon_fb.c, function radeonfb_create() */
+static __inline__ struct fb_info *
+framebuffer_alloc(unsigned long isZero, struct device *device) {
+	return NULL;
+}
+
 /*
  * Framebuffer global variables
  */
 #define DEFAULT_FB_MODE_OPTION "default fb mode option"
 
 extern const char *fb_mode_option;
-
-/* drm_crtc.h, struct drm_connector, field attr */
-struct device_attribute {
-	int placeholder;
-};
 
 struct edi {
 	int placeholder;
@@ -2671,8 +2827,10 @@ typedef unsigned long pm_message_t;
  **********************************************************/
 
 /* file drm_encoder_slave.c, function i2c_algo_dp_aux_functionality() */
+/* file radeon_i2c.c, function radeon_hw_i2c_func() */
 #define I2C_FUNC_I2C                    0x0001
 #define I2C_FUNC_SMBUS_EMUL             0x0002
+/* file drm_encoder_slave.c, function i2c_algo_dp_aux_functionality() */
 #define I2C_FUNC_SMBUS_READ_BLOCK_DATA  0x0004
 #define I2C_FUNC_SMBUS_BLOCK_PROC_CALL  0x0008
 #define I2C_FUNC_10BIT_ADDR             0x0010
@@ -2682,6 +2840,7 @@ typedef unsigned long pm_message_t;
 #define I2C_NAME_SIZE 32
 
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
+/* file radeon_i2c.c, function r500_hw_i2c_xfer() */
 #define I2C_M_RD 0x0001
 
 struct i2c_algorithm;
@@ -2700,7 +2859,7 @@ struct i2c_msg {
 
 /* file drm_crtc.h, function drm_get_edid() */
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
-struct i2c_adapter{
+struct i2c_adapter {
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 	struct module *owner;
 /* file drm_dp_i2c_helper.c, function i2c_algo_dp_aux_transaction() */
@@ -2710,14 +2869,47 @@ struct i2c_adapter{
 	const struct i2c_algorithm *algo;
 };
 
+/* file radeon_i2c.c, function pre_xfer() */
+static __inline__ void *
+i2c_get_adapdata(struct i2c_adapter *i2c_adap) {
+	return i2c_adap->algo_data;
+}
+
+/* file radeon_i2c.c, function radeon_i2c_create() */
+static __inline__ void
+i2c_set_adapdata(struct i2c_adapter *i2c_adap, void *data) {
+	i2c_adap->algo_data = data;
+}
+
 /* file drm_dp_i2c_helper.c, struct i2c_dp_aux_algo */
+/* file radeon_i2c.c, struct radeon_i2c_algo */
 struct i2c_algorithm {
 	int (*master_xfer)(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
 	uint32_t (*functionality)(struct i2c_adapter *adapter);
 };
 
+/* file radeon_i2c.c, function radeon_i2c_create() */
+struct i2c_algo_bit_data {
+	int (*pre_xfer)(struct i2c_adapter *i2c_adap);
+	int (*post_xfer)(struct i2c_adapter *i2c_adap);
+	void (*setsda)(void *i2c_priv, int data);
+	void (*setscl)(void *i2c_priv, int clock);
+	int (*getsda)(void *i2c_priv);
+	int (*getscl)(void *i2c_priv);
+	unsigned long udelay;
+	unsigned long timeout;
+	void *data;
+};
+
+/* file radeon_i2c.c, function radeon_i2c_create() */
+static __inline__ int
+i2c_bit_add_bus(struct i2c_adapter *adapter) {
+	return 0;
+}
+
 /* file drm_crtc.h, function drm_get_edid() */
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
+/* file radeon_i2c.c, function radeon_ddc_probe() */
 static __inline__ int
 i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
 	return 0;
@@ -2759,6 +2951,7 @@ i2c_unregister_device(struct i2c_client *client) {
 }
 
 /* file drm_encoder_slave.c, function i2c_dp_aux_add_bus() */
+/* file radeon_i2c.c, function radeon_i2c_create() */
 static __inline__ int
 i2c_add_adapter(struct i2c_adapter *adapter) {
 	return 0;
@@ -2771,6 +2964,22 @@ i2c_del_driver(struct i2c_driver *driver) {
 }
 
 /**********************************************************
+ * MSI                                                    *
+ **********************************************************/
+
+/* file radeon_irq_kms.c, function radeon_irq_kms_init() */
+static __inline__ int
+pci_enable_msi(struct pci_dev *pdev) {
+	return 0;
+}
+
+/* file radeon_irq_kms.c, function radeon_irq_kms_fini() */
+static __inline__ int
+pci_disable_msi(struct pci_dev *pdev) {
+	return 0;
+}
+
+/**********************************************************
  * FIRMWARE                                               *
  **********************************************************/
 
@@ -2778,6 +2987,65 @@ i2c_del_driver(struct i2c_driver *driver) {
 struct firmware {
 	int placeholder;
 };
+
+/**********************************************************
+ * POWER                                                  *
+ **********************************************************/
+
+/* file radeon_pm.c, function radeon_acpi_event() */
+static __inline__ int
+power_supply_is_system_supplied(void) {
+	return 0;
+}
+
+/* file radeon_pm.c, function radeon_sync_with_vblank() */
+/* file radeon_fence.c, function radeon_fence_wait() */
+static __inline__ void
+wait_event_timeout(
+	wait_queue_head_t vblank_queue,
+	bool vblank_sync,
+	unsigned long jiffies
+) {
+	;
+}
+
+/* file radeon_pm.c, function radeon_sync_with_vblank() */
+static __inline__ unsigned long
+msecs_to_jiffies(unsigned long msecs) {
+	return 0;
+}
+
+/* file radeon_pm.c, function radeon_pm_set_clocks() */
+/* file radeon_fence.c, function radeon_fence_wait() */
+static __inline__ void
+wait_event_interruptible_timeout(
+	wait_queue_head_t idle_queue,
+	bool gui_idle,
+	unsigned long jiffies
+) {
+	;
+}
+
+/**********************************************************
+ * ACPI                                                   *
+ **********************************************************/
+
+/* drm_fb_helper.c, struct block_paniced */
+/* radeon_pm.c, function radeon_pm_init() */
+struct notifier_block {
+	int (*notifier_call)(struct notifier_block *nb, unsigned long val, void *data);
+};
+
+static __inline__ int
+register_acpi_notifier(struct notifier_block *nb) {
+	return 0;
+}
+
+/* radeon_pm.c, function radeon_pm_fini() */
+static __inline__ int
+unregister_acpi_notifier(struct notifier_block *nb) {
+	return 0;
+}
 
 #endif /* __KERNEL__ */
 #endif

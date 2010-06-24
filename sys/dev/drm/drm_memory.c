@@ -76,6 +76,7 @@ MALLOC_DEFINE(DRM_MEM_IDR, "drm_idr", "DRM idr Data Structures");
 MALLOC_DEFINE(DRM_MEM_GEM, "drm_gem", "DRM GEM Data Structures");
 MALLOC_DEFINE(DRM_MEM_TTM, "drm_ttm", "DRM TTM Data Structures");
 MALLOC_DEFINE(DRM_MEM_KMS, "drm_kms", "DRM KMS Data Structures");
+MALLOC_DEFINE(DRM_MEM_FENCE, "drm_fence", "DRM fence Data Structures");
 
 /**
  * Called when "/proc/dri/%dev%/mem" is read.
