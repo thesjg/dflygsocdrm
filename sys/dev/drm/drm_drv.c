@@ -34,9 +34,9 @@
  */
 
 #include <machine/limits.h>
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#include "dev/drm/drm_sarea.h"
+#include "drmP.h"
+#include "drm.h"
+#include "drm_sarea.h"
 #include "drm_core.h"
 
 #ifdef DRM_DEBUG_DEFAULT_ON
@@ -553,10 +553,14 @@ drm_pci_id_list_t *drm_find_description(int vendor, int device,
 	return NULL;
 }
 
+/* synchronized with file drm_fops.c, function drm_setup() */
 static int drm_firstopen(struct drm_device *dev)
 {
-	drm_local_map_t *map;
 	int i;
+	int ret;
+
+#ifndef __linux__
+	drm_local_map_t *map;
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
 
@@ -565,52 +569,125 @@ static int drm_firstopen(struct drm_device *dev)
 	    _DRM_CONTAINS_LOCK, &map);
 	if (i != 0)
 		return i;
+#endif /* __linux__ */
 
-	if (dev->driver->firstopen)
-		dev->driver->firstopen(dev);
+	if (dev->driver->firstopen) {
+		ret = dev->driver->firstopen(dev);
+		if (ret != 0)
+			return ret;
+	}
 
+	atomic_set(&dev->ioctl_count, 0);
+	atomic_set(&dev->vma_count, 0);
+
+#ifndef __linux__
+/* Intel i915 only driver that appears to not DRIVER_HAVE_DMA */
 	dev->buf_use = 0;
+#endif /* __linux__ */
+	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
+	    !drm_core_check_feature(dev, DRIVER_MODESET)) {
+		dev->buf_use = 0;
+		atomic_set(&dev->buf_alloc, 0);
 
-	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA)) {
 		i = drm_dma_setup(dev);
+#ifdef __linux__
+		if (i < 0)
+#else
 		if (i != 0)
+#endif /* __linux__ */
 			return i;
 	}
 
+	for (i = 0; i < ARRAY_SIZE(dev->counts); i++)
+		atomic_set(&dev->counts[i], 0);
+
+#ifndef __linux__
 	for (i = 0; i < DRM_HASH_SIZE; i++) {
 		dev->magiclist[i].head = NULL;
 		dev->magiclist[i].tail = NULL;
 	}
+#endif /* __linux__ */
 
+	dev->sigdata.lock = NULL;
+
+	dev->queue_count = 0;
+	dev->queue_reserved = 0;
+	dev->queue_slots = 0;
+	dev->queuelist = NULL;
+#ifndef __linux__
 	dev->lock.lock_queue = 0;
 	dev->irq_enabled = 0;
+#endif /* __linux__ */
 	dev->context_flag = 0;
+	dev->interrupt_flag = 0;
+	dev->dma_flag = 0;
 	dev->last_context = 0;
+	dev->last_switch = 0;
+	dev->last_checked = 0;
+	init_waitqueue_head(&dev->context_wait);
 	dev->if_version = 0;
 
+	dev->ctx_start = 0;
+	dev->lck_start = 0;
+
+	dev->buf_async = NULL;
+	init_waitqueue_head(&dev->buf_readers);
+	init_waitqueue_head(&dev->buf_writers);
+
+#ifndef __linux__
 	dev->buf_sigio = NULL;
+#endif /* __linux__ */
 
 	DRM_DEBUG("\n");
+
+	/*
+	 * The kernel's context could be created here, but is now created
+	 * in drm_dma_enqueue.  This is more resource-efficient for
+	 * hardware that does not do DMA, but may mean that
+	 * drm_select_queue fails between the time the interrupt is
+	 * initialized and the time the queues are initialized.
+	 */
 
 	return 0;
 }
 
-int drm_lastclose(struct drm_device *dev)
+/**
+ * Take down the DRM device.
+ *
+ * \param dev DRM device structure.
+ *
+ * Frees every resource in \p dev.
+ *
+ * \sa drm_device
+ */
+int drm_lastclose(struct drm_device * dev)
 {
+#ifdef __linux__
+	struct drm_vma_entry *vma, *vma_temp;
+#else
 	struct drm_magic_entry *pt, *next;
 	drm_local_map_t *map, *mapsave;
+#endif /* __linux__ */
 	int i;
 
+#ifndef __linux__
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+#endif /* __linux__ */
 
 	DRM_DEBUG("\n");
 
-	if (dev->driver->lastclose != NULL)
+	if (dev->driver->lastclose)
 		dev->driver->lastclose(dev);
+	DRM_DEBUG("driver lastclose completed\n");
 
-	if (dev->irq_enabled)
+	if (dev->irq_enabled && !drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_irq_uninstall(dev);
 
+#ifdef __linux__
+	mutex_lock(&dev->struct_mutex);
+#endif /* __linux__ */
+
+#ifndef __linux__
 	if (dev->unique) {
 		free(dev->unique, DRM_MEM_DRIVER);
 		dev->unique = NULL;
@@ -624,37 +701,32 @@ int drm_lastclose(struct drm_device *dev)
 		}
 		dev->magiclist[i].head = dev->magiclist[i].tail = NULL;
 	}
+#endif /* __linux__ */
 
 	DRM_UNLOCK();
+	/* Free drawable information memory */
 	drm_drawable_free_all(dev);
+	del_timer(&dev->timer);
 	DRM_LOCK();
 
 	/* Clear AGP information */
-	if (dev->agp) {
-#if 0
-		struct drm_agp_mem *entry;
-		struct drm_agp_mem *nexte;
-#endif
+	if (drm_core_has_AGP(dev) && dev->agp &&
+			!drm_core_check_feature(dev, DRIVER_MODESET)) {
 		struct drm_agp_mem *entry, *tempe;
 
-		/* Remove AGP resources, but leave dev->agp intact until
-		 * drm_unload is called.
-		 */
-#if 0
-		for (entry = dev->agp->memory_legacy; entry; entry = nexte) {
-			nexte = entry->next;
-			if (entry->bound)
-				drm_agp_unbind_memory(entry->handle);
-			drm_agp_free_memory(entry->handle);
-			free(entry, DRM_MEM_AGPLISTS);
-		}
-		dev->agp->memory_legacy = NULL;
-#endif
+		/* Remove AGP resources, but leave dev->agp
+		   intact until drv_cleanup is called. */
 		list_for_each_entry_safe(entry, tempe, &dev->agp->memory, head) {
 			if (entry->bound)
+#ifdef __linux__
+				drm_unbind_agp(entry->memory);
+			drm_free_agp(entry->memory, entry->pages);
+			kfree(entry);
+#else
 				drm_agp_unbind_memory(entry->memory);
 			drm_agp_free_memory(entry->memory);
 			free(entry, DRM_MEM_AGPLISTS);
+#endif /* __linux__ */
 		}
 		INIT_LIST_HEAD(&dev->agp->memory);
 
@@ -664,23 +736,59 @@ int drm_lastclose(struct drm_device *dev)
 		dev->agp->acquired = 0;
 		dev->agp->enabled  = 0;
 	}
-	if (dev->sg != NULL) {
+	if (drm_core_check_feature(dev, DRIVER_SG) && dev->sg &&
+	    !drm_core_check_feature(dev, DRIVER_MODESET)) {
 		drm_sg_cleanup(dev->sg);
 		dev->sg = NULL;
 	}
 
+#ifndef __linux__
 	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
 		if (!(map->flags & _DRM_DRIVER))
 			drm_rmmap(dev, map);
 	}
+#endif /* __linux__ */
 
-	drm_dma_takedown(dev);
+#ifdef __linux__
+	/* Clear vma list (only built for debugging) */
+	list_for_each_entry_safe(vma, vma_temp, &dev->vmalist, head) {
+		list_del(&vma->head);
+		kfree(vma);
+	}
+#endif /* __linux__ */
+
+	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE) && dev->queuelist) {
+		for (i = 0; i < dev->queue_count; i++) {
+#ifdef __linux__
+			kfree(dev->queuelist[i]);
+#endif /* __linux__ */
+			dev->queuelist[i] = NULL;
+		}
+#ifdef __linux__
+		kfree(dev->queuelist);
+#endif /* __linux__ */
+		dev->queuelist = NULL;
+	}
+	dev->queue_count = 0;
+
+	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
+	    !drm_core_check_feature(dev, DRIVER_MODESET))
+		drm_dma_takedown(dev);
+
+#ifndef __linux__
 	if (dev->lock.hw_lock) {
 		dev->lock.hw_lock = NULL; /* SHM removed */
 		dev->lock.file_priv = NULL;
 		DRM_WAKEUP_INT((void *)&dev->lock.lock_queue);
 	}
+#endif /* __linux__ */
 
+	dev->dev_mapping = NULL;
+#ifdef __linux__
+	mutex_unlock(&dev->struct_mutex);
+#endif /* __linux__ */
+
+	DRM_DEBUG("lastclose completed\n");
 	return 0;
 }
 

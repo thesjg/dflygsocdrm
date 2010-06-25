@@ -34,14 +34,12 @@
  * open of the DRM device.
  */
 
-#ifdef __linux__
 #include "drmP.h"
+#ifdef __linux__
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
-#else
-#include "dev/drm/drmP.h"
-#endif
+#endif /* __linux__ */
 
 /* working legacy code */
 
