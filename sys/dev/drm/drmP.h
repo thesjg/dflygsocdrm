@@ -1274,6 +1274,9 @@ struct drm_device {
 
 	/* RB tree of drawable infos */
 	RB_HEAD(drawable_tree, bsd_drm_drawable_info) drw_head;
+
+	/* Added for DragonFly port for backwards compatibility */
+	int unit; /* return value of device_get_unit() */
 };
 
 static inline int drm_dev_to_irq(struct drm_device *dev)

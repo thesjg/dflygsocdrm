@@ -191,6 +191,150 @@ static int drm_msi_is_blacklisted(int vendor, int device)
 	return 0;
 }
 
+#ifdef __linux__
+static int drm_fill_in_dev(struct drm_device * dev, struct pci_dev *pdev,
+			   const struct pci_device_id *ent,
+			   struct drm_driver *driver)
+#else
+static int drm_fill_in_dev(struct drm_device *dev,
+	device_t kdev, drm_pci_id_list_t *idlist)
+#endif /* __linux__ */
+{
+	int retcode;
+#ifndef __linux__
+	int i;
+	drm_pci_id_list_t *id_entry;
+#endif /* __linux__ */
+
+	INIT_LIST_HEAD(&dev->filelist);
+	INIT_LIST_HEAD(&dev->ctxlist);
+	INIT_LIST_HEAD(&dev->vmalist);
+	INIT_LIST_HEAD(&dev->maplist);
+	INIT_LIST_HEAD(&dev->vblank_event_list);
+
+	spin_lock_init(&dev->count_lock);
+/* both newer and legacy */
+	DRM_SPININIT(&dev->drw_lock, "drmdrw");
+/* end both newer and legacy */
+	spin_lock_init(&dev->event_lock);
+	init_timer(&dev->timer);
+	mutex_init(&dev->struct_mutex);
+	mutex_init(&dev->ctxlist_mutex);
+
+	idr_init(&dev->drw_idr);
+
+#ifndef __linux__
+	DRM_SPININIT(&dev->dev_lock, "drmdev");
+	lwkt_serialize_init(&dev->irq_lock);
+/* Should perhaps be initialized in drm_irq.c as in linux drm */
+	DRM_SPININIT(&dev->vbl_lock, "drmvbl");
+#endif /* __linux__ */
+
+#ifdef __linux__
+	dev->pdev = pdev;
+	dev->pci_device = pdev->device;
+	dev->pci_vendor = pdev->vendor;
+#else
+	dev->device = kdev;
+	dev->unit = device_get_unit(kdev);
+	dev->pci_device = pci_get_device(dev->device);
+	dev->pci_vendor = pci_get_vendor(dev->device);
+#endif /* __linux__ */
+
+#ifndef __linux__
+	dev->pci_domain = 0;
+	dev->pci_bus = pci_get_bus(dev->device);
+	dev->pci_slot = pci_get_slot(dev->device);
+	dev->pci_func = pci_get_function(dev->device);
+
+	id_entry = drm_find_description(dev->pci_vendor,
+	    dev->pci_device, idlist);
+	dev->id_entry = id_entry;
+
+	TAILQ_INIT(&dev->maplist_legacy);
+	drm_sysctl_init(dev);
+	TAILQ_INIT(&dev->files);
+
+/* also done in drm_fops.c */
+	for (i = 0; i < DRM_ARRAY_SIZE(dev->counts); i++)
+		atomic_set(&dev->counts[i], 0);
+
+#endif /* __linux__ */
+
+#ifdef __alpha__
+	dev->hose = pdev->sysdata;
+#endif
+
+	if (drm_ht_create(&dev->map_hash, 12)) {
+		return -ENOMEM;
+	}
+
+	/* the DRM has 6 basic counters */
+	dev->counters = 6;
+	dev->types[0] = _DRM_STAT_LOCK;
+	dev->types[1] = _DRM_STAT_OPENS;
+	dev->types[2] = _DRM_STAT_CLOSES;
+	dev->types[3] = _DRM_STAT_IOCTLS;
+	dev->types[4] = _DRM_STAT_LOCKS;
+	dev->types[5] = _DRM_STAT_UNLOCKS;
+
+#ifdef __linux /* driver already set otherwise */
+	dev->driver = driver;
+#endif /* __linux__ */
+
+	if (drm_core_has_AGP(dev)) {
+		if (drm_device_is_agp(dev))
+			dev->agp = drm_agp_init(dev);
+		if (drm_core_check_feature(dev, DRIVER_REQUIRE_AGP)
+		    && (dev->agp == NULL)) {
+			DRM_ERROR("Cannot initialize the agpgart module.\n");
+			retcode = -EINVAL;
+			goto error_out_unreg;
+		}
+#ifdef __linux__
+		if (drm_core_has_MTRR(dev)) {
+			if (dev->agp)
+				dev->agp->agp_mtrr =
+				    mtrr_add(dev->agp->agp_info.aper_base,
+					     dev->agp->agp_info.aper_size *
+					     1024 * 1024, MTRR_TYPE_WRCOMB, 1);
+		}
+#else
+		if (dev->agp != NULL) {
+			if (drm_mtrr_add(dev->agp->info.ai_aperture_base,
+			    dev->agp->info.ai_aperture_size, DRM_MTRR_WC) == 0)
+				dev->agp->mtrr = 1;
+		}
+#endif /* __linux__ */
+	}
+
+	retcode = drm_ctxbitmap_init(dev);
+	if (retcode) {
+		DRM_ERROR("Cannot allocate memory for context bitmap.\n");
+		goto error_out_unreg;
+	}
+
+#ifdef __linux__
+	if (driver->driver_features & DRIVER_GEM) {
+		retcode = drm_gem_init(dev);
+#else /* inserted just to compile */
+	if (dev->driver->driver_features & DRIVER_GEM) {
+		retcode = 0;
+#endif
+		if (retcode) {
+			DRM_ERROR("Cannot initialize graphics execution "
+				  "manager (GEM)\n");
+			goto error_out_unreg;
+		}
+	}
+
+	return 0;
+
+      error_out_unreg:
+	drm_lastclose(dev);
+	return retcode;
+}
+
 int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
 {
 	drm_pci_id_list_t *id_entry;
@@ -205,7 +349,7 @@ int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
 
 	id_entry = drm_find_description(vendor, device, idlist);
 	if (id_entry != NULL) {
-		DRM_INFO("drm_probe: vendor %8x, device %8x, name %s, get_desc %s\n",
+		DRM_INFO("drm_probe: vendor 0x%4x, device 0x%4x, name %s, get_desc %s\n",
 			vendor, device, id_entry->name, device_get_desc(kdev));
 		if (!device_get_desc(kdev)) {
 			DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
@@ -220,27 +364,51 @@ int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
 int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 {
 	struct drm_device *dev;
+	int ret;
+
+#ifndef __linux__
+#if 0
 	drm_pci_id_list_t *id_entry;
+#endif
 	int unit;
+#endif /* __linux__ */
+
 #if 0
 	int msicount;
 #endif
 
+#ifdef __linux__
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+#else /* already allocated in driver _drv.c */
 	unit = device_get_unit(kdev);
 	dev = device_get_softc(kdev);
-
+#if 0
+/* drmsub appears nowhere, relic of sub to drm rejected by linux */
 	if (!strcmp(device_get_name(kdev), "drmsub"))
 		dev->device = device_get_parent(kdev);
 	else
-		dev->device = kdev;
+#endif
+	dev->device = kdev;
+#endif /* __linux__ */
+	if (!dev)
+		return -ENOMEM;
 
+#ifdef __linux__
+	ret = pci_enable_device(pdev);
+	if (ret)
+		goto err_g1;
+
+	pci_set_master(pdev);
+#else
 	pci_enable_busmaster(dev->device);
+#endif /* __linux__ */
 
 #if 0
 	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
 				DRM_DEV_MODE, "dri/card%d", unit);
 #endif
 
+#if 0
 	dev->pci_domain = 0;
 	dev->pci_bus = pci_get_bus(dev->device);
 	dev->pci_slot = pci_get_slot(dev->device);
@@ -248,6 +416,7 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 
 	dev->pci_vendor = pci_get_vendor(dev->device);
 	dev->pci_device = pci_get_device(dev->device);
+#endif
 
 	if (drm_core_check_feature(dev, DRIVER_HAVE_IRQ)) {
 		if (drm_msi &&
@@ -276,6 +445,7 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 		dev->irq = (int) rman_get_start(dev->irqr);
 	}
 
+#if 0
 	DRM_SPININIT(&dev->dev_lock, "drmdev");
 	lwkt_serialize_init(&dev->irq_lock);
 	DRM_SPININIT(&dev->vbl_lock, "drmvbl");
@@ -286,6 +456,57 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 	dev->id_entry = id_entry;
 
 	return drm_load(dev);
+#endif
+
+#ifdef __linux__
+	if ((ret = drm_fill_in_dev(dev, pdev, ent, driver))) {
+#else
+	if ((ret = drm_fill_in_dev(dev, kdev, idlist))) {
+#endif /* __linux__ */
+		printk(KERN_ERR "DRM: Fill_in_dev failed.\n");
+		goto err_g2;
+	}
+
+	if (dev->driver->load) {
+#ifdef __linux__
+		ret = dev->driver->load(dev, ent->driver_data);
+#else
+		DRM_LOCK();
+		/* Shared code returns -errno. */
+		ret = -dev->driver->load(dev, dev->id_entry->driver_private);
+#if 0
+		pci_enable_busmaster(dev->device);
+#endif
+		DRM_UNLOCK();
+#endif /* __linux__ */
+		if (ret)
+			goto err_g4;
+	}
+
+#ifndef __linux__
+	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
+				DRM_DEV_MODE, "dri/card%d", unit);
+#endif /* __linux__ */
+
+#ifdef __linux__
+	list_add_tail(&dev->driver_item, &driver->device_list);
+#endif /* __linux__ */
+
+	DRM_INFO("Initialized %s %d.%d.%d %s for %s on minor %d\n",
+#ifdef __linux__
+		 driver->name, driver->major, driver->minor, driver->patchlevel,
+		 driver->date, pci_name(pdev), dev->primary->index);
+#else
+		dev->driver->name, dev->driver->major, dev->driver->minor, dev->driver->patchlevel,
+		dev->driver->date, device_get_desc(kdev), dev->unit);
+#endif /* __linux__ */
+
+	return 0;
+
+err_g4:
+
+err_g2:
+	return ret;
 }
 
 int drm_detach(device_t kdev)
