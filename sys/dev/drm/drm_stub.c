@@ -74,7 +74,12 @@ static int drm_minor_get_id(struct drm_device *dev, int type)
 {
 	int new_id;
 	int ret;
+/* if (type == DRM_MINOR_LEGACY) */
+#ifdef __linux__
 	int base = 0, limit = 63;
+#else /* unit == 0 most common case */
+	int base = dev->unit - 1, limit = 63;
+#endif
 
 	if (type == DRM_MINOR_CONTROL) {
                 base += 64;
@@ -103,6 +108,10 @@ again:
 		idr_remove(&drm_minors_idr, new_id);
 		return -EINVAL;
 	}
+#ifndef __linux__
+	if ((type == DRM_MINOR_LEGACY) && (new_id != dev->unit))
+		DRM_ERROR("Invalid minor id %d not unit %d\n", new_id, dev->unit);
+#endif /* __linux__ */
 	return new_id;
 }
 
@@ -342,7 +351,11 @@ static int drm_fill_in_dev(struct drm_device * dev, struct pci_dev *pdev,
  * create the proc init entry via proc_init(). This routines assigns
  * minor numbers to secondary heads of multi-headed cards
  */
+#ifdef __linux__
 static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
+#else
+int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
+#endif /* __linux__ */
 {
 	struct drm_minor *new_minor;
 	int ret;
@@ -365,7 +378,9 @@ static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int t
 	}
 
 	new_minor->type = type;
+#ifdef __linux__
 	new_minor->device = MKDEV(DRM_MAJOR, minor_id);
+#endif /* __linux__ */
 	new_minor->dev = dev;
 	new_minor->index = minor_id;
 	INIT_LIST_HEAD(&new_minor->master_list);
@@ -563,9 +578,7 @@ int drm_put_minor(struct drm_minor **minor_p)
 void drm_put_dev(struct drm_device *dev)
 {
 	struct drm_driver *driver;
-#ifdef __linux
 	struct drm_map_list *r_list, *list_temp;
-#endif
 
 	DRM_DEBUG("\n");
 
@@ -589,9 +602,12 @@ void drm_put_dev(struct drm_device *dev)
 	if (dev->driver->unload)
 		dev->driver->unload(dev);
 
-#ifdef __linux__
 	if (drm_core_has_AGP(dev) && dev->agp) {
+#ifdef __linux__
 		kfree(dev->agp);
+#else
+		free(dev->agp, DRM_MEM_AGPLISTS);
+#endif /* __linux__ */
 		dev->agp = NULL;
 	}
 
@@ -612,10 +628,13 @@ void drm_put_dev(struct drm_device *dev)
 	drm_put_minor(&dev->primary);
 
 	if (dev->devname) {
+#ifdef __linux__
 		kfree(dev->devname);
+#endif /* __linux__ */
 		dev->devname = NULL;
 	}
+#ifdef __linux__
 	kfree(dev);
-#endif
+#endif /* __linux__ */
 }
 EXPORT_SYMBOL(drm_put_dev);

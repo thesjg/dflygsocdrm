@@ -467,6 +467,18 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 		goto err_g2;
 	}
 
+	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
+#ifdef __linux__
+		pci_set_drvdata(pdev, dev);
+#endif /* __linux__ */
+		ret = drm_get_minor(dev, &dev->control, DRM_MINOR_CONTROL);
+		if (ret)
+			goto err_g2;
+	}
+
+	if ((ret = drm_get_minor(dev, &dev->primary, DRM_MINOR_LEGACY)))
+		goto err_g3;
+
 	if (dev->driver->load) {
 #ifdef __linux__
 		ret = dev->driver->load(dev, ent->driver_data);
@@ -483,13 +495,24 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 			goto err_g4;
 	}
 
-#ifndef __linux__
-	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
-				DRM_DEV_MODE, "dri/card%d", unit);
-#endif /* __linux__ */
+        /* setup the grouping for the legacy output */
+	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
+#ifdef __linux__ /* enable when import drm_crtc.c */
+		ret = drm_mode_group_init_legacy_group(dev, &dev->primary->mode_group);
+#else
+		ret = 0;
+#endif
+		if (ret)
+			goto err_g4;
+	}
 
 #ifdef __linux__
 	list_add_tail(&dev->driver_item, &driver->device_list);
+#endif /* __linux__ */
+
+#ifndef __linux__
+	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
+				DRM_DEV_MODE, "dri/card%d", unit);
 #endif /* __linux__ */
 
 	DRM_INFO("Initialized %s %d.%d.%d %s for %s on minor %d\n",
@@ -504,8 +527,12 @@ int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
 	return 0;
 
 err_g4:
-
+	drm_put_minor(&dev->primary);
+err_g3:
+	if (drm_core_check_feature(dev, DRIVER_MODESET))
+		drm_put_minor(&dev->control);
 err_g2:
+err_g1:
 	return ret;
 }
 
@@ -880,17 +907,43 @@ error:
 	return retcode;
 }
 
+/**
+ * Called via drm_exit() at module unload time or when pci device is
+ * unplugged.
+ *
+ * Cleans up all DRM device, calling drm_lastclose().
+ *
+ * \sa drm_init
+ */
 static void drm_unload(struct drm_device *dev)
 {
+	struct drm_driver *driver;
+	struct drm_map_list *r_list, *list_temp;
 	int i;
 
 	DRM_DEBUG("\n");
+
+	if (!dev) {
+		DRM_ERROR("cleanup called no dev\n");
+		return;
+	}
+	driver = dev->driver;
 
 	drm_sysctl_cleanup(dev);
 	destroy_dev(dev->devnode);
 
 	drm_ctxbitmap_cleanup(dev);
 
+#ifdef __linux__
+	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
+	    dev->agp && dev->agp->agp_mtrr >= 0) {
+		int retval;
+		retval = mtrr_del(dev->agp->agp_mtrr,
+				  dev->agp->agp_info.aper_base,
+				  dev->agp->agp_info.aper_size * 1024 * 1024);
+		DRM_DEBUG("mtrr_del=%d\n", retval);
+	}
+#else
 	if (dev->agp && dev->agp->mtrr) {
 		int __unused retcode;
 
@@ -898,6 +951,7 @@ static void drm_unload(struct drm_device *dev)
 		    dev->agp->info.ai_aperture_size, DRM_MTRR_WC);
 		DRM_DEBUG("mtrr_del = %d", retcode);
 	}
+#endif /* __linux__ */
 
 	drm_vblank_cleanup(dev);
 
@@ -930,6 +984,18 @@ static void drm_unload(struct drm_device *dev)
 	}
 
 	drm_mem_uninit();
+
+	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
+		drm_rmmap(dev, r_list->map);
+	drm_ht_remove(&dev->map_hash);
+
+	if (drm_core_check_feature(dev, DRIVER_MODESET))
+		drm_put_minor(&dev->control);
+
+	if (driver->driver_features & DRIVER_GEM)
+		drm_gem_destroy(dev);
+
+	drm_put_minor(&dev->primary);
 
 	pci_disable_busmaster(dev->device);
 
