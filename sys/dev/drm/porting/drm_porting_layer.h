@@ -683,39 +683,38 @@ preempt_enable(void) {
 #define spin_lock_bh(l)    spin_lock(l)    /* UNIMPLEMENTED */
 #define spin_unlock_bh(l)  spin_unlock(l)  /* UNIMPLEMENTED */
 
-/*
- * Mutex
- */
+/**********************************************************
+ * MUTEX                                                  *
+ **********************************************************/
 
 /* drm_crtc.h, struct drm_mode_config, field mutex and idr_mutex */
 /* file ttm/ttm_global.c, function ttm_global_init() */
 
-#define mutex mtx
+#define mutex lock
 
 /* file ttm/ttm_global.c, function ttm_global_item_ref() */
-
-#define mutex_init(l)      mtx_init(l)
-#define mutex_lock(l)      mtx_lock_ex_quick(l, "mtx")
-#define mutex_unlock(l)    mtx_unlock_ex(l)
+#define mutex_init(l)      lockinit(l, "linux_mutex", 0, LK_CANRECURSE)
+#define mutex_lock(l)      lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
+#define mutex_unlock(u)    lockmgr(u, LK_RELEASE)
 
 /* file drm_gem.c, function drm_gem_object_free() */
-#define mutex_is_locked(l) mtx_islocked(l)
+#define mutex_is_locked(l) lockstatus(l, NULL)
 
 /* file ttm/ttm_object.c,
  * function ttm_object_file() */
-typedef struct mtx rwlock_t;
+typedef struct lock rwlock_t;
 
 /* file ttm/ttm_object.c,
  * function ttm_object_file_init() */
-#define rwlock_init(l)  mtx_init(l)
+#define rwlock_init(l)  mutex_init(l)
 
 /* file ttm/ttm_object.c, function ttm_base_object_init() */
-#define write_lock(l)   mtx_lock_ex_quick(l, NULL)
-#define write_unlock(l) mtx_unlock_ex(l)
+#define write_lock(l)   mutex_lock(l)
+#define write_unlock(l) mutex_unlock(l)
 
 /* file ttm/ttm_object.c, function ttm_base_object_lookup() */
-#define read_lock(l)    mtx_lock_sh_quick(l, NULL)
-#define read_unlock(l)  mtx_unlock_sh(l)
+#define read_lock(l)    mutex_lock(l)
+#define read_unlock(l)  mutex_unlock(l)
 
 /* file radeon_pm.c, function radeon_dynpm_idle_work_handler() */
 static __inline__ void
@@ -741,7 +740,6 @@ write_lock_irqrestore(rwlock_t *lock, unsigned long flags) {
 	;
 }
 
-
 /*
  * Semaphores
  */
@@ -749,7 +747,7 @@ write_lock_irqrestore(rwlock_t *lock, unsigned long flags) {
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 /* Obviously this is not a rw-semaphore */
 /* but all downs seem to be matched with ups */
-typedef struct mtx DRM_RWSEMAPHORE;
+typedef struct lock DRM_RWSEMAPHORE;
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 static __inline__ void
@@ -774,7 +772,6 @@ static __inline__ void
 up_write(DRM_RWSEMAPHORE *rwlock) {
 	mutex_unlock(rwlock);
 }
-
 
 /**********************************************************
  * idr                                                    *
