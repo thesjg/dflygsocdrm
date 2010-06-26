@@ -1160,7 +1160,7 @@ mxge_set_multicast_list(mxge_softc_t *sc)
 
 	/* Walk the multicast list, and add each address */
 
-	LIST_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
+	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
 		bcopy(LLADDR((struct sockaddr_dl *)ifma->ifma_addr),
@@ -2038,7 +2038,7 @@ mxge_encap(struct mxge_slice_state *ss, struct mbuf *m)
 	if (__predict_false(err == EFBIG)) {
 		/* Too many segments in the chain.  Try
 		   to defrag */
-		m_tmp = m_defrag(m, M_NOWAIT);
+		m_tmp = m_defrag(m, MB_DONTWAIT);
 		if (m_tmp == NULL) {
 			goto drop;
 		}

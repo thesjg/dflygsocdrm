@@ -127,6 +127,7 @@ MAN=	accept_filter.9 \
 	physio.9 \
 	posix4.9 \
 	priv.9 \
+	prop_copyin_ioctl.9 \
 	resettodr.9 \
 	rman.9 \
 	rtalloc.9 \
@@ -145,6 +146,7 @@ MAN=	accept_filter.9 \
 	sysctl_ctx_init.9 \
 	taskqueue.9 \
 	time.9 \
+	token.9 \
 	tvtohz.9 \
 	uio.9 \
 	usbdi.9 \
@@ -652,6 +654,12 @@ MLINKS+=physio.9 physread.9 \
 MLINKS+=posix4.9 p1003_1b.9
 MLINKS+=priv.9 priv_check.9 \
 	priv.9 priv_check_cred.9
+MLINKS+=prop_copyin_ioctl.9 prop_array_copyin.9 \
+	prop_copyin_ioctl.9 prop_array_copyin_ioctl.9 \
+	prop_copyin_ioctl.9 prop_array_copyout_ioctl.9 \
+	prop_copyin_ioctl.9 prop_dictionary_copyin.9 \
+	prop_copyin_ioctl.9 prop_dictionary_copyin_ioctl.9 \
+	prop_copyin_ioctl.9 prop_dictionary_copyout_ioctl.9
 MLINKS+=rman.9 rman_activate_resource.9 \
 	rman.9 rman_deactivate_resource.9 \
 	rman.9 rman_fini.9 \
@@ -781,6 +789,13 @@ MLINKS+=taskqueue.9 TASK_INIT.9 \
 	taskqueue.9 taskqueue_unblock.9
 MLINKS+=time.9 boottime.9 \
 	time.9 time_second.9
+MLINKS+=token.9 lwkt_getpooltoken.9 \
+	token.9 lwkt_gettoken.9 \
+	token.9 lwkt_reltoken.9 \
+	token.9 lwkt_token_init.9 \
+	token.9 lwkt_token_pool_lookup.9 \
+	token.9 lwkt_token_uninit.9 \
+	token.9 lwkt_trytoken.9
 MLINKS+=tvtohz.9 tvtohz_high.9 \
 	tvtohz.9 tvtohz_low.9
 MLINKS+=uio.9 uiomove.9

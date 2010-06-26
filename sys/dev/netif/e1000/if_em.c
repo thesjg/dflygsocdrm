@@ -2438,7 +2438,7 @@ em_set_multi(struct adapter *adapter)
 	if_maddr_rlock(ifp);
 #endif
 #endif
-	LIST_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
+	TAILQ_FOREACH(ifma, &ifp->if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
 
@@ -2798,7 +2798,7 @@ em_allocate_legacy(struct adapter *adapter)
 	taskqueue_start_threads(&adapter->tq, 1, TDPRI_KERN_DAEMON /*PI_NET*/, -1, "%s taskq",
 	    device_get_nameunit(adapter->dev));
 	if ((error = bus_setup_intr(dev, adapter->res[0],
-	    /*INTR_TYPE_NET |*/ INTR_FAST, em_irq_fast, adapter,
+	    /*INTR_TYPE_NET |*/ 0, em_irq_fast, adapter,
 	    &adapter->tag[0], NULL)) != 0) {
 		device_printf(dev, "Failed to register fast interrupt "
 			    "handler: %d\n", error);

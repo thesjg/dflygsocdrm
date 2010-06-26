@@ -57,8 +57,9 @@
 #ifndef _SYS_SYSREF_H_
 #include <sys/sysref.h>
 #endif
+#include <libprop/proplib.h>
 
-#define SPECNAMELEN	15
+#define SPECNAMELEN	63
 
 struct tty;
 struct disk;
@@ -100,6 +101,7 @@ struct cdev {
 	time_t		si_lastread;	/* time_second */
 	time_t		si_lastwrite;	/* time_second */
 	struct vm_object *si_object;	/* vm_pager support */
+	prop_dictionary_t si_dict;
 };
 
 #define SI_UNUSED01	0x0001
@@ -222,7 +224,7 @@ cdev_t	kgetdiskbyname(const char *name);
 int	dev_is_good(cdev_t dev);
 
 /*
- * XXX: This included for when DEVFS resurfaces 
+ * XXX: This included for when DEVFS resurfaces
  */
 
 #define		UID_ROOT	0

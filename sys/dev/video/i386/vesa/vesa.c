@@ -24,7 +24,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/isa/vesa.c,v 1.32.2.1 2002/08/13 02:42:33 rwatson Exp $
- * $DragonFly: src/sys/dev/video/i386/vesa/vesa.c,v 1.29 2008/10/03 09:25:18 swildner Exp $
  */
 
 #include "opt_vga.h"
@@ -662,8 +661,7 @@ vesa_bios_init(void)
 			continue;
 
 		/* reject unsupported modes */
-		if ((vmode.v_modeattr & (V_MODESUPP | V_MODEOPTINFO)) !=
-		    (V_MODESUPP | V_MODEOPTINFO)) {
+		if ((vmode.v_modeattr & V_MODESUPP) != V_MODESUPP) {
 #if VESA_DEBUG > 1
 			kprintf("Rejecting VESA %s mode: %d x %d x %d bpp  attr = 0x%x\n",
 			       vmode.v_modeattr & V_MODEGRAPHICS ? "graphics" : "text",
@@ -777,7 +775,7 @@ vesa_bios_init(void)
 		return (1);
 
 	dpms_states = vesa_probe_dpms();
-	if (dpms_states != 0 && bootverbose)
+	if (dpms_states > 0 && bootverbose)
 		kprintf("VESA: DPMS support (states:0x%x)\n", dpms_states);
 
 	return (0);
@@ -825,7 +823,7 @@ vesa_probe_dpms(void)
 
 	err = vm86_intcall(0x10, &vmf);
 	if ((err != 0) || (vmf.vmf_ax != 0x4f))
-		return -1;	/* no support */
+		return 0;	/* no support */
 
 	return (vmf.vmf_ebx >> 8);
 }
@@ -1552,20 +1550,18 @@ vesa_bios_info(int level)
 		/* print something for diagnostic purpose */
 		kprintf("VESA: mode:0x%03x, flags:0x%04x", 
 		       vesa_vmodetab[i], vmode.v_modeattr);
-		if (vmode.v_modeattr & V_MODEOPTINFO) {
-			if (vmode.v_modeattr & V_MODEGRAPHICS) {
-				kprintf(", G %dx%dx%d %d, ", 
-				       vmode.v_width, vmode.v_height,
-				       vmode.v_bpp, vmode.v_planes);
-			} else {
-				kprintf(", T %dx%d, ", 
-				       vmode.v_width, vmode.v_height);
-			}
-			kprintf("font:%dx%d, ", 
-			       vmode.v_cwidth, vmode.v_cheight);
-			kprintf("pages:%d, mem:%d",
-			       vmode.v_ipages + 1, vmode.v_memmodel);
+		if (vmode.v_modeattr & V_MODEGRAPHICS) {
+			kprintf(", G %dx%dx%d %d, ",
+			    vmode.v_width, vmode.v_height,
+			    vmode.v_bpp, vmode.v_planes);
+		} else {
+			kprintf(", T %dx%d, ",
+			    vmode.v_width, vmode.v_height);
 		}
+		kprintf("font:%dx%d, ",
+		    vmode.v_cwidth, vmode.v_cheight);
+		kprintf("pages:%d, mem:%d",
+		    vmode.v_ipages + 1, vmode.v_memmodel);
 		if (vmode.v_modeattr & V_MODELFB) {
 			kprintf("\nVESA: LFB:0x%x, off:0x%x, off_size:0x%x", 
 			       vmode.v_lfb, vmode.v_offscreen,

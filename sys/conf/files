@@ -547,6 +547,7 @@ dev/netif/vx/if_vx_pci.c		optional vx pci
 dev/netif/wi/if_wi.c			optional wi
 dev/netif/wi/if_wi_pccard.c		optional wi pccard
 dev/netif/wi/if_wi_pci.c		optional wi pci
+dev/netif/wpi/if_wpi.c			optional wpi
 dev/netif/rtw/rtw.c			optional rtw
 dev/netif/rtw/rtwphy.c			optional rtw
 dev/netif/rtw/rtwphyio.c		optional rtw
@@ -690,6 +691,7 @@ kern/kern_mpipe.c	standard
 kern/kern_shutdown.c	standard
 kern/kern_sig.c		standard
 kern/kern_memio.c	standard
+kern/kern_udev.c	standard
 kern/kern_upcall.c	standard
 kern/kern_sfbuf.c	standard
 kern/kern_mplock.c	standard
@@ -1617,9 +1619,6 @@ libkern/bsearch.c			standard
 libkern/crc32.c				standard
 libkern/cmpdi2.c			standard
 libkern/ucmpdi2.c			standard
-libiconv/iconv.c			optional libiconv
-libiconv/iconv_xlat.c			optional libiconv
-libiconv/iconv_converter_if.m		optional libiconv
 libkern/index.c				standard
 libkern/inet_ntoa.c			standard
 libkern/mcount.c			optional	profiling-routine
@@ -1630,6 +1629,7 @@ libkern/rindex.c			standard
 libkern/scanc.c				standard
 libkern/skpc.c				standard
 libkern/strcat.c			standard
+libkern/strchr.c			standard
 libkern/strcmp.c			standard
 libkern/strcasecmp.c			standard
 libkern/fnmatch.c			standard
@@ -1639,11 +1639,28 @@ libkern/strlcpy.c			standard
 libkern/strlen.c			standard
 libkern/strncmp.c			standard
 libkern/strncpy.c			standard
+libkern/strsep.c			standard
 libkern/strtol.c			standard
 libkern/strtoq.c			standard
 libkern/strtoul.c			standard
 libkern/strtouq.c			standard
 #libkern/stack_protector.c		standard
+libiconv/iconv.c			optional libiconv
+libiconv/iconv_xlat.c			optional libiconv
+libiconv/iconv_converter_if.m		optional libiconv
+libprop/prop_array.c			standard
+libprop/prop_array_util.c		standard
+libprop/prop_bool.c			standard
+libprop/prop_data.c			standard
+libprop/prop_dictionary.c		standard
+libprop/prop_dictionary_util.c		standard
+libprop/prop_ingest.c			standard
+libprop/prop_kern.c			standard
+libprop/prop_number.c			standard
+libprop/prop_object.c			standard
+libprop/prop_stack.c			standard
+libprop/prop_string.c			standard
+libprop/prop_rb.c			standard
 crypto/blowfish/bf_ecb.c		optional ipsec
 crypto/blowfish/bf_skey.c		optional crypto
 crypto/camellia/camellia.c		optional crypto

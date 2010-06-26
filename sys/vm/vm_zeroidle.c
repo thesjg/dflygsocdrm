@@ -1,4 +1,6 @@
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 1994 John Dyson
  * Copyright (c) 2001 Matt Dillon
  * Copyright (c) 2010 The DragonFly Project
@@ -72,6 +74,7 @@ SYSCTL_INT(_vm, OID_AUTO, idlezero_enable, CTLFLAG_RW, &idlezero_enable, 0,
 static int idlezero_rate = NPAGES_RUN;
 SYSCTL_INT(_vm, OID_AUTO, idlezero_rate, CTLFLAG_RW, &idlezero_rate, 0,
 	   "Maximum pages per second to zero");
+int bzeront_avail = 0;
 static int idlezero_nocache = 0;
 SYSCTL_INT(_vm, OID_AUTO, idlezero_nocache, CTLFLAG_RW, &idlezero_nocache, 0,
 	   "Maximum pages per second to zero");
@@ -86,6 +89,9 @@ enum zeroidle_state {
 	STATE_ZERO_PAGE,
 	STATE_RELEASE_PAGE
 };
+
+#define DEFAULT_SLEEP_TIME	(hz / 10)
+#define LONG_SLEEP_TIME		(hz * 10)
 
 static int zero_state;
 
@@ -122,6 +128,20 @@ vm_page_zero_check(void)
 	return (zero_state);
 }
 
+/*
+ * vm_pagezero should sleep for a longer time when idlezero is disabled or
+ * when there is an excess of zeroed pages.
+ */
+static int
+vm_page_zero_time(void)
+{
+	if (idlezero_enable == 0)
+		return (LONG_SLEEP_TIME);
+	if (vm_page_zero_count >= ZIDLE_HI(vmstats.v_free_count))
+		return (LONG_SLEEP_TIME);
+	return (DEFAULT_SLEEP_TIME);
+}
+
 static void
 vm_pagezero(void __unused *arg)
 {
@@ -130,6 +150,7 @@ vm_pagezero(void __unused *arg)
 	enum zeroidle_state state = STATE_IDLE;
 	char *pg = NULL;
 	int npages = 0;
+	int sleep_time;	
 	int i = 0;
 
 	/*
@@ -142,6 +163,7 @@ vm_pagezero(void __unused *arg)
 	rel_mplock();
 	lwkt_setpri_self(TDPRI_IDLE_WORK);
 	lwkt_setcpu_self(globaldata_find(ncpus - 1));
+	sleep_time = DEFAULT_SLEEP_TIME;
 
 	/*
 	 * Loop forever
@@ -152,9 +174,10 @@ vm_pagezero(void __unused *arg)
 			/*
 			 * Wait for work.
 			 */
-			tsleep(&zero_state, 0, "pgzero", hz / 10);
+			tsleep(&zero_state, 0, "pgzero", sleep_time);
 			if (vm_page_zero_check())
 				npages = idlezero_rate / 10;
+			sleep_time = vm_page_zero_time();
 			if (npages)
 				state = STATE_GET_PAGE;	/* Fallthrough */
 			break;
@@ -162,11 +185,8 @@ vm_pagezero(void __unused *arg)
 			/*
 			 * Acquire page to zero
 			 */
-			if (try_mplock() == 0) {
+			if (--npages == 0) {
 				state = STATE_IDLE;
-			} else if (--npages == 0) {
-				state = STATE_IDLE;
-				rel_mplock();
 			} else {
 				m = vm_page_free_fromq_fast();
 				if (m == NULL) {
@@ -177,7 +197,6 @@ vm_pagezero(void __unused *arg)
 					pg = (char *)lwbuf_kva(buf);
 					i = 0;
 				}
-				rel_mplock();
 			}
 			break;
 		case STATE_ZERO_PAGE:
@@ -198,17 +217,15 @@ vm_pagezero(void __unused *arg)
 				state = STATE_RELEASE_PAGE;
 			break;
 		case STATE_RELEASE_PAGE:
-			if (try_mplock()) {
-				lwbuf_free(buf);
-				vm_page_flag_set(m, PG_ZERO);
-				vm_page_free_toq(m);
-				state = STATE_GET_PAGE;
-				++idlezero_count;
-				rel_mplock();
-			}
+			lwbuf_free(buf);
+			vm_page_flag_set(m, PG_ZERO);
+			vm_page_free_toq(m);
+			state = STATE_GET_PAGE;
+			++idlezero_count;
 			break;
 		}
-		lwkt_switch();
+		if (lwkt_check_resched(curthread))
+			lwkt_switch();
 	}
 }
 
@@ -217,6 +234,8 @@ pagezero_start(void __unused *arg)
 {
 	int error;
 	struct thread *td;
+
+	idlezero_nocache = bzeront_avail;
 
 	error = kthread_create(vm_pagezero, NULL, &td, "pagezero");
 	if (error)

@@ -1,4 +1,6 @@
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 1988 University of Utah.
  * Copyright (c) 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -79,8 +81,8 @@
 #include <vm/vm_kern.h>
 
 #include <sys/file2.h>
+#include <sys/thread.h>
 #include <sys/thread2.h>
-#include <sys/mplock2.h>
 
 static int max_proc_mmap;
 SYSCTL_INT(_vm, OID_AUTO, max_proc_mmap, CTLFLAG_RW, &max_proc_mmap, 0, "");
@@ -147,8 +149,9 @@ sys_sstk(struct sstk_args *uap)
  * Block devices can be mmap'd no matter what they represent.  Cache coherency
  * is maintained as long as you do not write directly to the underlying
  * character device.
+ *
+ * No requirements; sys_mmap path holds the vm_token
  */
-
 int
 kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	  int uprot, int uflags, int fd, off_t upos, void **res)
@@ -385,6 +388,9 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 		}
 	}
 
+	/* Token serializes access to vm_map.nentries against vm_mmap */
+	lwkt_gettoken(&vm_token);
+
 	/*
 	 * Do not allow more then a certain number of vm_map_entry structures
 	 * per process.  Scale with the number of rforks sharing the map
@@ -393,6 +399,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	if (max_proc_mmap && 
 	    vms->vm_map.nentries >= max_proc_mmap * vms->vm_sysref.refcnt) {
 		error = ENOMEM;
+		lwkt_reltoken(&vm_token);
 		goto done;
 	}
 
@@ -400,33 +407,38 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 			flags, handle, pos);
 	if (error == 0)
 		*res = (void *)(addr + pageoff);
+
+	lwkt_reltoken(&vm_token);
 done:
 	if (fp)
 		fdrop(fp);
+
 	return (error);
 }
 
 /*
- * MPALMOSTSAFE
+ * mmap system call handler
+ *
+ * No requirements.
  */
 int
 sys_mmap(struct mmap_args *uap)
 {
 	int error;
 
-	get_mplock();
 	error = kern_mmap(curproc->p_vmspace, uap->addr, uap->len,
 			  uap->prot, uap->flags,
 			  uap->fd, uap->pos, &uap->sysmsg_resultp);
-	rel_mplock();
 
 	return (error);
 }
 
 /*
+ * msync system call handler 
+ *
  * msync_args(void *addr, size_t len, int flags)
  *
- * MPALMOSTSAFE
+ * No requirements
  */
 int
 sys_msync(struct msync_args *uap)
@@ -456,8 +468,15 @@ sys_msync(struct msync_args *uap)
 	if ((flags & (MS_ASYNC|MS_INVALIDATE)) == (MS_ASYNC|MS_INVALIDATE))
 		return (EINVAL);
 
-	get_mplock();
 	map = &p->p_vmspace->vm_map;
+
+	/*
+	 * vm_token serializes extracting the address range for size == 0
+	 * msyncs with the vm_map_clean call; if the token were not held
+	 * across the two calls, an intervening munmap/mmap pair, for example,
+	 * could cause msync to occur on a wrong region.
+	 */
+	lwkt_gettoken(&vm_token);
 
 	/*
 	 * XXX Gak!  If size is zero we are supposed to sync "all modified
@@ -487,7 +506,7 @@ sys_msync(struct msync_args *uap)
 	rv = vm_map_clean(map, addr, addr + size, (flags & MS_ASYNC) == 0,
 			  (flags & MS_INVALIDATE) != 0);
 done:
-	rel_mplock();
+	lwkt_reltoken(&vm_token);
 
 	switch (rv) {
 	case KERN_SUCCESS:
@@ -504,9 +523,11 @@ done:
 }
 
 /*
+ * munmap system call handler
+ *
  * munmap_args(void *addr, size_t len)
  *
- * MPALMOSTSAFE
+ * No requirements
  */
 int
 sys_munmap(struct munmap_args *uap)
@@ -542,25 +563,29 @@ sys_munmap(struct munmap_args *uap)
 	if (VM_MIN_USER_ADDRESS > 0 && addr < VM_MIN_USER_ADDRESS)
 		return (EINVAL);
 
-	get_mplock();
 	map = &p->p_vmspace->vm_map;
+
+	/* vm_token serializes between the map check and the actual unmap */
+	lwkt_gettoken(&vm_token);
+
 	/*
 	 * Make sure entire range is allocated.
 	 */
-	if (!vm_map_check_protection(map, addr, addr + size, VM_PROT_NONE)) {
-		rel_mplock();
+	if (!vm_map_check_protection(map, addr, addr + size,
+				     VM_PROT_NONE, FALSE)) {
+		lwkt_reltoken(&vm_token);
 		return (EINVAL);
 	}
 	/* returns nothing but KERN_SUCCESS anyway */
 	vm_map_remove(map, addr, addr + size);
-	rel_mplock();
+	lwkt_reltoken(&vm_token);
 	return (0);
 }
 
 /*
  * mprotect_args(const void *addr, size_t len, int prot)
  *
- * MPALMOSTSAFE
+ * No requirements.
  */
 int
 sys_mprotect(struct mprotect_args *uap)
@@ -590,7 +615,6 @@ sys_mprotect(struct mprotect_args *uap)
 	if (tmpaddr < addr)		/* wrap */
 		return(EINVAL);
 
-	get_mplock();
 	switch (vm_map_protect(&p->p_vmspace->vm_map, addr, addr + size,
 			       prot, FALSE)) {
 	case KERN_SUCCESS:
@@ -603,14 +627,15 @@ sys_mprotect(struct mprotect_args *uap)
 		error = EINVAL;
 		break;
 	}
-	rel_mplock();
 	return (error);
 }
 
 /*
+ * minherit system call handler
+ *
  * minherit_args(void *addr, size_t len, int inherit)
  *
- * MPALMOSTSAFE
+ * No requirements.
  */
 int
 sys_minherit(struct minherit_args *uap)
@@ -636,8 +661,6 @@ sys_minherit(struct minherit_args *uap)
 	if (tmpaddr < addr)		/* wrap */
 		return(EINVAL);
 
-	get_mplock();
-
 	switch (vm_map_inherit(&p->p_vmspace->vm_map, addr,
 			       addr + size, inherit)) {
 	case KERN_SUCCESS:
@@ -650,14 +673,15 @@ sys_minherit(struct minherit_args *uap)
 		error = EINVAL;
 		break;
 	}
-	rel_mplock();
 	return (error);
 }
 
 /*
+ * madvise system call handler
+ * 
  * madvise_args(void *addr, size_t len, int behav)
  *
- * MPALMOSTSAFE
+ * No requirements.
  */
 int
 sys_madvise(struct madvise_args *uap)
@@ -690,17 +714,17 @@ sys_madvise(struct madvise_args *uap)
 	start = trunc_page((vm_offset_t)uap->addr);
 	end = round_page(tmpaddr);
 
-	get_mplock();
 	error = vm_map_madvise(&p->p_vmspace->vm_map, start, end,
 			       uap->behav, 0);
-	rel_mplock();
 	return (error);
 }
 
 /*
+ * mcontrol system call handler
+ *
  * mcontrol_args(void *addr, size_t len, int behav, off_t value)
  *
- * MPALMOSTSAFE
+ * No requirements
  */
 int
 sys_mcontrol(struct mcontrol_args *uap)
@@ -733,18 +757,18 @@ sys_mcontrol(struct mcontrol_args *uap)
 	start = trunc_page((vm_offset_t)uap->addr);
 	end = round_page(tmpaddr);
 	
-	get_mplock();
 	error = vm_map_madvise(&p->p_vmspace->vm_map, start, end,
 			       uap->behav, uap->value);
-	rel_mplock();
 	return (error);
 }
 
 
 /*
+ * mincore system call handler
+ *
  * mincore_args(const void *addr, size_t len, char *vec)
  *
- * MPALMOSTSAFE
+ * No requirements
  */
 int
 sys_mincore(struct mincore_args *uap)
@@ -781,7 +805,7 @@ sys_mincore(struct mincore_args *uap)
 	map = &p->p_vmspace->vm_map;
 	pmap = vmspace_pmap(p->p_vmspace);
 
-	get_mplock();
+	lwkt_gettoken(&vm_token);
 	vm_map_lock_read(map);
 RestartScan:
 	timestamp = map->timestamp;
@@ -945,14 +969,16 @@ RestartScan:
 
 	error = 0;
 done:
-	rel_mplock();
+	lwkt_reltoken(&vm_token);
 	return (error);
 }
 
 /*
+ * mlock system call handler
+ *
  * mlock_args(const void *addr, size_t len)
  *
- * MPALMOSTSAFE
+ * No requirements
  */
 int
 sys_mlock(struct mlock_args *uap)
@@ -980,22 +1006,22 @@ sys_mlock(struct mlock_args *uap)
 	if (atop(size) + vmstats.v_wire_count > vm_page_max_wired)
 		return (EAGAIN);
 
-	get_mplock();
+	/* 
+	 * We do not need to synchronize against other threads updating ucred;
+	 * they update p->ucred, which is synchronized into td_ucred ourselves.
+	 */
 #ifdef pmap_wired_count
 	if (size + ptoa(pmap_wired_count(vm_map_pmap(&p->p_vmspace->vm_map))) >
 	    p->p_rlimit[RLIMIT_MEMLOCK].rlim_cur) {
-		rel_mplock();
 		return (ENOMEM);
 	}
 #else
 	error = priv_check_cred(td->td_ucred, PRIV_ROOT, 0);
 	if (error) {
-		rel_mplock();
 		return (error);
 	}
 #endif
 	error = vm_map_unwire(&p->p_vmspace->vm_map, addr, addr + size, FALSE);
-	rel_mplock();
 	return (error == KERN_SUCCESS ? 0 : ENOMEM);
 }
 
@@ -1004,7 +1030,7 @@ sys_mlock(struct mlock_args *uap)
  *
  * Dummy routine, doesn't actually do anything.
  *
- * MPSAFE
+ * No requirements
  */
 int
 sys_mlockall(struct mlockall_args *uap)
@@ -1017,7 +1043,7 @@ sys_mlockall(struct mlockall_args *uap)
  *
  * Dummy routine, doesn't actually do anything.
  *
- * MPSAFE
+ * No requirements
  */
 int
 sys_munlockall(struct munlockall_args *uap)
@@ -1026,9 +1052,11 @@ sys_munlockall(struct munlockall_args *uap)
 }
 
 /*
+ * munlock system call handler
+ *
  * munlock_args(const void *addr, size_t len)
  *
- * MPALMOSTSAFE
+ * No requirements
  */
 int
 sys_munlock(struct munlock_args *uap)
@@ -1058,9 +1086,7 @@ sys_munlock(struct munlock_args *uap)
 		return (error);
 #endif
 
-	get_mplock();
 	error = vm_map_unwire(&p->p_vmspace->vm_map, addr, addr + size, TRUE);
-	rel_mplock();
 	return (error == KERN_SUCCESS ? 0 : ENOMEM);
 }
 
@@ -1068,6 +1094,8 @@ sys_munlock(struct munlock_args *uap)
  * Internal version of mmap.
  * Currently used by mmap, exec, and sys5 shared memory.
  * Handle is either a vnode pointer or NULL for MAP_ANON.
+ * 
+ * No requirements; kern_mmap path holds the vm_token
  */
 int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
@@ -1092,6 +1120,8 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		return (EINVAL);
 	size = objsize;
 
+	lwkt_gettoken(&vm_token);
+	
 	/*
 	 * XXX messy code, fixme
 	 *
@@ -1102,6 +1132,7 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		esize = map->size + size;	/* workaround gcc4 opt */
 		if (esize < map->size ||
 		    esize > p->p_rlimit[RLIMIT_VMEM].rlim_cur) {
+			lwkt_reltoken(&vm_token);
 			return(ENOMEM);
 		}
 	}
@@ -1117,18 +1148,24 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * NOTE: Overflow checks require discrete statements or GCC4
 	 * will optimize it out.
 	 */
-	if (foff & PAGE_MASK)
+	if (foff & PAGE_MASK) {
+		lwkt_reltoken(&vm_token);
 		return (EINVAL);
+	}
 
 	if ((flags & (MAP_FIXED | MAP_TRYFIXED)) == 0) {
 		fitit = TRUE;
 		*addr = round_page(*addr);
 	} else {
-		if (*addr != trunc_page(*addr))
+		if (*addr != trunc_page(*addr)) {
+			lwkt_reltoken(&vm_token);
 			return (EINVAL);
+		}
 		eaddr = *addr + size;
-		if (eaddr < *addr)
+		if (eaddr < *addr) {
+			lwkt_reltoken(&vm_token);
 			return (EINVAL);
+		}
 		fitit = FALSE;
 		if ((flags & MAP_TRYFIXED) == 0)
 			vm_map_remove(map, *addr, *addr + size);
@@ -1147,8 +1184,10 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			 */
 			object = default_pager_alloc(handle, objsize,
 						     prot, foff);
-			if (object == NULL)
+			if (object == NULL) {
+				lwkt_reltoken(&vm_token);
 				return(ENOMEM);
+			}
 			docow = MAP_PREFAULT_PARTIAL;
 		} else {
 			/*
@@ -1169,8 +1208,10 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			 */
 			handle = (void *)(intptr_t)vp->v_rdev;
 			object = dev_pager_alloc(handle, objsize, prot, foff);
-			if (object == NULL)
+			if (object == NULL) {
+				lwkt_reltoken(&vm_token);
 				return(EINVAL);
+			}
 			docow = MAP_PREFAULT_PARTIAL;
 			flags &= ~(MAP_PRIVATE|MAP_COPY);
 			flags |= MAP_SHARED;
@@ -1184,11 +1225,14 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			int error;
 
 			error = VOP_GETATTR(vp, &vat);
-			if (error)
+			if (error) {
+				lwkt_reltoken(&vm_token);
 				return (error);
+			}
 			docow = MAP_PREFAULT_PARTIAL;
 			object = vnode_pager_reference(vp);
 			if (object == NULL && vp->v_type == VREG) {
+				lwkt_reltoken(&vm_token);
 				kprintf("Warning: cannot mmap vnode %p, no "
 					"object\n", vp);
 				return(EINVAL);
@@ -1276,6 +1320,8 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	if (vp != NULL)
 		vn_mark_atime(vp, td);
 out:
+	lwkt_reltoken(&vm_token);
+	
 	switch (rv) {
 	case KERN_SUCCESS:
 		return (0);

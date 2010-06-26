@@ -95,32 +95,50 @@ struct intrframe;
  * interrupts as well as other cpus.  This means that your token can only
  * be (temporarily) lost if you *explicitly* block.
  *
- * Tokens are managed through a helper reference structure, lwkt_tokref,
- * which is typically declared on the caller's stack.  Multiple tokref's
- * may reference the same token.
+ * Tokens are managed through a helper reference structure, lwkt_tokref.  Each
+ * thread has a stack of tokref's to keep track of acquired tokens.  Multiple
+ * tokref's may reference the same token.
  */
 
 typedef struct lwkt_token {
     struct lwkt_tokref	*t_ref;		/* Owning ref or NULL */
+    intptr_t		t_flags;	/* MP lock required */
+    long		t_collisions;	/* Collision counter */
 } lwkt_token;
 
-#define LWKT_TOKEN_INITIALIZER(head)	\
+#define LWKT_TOKEN_MPSAFE	0x0001
+
+/*
+ * Static initialization for a lwkt_token.
+ *	UP - Not MPSAFE (full MP lock will also be acquired)
+ *	MP - Is MPSAFE  (only the token will be acquired)
+ */
+#define LWKT_TOKEN_UP_INITIALIZER	\
 {					\
-	.t_ref = NULL			\
+	.t_ref = NULL,			\
+	.t_flags = 0,			\
+	.t_collisions = 0		\
+}
+
+#define LWKT_TOKEN_MP_INITIALIZER	\
+{					\
+	.t_ref = NULL,			\
+	.t_flags = LWKT_TOKEN_MPSAFE,	\
+	.t_collisions = 0		\
 }
 
 #define ASSERT_LWKT_TOKEN_HELD(tok) \
 	KKASSERT((tok)->t_ref->tr_owner == curthread)
 
-typedef struct lwkt_tokref {
+struct lwkt_tokref {
     lwkt_token_t	tr_tok;		/* token in question */
     struct thread	*tr_owner;	/* me */
-    lwkt_tokref_t	tr_next;	/* linked list */
-} lwkt_tokref;
+    intptr_t		tr_flags;	/* copy of t_flags */
+};
 
 #define MAXCPUFIFO      16	/* power of 2 */
 #define MAXCPUFIFO_MASK	(MAXCPUFIFO - 1)
-#define LWKT_MAXTOKENS	16	/* max tokens beneficially held by thread */
+#define LWKT_MAXTOKENS	32	/* max tokens beneficially held by thread */
 
 /*
  * Always cast to ipifunc_t when registering an ipi.  The actual ipi function
@@ -230,7 +248,8 @@ struct thread {
     struct thread *td_preempted; /* we preempted this thread */
     struct ucred *td_ucred;		/* synchronized from p_ucred */
     struct caps_kinfo *td_caps;	/* list of client and server registrations */
-    lwkt_tokref_t td_toks;	/* tokens beneficially held */
+    lwkt_tokref_t td_toks_stop;
+    struct lwkt_tokref td_toks_array[LWKT_MAXTOKENS];
 #ifdef DEBUG_CRIT_SECTIONS
 #define CRIT_DEBUG_ARRAY_SIZE   32
 #define CRIT_DEBUG_ARRAY_MASK   (CRIT_DEBUG_ARRAY_SIZE - 1)
@@ -240,6 +259,12 @@ struct thread {
 #endif
     struct md_thread td_mach;
 };
+
+#define td_toks_base	td_toks_array[0]
+#define td_toks_end	td_toks_array[LWKT_MAXTOKENS]
+
+#define TD_TOKS_HELD(td)	((td)->td_toks_stop != &(td)->td_toks_base)
+#define TD_TOKS_NOT_HELD(td)	((td)->td_toks_stop == &(td)->td_toks_base)
 
 /*
  * Thread flags.  Note that TDF_RUNNING is cleared on the old thread after
@@ -316,14 +341,29 @@ struct thread {
 #define TDPRI_MASK		31
 #define TDPRI_CRIT		32	/* high bits of td_pri used for crit */
 
-#ifdef _KERNEL
 #define LWKT_THREAD_STACK	(UPAGES * PAGE_SIZE)
-#endif
 
 #define CACHE_NTHREADS		6
 
 #define IN_CRITICAL_SECT(td)	((td)->td_pri >= TDPRI_CRIT)
 
+#ifdef _KERNEL
+
+/*
+ * Global tokens
+ */
+extern struct lwkt_token pmap_token;
+extern struct lwkt_token dev_token;
+extern struct lwkt_token vm_token;
+extern struct lwkt_token vmspace_token;
+extern struct lwkt_token kvm_token;
+extern struct lwkt_token proc_token;
+extern struct lwkt_token tty_token;
+extern struct lwkt_token vnode_token;
+
+/*
+ * Procedures
+ */
 extern void lwkt_init(void);
 extern struct thread *lwkt_alloc_thread(struct thread *, int, int, int);
 extern void lwkt_init_thread(struct thread *, void *, int, int,
@@ -346,20 +386,18 @@ extern void lwkt_hold(thread_t);
 extern void lwkt_rele(thread_t);
 extern void lwkt_passive_release(thread_t);
 
-extern void lwkt_gettoken(lwkt_tokref_t, lwkt_token_t);
-extern int lwkt_trytoken(lwkt_tokref_t, lwkt_token_t);
-extern void lwkt_gettokref(lwkt_tokref_t);
-extern int  lwkt_trytokref(lwkt_tokref_t);
-extern void lwkt_reltoken(lwkt_tokref_t);
+extern void lwkt_gettoken(lwkt_token_t);
+extern int  lwkt_trytoken(lwkt_token_t);
+extern void lwkt_reltoken(lwkt_token_t);
 extern int  lwkt_getalltokens(thread_t);
 extern void lwkt_relalltokens(thread_t);
 extern void lwkt_drain_token_requests(void);
-extern void lwkt_token_init(lwkt_token_t);
+extern void lwkt_token_init(lwkt_token_t, int);
 extern void lwkt_token_uninit(lwkt_token_t);
 
 extern void lwkt_token_pool_init(void);
 extern lwkt_token_t lwkt_token_pool_lookup(void *);
-extern void lwkt_getpooltoken(lwkt_tokref_t, void *);
+extern lwkt_token_t lwkt_getpooltoken(void *);
 
 extern void lwkt_setpri(thread_t, int);
 extern void lwkt_setpri_initial(thread_t, int);
@@ -382,9 +420,7 @@ extern int  lwkt_send_ipiq3_mask(cpumask_t, ipifunc3_t, void *, int);
 extern void lwkt_wait_ipiq(struct globaldata *, int);
 extern int  lwkt_seq_ipiq(struct globaldata *);
 extern void lwkt_process_ipiq(void);
-#ifdef _KERNEL
 extern void lwkt_process_ipiq_frame(struct intrframe *);
-#endif
 extern void lwkt_smp_stopped(void);
 extern void lwkt_synchronize_ipiqs(const char *);
 
@@ -404,6 +440,8 @@ extern int  lwkt_create (void (*func)(void *), void *, struct thread **,
 		const char *, ...) __printflike(7, 8);
 extern void lwkt_exit (void) __dead2;
 extern void lwkt_remove_tdallq (struct thread *);
+
+#endif
 
 #endif
 

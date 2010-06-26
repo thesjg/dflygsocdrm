@@ -12,7 +12,7 @@
  *    notice, this list of conditions and the following disclaimer in the
  *    documentation and/or other materials provided with the distribution.
  * 3. The name of the author may not be used to endorse or promote products
- *    derived from this software withough specific prior written permission
+ *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -424,30 +424,36 @@ linux_do_tkill(l_int tgid, l_int pid, l_int sig)
 		sig = linux_to_bsd_signal[_SIG_IDX(sig)];
 
 	get_mplock();
+	lwkt_gettoken(&proc_token);
 	if ((p = pfind(pid)) == NULL) {
 		if ((p = zpfind(pid)) == NULL) {
-			rel_mplock();
-			return (ESRCH);
+			error = ESRCH;
+			goto done2;
 		}
 	}
+	PHOLD(p);
 
 	EMUL_LOCK();
 	em = emuldata_get(p);
 
 	if (em == NULL) {
 		EMUL_UNLOCK();
-		rel_mplock();
-		return (ESRCH);
+		error = ESRCH;
+		goto done1;
 	}
 
 	if (tgid > 0 && em->s->group_pid != tgid) {
 		EMUL_UNLOCK();
-		rel_mplock();
-		return (ESRCH);
+		error = ESRCH;
+		goto done1;
 	}
 	EMUL_UNLOCK();
 	
 	error = kern_kill(sig, pid, -1);
+done1:
+	PRELE(p);
+done2:
+	lwkt_reltoken(&proc_token);
 	rel_mplock();
 
 	return (error);

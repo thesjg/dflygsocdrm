@@ -7,7 +7,7 @@
  * 1. Redistributions of source code must retain all copyright 
  *    notices, this list of conditions and the following disclaimer.
  * 2. The names of the authors may not be used to endorse or promote products
- *    derived from this software withough specific prior written permission
+ *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHORS ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -2145,7 +2145,7 @@ wlconfig(struct wl_softc *sc)
     outw(PIOP1(base), AC_MCSETUP|AC_CW_EL);		/* ac_command */
     outw(PIOR1(base), OFFSET_CU + 8);
 #if defined(__DragonFly__) || (defined(__FreeBSD__) && __FreeBSD_version >= 300000)
-    LIST_FOREACH(ifma, &sc->wl_if.if_multiaddrs, ifma_link) {
+    TAILQ_FOREACH(ifma, &sc->wl_if.if_multiaddrs, ifma_link) {
 	if (ifma->ifma_addr->sa_family != AF_LINK)
 	    continue;
 	

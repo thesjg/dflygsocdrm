@@ -13,7 +13,7 @@
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. The name of the author may not be used to endorse or promote products
- *    derived from this software withough specific prior written permission
+ *    derived from this software without specific prior written permission
  *
  * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
  * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
@@ -2756,7 +2756,7 @@ tulip_addr_filter(tulip_softc_t *sc)
 #endif
 
     multicnt = 0;
-    LIST_FOREACH(ifma, &sc->tulip_if.if_multiaddrs, ifma_link) {
+    TAILQ_FOREACH(ifma, &sc->tulip_if.if_multiaddrs, ifma_link) {
 	    if (ifma->ifma_addr->sa_family == AF_LINK)
 		multicnt++;
     }
@@ -2783,7 +2783,7 @@ tulip_addr_filter(tulip_softc_t *sc)
 	 */
 	bzero(sc->tulip_setupdata, sizeof(sc->tulip_setupdata));
 
-	LIST_FOREACH(ifma, &sc->tulip_if.if_multiaddrs, ifma_link) {
+	TAILQ_FOREACH(ifma, &sc->tulip_if.if_multiaddrs, ifma_link) {
 		if (ifma->ifma_addr->sa_family != AF_LINK)
 			continue;
 
@@ -2832,7 +2832,7 @@ tulip_addr_filter(tulip_softc_t *sc)
 	    /*
 	     * Else can get perfect filtering for 16 addresses.
 	     */
-	    LIST_FOREACH(ifma, &sc->tulip_if.if_multiaddrs, ifma_link) {
+	    TAILQ_FOREACH(ifma, &sc->tulip_if.if_multiaddrs, ifma_link) {
 		    if (ifma->ifma_addr->sa_family != AF_LINK)
 			    continue;
 		    addrp = LLADDR((struct sockaddr_dl *)ifma->ifma_addr);

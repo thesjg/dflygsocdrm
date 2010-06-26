@@ -2,6 +2,7 @@
 
 #include <assert.h>
 //#define YYSTYPE struct token
+#include <stdlib.h>
 #include "ktrfmt.tab.h"
 #include "tok.h"
 #include "internal.h"
@@ -15,6 +16,7 @@ static struct token tokens[NR_TOKENS];
 static int curr_tok;
 static struct symtab *strtab;
 
+static
 struct token *
 tok_new(void)
 {
@@ -22,7 +24,7 @@ tok_new(void)
 	if (curr_tok == NR_TOKENS) {
 		/* can't happen */
 		fprintf(stderr, "Reached max number of tokens\n");
-		exit(2);
+		abort();
 	}
 	return &tokens[curr_tok];
 }
@@ -62,9 +64,10 @@ newstr(const char *s)
 %option nounput
 
 INT	[0-9]+
-WHITE	[ \t\r]
-ID	[a-zA-Z_$][a-zA-Z0-9_]*
 HEX	0x[0-9a-fA-F]+
+WHITE	[ \t\r]
+ID	[a-z_$][a-zA-Z0-9_]*
+CTOR	[A-Z][a-zA-Z0-9_]*
 
 %%
 {WHITE}+ { /* ignore */ }
@@ -87,6 +90,13 @@ HEX	0x[0-9a-fA-F]+
 	printd(LEX, "tok %p TOK_ID %p:%s\n", yylval->tok, yytext, yytext);
 	yylval->tok->str = newstr(yytext);	/* parser detects oom */
 	return TOK_ID;
+	}
+{CTOR} {
+	yylval->tok = tok_new();
+	yylval->tok->type = TOK_CTOR;
+	printd(LEX, "tok %p TOK_CTOR %p:%s\n", yylval->tok, yytext, yytext);
+	yylval->tok->str = newstr(yytext);	/* parser detects oom */
+	return TOK_CTOR;
 	}
 {INT} {
 	yylval->tok = tok_new();

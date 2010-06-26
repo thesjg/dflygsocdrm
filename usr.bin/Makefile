@@ -46,6 +46,7 @@ SUBDIR=	alias \
 	ctags \
 	cut \
 	dirname \
+	drill \
 	du \
 	ee \
 	enigma \
@@ -75,7 +76,7 @@ SUBDIR=	alias \
 	iconv \
 	id \
 	indent \
-	ionice \
+	ioprio \
 	ipcrm \
 	ipcs \
 	join \

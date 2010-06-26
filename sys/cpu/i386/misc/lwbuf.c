@@ -51,7 +51,7 @@
 #include <machine/globaldata.h>
 #include <machine/atomic.h>
 #include <machine/param.h>
-
+#include <sys/thread.h>
 #include <sys/mplock2.h>
 
 static void lwbuf_init(void *);
@@ -85,9 +85,7 @@ lwbuf_cache_ctor(void *obj, void *pdata, int ocflags)
 
     lwb->m = NULL;
     lwb->cpumask = 0;
-    get_mplock();
     lwb->kva = kmem_alloc_nofault(&kernel_map, PAGE_SIZE, PAGE_SIZE);
-    rel_mplock();
     if (lwb->kva == 0)
         return (FALSE);
     atomic_add_int(&lwbuf_kva_bytes, PAGE_SIZE);
@@ -109,8 +107,8 @@ lwbuf_cache_dtor(void *obj, void *pdata)
     KKASSERT(lwb->kva != 0);
     get_mplock();
     pmap_kremove_quick(lwb->kva);
-    kmem_free(&kernel_map, lwb->kva, PAGE_SIZE);
     rel_mplock();
+    kmem_free(&kernel_map, lwb->kva, PAGE_SIZE);
     lwb->kva = 0;
     atomic_add_int(&lwbuf_kva_bytes, -PAGE_SIZE);
 }

@@ -15,6 +15,7 @@
 # libsbuf must be built before libcam.
 # libthread_xu must be built before libpthread.
 # ${_libc_r} must be built before libpthread.
+# libpthread must be built before libprop.
 #
 # Otherwise, the SUBDIR list should be in alphabetical order.
 
@@ -24,13 +25,14 @@ SUBDIR=	csu \
 	libalias libatm libbz2 libc ${_libc_r} \
 	libcalendar libcam libcompat libdevinfo libdevstat libedit \
 	libevent libexpat libfetch \
-	libftpio libipsec libipx libkcore libkiconv libkinfo \
+	libftpio libipsec libipx libldns libkcore libkiconv libkinfo \
 	libkvm libmagic \
 	${_libmilter} ${_libncp} libnetgraph libopie libpam \
-	libpcap libposix1e libsdp libthread_xu libpthread librpcsvc ${_libsm} \
+	libpcap libposix1e libsdp libthread_xu libpthread libprop \
+	librpcsvc ${_libsm} \
 	${_libsmb} ${_libsmdb} ${_libsmutil} libstand libtelnet libusbhid \
 	${_libvgl} libwrap libxpg4 liby libypclnt libz i18n_module pam_module \
-	libc_rtld libsctp libevtr
+	libc_rtld libsctp libevtr libdevattr
 
 .if exists(${.CURDIR}/compat/${MACHINE_ARCH}/Makefile)
 SUBDIR+= compat/${MACHINE_ARCH}

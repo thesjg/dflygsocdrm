@@ -32,8 +32,6 @@
  * Cyclades Y PCI serial interface driver
  */
 
-#include "opt_cy_pci_fastintr.h"
-
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
@@ -44,10 +42,6 @@
 #include <bus/pci/pcivar.h>
 
 #include "cy_pcireg.h"
-
-#ifdef CY_PCI_FASTINTR
-#include <machine_base/isa/intr_machdep.h>
-#endif
 
 static const char *cy_probe		(pcici_t, pcidi_t);
 static void cy_attach		(pcici_t, int);
@@ -112,13 +106,7 @@ cy_attach(pcici_t config_id, int unit)
 	 *	since the ISA driver must handle the interrupt anyway, we use
 	 *	the unit number as the token even for PCI.
 	 */
-	if (
-#ifdef CY_PCI_FASTINTR
-	    !pci_map_int_right(config_id, (pci_inthand_t *)cyintr,
-			       (void *)adapter,
-			       INTR_EXCL | INTR_FAST) &&
-#endif
-	    !pci_map_int_right(config_id, (pci_inthand_t *)cyintr,
+	if (!pci_map_int_right(config_id, (pci_inthand_t *)cyintr,
 			       (void *)adapter, 0)) {
 		kprintf("cy%d: couldn't map interrupt\n", unit);
 		goto fail;
