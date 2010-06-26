@@ -123,7 +123,7 @@ struct drm_master *drm_master_create(struct drm_minor *minor)
 	master = kzalloc(sizeof(*master), GFP_KERNEL);
 #else
 	master = malloc(sizeof(*master), DRM_MEM_STUB, M_WAITOK | M_ZERO);
-#endif
+#endif /* __linux__ */
 	if (!master)
 		return NULL;
 
@@ -170,7 +170,7 @@ static void drm_master_destroy(struct kref *kref)
 		kfree(master->unique);
 #else /* allocated in drm_ioctl.c */
 		free(master->unique, DRM_MEM_DRIVER);
-#endif
+#endif /* __linux__ */
 		master->unique = NULL;
 		master->unique_len = 0;
 	}
@@ -182,7 +182,7 @@ static void drm_master_destroy(struct kref *kref)
 		kfree(pt);
 #else /* allocated in drm_auth.c */
 		free(pt, DRM_MEM_MAGIC);
-#endif
+#endif /* __linux__ */
 	}
 
 	drm_ht_remove(&master->magiclist);
@@ -191,7 +191,7 @@ static void drm_master_destroy(struct kref *kref)
 	kfree(master);
 #else
 	free(master, DRM_MEM_STUB);
-#endif
+#endif /* __linux__ */
 }
 
 void drm_master_put(struct drm_master **master)

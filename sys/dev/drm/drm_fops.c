@@ -56,58 +56,201 @@ struct drm_file *drm_find_file_by_proc(struct drm_device *dev, DRM_STRUCTPROC *p
 }
 
 /* drm_open_helper is called whenever a process opens /dev/drm. */
+/**
+ * Called whenever a process opens /dev/drm.
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param dev device.
+ * \return zero on success or a negative number on failure.
+ *
+ * Creates and initializes a drm_file structure for the file private data in \p
+ * filp and add it into the double linked list in \p dev.
+ */
 int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p,
 		    struct drm_device *dev)
 {
+	int minor_id = minor(kdev);
 	struct drm_file *priv;
-	int m = minor(kdev);
-	int retcode;
+	struct drm_file *find_priv;
+	int ret;
 
+#ifdef __linux__
+	if (filp->f_flags & O_EXCL)
+		return -EBUSY;	/* No exclusive opens */
+	if (!drm_cpu_valid())
+		return -EINVAL;
+#else
 	if (flags & O_EXCL)
 		return EBUSY; /* No exclusive opens */
 	dev->flags = flags;
+#endif /* __linux__ */
 
-	DRM_DEBUG("pid = %d, minor = %d\n", DRM_CURRENTPID, m);
-        DRM_LOCK();
-        priv = drm_find_file_by_proc(dev, p);
-        if (priv) {
-                priv->refs++;
-        } else {
-                priv = malloc(sizeof(*priv), DRM_MEM_FILES, M_NOWAIT | M_ZERO);
-                if (priv == NULL) {
-                        DRM_UNLOCK();
-                        return ENOMEM;
-                }
-                priv->uid               = p->td_proc->p_ucred->cr_svuid;
-                priv->pid               = p->td_proc->p_pid;
-                priv->refs              = 1;
-                priv->minor_legacy      = m;
-                priv->ioctl_count       = 0;
+#ifdef __linux__
+	DRM_DEBUG("pid = %d, minor = %d\n", task_pid_nr(current), minor_id);
+#else
+	DRM_DEBUG("pid = %d, minor = %d\n", DRM_CURRENTPID, minor_id);
+#endif /* __linux__ */
 
-                /* for compatibility root is always authenticated */
-                priv->authenticated     = DRM_SUSER(p);
-
-                if (dev->driver->open) {
-                        /* shared code returns -errno */
-                        retcode = -dev->driver->open(dev, priv);
-                        if (retcode != 0) {
-                                free(priv, DRM_MEM_FILES);
-                                DRM_UNLOCK();
-                                return retcode;
-                        }
-                }
-
-                /* first opener automatically becomes master */
-                priv->master_legacy = TAILQ_EMPTY(&dev->files);
-
-                TAILQ_INSERT_TAIL(&dev->files, priv, link);
+#ifdef __linux__
+	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+#else
+	priv = malloc(sizeof(*priv), DRM_MEM_FILES, M_NOWAIT | M_ZERO);
+#endif /* __linux__ */
+	if (!priv) {
+#ifdef __linux__
+		return -ENOMEM;
+#else
+		return ENOMEM;
+#endif /* __linux__ */
 	}
 
+#ifndef __linux__
+        DRM_LOCK();
+        find_priv = drm_find_file_by_proc(dev, p);
+        if (find_priv) {
+                find_priv->refs++;
+		DRM_UNLOCK();
+		free(priv, DRM_MEM_FILES);
+		goto normal_exit;
+	}
+#endif /* __linux__ */
+
+#ifndef __linux__
+	priv->refs = 1;
+	priv->minor_legacy = minor_id;
+#endif /* __linux__ */
+
+#ifdef __linux__
+	filp->private_data = priv;
+	priv->filp = filp;
+	priv->uid = current_euid();
+	priv->pid = task_pid_nr(current);
+#else
+	priv->uid = p->td_proc->p_ucred->cr_svuid;
+	priv->pid = p->td_proc->p_pid;
+#endif /* __linux__ */
+
+	priv->minor = idr_find(&drm_minors_idr, minor_id);
+	priv->ioctl_count = 0;
+	/* for compatibility root is always authenticated */
+#ifdef __linux__
+	priv->authenticated = capable(CAP_SYS_ADMIN);
+#else
+	priv->authenticated = DRM_SUSER(p);
+#endif /* __linux__ */
+
+	priv->lock_count = 0;
+
+	INIT_LIST_HEAD(&priv->lhead);
+	INIT_LIST_HEAD(&priv->fbs);
+	INIT_LIST_HEAD(&priv->event_list);
+	init_waitqueue_head(&priv->event_wait);
+	priv->event_space = 4096; /* set aside 4k for event buffer */
+
+	if (dev->driver->driver_features & DRIVER_GEM)
+		drm_gem_open(dev, priv);
+
+	if (dev->driver->open) {
+		/* shared code returns -errno */
+		ret = -dev->driver->open(dev, priv);
+		if (ret != 0) {
+			free(priv, DRM_MEM_FILES);
+			DRM_UNLOCK();
+			return ret;
+		}
+	}
+
+	/* first opener automatically becomes master */
+	priv->master_legacy = TAILQ_EMPTY(&dev->files);
+
+	TAILQ_INSERT_TAIL(&dev->files, priv, link);
+
+	kdev->si_drv1 = dev;
 	DRM_UNLOCK();
+
+/* newer */
+	/* if there is no current master make this fd it */
+	mutex_lock(&dev->struct_mutex);
+	if (!priv->minor->master) {
+		/* create a new master */
+		priv->minor->master = drm_master_create(priv->minor);
+		if (!priv->minor->master) {
+			mutex_unlock(&dev->struct_mutex);
+			ret = -ENOMEM;
+			goto out_free;
+		}
+
+		priv->is_master = 1;
+		/* take another reference for the copy in the local file priv */
+		priv->master = drm_master_get(priv->minor->master);
+
+		priv->authenticated = 1;
+
+		mutex_unlock(&dev->struct_mutex);
+		if (dev->driver->master_create) {
+			ret = dev->driver->master_create(dev, priv->master);
+			if (ret) {
+				mutex_lock(&dev->struct_mutex);
+				/* drop both references if this fails */
+				drm_master_put(&priv->minor->master);
+				drm_master_put(&priv->master);
+				mutex_unlock(&dev->struct_mutex);
+				goto out_free;
+			}
+		}
+		mutex_lock(&dev->struct_mutex);
+		if (dev->driver->master_set) {
+			ret = dev->driver->master_set(dev, priv, true);
+			if (ret) {
+				/* drop both references if this fails */
+				drm_master_put(&priv->minor->master);
+				drm_master_put(&priv->master);
+				mutex_unlock(&dev->struct_mutex);
+				goto out_free;
+			}
+		}
+		mutex_unlock(&dev->struct_mutex);
+	} else {
+		/* get a reference to the master */
+		priv->master = drm_master_get(priv->minor->master);
+		mutex_unlock(&dev->struct_mutex);
+	}
+
+	mutex_lock(&dev->struct_mutex);
+	list_add(&priv->lhead, &dev->filelist);
+	mutex_unlock(&dev->struct_mutex);
+/* end newer */
+
+#ifdef __linux__
+#ifdef __alpha__
+	/*
+	 * Default the hose
+	 */
+	if (!dev->hose) {
+		struct pci_dev *pci_dev;
+		pci_dev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, NULL);
+		if (pci_dev) {
+			dev->hose = pci_dev->sysdata;
+			pci_dev_put(pci_dev);
+		}
+		if (!dev->hose) {
+			struct pci_bus *b = pci_bus_b(pci_root_buses.next);
+			if (b)
+				dev->hose = b->sysdata;
+		}
+	}
+#endif /* __alpha__ */
+#endif /* __linux__ */
+
+normal_exit:
 	kdev->si_drv1 = dev;
 	return 0;
-}
 
+out_free:
+	free(priv, DRM_MEM_FILES);
+	return ret;
+}
 
 /* The drm_read_legacy and drm_poll_legacy are stubs to prevent spurious errors
  * on older X Servers (4.3.0 and earlier) */

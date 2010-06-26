@@ -1029,42 +1029,138 @@ int drm_version(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return 0;
 }
 
+/**
+ * Open file.
+ *
+ * \param inode device inode
+ * \param filp file pointer.
+ * \return zero on success or a negative number on failure.
+ *
+ * Searches the DRM device with the same minor number, calls open_helper(), and
+ * increments the device open count. If the open count was previous at zero,
+ * i.e., it's the first that the device is open, then calls setup().
+ */
 int drm_open_legacy(struct dev_open_args *ap)
 {
+#ifndef __linux__
 	struct cdev *kdev = ap->a_head.a_dev;
 	int flags = ap->a_oflags;
 	int fmt = 0;
 	struct thread *p = curthread;
+#endif /* __linux__ */
 	struct drm_device *dev = NULL;
+#ifdef __linux__
+	int minor_id = iminor(inode);
+#else
+	int minor_id = minor(kdev);
+#endif /* __linux__ */
+	struct drm_minor *minor;
 	int retcode = 0;
 
-	dev = DRIVER_SOFTC(minor(kdev));
+	minor = idr_find(&drm_minors_idr, minor_id);
+	if (!minor)
+#ifdef __linux__
+		return -ENODEV;
+#else
+		DRM_ERROR("No minor for %d\n", minor_id);
+#endif /* __linux__ */
 
+#ifdef __linux__
+	if (!(dev = minor->dev))
+		return -ENODEV;
+#else
+	if (minor && !minor->dev) {
+		DRM_ERROR("No minor device for %d\n", minor_id);
+	}
+#endif /* __linux__ */
+
+#ifndef __linux__
+	dev = DRIVER_SOFTC(minor_id);
+	if (minor && (dev != minor->dev)) {
+		DRM_ERROR("Minor device != softc device for %d\n", minor_id);
+	}
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
+#endif /* __linux__ */
 
+#ifdef __linux__
+	retcode = drm_open_helper(inode, filp, dev);
+#else
 	retcode = drm_open_helper_legacy(kdev, flags, fmt, p, dev);
-
+#endif /* __linux__ */
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
+#ifdef __linux__
+		spin_lock(&dev->count_lock);
+#else
 		DRM_LOCK();
 		device_busy(dev->device);
-		if (!dev->open_count++)
+#endif /* __linux__ */
+		if (!dev->open_count++) {
+#ifdef __linux__
+			spin_unlock(&dev->count_lock);
+			retcode = drm_setup(dev);
+			goto out;
+#else
 			retcode = drm_firstopen(dev);
+#endif /* __linux__ */
+		}
+#ifdef __linux__
+		spin_unlock(&dev->count_lock);
+#else
 		DRM_UNLOCK();
+#endif /* __linux__ */
 	}
+#ifdef __linux__
+out:
+	if (!retcode) {
+		mutex_lock(&dev->struct_mutex);
+		if (minor->type == DRM_MINOR_LEGACY) {
+			if (dev->dev_mapping == NULL)
+				dev->dev_mapping = inode->i_mapping;
+			else if (dev->dev_mapping != inode->i_mapping)
+				retcode = -ENODEV;
+		}
+		mutex_unlock(&dev->struct_mutex);
+	}
+#endif /* __linux__ */
 
 	return retcode;
 }
 
+/**
+ * Release file.
+ *
+ * \param inode device inode
+ * \param file_priv DRM file private.
+ * \return zero on success or a negative number on failure.
+ *
+ * If the hardware lock is held then free it, and take it again for the kernel
+ * context since it's necessary to reclaim buffers. Unlink the file private
+ * data from its list and free it. Decreases the open count and if it reaches
+ * zero calls drm_lastclose().
+ */
 int drm_close_legacy(struct dev_close_args *ap)
 {
+#ifdef __linux__
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev = file_priv->minor->dev;
+#else
 	struct cdev *kdev = ap->a_head.a_dev;
 	struct drm_file *file_priv;
 	struct drm_device *dev;
+#endif /* __linux__ */
 	int retcode = 0;
 
+#ifndef __linux__
 	dev = DRIVER_SOFTC(minor(kdev));
 	file_priv = drm_find_file_by_proc(dev, curthread);
+	if (!file_priv->minor) {
+		DRM_ERROR("drm_close() no minor for file!\n");
+	}
+	if (file_priv->minor && (dev != file_priv->minor->dev)) {
+		DRM_ERROR("drm_close() softc device != minor device!\n");
+	}
+#endif /* __linux__ */
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
 
@@ -1134,7 +1230,47 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 	funsetown(dev->buf_sigio);
 
-	if (dev->driver->postclose != NULL)
+/* newer */
+	mutex_lock(&dev->struct_mutex);
+
+	if (file_priv->is_master) {
+		struct drm_master *master = file_priv->master;
+		struct drm_file *temp;
+		list_for_each_entry(temp, &dev->filelist, lhead) {
+			if ((temp->master == file_priv->master) &&
+			    (temp != file_priv))
+				temp->authenticated = 0;
+		}
+
+		/**
+		 * Since the master is disappearing, so is the
+		 * possibility to lock.
+		 */
+
+		if (master->lock.hw_lock) {
+			if (dev->sigdata.lock == master->lock.hw_lock)
+				dev->sigdata.lock = NULL;
+			master->lock.hw_lock = NULL;
+			master->lock.file_priv = NULL;
+			wake_up_interruptible_all(&master->lock.lock_queue);
+		}
+
+		if (file_priv->minor->master == file_priv->master) {
+			/* drop the reference held my the minor */
+			if (dev->driver->master_drop)
+				dev->driver->master_drop(dev, file_priv, true);
+			drm_master_put(&file_priv->minor->master);
+		}
+	}
+
+	/* drop the reference held my the file priv */
+	drm_master_put(&file_priv->master);
+	file_priv->is_master = 0;
+	list_del(&file_priv->lhead);
+	mutex_unlock(&dev->struct_mutex);
+/* end newer */
+
+	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file_priv);
 	TAILQ_REMOVE(&dev->files, file_priv, link);
 	free(file_priv, DRM_MEM_FILES);
@@ -1154,27 +1290,59 @@ done:
 	return (0);
 }
 
-/* drm_ioctl_legacy is called whenever a process performs an ioctl on /dev/drm.
+/**
+ * Called whenever a process performs an ioctl on /dev/drm.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument.
+ * \return zero on success or negative number on failure.
+ *
+ * Looks up the ioctl function in the ::ioctls table, checking for root
+ * previleges if so required, and dispatches to the respective function.
  */
 int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 {
+#ifndef __linux__
 	struct cdev *kdev = ap->a_head.a_dev;
 	u_long cmd = ap->a_cmd;
 	caddr_t data = ap->a_data;
 	struct thread *p = curthread;
+#endif /* __linux__ */
+
+#ifdef __linux__
+	struct drm_file *file_priv = filp->private_data;
+	struct drm_device *dev;
+	struct drm_ioctl_desc *ioctl;
+	drm_ioctl_t *func;
+	unsigned int nr = DRM_IOCTL_NR(cmd);
+	int retcode = -EINVAL;
+	char stack_kdata[128];
+	char *kdata = NULL;
+#else
+	struct drm_file *file_priv;
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
-	int retcode = 0;
 	struct drm_ioctl_desc *ioctl;
 	int (*func)(struct drm_device *dev, void *data, struct drm_file *file_priv);
 	int nr = DRM_IOCTL_NR(cmd);
+	int retcode = 0;
 	int is_driver_ioctl = 0;
-	struct drm_file *file_priv;
+#endif /* __linux__ */
 
+#ifndef __linux__
 	file_priv = drm_find_file_by_proc(dev, p);
 	if (!file_priv) {
 		DRM_ERROR("can't find authenticator\n");
 		return EINVAL;
 	}
+	if (!file_priv->minor) {
+		DRM_ERROR("drm_ioctl() file_priv no minor\n");
+	}
+	if (file_priv->minor && (dev != file_priv->minor->dev)) {
+		DRM_ERROR("drm_ioctl() file_priv minor dev != dev\n");
+	}
+#endif /* __linux__ */
 
 	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
 	++file_priv->ioctl_count;
