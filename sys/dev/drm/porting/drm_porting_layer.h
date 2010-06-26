@@ -206,7 +206,9 @@ typedef int32_t s32;
 #define loff_t	off_t
 
 /* i915_drv.h */
+#ifndef bool
 typedef boolean_t bool;
+#endif
 
 /* file drm_agpsupport.c, function drm_agp_bind_pages() */
 #ifndef true
