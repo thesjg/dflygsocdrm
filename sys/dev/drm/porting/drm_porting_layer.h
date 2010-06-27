@@ -206,7 +206,8 @@ typedef int32_t s32;
 #define loff_t	off_t
 
 /* i915_drv.h */
-#ifndef bool
+/* evidently now defined in DragonFly in libprop/prop_object.h */
+#if 0
 typedef boolean_t bool;
 #endif
 
