@@ -1548,9 +1548,11 @@ extern void drm_idlelock_release(struct drm_lock_data *lock_data);
 /* Locking IOCTL support (drm_lock.c) */
 int	drm_lock_transfer(struct drm_lock_data *lock_data,
 			  unsigned int context);
+#if 0 /* now static */
 /* Locking IOCTL support (drm_drv.c) */
 int	drm_version(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv);
+#endif
 
 /*
  * These are exported to drivers so that they can implement fencing using

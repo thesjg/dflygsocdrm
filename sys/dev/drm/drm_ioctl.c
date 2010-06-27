@@ -39,7 +39,7 @@
 
 #include "linux/pci.h"
 #else
-#include "dev/drm/drmP.h"
+#include "drmP.h"
 #include "drm_core.h"
 #endif
 
@@ -48,6 +48,17 @@
  * a unique in the form pci:oooo:bb:dd.f (o=domain, b=bus, d=device, f=function)
  * before setunique has been called.  The format for the bus-specific part of
  * the unique is not defined for any other bus.
+ */
+/**
+ * Get the bus id.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_unique structure.
+ * \return zero on success or a negative number on failure.
+ *
+ * Copies the bus id from drm_device::unique into user space.
  */
 int drm_getunique(struct drm_device *dev, void *data,
 		  struct drm_file *file_priv)
@@ -65,6 +76,20 @@ int drm_getunique(struct drm_device *dev, void *data,
 
 /* Deprecated in DRM version 1.1, and will return EBUSY when setversion has
  * requested version 1.1 or greater.
+ */
+/**
+ * Set the bus id.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_unique structure.
+ * \return zero on success or a negative number on failure.
+ *
+ * Copies the bus id from userspace into drm_device::unique, and verifies that
+ * it matches the device this DRM is attached to (EINVAL otherwise).  Deprecated
+ * in interface version 1.1 and will return EBUSY when setversion has requested
+ * version 1.1 or greater.
  */
 int drm_setunique(struct drm_device *dev, void *data,
 		  struct drm_file *file_priv)
@@ -147,7 +172,21 @@ drm_set_busid(struct drm_device *dev)
 	return 0;
 }
 
-int drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
+/**
+ * Get a mapping information.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_map structure.
+ *
+ * \return zero on success or a negative number on failure.
+ *
+ * Searches for the mapping with the specified offset and copies its information
+ * into userspace
+ */
+int drm_getmap(struct drm_device *dev, void *data,
+	       struct drm_file *file_priv)
 {
 	struct drm_map     *map = data;
 	drm_local_map_t    *mapinlist;
@@ -157,7 +196,13 @@ int drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	idx = map->offset;
 
 	DRM_LOCK();
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#endif
 	if (idx < 0) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#endif
 		DRM_UNLOCK();
 		return EINVAL;
 	}
@@ -175,6 +220,9 @@ int drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		i++;
 	}
 
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#endif
 	DRM_UNLOCK();
 
  	if (mapinlist == NULL)
@@ -183,6 +231,19 @@ int drm_getmap(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return 0;
 }
 
+/**
+ * Get client information.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_client structure.
+ *
+ * \return zero on success or a negative number on failure.
+ *
+ * Searches for the client with the specified index and copies its information
+ * into userspace
+ */
 int drm_getclient(struct drm_device *dev, void *data,
 		  struct drm_file *file_priv)
 {
@@ -193,6 +254,9 @@ int drm_getclient(struct drm_device *dev, void *data,
 
 	idx = client->idx;
 	DRM_LOCK();
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#endif
 	TAILQ_FOREACH(pt, &dev->files, link) {
 		if (i == idx) {
 			client->auth  = pt->authenticated;
@@ -200,24 +264,44 @@ int drm_getclient(struct drm_device *dev, void *data,
 			client->uid   = pt->uid;
 			client->magic = pt->magic;
 			client->iocs  = pt->ioctl_count;
+#ifdef DRM_NEWER_LOCK
+			mutex_unlock(&dev->struct_mutex);
+#endif
 			DRM_UNLOCK();
 			return 0;
 		}
 		i++;
 	}
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#endif
 	DRM_UNLOCK();
 
 	return EINVAL;
 }
 
-int drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
+/**
+ * Get statistics information.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_stats structure.
+ *
+ * \return zero on success or a negative number on failure.
+ */
+int drm_getstats(struct drm_device *dev, void *data,
+		 struct drm_file *file_priv)
 {
 	struct drm_stats *stats = data;
-	int          i;
+	int i;
 
-	memset(stats, 0, sizeof(struct drm_stats));
-	
+	memset(stats, 0, sizeof(*stats));
+
 	DRM_LOCK();
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#endif
 
 	for (i = 0; i < dev->counters; i++) {
 		if (dev->types[i] == _DRM_STAT_LOCK)
@@ -230,18 +314,26 @@ int drm_getstats(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	
 	stats->count = dev->counters;
 
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#endif
 	DRM_UNLOCK();
 
 	return 0;
 }
 
-#if 0
-#define DRM_IF_MAJOR	1
-#define DRM_IF_MINOR	2
-#endif
-
-int drm_setversion(struct drm_device *dev, void *data,
-		   struct drm_file *file_priv)
+/**
+ * Setversion ioctl.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_lock structure.
+ * \return zero on success or negative number on failure.
+ *
+ * Sets the requested interface version
+ */
+int drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_set_version *sv = data;
 	struct drm_set_version ver;
@@ -279,13 +371,16 @@ int drm_setversion(struct drm_device *dev, void *data,
 		{
 			return EINVAL;
 		}
+		if (dev->driver->set_version)
+			dev->driver->set_version(dev, sv);
 	}
 
 	return 0;
 }
 
-
-int drm_noop(struct drm_device *dev, void *data, struct drm_file *file_priv)
+/** No-op ioctl. */
+int drm_noop(struct drm_device *dev, void *data,
+	     struct drm_file *file_priv)
 {
 	DRM_DEBUG("\n");
 	return 0;
