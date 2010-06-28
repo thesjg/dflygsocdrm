@@ -54,16 +54,22 @@ static int drm_alloc_resource(struct drm_device *dev, int resource)
 		return 1;
 	}
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	if (dev->pcir[resource] != NULL) {
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		return 0;
 	}
 
 	dev->pcirid[resource] = PCIR_BAR(resource);
 	dev->pcir[resource] = bus_alloc_resource_any(dev->device,
 	    SYS_RES_MEMORY, &dev->pcirid[resource], RF_SHAREABLE);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 
 	if (dev->pcir[resource] == NULL) {
 		DRM_ERROR("Couldn't find resource 0x%x\n", resource);
@@ -240,7 +246,9 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 			}
 		}
 	}
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	/* Allocate a new map structure, fill it in, and do any type-specific
 	 * initialization necessary.
@@ -251,7 +259,9 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 	map = malloc(sizeof(*map), DRM_MEM_MAPS, M_ZERO | M_NOWAIT);
 #endif
 	if (!map) {
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		return ENOMEM;
 	}
 
@@ -291,23 +301,33 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 		    map->size, drm_order(map->size), map->handle);
 		if (!map->handle) {
 			free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif
 			return ENOMEM;
 		}
 		map->offset = (unsigned long)map->handle;
 		if (map->flags & _DRM_CONTAINS_LOCK) {
 			/* Prevent a 2nd X Server from creating a 2nd lock */
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif
 			if (dev->lock.hw_lock != NULL) {
+#ifndef DRM_NEWER_LOCK
 				DRM_UNLOCK();
+#endif
 				free(map->handle, DRM_MEM_MAPS);
 				free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
 /* BSD drm bug? */
 				DRM_LOCK();
+#endif
 				return EBUSY;
 			}
 			dev->lock.hw_lock = map->handle; /* Pointer to lock */
+#ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
+#endif
 		}
 		break;
 	case _DRM_AGP:
@@ -317,7 +337,9 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 
 		if (!drm_core_has_AGP(dev)) {
 			free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif
 			return -EINVAL;
 		}
 #ifdef __alpha__
@@ -365,7 +387,9 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 	case _DRM_SCATTER_GATHER:
 		if (!dev->sg) {
 			free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif
 			return EINVAL;
 		}
 
@@ -404,7 +428,9 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 		map->dmah = drm_pci_alloc(dev, map->size, align);
 		if (map->dmah == NULL) {
 			free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif
 			return ENOMEM;
 		}
 		map->handle = map->dmah->vaddr;
@@ -415,7 +441,9 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 	default:
 		DRM_ERROR("Bad map type %d\n", map->type);
 		free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		return EINVAL;
 	}
 
@@ -530,10 +558,14 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	if (!DRM_SUSER(DRM_CURPROC) && request->type != _DRM_AGP)
 		return EACCES;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	err = drm_addmap(dev, request->offset, request->size, request->type,
 	    request->flags, &map);
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	if (err != 0)
 		return err;
 
@@ -734,9 +766,10 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 	drm_local_map_t *map;
 	struct drm_map *request = data;
 
-	DRM_LOCK();
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
+#else
+	DRM_LOCK();
 #endif
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (map->handle == request->handle &&
@@ -748,8 +781,9 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 	if (map == NULL) {
 #ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#endif
+#else
 		DRM_UNLOCK();
+#endif
 		return EINVAL;
 	}
 
@@ -757,9 +791,9 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
+#else
 	DRM_UNLOCK();
-
+#endif
 	return 0;
 }
 
