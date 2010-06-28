@@ -33,7 +33,7 @@
  * such as the current set of cliprects for vblank-synced buffer swaps.
  */
 
-#include "dev/drm/drmP.h"
+#include "drmP.h"
 
 struct bsd_drm_drawable_info {
 	struct drm_drawable_info info;
@@ -57,24 +57,21 @@ RB_PROTOTYPE_STATIC(drawable_tree, bsd_drm_drawable_info, tree,
 RB_GENERATE_STATIC(drawable_tree, bsd_drm_drawable_info, tree,
     drm_drawable_compare);
 
-struct drm_drawable_info *
-drm_get_drawable_info(struct drm_device *dev, int handle)
-{
-	struct bsd_drm_drawable_info find, *result;
-
-	find.handle = handle;
-	result = RB_FIND(drawable_tree, &dev->drw_head, &find);
-
-	return &result->info;
-}
-
+/**
+ * Allocate drawable ID and memory to store information about it.
+ */
 int drm_adddraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_draw *draw = data;
 	struct bsd_drm_drawable_info *info;
 
+#ifdef DRM_NEWER_LOCK
+	info = malloc(sizeof(struct bsd_drm_drawable_info), DRM_MEM_DRAWABLE,
+	    M_WAITOK | M_ZERO);
+#else
 	info = malloc(sizeof(struct bsd_drm_drawable_info), DRM_MEM_DRAWABLE,
 	    M_NOWAIT | M_ZERO);
+#endif
 	if (info == NULL)
 		return ENOMEM;
 
@@ -93,6 +90,9 @@ int drm_adddraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return 0;
 }
 
+/**
+ * Free drawable ID and memory to store information about it.
+ */
 int drm_rmdraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_draw *draw = (struct drm_draw *)data;
@@ -113,13 +113,13 @@ int drm_rmdraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	}
 }
 
-int drm_update_draw(struct drm_device *dev, void *data,
-		    struct drm_file *file_priv)
+int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_drawable_info *info;
 	struct drm_update_draw *update = (struct drm_update_draw *)data;
 	int ret;
 
+/* BSD bug? Someone needs to hold the spinlock? */
 	info = drm_get_drawable_info(dev, update->handle);
 	if (info == NULL)
 		return EINVAL;
@@ -137,8 +137,13 @@ int drm_update_draw(struct drm_device *dev, void *data,
 			return 0;
 		}
 		if (info->rects == NULL) {
+#ifdef DRM_NEWER_LOCK
+			info->rects = malloc(sizeof(*info->rects) *
+			    update->num, DRM_MEM_DRAWABLE, M_WAITOK);
+#else
 			info->rects = malloc(sizeof(*info->rects) *
 			    update->num, DRM_MEM_DRAWABLE, M_NOWAIT);
+#endif
 			if (info->rects == NULL) {
 				DRM_SPINUNLOCK(&dev->drw_lock);
 				return ENOMEM;
@@ -153,6 +158,19 @@ int drm_update_draw(struct drm_device *dev, void *data,
 	default:
 		return EINVAL;
 	}
+}
+
+/**
+ * Caller must hold the drawable spinlock!
+ */
+struct drm_drawable_info * drm_get_drawable_info(struct drm_device *dev, int handle)
+{
+	struct bsd_drm_drawable_info find, *result;
+
+	find.handle = handle;
+	result = RB_FIND(drawable_tree, &dev->drw_head, &find);
+
+	return &result->info;
 }
 
 void drm_drawable_free_all(struct drm_device *dev)

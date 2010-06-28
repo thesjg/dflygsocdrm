@@ -1,4 +1,14 @@
-/*-
+/**
+ * \file drm_ioctl.c
+ * IOCTL processing for DRM
+ *
+ * \author Rickard E. (Rik) Faith <faith@valinux.com>
+ * \author Gareth Hughes <gareth@valinux.com>
+ */
+
+/*
+ * Created: Fri Jan  8 09:01:26 1999 by faith@valinux.com
+ *
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
@@ -132,15 +142,21 @@ int drm_setunique(struct drm_device *dev, void *data,
 	}
 
 	/* Actually set the device's busid now. */
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	if (dev->unique_len || dev->unique) {
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		return EBUSY;
 	}
 
 	dev->unique_len = u->unique_len;
 	dev->unique = busid;
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	return 0;
 }
@@ -150,24 +166,32 @@ static int
 drm_set_busid(struct drm_device *dev)
 {
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 
 	if (dev->unique != NULL) {
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		return EBUSY;
 	}
 
 	dev->unique_len = 20;
 	dev->unique = malloc(dev->unique_len + 1, DRM_MEM_DRIVER, M_NOWAIT);
 	if (dev->unique == NULL) {
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		return ENOMEM;
 	}
 
 	snprintf(dev->unique, dev->unique_len, "pci:%04x:%02x:%02x.%1x",
 	    dev->pci_domain, dev->pci_bus, dev->pci_slot, dev->pci_func);
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	return 0;
 }
@@ -195,15 +219,17 @@ int drm_getmap(struct drm_device *dev, void *data,
 
 	idx = map->offset;
 
-	DRM_LOCK();
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
+#else
+	DRM_LOCK();
 #endif
 	if (idx < 0) {
 #ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#endif
+#else
 		DRM_UNLOCK();
+#endif
 		return EINVAL;
 	}
 
@@ -222,8 +248,9 @@ int drm_getmap(struct drm_device *dev, void *data,
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
+#else
 	DRM_UNLOCK();
+#endif
 
  	if (mapinlist == NULL)
 		return EINVAL;
@@ -253,9 +280,10 @@ int drm_getclient(struct drm_device *dev, void *data,
 	int i = 0;
 
 	idx = client->idx;
-	DRM_LOCK();
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
+#else
+	DRM_LOCK();
 #endif
 	TAILQ_FOREACH(pt, &dev->files, link) {
 		if (i == idx) {
@@ -266,16 +294,18 @@ int drm_getclient(struct drm_device *dev, void *data,
 			client->iocs  = pt->ioctl_count;
 #ifdef DRM_NEWER_LOCK
 			mutex_unlock(&dev->struct_mutex);
-#endif
+#else
 			DRM_UNLOCK();
+#endif
 			return 0;
 		}
 		i++;
 	}
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
+#else
 	DRM_UNLOCK();
+#endif
 
 	return EINVAL;
 }
@@ -298,9 +328,10 @@ int drm_getstats(struct drm_device *dev, void *data,
 
 	memset(stats, 0, sizeof(*stats));
 
-	DRM_LOCK();
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
+#else
+	DRM_LOCK();
 #endif
 
 	for (i = 0; i < dev->counters; i++) {
@@ -316,8 +347,9 @@ int drm_getstats(struct drm_device *dev, void *data,
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
+#else
 	DRM_UNLOCK();
+#endif
 
 	return 0;
 }
