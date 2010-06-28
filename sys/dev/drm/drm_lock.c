@@ -256,7 +256,7 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	DRM_LOCK();
 #endif
 
-#if 0
+#ifndef __linux__
 	drm_lock_transfer(psystem_lock, DRM_KERNEL_CONTEXT);
 #endif /* __linux__ */
 
@@ -266,10 +266,11 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	if (dev->driver->kernel_context_switch_unlock)
 		dev->driver->kernel_context_switch_unlock(dev);
 	else {
+#ifdef __linux__
 		if (drm_lock_free(psystem_lock, lock->context)) {
 			/* FIXME: Should really bail out here. */
 		}
-#if 0
+#else
 		if (drm_lock_free(psystem_lock, DRM_KERNEL_CONTEXT)) {
 			DRM_ERROR("\n");
 		}
@@ -310,10 +311,11 @@ int drm_lock_take(struct drm_lock_data *lock_data, unsigned int context)
 		if (old & _DRM_LOCK_HELD)
 			new = old | _DRM_LOCK_CONT;
 		else {
+#ifdef __linux__
 			new = context | _DRM_LOCK_HELD |
 				((lock_data->user_waiters + lock_data->kernel_waiters > 1) ?
 				 _DRM_LOCK_CONT : 0);
-#if 0
+#else
 			new = context | _DRM_LOCK_HELD;
 #endif
 		}
@@ -332,11 +334,12 @@ int drm_lock_take(struct drm_lock_data *lock_data, unsigned int context)
 			return 0;
 		}
 	}
+#ifdef __linux__
 	if ((_DRM_LOCKING_CONTEXT(new)) == context && (new & _DRM_LOCK_HELD)) {
 		/* Have lock */
 		return 1;
 	}
-#if 0
+#else
 	if (new == (context | _DRM_LOCK_HELD)) {
 		/* Have lock */
 		return 1;
