@@ -75,7 +75,9 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	struct drm_lock_data *psystem_lock = &dev->lock;
 #endif /* __linux__ */
 
+#ifdef __linux__
 	++file_priv->lock_count;
+#endif /* __linux__ */
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",
@@ -200,11 +202,15 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	if (dev->driver->dma_quiescent && (lock->flags & _DRM_LOCK_QUIESCENT))
 	{
+#ifdef __linux__
 		if (dev->driver->dma_quiescent(dev)) {
 			DRM_DEBUG("%d waiting for DMA quiescent\n",
 				  lock->context);
 			return EBUSY;
 		}
+#else
+		dev->driver->dma_quiescent(dev);
+#endif /* __linux__ */
 	}
 
 	if (dev->driver->kernel_context_switch &&
