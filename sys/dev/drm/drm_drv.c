@@ -39,6 +39,9 @@
 #include "drm_sarea.h"
 #include "drm_core.h"
 
+static int drm_version(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
+
 #ifdef DRM_DEBUG_DEFAULT_ON
 int drm_debug_flag = 1;
 #else
@@ -1004,7 +1007,19 @@ static void drm_unload(struct drm_device *dev)
 	DRM_SPINUNINIT(&dev->dev_lock);
 }
 
-int drm_version(struct drm_device *dev, void *data, struct drm_file *file_priv)
+/**
+ * Get version information
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_version structure.
+ * \return zero on success or negative number on failure.
+ *
+ * Fills in the version information in \p arg.
+ */
+static int drm_version(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv)
 {
 	struct drm_version *version = data;
 	int len;
