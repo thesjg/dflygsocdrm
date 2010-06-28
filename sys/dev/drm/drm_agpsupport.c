@@ -193,11 +193,10 @@ int drm_agp_release_ioctl(struct drm_device *dev, void *data,
  */
 int drm_agp_enable(struct drm_device *dev, struct drm_agp_mode mode)
 {
-
 	if (!dev->agp || !dev->agp->acquired)
 		return EINVAL;
 	
-	dev->agp->mode    = mode.mode;
+	dev->agp->mode = mode.mode;
 	agp_enable(dev->agp->agpdev, mode.mode);
 	dev->agp->enabled = 1;
 	return 0;
@@ -244,10 +243,14 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	pages = (request->size + PAGE_SIZE - 1) / PAGE_SIZE;
 	type = (u32) request->type;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	memory = drm_agp_allocate_memory((struct agp_bridge_data*)NULL, pages,
 		type);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	if (memory == NULL) {
 		free(entry, DRM_MEM_AGPLISTS);
 		return ENOMEM;
@@ -276,9 +279,13 @@ int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_buffer *) data;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	retcode = drm_agp_alloc(dev, &request);
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	*(struct drm_agp_buffer *) data = request;
 
@@ -325,14 +332,17 @@ int drm_agp_unbind(struct drm_device *dev, struct drm_agp_binding *request)
 
 	if (!dev->agp || !dev->agp->acquired)
 		return EINVAL;
-
 	entry = drm_agp_lookup_entry(dev, request->handle);
 	if (entry == NULL || !entry->bound)
 		return EINVAL;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	retcode = drm_agp_unbind_memory(entry->memory);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 
 	if (retcode == 0)
 		entry->bound = 0;
@@ -348,9 +358,13 @@ int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_binding *) data;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	retcode = drm_agp_unbind(dev, &request);
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	return retcode;
 }
@@ -385,9 +399,13 @@ int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request)
 
 	page = (request->offset + PAGE_SIZE - 1) / PAGE_SIZE;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	retcode = drm_agp_bind_memory(entry->memory, page);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	if (retcode == 0)
 		entry->bound = dev->agp->base + (page << PAGE_SHIFT);
 
@@ -402,9 +420,13 @@ int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_binding *) data;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	retcode = drm_agp_bind(dev, &request);
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	return retcode;
 }
@@ -436,11 +458,15 @@ int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 
 	list_del(&entry->head);
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	if (entry->bound)
 		drm_agp_unbind_memory(entry->memory);
 	drm_agp_free_memory(entry->memory);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 
 	free(entry, DRM_MEM_AGPLISTS);
 	return 0;
@@ -454,9 +480,13 @@ int drm_agp_free_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_buffer *) data;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	retcode = drm_agp_free(dev, &request);
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	return retcode;
 }
@@ -490,7 +520,7 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 		head->agpdev = agpdev;
 		agp_get_info(agpdev, &head->info);
 		head->base = head->info.ai_aperture_base;
-	INIT_LIST_HEAD(&head->memory);
+		INIT_LIST_HEAD(&head->memory);
 
 /* Sets neither
  * head->cant_use_aperture nor head->page_mask
