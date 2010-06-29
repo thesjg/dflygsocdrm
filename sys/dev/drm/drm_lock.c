@@ -173,8 +173,8 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	/* don't set the block all signals on the master process for now
 	 * really probably not the correct answer but lets us debug xkb
 	 * xserver for now */
-	if (!file_priv->is_master) {
 #ifdef __linux__
+	if (!file_priv->is_master) {
 		sigemptyset(&dev->sigmask);
 		sigaddset(&dev->sigmask, SIGSTOP);
 		sigaddset(&dev->sigmask, SIGTSTP);
@@ -183,11 +183,9 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		dev->sigdata.context = lock->context;
 		dev->sigdata.lock = master->lock.hw_lock;
 		block_all_signals(drm_notifier, &dev->sigdata, &dev->sigmask);
-#else
 		DRM_INFO("drm_lock pid (%d) needs signals blocked\n", DRM_CURRENTPID);
-#endif
 	}
-
+#endif
 	if (dev->driver->dma_ready && (lock->flags & _DRM_LOCK_READY))
 		dev->driver->dma_ready(dev);
 
