@@ -26,8 +26,7 @@
  * debug information.
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
+#include "drmP.h"
 
 #include <sys/sysctl.h>
 
@@ -135,13 +134,21 @@ static int drm_name_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	int hasunique = 0;
 
 	DRM_SYSCTL_PRINT("%s 0x%x", dev->driver->name, dev2udev(dev->devnode));
-	
+
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
 	DRM_LOCK();
+#endif
 	if (dev->unique) {
 		snprintf(buf, sizeof(buf), " %s", dev->unique);
 		hasunique = 1;
 	}
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
 	DRM_UNLOCK();
+#endif
 	
 	if (hasunique)
 		SYSCTL_OUT(req, buf, strlen(buf));
@@ -165,16 +172,29 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	/* We can't hold the lock while doing SYSCTL_OUTs, so allocate a
 	 * temporary copy of all the map entries and then SYSCTL_OUT that.
 	 */
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
 	DRM_LOCK();
+#endif
 
 	mapcount = 0;
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
 		mapcount++;
 
+#ifdef DRM_NEWER_LOCK
+	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount, DRM_MEM_DRIVER,
+	    M_WAITOK);
+#else
 	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount, DRM_MEM_DRIVER,
 	    M_NOWAIT);
+#endif
 	if (tempmaps == NULL) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#else
 		DRM_UNLOCK();
+#endif
 		return ENOMEM;
 	}
 
@@ -182,7 +202,11 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
 		tempmaps[i++] = *map;
 
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
 	DRM_UNLOCK();
+#endif
 
 	DRM_SYSCTL_PRINT("\nslot offset	        size       "
 	    "type flags address            mtrr\n");
@@ -225,20 +249,42 @@ static int drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	/* We can't hold the locks around DRM_SYSCTL_PRINT, so make a temporary
 	 * copy of the whole structure and the relevant data from buflist.
 	 */
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
 	DRM_LOCK();
+#endif
 	if (dma == NULL) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#else
 		DRM_UNLOCK();
+#endif
 		return 0;
 	}
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINLOCK(&dev->dma_lock);
+#endif
 	tempdma = *dma;
+#ifdef DRM_NEWER_LOCK
+	templists = malloc(sizeof(int) * dma->buf_count, DRM_MEM_DRIVER,
+	    M_WAITOK);
+#else
 	templists = malloc(sizeof(int) * dma->buf_count, DRM_MEM_DRIVER,
 	    M_NOWAIT);
+#endif
 	for (i = 0; i < dma->buf_count; i++)
 		templists[i] = dma->buflist[i]->list;
 	dma = &tempdma;
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINUNLOCK(&dev->dma_lock);
+#endif
+
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
 	DRM_UNLOCK();
+#endif
 
 	DRM_SYSCTL_PRINT("\n o     size count  free	 segs pages    kB\n");
 	for (i = 0; i <= DRM_MAX_ORDER; i++) {
@@ -277,23 +323,40 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	int retcode;
 	int privcount, i;
 
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
 	DRM_LOCK();
+#endif
 
 	privcount = 0;
 	TAILQ_FOREACH(priv, &dev->files, link)
 		privcount++;
 
+#ifdef DRM_NEWER_LOCK
+	tempprivs = malloc(sizeof(struct drm_file) * privcount, DRM_MEM_DRIVER,
+	    M_WAITOK);
+#else
 	tempprivs = malloc(sizeof(struct drm_file) * privcount, DRM_MEM_DRIVER,
 	    M_NOWAIT);
+#endif
 	if (tempprivs == NULL) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#else
 		DRM_UNLOCK();
+#endif
 		return ENOMEM;
 	}
 	i = 0;
 	TAILQ_FOREACH(priv, &dev->files, link)
 		tempprivs[i++] = *priv;
 
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
 	DRM_UNLOCK();
+#endif
 
 	DRM_SYSCTL_PRINT("\na dev	pid    uid	magic	  ioctls\n");
 	for (i = 0; i < privcount; i++) {

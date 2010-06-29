@@ -106,7 +106,7 @@ drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather *request)
 	}
 
 	dmah = malloc(sizeof(struct drm_dma_handle), DRM_MEM_DMA,
-	    M_ZERO | M_NOWAIT);
+	    M_ZERO | M_WAITOK);
 	if (dmah == NULL) {
 		free(entry->busaddr, DRM_MEM_PAGES);
 		free(entry, DRM_MEM_SGLISTS);
@@ -156,15 +156,20 @@ drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather *request)
 	entry->virtual = (void *)entry->handle;
 	request->handle = entry->handle;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	if (dev->sg) {
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		drm_sg_cleanup(entry);
 		return EINVAL;
 	}
 	dev->sg = entry;
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
-
+#endif
 	return 0;
 }
 
@@ -199,10 +204,14 @@ drm_sg_free(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	struct drm_scatter_gather *request = data;
 	struct drm_sg_mem *entry;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	entry = dev->sg;
 	dev->sg = NULL;
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	if (!entry || entry->handle != request->handle)
 		return EINVAL;

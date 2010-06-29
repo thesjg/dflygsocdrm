@@ -1,4 +1,39 @@
-/*-
+/**
+ * \file drm_vm.c
+ * Memory mapping for DRM
+ *
+ * \author Rickard E. (Rik) Faith <faith@valinux.com>
+ * \author Gareth Hughes <gareth@valinux.com>
+ */
+
+/*
+ * Created: Mon Jan  4 08:58:31 1999 by faith@valinux.com
+ *
+ * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
+ * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * VA LINUX SYSTEMS AND/OR ITS SUPPLIERS BE LIABLE FOR ANY CLAIM, DAMAGES OR
+ * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
+ * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+/*
  * Copyright 2003 Eric Anholt
  * All Rights Reserved.
  *
@@ -25,10 +60,15 @@
  * Support code for mmaping of DRM maps.
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
+#include "drmP.h"
+#ifdef __linux__
+#if defined(__ia64__)
+#include <linux/efi.h>
+#include <linux/slab.h>
+#endif
+#endif /* __linux__ */
 
-int drm_mmap_legacy(struct dev_mmap_args *ap)
+static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
 	vm_offset_t offset = ap->a_offset;
@@ -38,9 +78,13 @@ int drm_mmap_legacy(struct dev_mmap_args *ap)
 	enum drm_map_type type;
 	vm_paddr_t phys;
 
+#ifndef DRM_NEWER_LOCK
         DRM_LOCK();
+#endif
         file_priv = drm_find_file_by_proc(dev, DRM_CURPROC);
+#ifndef DRM_NEWER_LOCK
         DRM_UNLOCK();
+#endif
 
         if (file_priv == NULL) {
                 DRM_ERROR("can't find authenticator\n");
@@ -53,16 +97,22 @@ int drm_mmap_legacy(struct dev_mmap_args *ap)
 	if (dev->dma && offset < ptoa(dev->dma->page_count)) {
 		struct drm_device_dma *dma = dev->dma;
 
+#ifndef DRM_NEWER_LOCK
 		DRM_SPINLOCK(&dev->dma_lock);
+#endif
 
 		if (dma->pagelist != NULL) {
 			unsigned long page = offset >> PAGE_SHIFT;
 			unsigned long phys = dma->pagelist[page];
 			ap->a_result = atop(phys);
+#ifndef DRM_NEWER_LOCK
 			DRM_SPINUNLOCK(&dev->dma_lock);
+#endif
 			return 0;
 		} else {
+#ifndef DRM_NEWER_LOCK
 			DRM_SPINUNLOCK(&dev->dma_lock);
+#endif
 			return -1;
 		}
 	}
@@ -74,7 +124,9 @@ int drm_mmap_legacy(struct dev_mmap_args *ap)
 				   once, so it doesn't have to be optimized
 				   for performance, even if the list was a
 				   bit longer. */
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (offset >= map->offset && offset < map->offset + map->size)
 			break;
@@ -88,16 +140,22 @@ int drm_mmap_legacy(struct dev_mmap_args *ap)
 			    (unsigned long)map->offset,
 			    (unsigned long)map->handle);
 		}
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		return -1;
 	}
 	if (((map->flags&_DRM_RESTRICTED) && !DRM_SUSER(DRM_CURPROC))) {
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		DRM_DEBUG("restricted map\n");
 		return -1;
 	}
 	type = map->type;
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	switch (type) {
 	case _DRM_FRAME_BUFFER:
@@ -119,6 +177,21 @@ int drm_mmap_legacy(struct dev_mmap_args *ap)
 
 	ap->a_result = atop(phys);
 	return 0;
+}
+
+int drm_mmap_legacy(struct dev_mmap_args *ap)
+{
+	int ret;
+
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#endif
+	ret = drm_mmap_legacy_locked(ap);
+
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#endif
+	return ret;
 }
 
 /* newer UNIMPLEMENTED */

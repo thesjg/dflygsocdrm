@@ -31,9 +31,10 @@
  * address space with addresses remapped to system memory.
  */
 
-#include "dev/drm/drmP.h"
+#include "drmP.h"
 
 #define ATI_PCIGART_PAGE_SIZE		4096	/* PCI GART page size */
+
 #define ATI_PCIGART_PAGE_MASK		(~(ATI_PCIGART_PAGE_SIZE-1))
 
 #define ATI_PCIE_WRITE 0x4
@@ -66,7 +67,9 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 	if (dmah == NULL)
 		return ENOMEM;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	ret = bus_dma_tag_create(NULL, PAGE_SIZE, 0, /* tag, align, boundary */
 	    gart_info->table_mask, BUS_SPACE_MAXADDR, /* lowaddr, highaddr */
 	    NULL, NULL, /* filtfunc, filtfuncargs */
@@ -92,7 +95,9 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 		free(dmah, DRM_MEM_DMA);
 		return ENOMEM;
 	}
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 
 	ret = bus_dmamap_load(dmah->tag, dmah->map, dmah->vaddr,
 	    gart_info->table_size, drm_ati_alloc_pcigart_table_cb, dmah,

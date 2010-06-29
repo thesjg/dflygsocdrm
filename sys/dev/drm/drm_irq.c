@@ -38,10 +38,22 @@
 
 #include <linux/vgaarb.h>
 #else
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm.h"
-#endif
+#include "drmP.h"
+#endif /* __linux__ */
 
+/**
+ * Get interrupt from bus id.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_irq_busid structure.
+ * \return zero on success or a negative number on failure.
+ *
+ * Finds the PCI device with the specified bus id and gets its IRQ number.
+ * This IOCTL is deprecated, and will now return EINVAL for any busid not equal
+ * to that of the device that this DRM instance attached to.
+ */
 int drm_irq_by_busid(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)
 {
@@ -124,8 +136,13 @@ int drm_vblank_init(struct drm_device *dev, int num_crtcs)
 	callout_init(&dev->vblank_disable_timer);
 	dev->num_crtcs = num_crtcs;
 
+#ifdef DRM_NEWER_LOCK
+	dev->vblank = malloc(sizeof(struct drm_vblank_info) * num_crtcs,
+	    DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#else
 	dev->vblank = malloc(sizeof(struct drm_vblank_info) * num_crtcs,
 	    DRM_MEM_DRIVER, M_NOWAIT | M_ZERO);
+#endif
 	if (!dev->vblank)
 	    goto err;
 
@@ -148,6 +165,15 @@ err:
 	return ret;
 }
 
+/**
+ * Install IRQ handler.
+ *
+ * \param dev DRM device.
+ *
+ * Initializes the IRQ related data. Installs the handler, calling the driver
+ * \c drm_driver_irq_preinstall() and \c drm_driver_irq_postinstall() functions
+ * before and after the installation.
+ */
 int drm_irq_install(struct drm_device *dev)
 {
 	int crtc, retcode;
@@ -157,9 +183,17 @@ int drm_irq_install(struct drm_device *dev)
 
 	DRM_DEBUG("irq=%d\n", dev->irq);
 
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
 	DRM_LOCK();
+#endif
 	if (dev->irq_enabled) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#else
 		DRM_UNLOCK();
+#endif
 		return EBUSY;
 	}
 	dev->irq_enabled = 1;
@@ -168,7 +202,11 @@ int drm_irq_install(struct drm_device *dev)
 
 	/* Before installing handler */
 	dev->driver->irq_preinstall(dev);
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
 	DRM_UNLOCK();
+#endif
 
 	/* Install handler */
 	retcode = bus_setup_intr(dev->device, dev->irqr, INTR_MPSAFE,
@@ -178,9 +216,17 @@ int drm_irq_install(struct drm_device *dev)
 		goto err;
 
 	/* After installing handler */
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
 	DRM_LOCK();
+#endif
 	dev->driver->irq_postinstall(dev);
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
 	DRM_UNLOCK();
+#endif
 	if (dev->driver->enable_vblank) {
 		DRM_SPINLOCK(&dev->vbl_lock);
 		for( crtc = 0 ; crtc < dev->num_crtcs ; crtc++) {
@@ -195,9 +241,17 @@ int drm_irq_install(struct drm_device *dev)
 
 	return 0;
 err:
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
 	DRM_LOCK();
+#endif
 	dev->irq_enabled = 0;
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
 	DRM_UNLOCK();
+#endif
 
 	return retcode;
 }
@@ -206,10 +260,19 @@ int drm_irq_uninstall(struct drm_device *dev)
 {
 	int crtc;
 
-	if (!dev->irq_enabled)
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#endif
+	if (!dev->irq_enabled) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#endif
 		return EINVAL;
-
+	}
 	dev->irq_enabled = 0;
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#endif
 
 	/*
 	* Wake up any waiters so they don't hang.
@@ -229,13 +292,28 @@ int drm_irq_uninstall(struct drm_device *dev)
 
 	dev->driver->irq_uninstall(dev);
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	bus_teardown_intr(dev->device, dev->irqr, dev->irqh);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 
 	return 0;
 }
 
+/**
+ * IRQ control ioctl.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_control structure.
+ * \return zero on success or a negative number on failure.
+ *
+ * Calls irq_install() or irq_uninstall() according to \p arg.
+ */
 int drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_control *ctl = data;
@@ -248,6 +326,10 @@ int drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		 */
 		if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 			return 0;
+#ifdef DRM_NEWER_LOCK
+		if (drm_core_check_feature(dev, DRIVER_MODESET))
+			return 0;
+#endif
 		if (dev->if_version < DRM_IF_VERSION(1, 2) &&
 		    ctl->irq != dev->irq)
 			return EINVAL;
@@ -255,20 +337,54 @@ int drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	case DRM_UNINST_HANDLER:
 		if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 			return 0;
+#ifdef DRM_NEWER_LOCK
+		if (drm_core_check_feature(dev, DRIVER_MODESET))
+			return 0;
+#endif
+
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		err = drm_irq_uninstall(dev);
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		return err;
 	default:
 		return EINVAL;
 	}
 }
 
+/**
+ * drm_vblank_count - retrieve "cooked" vblank counter value
+ * @dev: DRM device
+ * @crtc: which counter to retrieve
+ *
+ * Fetches the "cooked" vblank count value that represents the number of
+ * vblank events since the system was booted, including lost events due to
+ * modesetting activity.
+ */
 u32 drm_vblank_count(struct drm_device *dev, int crtc)
 {
 	return atomic_load_acq_32(&dev->vblank[crtc].count);
 }
 
+/**
+ * drm_update_vblank_count - update the master vblank counter
+ * @dev: DRM device
+ * @crtc: counter to update
+ *
+ * Call back into the driver to update the appropriate vblank counter
+ * (specified by @crtc).  Deal with wraparound, if it occurred, and
+ * update the last read value so we can deal with wraparound on the next
+ * call if necessary.
+ *
+ * Only necessary when going from off->on, to account for frames we
+ * didn't get an interrupt for.
+ *
+ * Note: caller must hold dev->vbl_lock since this reads & writes
+ * device vblank fields.
+ */
 static void drm_update_vblank_count(struct drm_device *dev, int crtc)
 {
 	u32 cur_vblank, diff;
@@ -295,6 +411,17 @@ static void drm_update_vblank_count(struct drm_device *dev, int crtc)
 	atomic_add_rel_32(&dev->vblank[crtc].count, diff);
 }
 
+/**
+ * drm_vblank_get - get a reference count on vblank events
+ * @dev: DRM device
+ * @crtc: which CRTC to own
+ *
+ * Acquire a reference count on vblank events to avoid having them disabled
+ * while in use.
+ *
+ * RETURNS
+ * Zero on success, nonzero on failure.
+ */
 int drm_vblank_get(struct drm_device *dev, int crtc)
 {
 	int ret = 0;
@@ -302,6 +429,9 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 	/* Make sure that we are called with the lock held */
 	KKASSERT(lockstatus(&dev->vbl_lock, curthread) != 0);
 
+#ifdef DRM_NEWER_LOCK
+	DRM_SPINLOCK(&dev->vbl_lock);
+#endif
 	/* Going from 0->1 means we have to enable interrupts again */
 	if (++dev->vblank[crtc].refcount == 1 &&
 	    !dev->vblank[crtc].enabled) {
@@ -319,9 +449,20 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 		dev->vblank[crtc].last =
 		    dev->driver->get_vblank_counter(dev, crtc);
 
+#ifdef DRM_NEWER_LOCK
+	DRM_SPINUNLOCK(&dev->vbl_lock);
+#endif
 	return ret;
 }
 
+/**
+ * drm_vblank_put - give up ownership of vblank events
+ * @dev: DRM device
+ * @crtc: which counter to give up
+ *
+ * Release ownership of a given vblank counter, turning off interrupts
+ * if possible.
+ */
 void drm_vblank_put(struct drm_device *dev, int crtc)
 {
 	/* Make sure that we are called with the lock held */
@@ -330,12 +471,31 @@ void drm_vblank_put(struct drm_device *dev, int crtc)
 	KASSERT(dev->vblank[crtc].refcount > 0,
 	    ("invalid refcount"));
 
+#ifdef DRM_NEWER_LOCK
+	DRM_SPINLOCK(&dev->vbl_lock);
+#endif
+
 	/* Last user schedules interrupt disable */
 	if (--dev->vblank[crtc].refcount == 0)
 	    callout_reset(&dev->vblank_disable_timer, 5 * DRM_HZ,
 		(timeout_t *)vblank_disable_fn, (void *)dev);
+
+#ifdef DRM_NEWER_LOCK
+	DRM_SPINUNLOCK(&dev->vbl_lock);
+#endif
 }
 
+/**
+ * drm_modeset_ctl - handle vblank event counter changes across mode switch
+ * @DRM_IOCTL_ARGS: standard ioctl arguments
+ *
+ * Applications should call the %_DRM_PRE_MODESET and %_DRM_POST_MODESET
+ * ioctls around modesetting so that any lost vblank events are accounted for.
+ *
+ * Generally the counter will reset across mode sets.  If interrupts are
+ * enabled around this call, we don't have to do anything since the counter
+ * will have already been incremented.
+ */
 int drm_modeset_ctl(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv)
 {
@@ -360,15 +520,35 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 	 * so that interrupts remain enabled in the interim.
 	 */
 	switch (modeset->cmd) {
+/**
+ * drm_vblank_pre_modeset - account for vblanks across mode sets
+ * @dev: DRM device
+ * @crtc: CRTC in question
+ * @post: post or pre mode set?
+ *
+ * Account for vblank events across mode setting events, which will likely
+ * reset the hardware frame counter.
+ */
 	case _DRM_PRE_MODESET:
 		DRM_DEBUG("pre-modeset, crtc %d\n", crtc);
+#ifndef DRM_NEWER_LOCK
 		DRM_SPINLOCK(&dev->vbl_lock);
+#endif
+	/*
+	 * To avoid all the problems that might happen if interrupts
+	 * were enabled/disabled around or between these calls, we just
+	 * have the kernel take a reference on the CRTC (just once though
+	 * to avoid corrupting the count if multiple, mismatch calls occur),
+	 * so that interrupts remain enabled in the interim.
+	 */
 		if (!dev->vblank[crtc].inmodeset) {
 			dev->vblank[crtc].inmodeset = 0x1;
 			if (drm_vblank_get(dev, crtc) == 0)
 				dev->vblank[crtc].inmodeset |= 0x2;
 		}
+#ifndef DRM_NEWER_LOCK
 		DRM_SPINUNLOCK(&dev->vbl_lock);
+#endif
 		break;
 	case _DRM_POST_MODESET:
 		DRM_DEBUG("post-modeset, crtc %d\n", crtc);
@@ -390,6 +570,20 @@ out:
 	return ret;
 }
 
+/**
+ * Wait for VBLANK.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param data user argument, pointing to a drm_wait_vblank structure.
+ * \return zero on success or a negative number on failure.
+ *
+ * This function enables the vblank interrupt on the pipe requested, then
+ * sleeps waiting for the requested sequence number to occur, and drops
+ * the vblank interrupt refcount afterwards. (vblank irq disable follows that
+ * after a timeout with no further vblank waits scheduled).
+ */
 int drm_wait_vblank(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	union drm_wait_vblank *vblwait = data;
@@ -413,9 +607,13 @@ int drm_wait_vblank(struct drm_device *dev, void *data, struct drm_file *file_pr
 	if (crtc >= dev->num_crtcs)
 		return EINVAL;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINLOCK(&dev->vbl_lock);
+#endif
 	ret = drm_vblank_get(dev, crtc);
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINUNLOCK(&dev->vbl_lock);
+#endif
 	if (ret) {
 		DRM_ERROR("failed to acquire vblank counter, %d\n", ret);
 		return ret;
@@ -472,9 +670,13 @@ int drm_wait_vblank(struct drm_device *dev, void *data, struct drm_file *file_pr
 	}
 
 done:
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINLOCK(&dev->vbl_lock);
+#endif
 	drm_vblank_put(dev, crtc);
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINUNLOCK(&dev->vbl_lock);
+#endif
 
 	return ret;
 }
