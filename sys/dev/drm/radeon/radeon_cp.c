@@ -1,4 +1,5 @@
-/*-
+/* radeon_cp.c -- CP support for Radeon -*- linux-c -*- */
+/*
  * Copyright 2000 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Fremont, California.
  * Copyright 2007 Advanced Micro Devices, Inc.
@@ -28,9 +29,6 @@
  *    Gareth Hughes <gareth@valinux.com>
  * __FBSDID("$FreeBSD: src/sys/dev/drm/radeon_cp.c,v 1.36 2009/10/30 18:07:22 rnoland Exp $");
  */
-/* 2010-05-28
- * Moved to subdirectory radeon and adjusted include paths
- */
 
 #include "drmP.h"
 #include "drm.h"
@@ -39,9 +37,30 @@
 #include "radeon_drv.h"
 #include "r300_reg.h"
 
+#ifndef __linux__
 #include "radeon_microcode.h"
+#endif /* __linux__ */
 
 #define RADEON_FIFO_DEBUG	0
+
+#ifdef __linux__
+/* Firmware Names */
+#define FIRMWARE_R100		"radeon/R100_cp.bin"
+#define FIRMWARE_R200		"radeon/R200_cp.bin"
+#define FIRMWARE_R300		"radeon/R300_cp.bin"
+#define FIRMWARE_R420		"radeon/R420_cp.bin"
+#define FIRMWARE_RS690		"radeon/RS690_cp.bin"
+#define FIRMWARE_RS600		"radeon/RS600_cp.bin"
+#define FIRMWARE_R520		"radeon/R520_cp.bin"
+
+MODULE_FIRMWARE(FIRMWARE_R100);
+MODULE_FIRMWARE(FIRMWARE_R200);
+MODULE_FIRMWARE(FIRMWARE_R300);
+MODULE_FIRMWARE(FIRMWARE_R420);
+MODULE_FIRMWARE(FIRMWARE_RS690);
+MODULE_FIRMWARE(FIRMWARE_RS600);
+MODULE_FIRMWARE(FIRMWARE_R520);
+#endif /* __linux__ */
 
 static int radeon_do_cleanup_cp(struct drm_device * dev);
 static void radeon_do_cp_start(drm_radeon_private_t * dev_priv);
@@ -713,6 +732,9 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 				       drm_radeon_private_t *dev_priv,
 				       struct drm_file *file_priv)
 {
+#ifdef DRM_NEWER_MASTER
+	struct drm_radeon_master_private *master_priv;
+#endif
 	u32 ring_start, cur_read_ptr;
 
 	/* Initialize the memory controller. With new memory map, the fb location
@@ -807,11 +829,20 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 	RADEON_WRITE(RADEON_LAST_CLEAR_REG, 0);
 
 	/* reset sarea copies of these */
+#ifdef DRM_NEWER_MASTER
+	master_priv = file_priv->master->driver_priv;
+	if (master_priv->sarea_priv) {
+		master_priv->sarea_priv->last_frame = 0;
+		master_priv->sarea_priv->last_dispatch = 0;
+		master_priv->sarea_priv->last_clear = 0;
+	}
+#else
 	if (dev_priv->sarea_priv) {
 		dev_priv->sarea_priv->last_frame = 0;
 		dev_priv->sarea_priv->last_dispatch = 0;
 		dev_priv->sarea_priv->last_clear = 0;
 	}
+#endif
 
 	radeon_do_wait_for_idle(dev_priv);
 
@@ -1135,6 +1166,9 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 			     struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
+#ifdef DRM_NEWER_MASTER
+	struct drm_radeon_master_private *master_priv = file_priv->master->driver_priv;
+#endif
 
 	DRM_DEBUG("\n");
 
@@ -1259,12 +1293,21 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	dev_priv->buffers_offset = init->buffers_offset;
 	dev_priv->gart_textures_offset = init->gart_textures_offset;
 
+#ifdef DRM_NEWER_MASTER
+	master_priv->sarea = drm_getsarea(dev);
+	if (!master_priv->sarea) {
+		DRM_ERROR("could not find sarea!\n");
+		radeon_do_cleanup_cp(dev);
+		return -EINVAL;
+	}
+#else
 	dev_priv->sarea = drm_getsarea(dev);
 	if (!dev_priv->sarea) {
 		DRM_ERROR("could not find sarea!\n");
 		radeon_do_cleanup_cp(dev);
 		return -EINVAL;
 	}
+#endif
 
 	dev_priv->cp_ring = drm_core_findmap(dev, init->ring_offset);
 	if (!dev_priv->cp_ring) {
@@ -1296,9 +1339,11 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
+#ifndef DRM_NEWER_MASTER
 	dev_priv->sarea_priv =
 	    (drm_radeon_sarea_t *) ((u8 *) dev_priv->sarea->handle +
 				    init->sarea_priv_offset);
+#endif
 
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
@@ -1434,7 +1479,7 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		/* if we have an offset set from userspace */
 		if (dev_priv->pcigart_offset_set) {
 			dev_priv->gart_info.bus_addr =
-			    dev_priv->pcigart_offset + dev_priv->fb_location;
+				(resource_size_t)dev_priv->pcigart_offset + dev_priv->fb_location;
 			dev_priv->gart_info.mapping.offset =
 			    dev_priv->pcigart_offset + dev_priv->fb_aper_offset;
 			dev_priv->gart_info.mapping.size =
@@ -1500,6 +1545,16 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		radeon_set_pcigart(dev_priv, 1);
 	}
 
+#ifdef __linux__
+	if (!dev_priv->me_fw) {
+		int err = radeon_cp_init_microcode(dev_priv);
+		if (err) {
+			DRM_ERROR("Failed to load firmware!\n");
+			radeon_do_cleanup_cp(dev);
+			return err;
+		}
+	}
+#endif /* __linux__ */
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
@@ -1596,6 +1651,9 @@ static int radeon_do_resume_cp(struct drm_device *dev, struct drm_file *file_pri
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
+#ifdef DRM_NEWER_MASTER
+	dev_priv->have_z_offset = 0;
+#endif
 	radeon_do_engine_reset(dev);
 	radeon_irq_set_state(dev, RADEON_SW_INT_ENABLE, 1);
 
@@ -1721,11 +1779,15 @@ void radeon_do_release(struct drm_device * dev)
 					DRM_DEBUG("radeon_do_cp_idle %d\n", ret);
 					tsleep_interlock(&dev->lock.lock_queue,
 							 PCATCH);
+#ifndef DRM_NEWER_LOCK
                 			DRM_UNLOCK();
+#endif
 					ret = tsleep(&dev->lock.lock_queue,
 						    PCATCH | PINTERLOCKED,
 						    "rdnrel", 0);
+#ifndef DRM_NEWER_LOCK
                 			DRM_LOCK();
+#endif
 /* DragonFly equivalent of
  *					mtx_sleep(&ret, &dev->dev_lock, 0,
  *					    "rdnrel", 1);
@@ -1736,11 +1798,15 @@ void radeon_do_release(struct drm_device * dev)
 					DRM_DEBUG("radeon_do_cp_idle %d\n", ret);
 					tsleep_interlock(&dev->lock.lock_queue,
 							 PCATCH);
+#ifndef DRM_NEWER_LOCK
                 			DRM_UNLOCK();
+#endif
 					ret = tsleep(&dev->lock.lock_queue,
 						    PCATCH | PINTERLOCKED,
 						    "rdnrel", 0);
+#ifndef DRM_NEWER_LOCK
                 			DRM_LOCK();
+#endif
 				}
 			}
 			if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600) {
@@ -1777,6 +1843,16 @@ void radeon_do_release(struct drm_device * dev)
 			r600_do_cleanup_cp(dev);
 		else
 			radeon_do_cleanup_cp(dev);
+#ifdef __linux__
+		if (dev_priv->me_fw) {
+			release_firmware(dev_priv->me_fw);
+			dev_priv->me_fw = NULL;
+		}
+		if (dev_priv->pfp_fw) {
+			release_firmware(dev_priv->pfp_fw);
+			dev_priv->pfp_fw = NULL;
+		}
+#endif /* __linux__ */
 	}
 }
 
@@ -1913,7 +1989,6 @@ struct drm_buf *radeon_freelist_get(struct drm_device * dev)
 		}
 	}
 
-	DRM_DEBUG("returning NULL!\n");
 	return NULL;
 }
 
@@ -2066,19 +2141,30 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	else
 		dev_priv->flags |= RADEON_IS_PCI;
 
+#ifndef __linux__
 	DRM_SPININIT(&dev_priv->cs.cs_mutex, "cs_mtx");
+#endif /* __linux__ */
 
 	ret = drm_addmap(dev, drm_get_resource_start(dev, 2),
 			 drm_get_resource_len(dev, 2), _DRM_REGISTERS,
 			 _DRM_READ_ONLY | _DRM_DRIVER, &dev_priv->mmio);
-	if (ret != 0)
+	if (ret != 0) {
+#ifdef __linux__
+		return ret;
+#else
 		goto error;
+#endif /* __linux__ */
+	}
 
 	ret = drm_vblank_init(dev, 2);
-	if (ret != 0)
-		goto error;
+	if (ret) {
+		radeon_driver_unload(dev);
+		return ret;
+	}
 
+#ifndef __linux__
 	dev->max_vblank_count = 0x001fffff;
+#endif /* __linux__ */
 
 	DRM_DEBUG("%s card detected\n",
 		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" :
@@ -2094,10 +2180,8 @@ error:
 int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 {
 	struct drm_radeon_master_private *master_priv;
-#ifdef __linux__
 	unsigned long sareapage;
 	int ret;
-#endif /* __linux */
 
 #ifdef __linux__
 	master_priv = kzalloc(sizeof(*master_priv), GFP_KERNEL);
@@ -2107,19 +2191,21 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return -ENOMEM;
 
-#ifdef __linux__
 	/* prebuild the SAREA */
 	sareapage = max_t(unsigned long, SAREA_MAX, PAGE_SIZE);
 	ret = drm_addmap(dev, 0, sareapage, _DRM_SHM, _DRM_CONTAINS_LOCK,
 			 &master_priv->sarea);
 	if (ret) {
 		DRM_ERROR("SAREA setup failed\n");
+#ifdef __linux__
 		kfree(master_priv);
+#else
+		free(master_priv, DRM_MEM_DRIVER);
+#endif /* __linux__ */
 		return ret;
 	}
 	master_priv->sarea_priv = master_priv->sarea->handle + sizeof(struct drm_sarea);
 	master_priv->sarea_priv->pfCurrentPage = 0;
-#endif /* __linux__ */
 
 	master->driver_priv = master_priv;
 	return 0;
@@ -2132,7 +2218,6 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return;
 
-#ifdef __linux__
 	if (master_priv->sarea_priv &&
 	    master_priv->sarea_priv->pfCurrentPage != 0)
 		radeon_cp_dispatch_flip(dev, master);
@@ -2140,7 +2225,6 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	master_priv->sarea_priv = NULL;
 	if (master_priv->sarea)
 		drm_rmmap_locked(dev, master_priv->sarea);
-#endif /* __linux__ */
 
 #ifdef __linux__
 	kfree(master_priv);
@@ -2180,7 +2264,9 @@ int radeon_driver_unload(struct drm_device *dev)
 
 	drm_rmmap(dev, dev_priv->mmio);
 
+#ifndef __linux__
 	DRM_SPINUNINIT(&dev_priv->cs.cs_mutex);
+#endif /* __linux__ */
 
 	drm_free(dev_priv, sizeof(*dev_priv), DRM_MEM_DRIVER);
 

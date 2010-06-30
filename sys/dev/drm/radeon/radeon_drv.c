@@ -199,6 +199,10 @@ static void radeon_configure(struct drm_device *dev)
 	dev->driver->get_vblank_counter	= radeon_get_vblank_counter;
 	dev->driver->enable_vblank	= radeon_enable_vblank;
 	dev->driver->disable_vblank	= radeon_disable_vblank;
+#ifdef DRM_NEWER_MASTER
+	dev->driver->master_create      = radeon_master_create,
+	dev->driver->master_destroy     = radeon_master_destroy,
+#endif
 	dev->driver->irq_preinstall	= radeon_driver_irq_preinstall;
 	dev->driver->irq_postinstall	= radeon_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= radeon_driver_irq_uninstall;
@@ -243,10 +247,10 @@ static struct drm_driver driver_old = {
 	.get_vblank_counter = radeon_get_vblank_counter,
 	.enable_vblank = radeon_enable_vblank,
 	.disable_vblank = radeon_disable_vblank,
-#ifdef __linux__
+#ifdef DRM_NEWER_MASTER
 	.master_create = radeon_master_create,
 	.master_destroy = radeon_master_destroy,
-#endif /* __linux__ */
+#endif
 	.irq_preinstall = radeon_driver_irq_preinstall,
 	.irq_postinstall = radeon_driver_irq_postinstall,
 	.irq_uninstall = radeon_driver_irq_uninstall,

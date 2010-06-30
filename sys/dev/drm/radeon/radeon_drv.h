@@ -557,9 +557,7 @@ extern long radeon_kms_compat_ioctl(struct file *filp, unsigned int cmd,
 
 extern int radeon_master_create(struct drm_device *dev, struct drm_master *master);
 extern void radeon_master_destroy(struct drm_device *dev, struct drm_master *master);
-#ifdef __linux__ /* legacy defined in radeon_state.c */
 extern void radeon_cp_dispatch_flip(struct drm_device *dev, struct drm_master *master);
-#endif
 /* r300_cmdbuf.c */
 extern void r300_init_reg_flags(struct drm_device *dev);
 

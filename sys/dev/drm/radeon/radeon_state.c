@@ -1417,7 +1417,7 @@ static void radeon_cp_dispatch_swap(struct drm_device *dev)
 	ADVANCE_RING();
 }
 
-static void radeon_cp_dispatch_flip(struct drm_device *dev)
+void radeon_cp_dispatch_flip(struct drm_device *dev, struct drm_master *master)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_sarea *sarea = (struct drm_sarea *)dev_priv->sarea->handle;
@@ -2182,7 +2182,7 @@ static int radeon_cp_flip(struct drm_device *dev, void *data, struct drm_file *f
 	if (!dev_priv->page_flipping)
 		radeon_do_init_pageflip(dev);
 
-	radeon_cp_dispatch_flip(dev);
+	radeon_cp_dispatch_flip(dev, file_priv->master);
 
 	COMMIT_RING();
 	return 0;
@@ -3168,13 +3168,15 @@ void radeon_driver_preclose(struct drm_device *dev, struct drm_file *file_priv)
 void radeon_driver_lastclose(struct drm_device *dev)
 {
 	radeon_surfaces_release(PCIGART_FILE_PRIV, dev->dev_private);
+#ifndef DRM_NEWER_MASTER
 	if (dev->dev_private) {
 		drm_radeon_private_t *dev_priv = dev->dev_private;
 
 		if (dev_priv->sarea_priv &&
 		    dev_priv->sarea_priv->pfCurrentPage != 0)
-			radeon_cp_dispatch_flip(dev);
+			radeon_cp_dispatch_flip(dev, NULL);
 	}
+#endif
 
 	radeon_do_release(dev);
 }
