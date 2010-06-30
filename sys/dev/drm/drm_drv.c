@@ -50,8 +50,8 @@ int drm_debug_flag = 0;
 
 static int drm_load(struct drm_device *dev);
 static void drm_unload(struct drm_device *dev);
-static drm_pci_id_list_t *drm_find_description(int vendor, int device,
-    drm_pci_id_list_t *idlist);
+static DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device,
+	DRM_PCI_DEVICE_ID *idlist);
 
 #define DRIVER_SOFTC(unit) \
 	((struct drm_device *)devclass_get_softc(drm_devclass, unit))
@@ -200,13 +200,13 @@ static int drm_fill_in_dev(struct drm_device * dev, struct pci_dev *pdev,
 			   struct drm_driver *driver)
 #else
 static int drm_fill_in_dev(struct drm_device *dev,
-	device_t kdev, drm_pci_id_list_t *idlist)
+	device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 #endif /* __linux__ */
 {
 	int retcode;
 #ifndef __linux__
 	int i;
-	drm_pci_id_list_t *id_entry;
+	DRM_PCI_DEVICE_ID *id_entry;
 #endif /* __linux__ */
 
 	INIT_LIST_HEAD(&dev->filelist);
@@ -338,9 +338,9 @@ static int drm_fill_in_dev(struct drm_device *dev,
 	return retcode;
 }
 
-int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
+int drm_probe(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 {
-	drm_pci_id_list_t *id_entry;
+	DRM_PCI_DEVICE_ID *id_entry;
 	int vendor, device;
 
 	vendor = pci_get_vendor(kdev);
@@ -352,11 +352,14 @@ int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
 
 	id_entry = drm_find_description(vendor, device, idlist);
 	if (id_entry != NULL) {
-		DRM_INFO("drm_probe: vendor 0x%4x, device 0x%4x, name %s, get_desc %s\n",
-			vendor, device, id_entry->name, device_get_desc(kdev));
+		DRM_INFO("drm_probe: vendor 0x%4x, device 0x%4x, device_get_desc %s\n",
+			vendor, device, device_get_desc(kdev));
 		if (!device_get_desc(kdev)) {
 			DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
+			device_set_desc(kdev, "UNKNOWN");
+#if 0
 			device_set_desc(kdev, id_entry->name);
+#endif
 		}
 		return 0;
 	}
@@ -364,7 +367,7 @@ int drm_probe(device_t kdev, drm_pci_id_list_t *idlist)
 	return ENXIO;
 }
 
-int drm_attach(device_t kdev, drm_pci_id_list_t *idlist)
+int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 {
 	struct drm_device *dev;
 	int ret;
@@ -568,8 +571,8 @@ int drm_detach(device_t kdev)
 
 devclass_t drm_devclass;
 
-drm_pci_id_list_t *drm_find_description(int vendor, int device,
-    drm_pci_id_list_t *idlist)
+DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device,
+	DRM_PCI_DEVICE_ID *idlist)
 {
 	int i = 0;
 	
