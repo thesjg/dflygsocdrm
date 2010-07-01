@@ -728,6 +728,7 @@ int drm_lastclose(struct drm_device * dev)
 	struct drm_vma_entry *vma, *vma_temp;
 #else
 	struct drm_magic_entry *pt, *next;
+	drm_local_map_t *map, *mapsave;
 #endif /* __linux__ */
 	int i;
 
@@ -833,6 +834,12 @@ int drm_lastclose(struct drm_device * dev)
 		dev->queuelist = NULL;
 	}
 	dev->queue_count = 0;
+
+/* Much earlier than in Linux drm */
+	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
+		if (!(map->flags & _DRM_DRIVER))
+			drm_rmmap(dev, map);
+	}
 
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !drm_core_check_feature(dev, DRIVER_MODESET))
@@ -974,7 +981,6 @@ static void drm_unload(struct drm_device *dev)
 	struct drm_driver *driver;
 	struct drm_map_list *r_list, *list_temp;
 #ifndef __linux__
-	drm_local_map_t *map, *mapsave;
 	int i;
 #endif /* __linux__ */
 
@@ -986,11 +992,10 @@ static void drm_unload(struct drm_device *dev)
 	}
 	driver = dev->driver;
 
-/* destroy device first so that can't be sent more ioctls? */
-	destroy_dev(dev->devnode);
-
 /* sysctl cleanup should probably be part of minor cleanup */
 	drm_sysctl_cleanup(dev);
+/* destroy device first so that can't be sent more ioctls? */
+	destroy_dev(dev->devnode);
 
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
@@ -1050,11 +1055,6 @@ static void drm_unload(struct drm_device *dev)
 	}
 
 	drm_vblank_cleanup(dev);
-
-	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
-		if (!(map->flags & _DRM_DRIVER))
-			drm_rmmap(dev, map);
-	}
 
 /* Does not seem to be used yet */
 #ifdef __linux__
