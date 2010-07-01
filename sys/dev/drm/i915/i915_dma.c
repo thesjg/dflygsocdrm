@@ -823,7 +823,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	unsigned long base, size;
-	int ret = 0, mmio_bar = IS_I9XX(dev) ? 0 : 1;
+	int ret = 0, mmio_bar;
 
 	/* i915 has 4 more counters */
 	dev->counters += 4;
@@ -845,6 +845,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #endif /* DRM_NEWER_PCIID */
 
 	/* Add register map (needed for suspend/resume) */
+	mmio_bar = IS_I9XX(dev) ? 0 : 1;
 	base = drm_get_resource_start(dev, mmio_bar);
 	size = drm_get_resource_len(dev, mmio_bar);
 
