@@ -573,6 +573,9 @@ int drm_detach(device_t kdev)
 	dev = device_get_softc(kdev);
 
 	drm_unload(dev);
+
+/* If busmaster enabled before irq should it be released after? */
+	pci_disable_busmaster(dev->device);
 	
 	if (dev->irqr) {
 		bus_release_resource(dev->device, SYS_RES_IRQ, dev->irqrid,
@@ -585,9 +588,6 @@ int drm_detach(device_t kdev)
 		}
 #endif
 	}
-
-/* If busmaster enabled before irq should it be released after? */
-	pci_disable_busmaster(dev->device);
 
 	return 0;
 }
@@ -986,6 +986,9 @@ static void drm_unload(struct drm_device *dev)
 	}
 	driver = dev->driver;
 
+/* destroy device first so that can't be sent more ioctls? */
+	destroy_dev(dev->devnode);
+
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
@@ -1071,7 +1074,6 @@ static void drm_unload(struct drm_device *dev)
 
 /* sysctl cleanup should probably be part of minor cleanup */
 	drm_sysctl_cleanup(dev);
-	destroy_dev(dev->devnode);
 
 	DRM_SPINUNINIT(&dev->drw_lock);
 	DRM_SPINUNINIT(&dev->vbl_lock);
