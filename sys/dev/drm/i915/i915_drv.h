@@ -1184,7 +1184,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_I830(dev) ((dev)->pci_device == 0x3577)
 #define IS_845G(dev) ((dev)->pci_device == 0x2562)
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_I85X(dev)		(INTEL_INFO(dev)->is_i85x)
 #else
 #define IS_I85X(dev) ((dev)->pci_device == 0x3582)
@@ -1197,7 +1197,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_I865G(dev) ((dev)->pci_device == 0x2572)
 #define IS_GEN2(dev)		(INTEL_INFO(dev)->is_i8xx)
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_I915G(dev)		(INTEL_INFO(dev)->is_i915g)
 #else
 #define IS_I915G(dev) ((dev)->pci_device == 0x2582 || (dev)->pci_device == 0x258a)
@@ -1206,14 +1206,14 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_I915GM(dev) ((dev)->pci_device == 0x2592)
 #define IS_I945G(dev) ((dev)->pci_device == 0x2772)
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_I945GM(dev)		(INTEL_INFO(dev)->is_i945gm)
 #else
 #define IS_I945GM(dev) ((dev)->pci_device == 0x27A2 ||\
 		        (dev)->pci_device == 0x27AE)
 #endif /* DRM_NEWER_PCIID */
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_I965G(dev)		(INTEL_INFO(dev)->is_i965g)
 #else
 #define IS_I965G(dev) ((dev)->pci_device == 0x2972 || \
@@ -1229,7 +1229,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 		       (dev)->pci_device == 0x2E32)
 #endif /* DRM_NEWER_PCIID */
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 /* extends to device 0x2a12 */
 #define IS_I965GM(dev)		(INTEL_INFO(dev)->is_i965gm)
 #else
@@ -1238,7 +1238,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 #define IS_GM45(dev) ((dev)->pci_device == 0x2A42)
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_G4X(dev)		(INTEL_INFO(dev)->is_g4x)
 #else
 #define IS_G4X(dev) ((dev)->pci_device == 0x2E02 || \
@@ -1256,7 +1256,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_IGDGM(dev)	((dev)->pci_device == 0xa011)
 #define IS_IGD(dev)	(IS_IGDG(dev) || IS_IGDGM(dev))
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_G33(dev)		(INTEL_INFO(dev)->is_g33)
 #else
 #define IS_G33(dev)    ((dev)->pci_device == 0x29C2 ||	\
@@ -1269,7 +1269,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_IRONLAKE_M(dev)	((dev)->pci_device == 0x0046)
 #define IS_IRONLAKE(dev)	(INTEL_INFO(dev)->is_ironlake)
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_I9XX(dev)		(INTEL_INFO(dev)->is_i9xx)
 #else
 #define IS_I9XX(dev) (IS_I915G(dev) || IS_I915GM(dev) || IS_I945G(dev) || \
@@ -1278,7 +1278,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 #define IS_GEN6(dev)		(INTEL_INFO(dev)->is_gen6)
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 #define IS_MOBILE(dev)		(INTEL_INFO(dev)->is_mobile)
 #else
 #define IS_MOBILE(dev) (IS_I830(dev) || IS_I85X(dev) || IS_I915GM(dev) || \
@@ -1305,7 +1305,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 			 (dev)->pci_device == 0x2A42 ||		\
 			 (dev)->pci_device == 0x2E42)
 
-#ifdef DRM_NEWER_PCIID
+#ifdef __linux__ /* DRM_NEWER_PCIID */
 /* extends to pineview, ironlake, and sandybridge */
 #define I915_NEED_GFX_HWS(dev)	(INTEL_INFO(dev)->need_gfx_hws)
 #else
