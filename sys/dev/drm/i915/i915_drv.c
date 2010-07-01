@@ -165,7 +165,11 @@ const static struct intel_device_info intel_sandybridge_m_info = {
 	.has_hotplug = 1, .is_gen6 = 1,
 };
 
+#ifdef __linux
 const static struct pci_device_id pciidlist[] = {
+#else
+static struct pci_device_id pciidlist[] = {
+#endif /* __linux__ */
 	INTEL_VGA_DEVICE(0x3577, &intel_i830_info),
 	INTEL_VGA_DEVICE(0x2562, &intel_845g_info),
 	INTEL_VGA_DEVICE(0x3582, &intel_i85x_info),
