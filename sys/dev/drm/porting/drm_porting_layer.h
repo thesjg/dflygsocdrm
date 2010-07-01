@@ -2287,10 +2287,10 @@ dma_free_coherent(
 /* drmP.h drm_stub.h */
 /* file drm_drv.c, function drm_init() */
 struct pci_device_id {
-	uint16_t vendor;
-	uint16_t device;
-	uint16_t subvendor;
-	uint16_t subdevice;
+	int vendor;
+	int device;
+	int subvendor;
+	int subdevice;
 	uint32_t class;
 	uint32_t class_mask;
 /* file drm_stub.c, function drm_get_dev() */
