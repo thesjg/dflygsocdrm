@@ -569,13 +569,24 @@ err_g1:
 int drm_detach(device_t kdev)
 {
 	struct drm_device *dev;
+	int i;
 
 	dev = device_get_softc(kdev);
 
 	drm_unload(dev);
 
-/* If busmaster enabled before irq should it be released after? */
-	pci_disable_busmaster(dev->device);
+	/* Clean up PCI resources allocated by drm_bufs.c.  We're not really
+	 * worried about resource consumption while the DRM is inactive (between
+	 * lastclose and firstopen or unload) because these aren't actually
+	 * taking up KVA, just keeping the PCI resource allocated.
+	 */
+	for (i = 0; i < DRM_MAX_PCI_RESOURCE; i++) {
+		if (dev->pcir[i] == NULL)
+			continue;
+		bus_release_resource(dev->device, SYS_RES_MEMORY,
+		    dev->pcirid[i], dev->pcir[i]);
+		dev->pcir[i] = NULL;
+	}
 	
 	if (dev->irqr) {
 		bus_release_resource(dev->device, SYS_RES_IRQ, dev->irqrid,
@@ -588,6 +599,9 @@ int drm_detach(device_t kdev)
 		}
 #endif
 	}
+
+/* If busmaster enabled before irq should it be released after? */
+	pci_disable_busmaster(dev->device);
 
 	return 0;
 }
@@ -731,6 +745,9 @@ int drm_lastclose(struct drm_device * dev)
 	drm_local_map_t *map, *mapsave;
 #endif /* __linux__ */
 	int i;
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *r_list, *list_temp;
+#endif /* DRM_NEWER_MAPLIST */
 
 #ifndef __linux__
 #ifndef DRM_NEWER_LOCK
@@ -765,7 +782,7 @@ int drm_lastclose(struct drm_device * dev)
 		}
 		dev->magiclist[i].head = dev->magiclist[i].tail = NULL;
 	}
-#endif /* __linux__ */
+#endif /* !__linux__ */
 
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
@@ -812,7 +829,6 @@ int drm_lastclose(struct drm_device * dev)
 		dev->sg = NULL;
 	}
 
-
 #ifdef __linux__
 	/* Clear vma list (only built for debugging) */
 	list_for_each_entry_safe(vma, vma_temp, &dev->vmalist, head) {
@@ -836,10 +852,18 @@ int drm_lastclose(struct drm_device * dev)
 	dev->queue_count = 0;
 
 /* Much earlier than in Linux drm */
+
+/* Does not seem to be used yet */
+#ifdef DRM_NEWER_MAPLIST
+	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
+		drm_rmmap(dev, r_list->map);
+	drm_ht_remove(&dev->map_hash);
+#else
 	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
 		if (!(map->flags & _DRM_DRIVER))
 			drm_rmmap(dev, map);
 	}
+#endif /* DRM_NEWER_MAPLIST */
 
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !drm_core_check_feature(dev, DRIVER_MODESET))
@@ -851,7 +875,7 @@ int drm_lastclose(struct drm_device * dev)
 		dev->lock.file_priv = NULL;
 		DRM_WAKEUP_INT((void *)&dev->lock.lock_queue);
 	}
-#endif /* __linux__ */
+#endif /* ! __linux__ */
 
 	dev->dev_mapping = NULL;
 
@@ -979,10 +1003,9 @@ error:
 static void drm_unload(struct drm_device *dev)
 {
 	struct drm_driver *driver;
+#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list, *list_temp;
-#ifndef __linux__
-	int i;
-#endif /* __linux__ */
+#endif /* DRM_NEWER_MAPLIST */
 
 	DRM_DEBUG("\n");
 
@@ -1026,19 +1049,6 @@ static void drm_unload(struct drm_device *dev)
 	}
 #endif /* __linux__ */
 
-	/* Clean up PCI resources allocated by drm_bufs.c.  We're not really
-	 * worried about resource consumption while the DRM is inactive (between
-	 * lastclose and firstopen or unload) because these aren't actually
-	 * taking up KVA, just keeping the PCI resource allocated.
-	 */
-	for (i = 0; i < DRM_MAX_PCI_RESOURCE; i++) {
-		if (dev->pcir[i] == NULL)
-			continue;
-		bus_release_resource(dev->device, SYS_RES_MEMORY,
-		    dev->pcirid[i], dev->pcir[i]);
-		dev->pcir[i] = NULL;
-	}
-
 	if (dev->driver->unload) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
@@ -1055,13 +1065,6 @@ static void drm_unload(struct drm_device *dev)
 	}
 
 	drm_vblank_cleanup(dev);
-
-/* Does not seem to be used yet */
-#ifdef __linux__
-	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
-		drm_rmmap(dev, r_list->map);
-	drm_ht_remove(&dev->map_hash);
-#endif /* __linux__ */
 
 	drm_ctxbitmap_cleanup(dev);
 
