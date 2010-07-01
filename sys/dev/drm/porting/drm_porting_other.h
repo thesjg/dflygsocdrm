@@ -250,6 +250,7 @@ drm_free(void *pt, size_t size, struct malloc_type *area)
 }
 
 /* Switching to Linux drm drm_pciids.h format */
+#define DRM_NEWER_PCIID 1
 #ifdef DRM_NEWER_PCIID
 #define DRM_PCI_DEVICE_ID  struct pci_device_id
 #else

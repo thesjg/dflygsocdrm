@@ -202,7 +202,7 @@ const static struct pci_device_id pciidlist[] = {
 };
 #else
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t i915_pciidlist[] = {
+static DRM_PCI_DEVICE_ID pciidlist[] = {
 	i915_PCI_IDS
 };
 #endif /* DRM_NEWER_PCIID */
@@ -696,7 +696,7 @@ static struct drm_driver driver = {
 static int
 i915_probe(device_t kdev)
 {
-	return drm_probe(kdev, i915_pciidlist);
+	return drm_probe(kdev, pciidlist);
 }
 
 static int
@@ -709,7 +709,7 @@ i915_attach(device_t kdev)
 
 	i915_configure(dev);
 
-	return drm_attach(kdev, i915_pciidlist);
+	return drm_attach(kdev, pciidlist);
 }
 
 static int

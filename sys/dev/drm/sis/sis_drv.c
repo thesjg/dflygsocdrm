@@ -33,7 +33,11 @@
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
 static DRM_PCI_DEVICE_ID sis_pciidlist[] = {
+#ifdef DRM_NEWER_PCIID
+	sisdrv_PCI_IDS
+#else
 	sis_PCI_IDS
+#endif /* DRM_NEWER_PCIID */
 };
 
 #ifdef SIS_HAVE_CORE_MM

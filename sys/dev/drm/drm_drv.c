@@ -503,7 +503,11 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 #else
 		DRM_LOCK();
 		/* Shared code returns -errno. */
+#ifdef DRM_NEWER_PCIID
+		ret = -dev->driver->load(dev, dev->id_entry->driver_data);
+#else
 		ret = -dev->driver->load(dev, dev->id_entry->driver_private);
+#endif /* _DRM_NEWER_PCIID */
 #if 0
 		pci_enable_busmaster(dev->device);
 #endif
@@ -863,14 +867,23 @@ static int drm_load(struct drm_device *dev)
 		atomic_set(&dev->counts[i], 0);
 
 	if (dev->driver->load != NULL) {
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		/* Shared code returns -errno. */
+#ifdef DRM_NEWER_PCIID
+		retcode = -dev->driver->load(dev,
+		    dev->id_entry->driver_data);
+#else
 		retcode = -dev->driver->load(dev,
 		    dev->id_entry->driver_private);
+#endif
 #if 0
 		pci_enable_busmaster(dev->device);
 #endif
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 		if (retcode != 0)
 			goto error;
 	}

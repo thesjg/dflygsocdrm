@@ -840,6 +840,9 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	dev->dev_private = (void *)dev_priv;
 	dev_priv->dev = dev;
+#ifdef DRM_NEWER_PCIID
+	dev_priv->info = (struct intel_device_info *) flags;
+#endif /* DRM_NEWER_PCIID */
 
 	/* Add register map (needed for suspend/resume) */
 	base = drm_get_resource_start(dev, mmio_bar);

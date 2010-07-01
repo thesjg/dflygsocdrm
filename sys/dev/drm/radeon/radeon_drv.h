@@ -158,6 +158,12 @@ enum radeon_family {
 	CHIP_RV730,
 	CHIP_RV710,
 	CHIP_RV740,
+/* from radeon_family.h */
+	CHIP_CEDAR,
+	CHIP_REDWOOD,
+	CHIP_JUNIPER,
+	CHIP_CYPRESS,
+	CHIP_HEMLOCK,
 	CHIP_LAST,
 };
 
