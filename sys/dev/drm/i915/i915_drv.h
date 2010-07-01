@@ -1206,7 +1206,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_I915GM(dev) ((dev)->pci_device == 0x2592)
 #define IS_I945G(dev) ((dev)->pci_device == 0x2772)
 
-#ifdef __linux__ /* DRM_NEWER_PCIID */
+#ifdef DRM_NEWER_PCIID
 #define IS_I945GM(dev)		(INTEL_INFO(dev)->is_i945gm)
 #else
 #define IS_I945GM(dev) ((dev)->pci_device == 0x27A2 ||\
