@@ -989,6 +989,9 @@ static void drm_unload(struct drm_device *dev)
 /* destroy device first so that can't be sent more ioctls? */
 	destroy_dev(dev->devnode);
 
+/* sysctl cleanup should probably be part of minor cleanup */
+	drm_sysctl_cleanup(dev);
+
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
@@ -1054,16 +1057,17 @@ static void drm_unload(struct drm_device *dev)
 	}
 
 /* Does not seem to be used yet */
+#ifdef __linux__
 	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
 		drm_rmmap(dev, r_list->map);
 	drm_ht_remove(&dev->map_hash);
+#endif /* __linux__ */
 
 	drm_ctxbitmap_cleanup(dev);
 
 #if 0 /* empty method */
 	drm_mem_uninit();
 #endif
-
 	if (drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_put_minor(&dev->control);
 
@@ -1071,9 +1075,6 @@ static void drm_unload(struct drm_device *dev)
 		drm_gem_destroy(dev);
 
 	drm_put_minor(&dev->primary);
-
-/* sysctl cleanup should probably be part of minor cleanup */
-	drm_sysctl_cleanup(dev);
 
 	DRM_SPINUNINIT(&dev->drw_lock);
 	DRM_SPINUNINIT(&dev->vbl_lock);
