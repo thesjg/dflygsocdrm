@@ -33,7 +33,7 @@
 #include "drm_pciids.h"
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t savage_pciidlist[] = {
+static DRM_PCI_DEVICE_ID savage_pciidlist[] = {
 	savage_PCI_IDS
 };
 

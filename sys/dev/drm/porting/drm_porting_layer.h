@@ -2280,13 +2280,17 @@ dma_free_coherent(
 /* file drm_vm.c, function drm_mmap_locked() */
 #define PCI_VENDOR_ID_APPLE 0x0001
 
+/* i915_drv.c */
+#define PCI_ANY_ID 0xffff
+#define PCI_CLASS_DISPLAY_VGA 0x0000
+
 /* drmP.h drm_stub.h */
 /* file drm_drv.c, function drm_init() */
 struct pci_device_id {
-	uint32_t vendor;
-	uint32_t device;
-	uint32_t subvendor;
-	uint32_t subdevice;
+	uint16_t vendor;
+	uint16_t device;
+	uint16_t subvendor;
+	uint16_t subdevice;
 	uint32_t class;
 	uint32_t class_mask;
 /* file drm_stub.c, function drm_get_dev() */

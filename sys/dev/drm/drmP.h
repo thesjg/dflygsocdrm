@@ -982,7 +982,7 @@ struct drm_driver {
 	struct list_head device_list;
 
 /* legacy drm */
-	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
+	DRM_PCI_DEVICE_ID *id_entry;	/* PCI ID, name, and chipset private */
 	int	max_ioctl;
 	int	buf_priv_size;
 };
@@ -1224,7 +1224,7 @@ struct drm_device {
 #endif
 	/* Linked list of mappable regions. Protected by dev_lock */
 	drm_map_list_t_legacy maplist_legacy;
-	drm_pci_id_list_t *id_entry;	/* PCI ID, name, and chipset private */
+	DRM_PCI_DEVICE_ID *id_entry;	/* PCI ID, name, and chipset private */
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
 	int		  unique_len;	/* Length of unique field	   */
@@ -1373,8 +1373,8 @@ extern long drm_compat_ioctl(struct file *filp,
 
 /* Device setup support (drm_drv.c) */
 /* legacy functions */
-int	drm_probe(device_t kdev, drm_pci_id_list_t *idlist);
-int	drm_attach(device_t kdev, drm_pci_id_list_t *idlist);
+int	drm_probe(device_t kdev, DRM_PCI_DEVICE_ID *idlist);
+int	drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist);
 int	drm_detach(device_t kdev);
 
 				/* Device support (drm_fops.h) */

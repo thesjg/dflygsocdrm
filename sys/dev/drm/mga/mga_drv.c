@@ -39,7 +39,7 @@
 static int mga_driver_device_is_agp(struct drm_device * dev);
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t mga_pciidlist[] = {
+static DRM_PCI_DEVICE_ID mga_pciidlist[] = {
 	mga_PCI_IDS
 };
 

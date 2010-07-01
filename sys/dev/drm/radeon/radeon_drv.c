@@ -172,7 +172,7 @@ static int radeon_resume(struct drm_device *dev)
 #endif /* __linux__ */
 
 /* drv_PCI_IDs comes from drm_pciids.h, generated from drm_pciids.txt. */
-static drm_pci_id_list_t radeon_pciidlist[] = {
+static DRM_PCI_DEVICE_ID radeon_pciidlist[] = {
 	radeon_PCI_IDS
 };
 

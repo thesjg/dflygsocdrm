@@ -53,7 +53,7 @@
 #define DRM_I915_VBLANK_PIPE_ALL	(DRM_I915_VBLANK_PIPE_A | \
 					 DRM_I915_VBLANK_PIPE_B)
 
-static inline void
+void
 i915_enable_irq(drm_i915_private_t *dev_priv, u32 mask)
 {
 	mask &= I915_INTERRUPT_ENABLE_VAR;

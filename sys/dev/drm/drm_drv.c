@@ -352,12 +352,13 @@ int drm_probe(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 
 	id_entry = drm_find_description(vendor, device, idlist);
 	if (id_entry != NULL) {
-		DRM_INFO("drm_probe: vendor 0x%4x, device 0x%4x, device_get_desc %s\n",
-			vendor, device, device_get_desc(kdev));
+		DRM_INFO("drm_probe: vendor 0x%4x, device 0x%4x, class 0x%4x, subclass 0x%4x, device_get_desc %s\n",
+			pci_get_vendor(kdev), pci_get_device(kdev),
+			pci_get_class(kdev), pci_get_subclass(kdev), device_get_desc(kdev));
 		if (!device_get_desc(kdev)) {
 			DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
-			device_set_desc(kdev, "UNKNOWN");
 #if 0
+			device_set_desc(kdev, "UNKNOWN");
 			device_set_desc(kdev, id_entry->name);
 #endif
 		}
@@ -372,9 +373,20 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 	struct drm_device *dev;
 	int ret;
 
+	DRM_INFO("drm_attach: vendor 0x%4x, device 0x%4x, class 0x%4x, subclass 0x%4x, device_get_desc %s\n",
+		pci_get_vendor(kdev), pci_get_device(kdev),
+		pci_get_class(kdev), pci_get_subclass(kdev), device_get_desc(kdev));
+	if (!device_get_desc(kdev)) {
+		DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
+		device_set_desc(kdev, "UNKNOWN");
+#if 0
+			device_set_desc(kdev, id_entry->name);
+#endif
+	}
+
 #ifndef __linux__
 #if 0
-	drm_pci_id_list_t *id_entry;
+	DRM_PCI_DEVICE_ID *id_entry;
 #endif
 	int unit;
 #endif /* __linux__ */

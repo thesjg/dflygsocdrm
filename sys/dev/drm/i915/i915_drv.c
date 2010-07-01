@@ -67,7 +67,7 @@ static struct drm_driver driver;
 extern int intel_agp_enabled;
 #endif /* __linux__ */
 
-#ifdef __linux__
+#ifdef DRM_NEWER_PCIID
 #define INTEL_VGA_DEVICE(id, info) {		\
 	.class = PCI_CLASS_DISPLAY_VGA << 8,	\
 	.class_mask = 0xffff00,			\
@@ -205,7 +205,7 @@ const static struct pci_device_id pciidlist[] = {
 static drm_pci_id_list_t i915_pciidlist[] = {
 	i915_PCI_IDS
 };
-#endif /* __linux__ */
+#endif /* DRM_NEWER_PCIID */
 
 #ifdef __linux__
 #if defined(CONFIG_DRM_I915_KMS)
@@ -554,10 +554,14 @@ static int i915_suspend(device_t kdev)
 		return -ENODEV;
 	}
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	DRM_DEBUG("starting suspend\n");
 	i915_save_state(dev);
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	return (bus_generic_suspend(kdev));
 }
@@ -566,10 +570,14 @@ static int i915_resume(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	i915_restore_state(dev);
 	DRM_DEBUG("finished resume\n");
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 
 	return (bus_generic_resume(kdev));
 }
