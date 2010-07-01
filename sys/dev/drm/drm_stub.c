@@ -378,9 +378,7 @@ int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
 	}
 
 	new_minor->type = type;
-#ifdef __linux__
 	new_minor->device = MKDEV(DRM_MAJOR, minor_id);
-#endif /* __linux__ */
 	new_minor->dev = dev;
 	new_minor->index = minor_id;
 	INIT_LIST_HEAD(&new_minor->master_list);
@@ -390,7 +388,7 @@ int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
 	if (type == DRM_MINOR_LEGACY) {
 #ifdef __linux__
 		ret = drm_proc_init(new_minor, minor_id, drm_proc_root);
-#else /* to compile */
+#else /* to compile maybe should initialize drm_sysctl here */
 		ret = 0;
 #endif
 		if (ret) {
@@ -405,7 +403,7 @@ int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
 	ret = drm_debugfs_init(new_minor, minor_id, drm_debugfs_root);
 #else /* to compile */
 	ret = 0;
-#endif
+#endif /* __linux__ */
 	if (ret) {
 		DRM_ERROR("DRM: Failed to initialize /sys/kernel/debug/dri.\n");
 		goto err_g2;
@@ -425,6 +423,9 @@ int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
 	*minor = new_minor;
 
 	DRM_DEBUG("new minor assigned %d\n", minor_id);
+#ifndef __linux__
+	DRM_INFO("New minor %d assigned of type %d\n", minor_id, type);
+#endif /* !__linux__ */
 	return 0;
 
 
@@ -432,7 +433,7 @@ err_g2:
 #ifdef __linux__
 	if (new_minor->type == DRM_MINOR_LEGACY)
 		drm_proc_cleanup(new_minor, drm_proc_root);
-#endif
+#endif /* __linux__ */
 err_mem:
 	free(new_minor, DRM_MEM_STUB);
 err_idr:
