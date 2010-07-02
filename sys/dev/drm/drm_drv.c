@@ -501,7 +501,9 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 #ifdef __linux__
 		ret = dev->driver->load(dev, ent->driver_data);
 #else
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 		/* Shared code returns -errno. */
 #ifdef DRM_NEWER_PCIID
 		ret = -dev->driver->load(dev, dev->id_entry->driver_data);
@@ -511,7 +513,9 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 #if 0
 		pci_enable_busmaster(dev->device);
 #endif
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 #endif /* __linux__ */
 		if (ret)
 			goto err_g4;
