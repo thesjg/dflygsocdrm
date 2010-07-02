@@ -615,7 +615,9 @@ static int drm_firstopen(struct drm_device *dev)
 #ifndef __linux__
 	drm_local_map_t *map;
 
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+#endif /* DRM_NEWER_LOCK */
 
 	/* prebuild the SAREA */
 	i = drm_addmap(dev, 0, SAREA_MAX, _DRM_SHM,
@@ -724,7 +726,9 @@ int drm_lastclose(struct drm_device * dev)
 	int i;
 
 #ifndef __linux__
+#ifndef DRM_NEWER_LOCK
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+#endif /* DRM_NEWER_LOCK */
 #endif /* __linux__ */
 
 	DRM_DEBUG("\n");
@@ -736,9 +740,9 @@ int drm_lastclose(struct drm_device * dev)
 	if (dev->irq_enabled && !drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_irq_uninstall(dev);
 
-#ifdef __linux__
+#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#endif /* __linux__ */
+#endif /* DRM_NEWER_LOCK */
 
 #ifndef __linux__
 	if (dev->unique) {
@@ -756,11 +760,15 @@ int drm_lastclose(struct drm_device * dev)
 	}
 #endif /* __linux__ */
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 	/* Free drawable information memory */
 	drm_drawable_free_all(dev);
 	del_timer(&dev->timer);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 
 	/* Clear AGP information */
 	if (drm_core_has_AGP(dev) && dev->agp &&
@@ -837,9 +845,9 @@ int drm_lastclose(struct drm_device * dev)
 #endif /* __linux__ */
 
 	dev->dev_mapping = NULL;
-#ifdef __linux__
+#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif /* __linux__ */
+#endif /* DRM_NEWER_LOCK */
 
 	DRM_DEBUG("lastclose completed\n");
 	return 0;
@@ -990,9 +998,13 @@ static void drm_unload(struct drm_device *dev)
 
 	drm_vblank_cleanup(dev);
 
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 	drm_lastclose(dev);
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 
 	/* Clean up PCI resources allocated by drm_bufs.c.  We're not really
 	 * worried about resource consumption while the DRM is inactive (between
@@ -1013,9 +1025,13 @@ static void drm_unload(struct drm_device *dev)
 	}
 
 	if (dev->driver->unload != NULL) {
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 		dev->driver->unload(dev);
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 	}
 
 	drm_mem_uninit();
@@ -1136,29 +1152,36 @@ int drm_open_legacy(struct dev_open_args *ap)
 #endif /* __linux__ */
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
-#ifdef __linux__
+#ifdef DRM_NEWER_LOCK
 		spin_lock(&dev->count_lock);
 #else
 		DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 		device_busy(dev->device);
-#endif /* __linux__ */
 		if (!dev->open_count++) {
 #ifdef __linux__
 			spin_unlock(&dev->count_lock);
 			retcode = drm_setup(dev);
 			goto out;
+#else /* __linux__ */
+#ifdef DRM_NEWER_LOCK
+			spin_unlock(&dev->count_lock);
 #else
+			DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 			retcode = drm_firstopen(dev);
+			goto out;
 #endif /* __linux__ */
 		}
-#ifdef __linux__
+#ifdef DRM_NEWER_LOCK
 		spin_unlock(&dev->count_lock);
 #else
 		DRM_UNLOCK();
-#endif /* __linux__ */
+#endif /* DRM_NEWER_LOCK */
 	}
-#ifdef __linux__
+
 out:
+#ifdef __linux__
 	if (!retcode) {
 		mutex_lock(&dev->struct_mutex);
 		if (minor->type == DRM_MINOR_LEGACY) {
