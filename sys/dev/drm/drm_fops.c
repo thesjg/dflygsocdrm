@@ -179,10 +179,6 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		}
 	}
 
-#ifdef DRM_NEWER_LOCK
-	mutex_lock(&dev->struct_mutex);
-#endif /* DRM_NEWER_LOCK */
-
 	/* first opener automatically becomes master */
 	priv->master_legacy = TAILQ_EMPTY(&dev->files);
 
@@ -196,6 +192,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 
 /* newer */
 	/* if there is no current master make this fd it */
+	mutex_lock(&dev->struct_mutex);
 	if (!priv->minor->master) {
 		/* create a new master */
 		priv->minor->master = drm_master_create(priv->minor);
