@@ -990,6 +990,7 @@ error:
 static void drm_unload(struct drm_device *dev)
 {
 	struct drm_driver *driver;
+	int i;
 #ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list, *list_temp;
 #endif /* DRM_NEWER_MAPLIST */
