@@ -1179,31 +1179,46 @@ int drm_open_legacy(struct dev_open_args *ap)
 #else
 	retcode = drm_open_helper_legacy(kdev, flags, fmt, p, dev);
 #endif /* __linux__ */
+
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
-#ifdef __linux__
+#ifdef DRM_NEWER_LOCK
 		spin_lock(&dev->count_lock);
 #else
 		DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
+
+#ifndef __linux__
 		device_busy(dev->device);
-#endif /* __linux__ */
+#endif /* !__linux__ */
+
 		if (!dev->open_count++) {
 #ifdef __linux__
 			spin_unlock(&dev->count_lock);
 			retcode = drm_setup(dev);
 			goto out;
+#else /* __linux__ */
+
+#ifdef DRM_NEWER_LOCK
+			spin_unlock(&dev->count_lock);
 #else
+			DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
+
 			retcode = drm_firstopen(dev);
+			goto out;
 #endif /* __linux__ */
 		}
-#ifdef __linux__
+
+#ifdef DRM_NEWER_LOCK
 		spin_unlock(&dev->count_lock);
 #else
 		DRM_UNLOCK();
-#endif /* __linux__ */
+#endif /* DRM_NEWER_LOCK */
 	}
+
+out: /* does not seem to apply apart from Linux */
 #ifdef __linux__
-out:
 	if (!retcode) {
 		mutex_lock(&dev->struct_mutex);
 		if (minor->type == DRM_MINOR_LEGACY) {
@@ -1247,10 +1262,10 @@ int drm_close_legacy(struct dev_close_args *ap)
 	dev = DRIVER_SOFTC(minor(kdev));
 	file_priv = drm_find_file_by_proc(dev, curthread);
 	if (!file_priv->minor) {
-		DRM_ERROR("drm_close() no minor for file!\n");
+		DRM_ERROR("drm_close() no minor for file\n");
 	}
 	if (file_priv->minor && (dev != file_priv->minor->dev)) {
-		DRM_ERROR("drm_close() softc device != minor device!\n");
+		DRM_ERROR("drm_close() softc device != minor device\n");
 	}
 #endif /* __linux__ */
 
@@ -1258,8 +1273,10 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 	DRM_LOCK();
 
+#ifndef __linux__
 	if (--file_priv->refs != 0)
 		goto done;
+#endif /* __linux__ */
 
 	if (dev->driver->preclose != NULL)
 		dev->driver->preclose(dev, file_priv);
