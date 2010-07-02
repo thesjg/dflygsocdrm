@@ -587,6 +587,9 @@ int drm_detach(device_t kdev)
 		    dev->pcirid[i], dev->pcir[i]);
 		dev->pcir[i] = NULL;
 	}
+
+/* If busmaster enabled before irq should it be released after? */
+	pci_disable_busmaster(dev->device);
 	
 	if (dev->irqr) {
 		bus_release_resource(dev->device, SYS_RES_IRQ, dev->irqrid,
@@ -599,9 +602,6 @@ int drm_detach(device_t kdev)
 		}
 #endif
 	}
-
-/* If busmaster enabled before irq should it be released after? */
-	pci_disable_busmaster(dev->device);
 
 	return 0;
 }
