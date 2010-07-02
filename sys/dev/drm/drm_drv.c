@@ -574,9 +574,6 @@ int drm_detach(device_t kdev)
 	dev = device_get_softc(kdev);
 
 	drm_unload(dev);
-
-/* If busmaster enabled before irq should it be released after? */
-	pci_disable_busmaster(dev->device);
 	
 	if (dev->irqr) {
 		bus_release_resource(dev->device, SYS_RES_IRQ, dev->irqrid,
@@ -816,6 +813,18 @@ int drm_lastclose(struct drm_device * dev)
 		dev->sg = NULL;
 	}
 
+/* Does not seem to be used yet */
+#ifdef DRM_NEWER_MAPLIST
+	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
+		drm_rmmap(dev, r_list->map);
+	drm_ht_remove(&dev->map_hash);
+#else
+	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
+		if (!(map->flags & _DRM_DRIVER))
+			drm_rmmap(dev, map);
+	}
+#endif /* DRM_NEWER_MAPLIST */
+
 #ifdef __linux__
 	/* Clear vma list (only built for debugging) */
 	list_for_each_entry_safe(vma, vma_temp, &dev->vmalist, head) {
@@ -839,18 +848,6 @@ int drm_lastclose(struct drm_device * dev)
 	dev->queue_count = 0;
 
 /* Much earlier than in Linux drm */
-
-/* Does not seem to be used yet */
-#ifdef DRM_NEWER_MAPLIST
-	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
-		drm_rmmap(dev, r_list->map);
-	drm_ht_remove(&dev->map_hash);
-#else
-	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
-		if (!(map->flags & _DRM_DRIVER))
-			drm_rmmap(dev, map);
-	}
-#endif /* DRM_NEWER_MAPLIST */
 
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !drm_core_check_feature(dev, DRIVER_MODESET))
@@ -1008,6 +1005,29 @@ static void drm_unload(struct drm_device *dev)
 /* destroy device first so that can't be sent more ioctls? */
 	destroy_dev(dev->devnode);
 
+	drm_ctxbitmap_cleanup(dev);
+
+	drm_vblank_cleanup(dev);
+
+#ifdef __linux__
+	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
+	    dev->agp && dev->agp->agp_mtrr >= 0) {
+		int retval;
+		retval = mtrr_del(dev->agp->agp_mtrr,
+				  dev->agp->agp_info.aper_base,
+				  dev->agp->agp_info.aper_size * 1024 * 1024);
+		DRM_DEBUG("mtrr_del=%d\n", retval);
+	}
+#else
+	if (dev->agp && dev->agp->mtrr) {
+		int __unused retcode;
+
+		retcode = drm_mtrr_del(0, dev->agp->info.ai_aperture_base,
+		    dev->agp->info.ai_aperture_size, DRM_MTRR_WC);
+		DRM_DEBUG("mtrr_del = %d", retcode);
+	}
+#endif /* __linux__ */
+
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
@@ -1031,25 +1051,6 @@ static void drm_unload(struct drm_device *dev)
 		dev->pcir[i] = NULL;
 	}
 
-#ifdef __linux__
-	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
-	    dev->agp && dev->agp->agp_mtrr >= 0) {
-		int retval;
-		retval = mtrr_del(dev->agp->agp_mtrr,
-				  dev->agp->agp_info.aper_base,
-				  dev->agp->agp_info.aper_size * 1024 * 1024);
-		DRM_DEBUG("mtrr_del=%d\n", retval);
-	}
-#else
-	if (dev->agp && dev->agp->mtrr) {
-		int __unused retcode;
-
-		retcode = drm_mtrr_del(0, dev->agp->info.ai_aperture_base,
-		    dev->agp->info.ai_aperture_size, DRM_MTRR_WC);
-		DRM_DEBUG("mtrr_del = %d", retcode);
-	}
-#endif /* __linux__ */
-
 	if (dev->driver->unload) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
@@ -1060,14 +1061,10 @@ static void drm_unload(struct drm_device *dev)
 #endif
 	}
 
-	if (drm_core_has_AGP(dev) && dev->agp) {
+	if (dev->agp) {
 		free(dev->agp, DRM_MEM_AGPLISTS);
 		dev->agp = NULL;
 	}
-
-	drm_vblank_cleanup(dev);
-
-	drm_ctxbitmap_cleanup(dev);
 
 #if 0 /* empty method */
 	drm_mem_uninit();
@@ -1079,6 +1076,9 @@ static void drm_unload(struct drm_device *dev)
 		drm_gem_destroy(dev);
 
 	drm_put_minor(&dev->primary);
+
+/* If busmaster enabled before irq should it be released after? */
+	pci_disable_busmaster(dev->device);
 
 	DRM_SPINUNINIT(&dev->drw_lock);
 	DRM_SPINUNINIT(&dev->vbl_lock);
