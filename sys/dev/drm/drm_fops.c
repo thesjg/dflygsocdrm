@@ -190,17 +190,17 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 
 	kdev->si_drv1 = dev;
 
+#ifndef DRM_NEWER_LOCK
+	DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
+
 /* newer */
 	/* if there is no current master make this fd it */
 	if (!priv->minor->master) {
 		/* create a new master */
 		priv->minor->master = drm_master_create(priv->minor);
 		if (!priv->minor->master) {
-#ifdef DRM_NEWER_LOCK
 			mutex_unlock(&dev->struct_mutex);
-#else
-			DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
 			ret = -ENOMEM;
 			goto out_free;
 		}
@@ -216,37 +216,21 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 
 		priv->authenticated = 1;
 
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
-		DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
 
 		if (dev->driver->master_create) {
 			ret = dev->driver->master_create(dev, priv->master);
 			if (ret) {
-#ifdef DRM_NEWER_LOCK
 				mutex_lock(&dev->struct_mutex);
-#else
-				DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
 				/* drop both references if this fails */
 				drm_master_put(&priv->minor->master);
 				drm_master_put(&priv->master);
-#ifdef DRM_NEWER_LOCK
 				mutex_unlock(&dev->struct_mutex);
-#else
-				DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
 				goto out_free;
 			}
 		}
 
-#ifdef DRM_NEWER_LOCK
 		mutex_lock(&dev->struct_mutex);
-#else
-		DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
 
 		if (dev->driver->master_set) {
 			ret = dev->driver->master_set(dev, priv, true);
@@ -254,42 +238,22 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 				/* drop both references if this fails */
 				drm_master_put(&priv->minor->master);
 				drm_master_put(&priv->master);
-#ifdef DRM_NEWER_LOCK
 				mutex_unlock(&dev->struct_mutex);
-#else
-				DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
 				goto out_free;
 			}
 		}
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
-		DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
 	} else {
 		/* get a reference to the master */
 		priv->master = drm_master_get(priv->minor->master);
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
-		DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
 	}
 
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
 
 	list_add(&priv->lhead, &dev->filelist);
 
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
-	DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
 /* end newer */
 
 #ifdef __linux__

@@ -1263,8 +1263,6 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 #ifdef DRM_NEWER_LOCK
 	lock_kernel();
-#else
-	DRM_LOCK();
 #endif /* DRM_NEWER_LOCK */
 
 #ifndef __linux__
@@ -1278,6 +1276,10 @@ int drm_close_legacy(struct dev_close_args *ap)
 #endif /* __linux__ */
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
+
+#ifndef DRM_NEWER_LOCK
+	DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 
 #ifndef __linux__
 	if (--file_priv->refs != 0)
