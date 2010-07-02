@@ -1487,13 +1487,13 @@ udelay(int delay) {
 /* file drm_fops.c, function drm_stub_open() */
 static __inline__ void
 lock_kernel(void) {
-	;
+	get_mplock();
 }
 
 /* file drm_fops.c, function drm_stub_open() */
 static __inline__ void
 unlock_kernel(void) {
-	;
+	rel_mplock();
 }
 
 /* file drm_cache.c, function drm_cache_flush_clflush() */

@@ -1258,8 +1258,15 @@ int drm_close_legacy(struct dev_close_args *ap)
 #endif /* __linux__ */
 	int retcode = 0;
 
-#ifndef __linux__
 	dev = DRIVER_SOFTC(minor(kdev));
+
+#ifdef DRM_NEWER_LOCK
+	lock_kernel();
+#else
+	DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
+
+#ifndef __linux__
 	file_priv = drm_find_file_by_proc(dev, curthread);
 	if (!file_priv->minor) {
 		DRM_ERROR("drm_close() no minor for file\n");
@@ -1270,8 +1277,6 @@ int drm_close_legacy(struct dev_close_args *ap)
 #endif /* __linux__ */
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
-
-	DRM_LOCK();
 
 #ifndef __linux__
 	if (--file_priv->refs != 0)
@@ -1288,6 +1293,7 @@ int drm_close_legacy(struct dev_close_args *ap)
 	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
 	    DRM_CURRENTPID, (long)dev->device, dev->open_count);
 
+/* non-master version of file drm_fops.c, function drm_master_release() */
 	if (dev->lock.hw_lock && _DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock)
 	    && dev->lock.file_priv == file_priv) {
 		DRM_DEBUG("Process %d dead, freeing lock for context %d\n",
@@ -1320,10 +1326,14 @@ int drm_close_legacy(struct dev_close_args *ap)
 			}
 			/* Contention */
 			tsleep_interlock((void *)&dev->lock.lock_queue, PCATCH);
+#ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 			retcode = tsleep((void *)&dev->lock.lock_queue,
 					 PCATCH | PINTERLOCKED, "drmlk2", 0);
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 			if (retcode)
 				break;
 		}
@@ -1333,14 +1343,49 @@ int drm_close_legacy(struct dev_close_args *ap)
 		}
 	}
 
+/* does similar code need to be implemented for reclaim_buffers_idlelocked() */
+
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !dev->driver->reclaim_buffers_locked)
 		drm_core_reclaim_buffers(dev, file_priv);
 
 	funsetown(dev->buf_sigio);
 
+#ifdef __linux__
+	drm_events_release(file_priv);
+
+	if (dev->driver->driver_features & DRIVER_GEM)
+		drm_gem_release(dev, file_priv);
+
+	if (dev->driver->driver_features & DRIVER_MODESET)
+		drm_fb_release(file_priv);
+
+	mutex_lock(&dev->ctxlist_mutex);
+	if (!list_empty(&dev->ctxlist)) {
+		struct drm_ctx_list *pos, *n;
+
+		list_for_each_entry_safe(pos, n, &dev->ctxlist, head) {
+			if (pos->tag == file_priv &&
+			    pos->handle != DRM_KERNEL_CONTEXT) {
+				if (dev->driver->context_dtor)
+					dev->driver->context_dtor(dev,
+								  pos->handle);
+
+				drm_ctxbitmap_free(dev, pos->handle);
+
+				list_del(&pos->head);
+				kfree(pos);
+				--dev->ctx_count;
+			}
+		}
+	}
+	mutex_unlock(&dev->ctxlist_mutex);
+#endif /* __linux__ */
+
 /* newer */
+#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
+#endif /* DRM_NEWER_LOCK */
 
 	if (file_priv->is_master) {
 		struct drm_master *master = file_priv->master;
@@ -1376,7 +1421,9 @@ int drm_close_legacy(struct dev_close_args *ap)
 	drm_master_put(&file_priv->master);
 	file_priv->is_master = 0;
 	list_del(&file_priv->lhead);
+#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
+#endif /* DRM_NEWER_LOCK */
 /* end newer */
 
 	if (dev->driver->postclose)
@@ -1394,7 +1441,11 @@ done:
 		retcode = drm_lastclose(dev);
 	}
 
+#ifdef DRM_NEWER_LOCK
+	unlock_kernel();
+#else
 	DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 
 	return (0);
 }
@@ -1504,12 +1555,38 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		return EACCES;
 
 	if (is_driver_ioctl) {
+#ifdef DRM_NEWER_LOCK
+		if (!(ioctl->flags & DRM_UNLOCKED))
+		{
+			lock_kernel();
+		}
+#else
 		DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
 		/* shared code returns -errno */
 		retcode = -func(dev, data, file_priv);
+#ifdef DRM_NEWER_LOCK
+		if (!(ioctl->flags & DRM_UNLOCKED))
+		{
+			unlock_kernel();
+		}
+#else
 		DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 	} else {
+#ifdef DRM_NEWER_LOCK
+		if (!(ioctl->flags & DRM_UNLOCKED))
+		{
+			lock_kernel();
+		}
+#endif /* DRM_NEWER_LOCK */
 		retcode = func(dev, data, file_priv);
+#ifdef DRM_NEWER_LOCK
+		if (!(ioctl->flags & DRM_UNLOCKED))
+		{
+			unlock_kernel();
+		}
+#endif /* DRM_NEWER_LOCK */
 	}
 
 	if (retcode != 0)

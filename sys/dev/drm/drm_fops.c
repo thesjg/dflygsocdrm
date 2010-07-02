@@ -206,7 +206,8 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		}
 
 #ifndef __linux__
-		DRM_INFO("drm_open: new master created for minor_id %d\n", minor_id);
+		DRM_INFO("drm_open: pid (%d) master created for minor_id (%d)\n",
+			DRM_CURRENTPID, minor_id);
 #endif /* __linux__ */
 
 		priv->is_master = 1;

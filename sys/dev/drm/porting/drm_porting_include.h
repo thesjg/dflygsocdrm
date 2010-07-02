@@ -117,5 +117,10 @@
 #include <sys/time.h>
 #endif
 
+/* for giant lock get_mplock() and rel_mplock() */
+#ifdef __DragonFly__
+#include <sys/mplock2.h>
+#endif
+
 #endif /* __KERNEL__ */
 #endif
