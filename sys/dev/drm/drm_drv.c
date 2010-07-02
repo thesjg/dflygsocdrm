@@ -1387,10 +1387,7 @@ int drm_close_legacy(struct dev_close_args *ap)
 #endif /* __linux__ */
 
 /* newer */
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#endif /* DRM_NEWER_LOCK */
-
 	if (file_priv->is_master) {
 		struct drm_master *master = file_priv->master;
 		struct drm_file *temp;
@@ -1425,9 +1422,7 @@ int drm_close_legacy(struct dev_close_args *ap)
 	drm_master_put(&file_priv->master);
 	file_priv->is_master = 0;
 	list_del(&file_priv->lhead);
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif /* DRM_NEWER_LOCK */
 /* end newer */
 
 	if (dev->driver->postclose)
