@@ -1007,8 +1007,6 @@ static void drm_unload(struct drm_device *dev)
 
 	drm_ctxbitmap_cleanup(dev);
 
-	drm_vblank_cleanup(dev);
-
 #ifdef __linux__
 	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
 	    dev->agp && dev->agp->agp_mtrr >= 0) {
@@ -1027,6 +1025,8 @@ static void drm_unload(struct drm_device *dev)
 		DRM_DEBUG("mtrr_del = %d", retcode);
 	}
 #endif /* __linux__ */
+
+	drm_vblank_cleanup(dev);
 
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
@@ -1051,6 +1051,11 @@ static void drm_unload(struct drm_device *dev)
 		dev->pcir[i] = NULL;
 	}
 
+	if (dev->agp) {
+		free(dev->agp, DRM_MEM_AGPLISTS);
+		dev->agp = NULL;
+	}
+
 	if (dev->driver->unload) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
@@ -1059,11 +1064,6 @@ static void drm_unload(struct drm_device *dev)
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
-	}
-
-	if (dev->agp) {
-		free(dev->agp, DRM_MEM_AGPLISTS);
-		dev->agp = NULL;
 	}
 
 #if 0 /* empty method */
