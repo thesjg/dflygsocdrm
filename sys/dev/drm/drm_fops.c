@@ -116,7 +116,6 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
         find_priv = drm_find_file_by_proc(dev, p);
         if (find_priv) {
                 find_priv->refs++;
-		kdev->si_drv1 = dev;
 
 #ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
@@ -275,6 +274,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 #endif /* __linux__ */
 
 normal_exit:
+	kdev->si_drv1 = dev;
 	return 0;
 
 out_free:

@@ -815,16 +815,10 @@ int drm_lastclose(struct drm_device * dev)
 	}
 
 /* Does not seem to be used yet */
-#ifdef DRM_NEWER_MAPLIST
-	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
-		drm_rmmap(dev, r_list->map);
-	drm_ht_remove(&dev->map_hash);
-#else
 	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
 		if (!(map->flags & _DRM_DRIVER))
 			drm_rmmap(dev, map);
 	}
-#endif /* DRM_NEWER_MAPLIST */
 
 #ifdef __linux__
 	/* Clear vma list (only built for debugging) */
@@ -989,9 +983,7 @@ static void drm_unload(struct drm_device *dev)
 {
 	struct drm_driver *driver;
 	int i;
-#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list, *list_temp;
-#endif /* DRM_NEWER_MAPLIST */
 
 	DRM_DEBUG("\n");
 
@@ -1067,9 +1059,11 @@ static void drm_unload(struct drm_device *dev)
 #endif
 	}
 
-#if 0 /* empty method */
 	drm_mem_uninit();
-#endif
+	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
+		drm_rmmap(dev, r_list->map);
+	drm_ht_remove(&dev->map_hash);
+
 	if (drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_put_minor(&dev->control);
 
