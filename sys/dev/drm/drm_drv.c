@@ -1166,10 +1166,11 @@ int drm_open_legacy(struct dev_open_args *ap)
 #else /* __linux__ */
 #ifdef DRM_NEWER_LOCK
 			spin_unlock(&dev->count_lock);
-#else
-			DRM_UNLOCK();
 #endif /* DRM_NEWER_LOCK */
 			retcode = drm_firstopen(dev);
+#ifndef DRM_NEWER_LOCK
+			DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 			goto out;
 #endif /* __linux__ */
 		}
