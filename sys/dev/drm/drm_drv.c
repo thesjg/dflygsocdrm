@@ -255,6 +255,10 @@ static int drm_fill_in_dev(struct drm_device *dev,
 	dev->id_entry = id_entry;
 
 	TAILQ_INIT(&dev->maplist_legacy);
+
+/* Each minor should have its own sysctl node under hw */
+	drm_sysctl_init(dev);
+
 	TAILQ_INIT(&dev->files);
 
 /* also done in drm_fops.c */
@@ -480,9 +484,6 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 		printk(KERN_ERR "DRM: Fill_in_dev failed.\n");
 		goto err_g2;
 	}
-
-/* Each minor should have its own sysctl node under hw */
-	drm_sysctl_init(dev);
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 #ifdef __linux__
