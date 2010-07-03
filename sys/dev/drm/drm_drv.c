@@ -1224,6 +1224,13 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 #ifndef __linux__
 	dev = DRIVER_SOFTC(minor(kdev));
+
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#else
+	DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
+
 	file_priv = drm_find_file_by_proc(dev, curthread);
 	if (!file_priv->minor) {
 		DRM_ERROR("drm_close() no minor for file!\n");
@@ -1235,10 +1242,18 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
 
-	DRM_LOCK();
+	DRM_INFO("close %d by pid (%d), uid (%d), on minor_id (%d)\n",
+		file_priv->refs,
+		file_priv->pid,
+		file_priv->uid,
+		file_priv->minor->index);
 
-	if (--file_priv->refs != 0)
+	if (--file_priv->refs != 0) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#endif /* DRM_NEWER_LOCK */
 		goto done;
+	}
 
 	if (dev->driver->preclose != NULL)
 		dev->driver->preclose(dev, file_priv);

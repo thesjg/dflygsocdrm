@@ -116,6 +116,11 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
         find_priv = drm_find_file_by_proc(dev, p);
         if (find_priv) {
                 find_priv->refs++;
+		DRM_INFO("open %d by pid (%d), uid (%d), on minor_id (%d)\n",
+			find_priv->refs,
+			p->td_proc->p_pid,
+			p->td_proc->p_ucred->cr_svuid,
+			minor_id);
 
 #ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
@@ -135,6 +140,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 #ifndef __linux__
 	priv->refs = 1;
 	priv->minor_legacy = minor_id;
+
 #endif /* __linux__ */
 
 #ifdef __linux__
@@ -154,6 +160,12 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 	priv->authenticated = capable(CAP_SYS_ADMIN);
 #else
 	priv->authenticated = DRM_SUSER(p);
+	DRM_INFO("open %d by pid (%d), uid (%d), on minor_id (%d), authenticated (%d)\n",
+		priv->refs,
+		priv->pid,
+		priv->uid,
+		priv->minor->index,
+		priv->authenticated);
 #endif /* __linux__ */
 	priv->lock_count = 0;
 
@@ -184,6 +196,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 	TAILQ_INSERT_TAIL(&dev->files, priv, link);
 
 	kdev->si_drv1 = dev;
+	kdev->si_drv2 = priv;
 
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
@@ -202,7 +215,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		}
 
 #ifndef __linux__
-		DRM_INFO("drm_open: pid (%d) master created for minor_id (%d)\n",
+		DRM_INFO("pid (%d), minor_id (%d), master created\n",
 			DRM_CURRENTPID, minor_id);
 #endif /* __linux__ */
 
@@ -275,6 +288,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 
 normal_exit:
 	kdev->si_drv1 = dev;
+	kdev->si_drv2 = priv;
 	return 0;
 
 out_free:
