@@ -94,9 +94,17 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 
 #ifdef __linux__
 	priv = kzalloc(sizeof(*priv), GFP_KERNEL);
+
+#else /* __linux__ */
+
+#ifdef DRM_NEWER_FILELIST
+	priv = malloc(sizeof(*priv), DRM_MEM_FILES, M_WAITOK | M_ZERO);
 #else
 	priv = malloc(sizeof(*priv), DRM_MEM_FILES, M_NOWAIT | M_ZERO);
+#endif
+
 #endif /* __linux__ */
+
 	if (!priv) {
 #ifdef __linux__
 		return -ENOMEM;
@@ -105,7 +113,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 #endif /* __linux__ */
 	}
 
-#ifndef __linux__
+#ifndef DRM_NEWER_FILELIST
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
@@ -135,20 +143,24 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 	mutex_unlock(&dev->struct_mutex);
 #endif /* DRM_NEWER_LOCK */
 
-#endif /* __linux__ */
+#endif /* DRM_NEWER_FILELIST */
 
 #ifndef __linux__
+#ifndef DRM_NEWER_FILELIST
 	priv->refs = 1;
+#endif
 	priv->minor_legacy = minor_id;
-
-#endif /* __linux__ */
+#endif /* !__linux__ */
 
 #ifdef __linux__
 	filp->private_data = priv;
 	priv->filp = filp;
 	priv->uid = current_euid();
 	priv->pid = task_pid_nr(current);
-#else
+#else /* __linux__ */
+#ifdef DRM_NEWER_FILELIST
+	kdev->si_drv2 = priv;
+#endif
 	priv->uid = p->td_proc->p_ucred->cr_svuid;
 	priv->pid = p->td_proc->p_pid;
 #endif /* __linux__ */
@@ -160,12 +172,21 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 	priv->authenticated = capable(CAP_SYS_ADMIN);
 #else
 	priv->authenticated = DRM_SUSER(p);
+#ifdef DRM_NEWER_FILELIST
+	DRM_INFO("open %d by pid (%d), uid (%d), on minor_id (%d), authenticated (%d)\n",
+		1,
+		priv->pid,
+		priv->uid,
+		priv->minor->index,
+		priv->authenticated);
+#else
 	DRM_INFO("open %d by pid (%d), uid (%d), on minor_id (%d), authenticated (%d)\n",
 		priv->refs,
 		priv->pid,
 		priv->uid,
 		priv->minor->index,
 		priv->authenticated);
+#endif /* DRM_NEWER_FILELIST */
 #endif /* __linux__ */
 	priv->lock_count = 0;
 
@@ -182,14 +203,19 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		/* shared code returns -errno */
 		ret = -dev->driver->open(dev, priv);
 		if (ret != 0) {
-			free(priv, DRM_MEM_FILES);
 #ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif /* !DRM_NEWER_LOCK */
+#ifdef DRM_NEWER_FILELIST
+			goto out_free;
+#else
+			free(priv, DRM_MEM_FILES);
 			return ret;
+#endif
 		}
 	}
 
+#ifndef DRM_NEWER_FILELIST
 	/* first opener automatically becomes master */
 	priv->master_legacy = TAILQ_EMPTY(&dev->files);
 
@@ -201,6 +227,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif /* DRM_NEWER_LOCK */
+#endif
 
 /* newer */
 	/* if there is no current master make this fd it */
@@ -210,7 +237,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		priv->minor->master = drm_master_create(priv->minor);
 		if (!priv->minor->master) {
 			mutex_unlock(&dev->struct_mutex);
-			ret = -ENOMEM;
+			ret = ENOMEM;
 			goto out_free;
 		}
 
@@ -226,7 +253,6 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		priv->authenticated = 1;
 
 		mutex_unlock(&dev->struct_mutex);
-
 		if (dev->driver->master_create) {
 			ret = dev->driver->master_create(dev, priv->master);
 			if (ret) {
@@ -240,7 +266,6 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		}
 
 		mutex_lock(&dev->struct_mutex);
-
 		if (dev->driver->master_set) {
 			ret = dev->driver->master_set(dev, priv, true);
 			if (ret) {
@@ -259,9 +284,7 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 	}
 
 	mutex_lock(&dev->struct_mutex);
-
 	list_add(&priv->lhead, &dev->filelist);
-
 	mutex_unlock(&dev->struct_mutex);
 /* end newer */
 
@@ -286,6 +309,10 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 #endif /* __alpha__ */
 #endif /* __linux__ */
 
+#ifdef DRM_NEWER_FILELIST
+	return 0;
+#endif /* DRM_NEWER_FILELIST */
+
 normal_exit:
 	kdev->si_drv1 = dev;
 	kdev->si_drv2 = priv;
@@ -293,6 +320,7 @@ normal_exit:
 
 out_free:
 	free(priv, DRM_MEM_FILES);
+	kdev->si_drv2 = NULL;
 	return ret;
 }
 

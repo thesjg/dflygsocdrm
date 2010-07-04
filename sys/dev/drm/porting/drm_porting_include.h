@@ -122,5 +122,10 @@
 #include <sys/mplock2.h>
 #endif
 
+/* for kern_kill */
+#ifdef __DragonFly__
+#include <sys/kern_syscall.h>
+#endif
+
 #endif /* __KERNEL__ */
 #endif
