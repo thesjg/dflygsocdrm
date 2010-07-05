@@ -131,20 +131,24 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 	return NULL;
 }
 
-#ifdef __linux__
 static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 			  unsigned long user_token, int hashed_handle, int shm)
 {
 	int use_hashed_handle, shift;
 	unsigned long add;
 
-#if (BITS_PER_LONG == 64)
+#ifdef __linux__
+/* #if (BITS_PER_LONG == 64) */
 	use_hashed_handle = ((user_token & 0xFFFFFFFF00000000UL) || hashed_handle);
-#elif (BITS_PER_LONG == 32)
+/* #elif (BITS_PER_LONG == 32) */
 	use_hashed_handle = hashed_handle;
-#else
-#error Unsupported long size. Neither 64 nor 32 bits.
-#endif
+/* #else */
+/* #error Unsupported long size. Neither 64 nor 32 bits. */
+/* #endif */
+#else /* __linux__ */
+/* sizeof(int) == 4 all supported platforms for DragonFly BSD */
+	use_hashed_handle = hashed_handle;
+#endif /* __linux__ */
 
 	if (!use_hashed_handle) {
 		int ret;
@@ -156,6 +160,9 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 
 	shift = 0;
 	add = DRM_MAP_HASH_OFFSET >> PAGE_SHIFT;
+
+#if 0
+/* SHMLBA in sys/shm.h is defined to be PAGE_SIZE in DragonFly BSD */
 	if (shm && (SHMLBA > PAGE_SIZE)) {
 		int bits = ilog2(SHMLBA >> PAGE_SHIFT) + 1;
 
@@ -174,12 +181,12 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 		shift = bits;
 		add |= ((user_token >> PAGE_SHIFT) & ((1UL << bits) - 1UL));
 	}
+#endif
 
 	return drm_ht_just_insert_please(&dev->map_hash, hash,
 					 user_token, 32 - PAGE_SHIFT - 3,
 					 shift, add);
 }
-#endif /* __linux__ */
 /* end newer */
 
 /**
@@ -190,8 +197,8 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
  * type.  Adds the map to the map list drm_device::maplist. Adds MTRR's where
  * applicable and if supported by the kernel.
  */
-#ifdef __linux__
-static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
+#ifdef DRM_NEWER_MAPLIST
+static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		unsigned int size, enum drm_map_type type,
 		enum drm_map_flags flags,
 		struct drm_map_list ** maplist)
@@ -200,9 +207,19 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 		unsigned long size, enum drm_map_type type,
 		enum drm_map_flags flags,
 		drm_local_map_t **map_ptr)
-#endif /* __linux__ */
+#endif
 {
-	drm_local_map_t *map;
+	struct drm_local_map *map;
+	struct drm_local_map *map_entry;
+	struct drm_local_map *map_free;
+
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *list;
+	struct drm_map_list *list_entry;
+	drm_dma_handle_t *dmah;
+	unsigned long user_token;
+	int ret;
+#endif
 	int align;
 
 	/* Only allow shared memory to be removable since we only keep enough
@@ -228,24 +245,6 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 		return EINVAL;
 	}
 
-	DRM_DEBUG("offset = 0x%08lx, size = 0x%08lx, type = %d\n", offset,
-	    size, type);
-
-	/* Check if this is just another version of a kernel-allocated map, and
-	 * just hand that back if so.
-	 */
-	if (type == _DRM_REGISTERS || type == _DRM_FRAME_BUFFER ||
-	    type == _DRM_SHM) {
-		TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
-			if (map->type == type && (map->offset == offset ||
-			    (map->type == _DRM_SHM &&
-			    map->flags == _DRM_CONTAINS_LOCK))) {
-				map->size = size;
-				DRM_DEBUG("Found kernel map %d\n", type);
-				goto done;
-			}
-		}
-	}
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
@@ -253,11 +252,8 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 	/* Allocate a new map structure, fill it in, and do any type-specific
 	 * initialization necessary.
 	 */
-#ifdef DRM_NEWER_LOCK
 	map = malloc(sizeof(*map), DRM_MEM_MAPS, M_ZERO | M_WAITOK);
-#else
-	map = malloc(sizeof(*map), DRM_MEM_MAPS, M_ZERO | M_NOWAIT);
-#endif
+
 	if (!map) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
@@ -267,14 +263,75 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 
 	map->offset = offset;
 	map->size = size;
-	map->type = type;
 	map->flags = flags;
+	map->type = type;
 
 #ifdef DRM_NEWER_LOCK
 #ifdef __linux__ /* later test for map->mtrr == 0 */
 	map->mtrr = -1;
 #endif /* __linux__ */
 	map->handle = NULL;
+#endif
+
+	DRM_DEBUG("offset = 0x%08lx, size = 0x%08lx, type = %d\n", offset,
+	    size, type);
+
+#ifndef DRM_NEWER_LOCK
+	DRM_LOCK();
+#endif
+
+	/* Check if this is just another version of a kernel-allocated map, and
+	 * just hand that back if so.
+	 */
+	if (type == _DRM_REGISTERS || type == _DRM_FRAME_BUFFER || type == _DRM_SHM) {
+#ifdef DRM_NEWER_MAPLIST
+		list_for_each_entry(list_entry, &dev->maplist, head) {
+			map_entry = list_entry->map;
+			if (!map_entry ||
+				map->type != map_entry->type ||
+				list_entry->master != dev->primary->master)
+			continue;
+
+			if (map->type == map_entry->type && (map->offset == map_entry->offset ||
+			(map_entry->type == _DRM_SHM && map_entry->flags == _DRM_CONTAINS_LOCK))) {
+				map_entry->size = map->size;
+				list = list_entry;
+				map_free = map;
+				map = map_entry;
+				DRM_DEBUG("Found kernel map %d\n", type);
+#ifndef DRM_NEWER_LOCK
+				DRM_UNLOCK();
+#endif
+				free(map_free, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
+				DRM_LOCK();
+#endif
+				goto done;
+			}
+		}
+#else /* DRM_NEWER_MAPLIST */
+		TAILQ_FOREACH(map_entry, &dev->maplist_legacy, link) {
+			if (map->type == map_entry->type && (map->offset == map_entry->offset ||
+			(map_entry->type == _DRM_SHM && map_entry->flags == _DRM_CONTAINS_LOCK))) {
+				map_entry->size = map->size;
+				map_free = map;
+				map = map_entry;
+				DRM_DEBUG("Found kernel map %d\n", type);
+#ifndef DRM_NEWER_LOCK
+				DRM_UNLOCK();
+#endif
+				free(map_free, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
+				DRM_LOCK();
+#endif
+				goto done;
+			}
+		}
+#endif /* DRM_NEWER_MAPLIST */
+	}
+
+#ifndef DRM_NEWER_LOCK
+	DRM_UNLOCK();
 #endif
 
 	switch (map->type) {
@@ -312,6 +369,25 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 #ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
 #endif
+
+#ifdef DRM_NEWER_MAPLIST
+
+			if (dev->primary->master->lock.hw_lock != NULL) {
+#ifndef DRM_NEWER_LOCK
+				DRM_UNLOCK();
+#endif
+				free(map->handle, DRM_MEM_MAPS);
+				free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
+				DRM_LOCK();
+#endif
+				return EBUSY;
+			}
+			dev->primary->master->lock.hw_lock = map->handle;	/* Pointer to lock */
+			dev->sigdata.lock = dev->primary->master->lock.hw_lock;	/* Pointer to lock */
+
+#else /* DRM_NEWER_MAPLIST */
+
 			if (dev->lock.hw_lock != NULL) {
 #ifndef DRM_NEWER_LOCK
 				DRM_UNLOCK();
@@ -319,12 +395,14 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 				free(map->handle, DRM_MEM_MAPS);
 				free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-/* BSD drm bug? */
 				DRM_LOCK();
 #endif
 				return EBUSY;
 			}
 			dev->lock.hw_lock = map->handle; /* Pointer to lock */
+
+#endif /* DRM_NEWER_MAPLIST */
+
 #ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
 #endif
@@ -340,11 +418,8 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 #ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
 #endif
-			return -EINVAL;
+			return EINVAL;
 		}
-#ifdef __alpha__
-		map->offset += dev->hose->mem_space->start;
-#endif
 #endif /* __linux__ */
 
 		/* In some cases (i810 driver), user space may have already
@@ -447,17 +522,16 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 		return EINVAL;
 	}
 
-#ifdef __linux__
-	list = kmalloc(sizeof(*list), GFP_KERNEL);
+#ifdef DRM_NEWER_MAPLIST
+	list = malloc(sizeof(*list), DRM_MEM_MAPS, M_WAITOK | M_ZERO);
 	if (!list) {
 		if (map->type == _DRM_REGISTERS)
-			iounmap(map->handle);
-		kfree(map);
-		return -EINVAL;
+			drm_ioremapfree(map);
+		free(map, DRM_MEM_MAPS);
+		return EINVAL;
 	}
-	memset(list, 0, sizeof(*list));
 	list->map = map;
-#endif /* __linux__ */
+#endif
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
@@ -465,9 +539,7 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 	DRM_LOCK();
 #endif
 
-	TAILQ_INSERT_TAIL(&dev->maplist_legacy, map, link);
-
-#ifdef __linux__
+#ifdef DRM_NEWER_MAPLIST
 	list_add(&list->head, &dev->maplist);
 
 	/* Assign a 32-bit handle */
@@ -478,25 +550,29 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 			     (map->type == _DRM_SHM));
 	if (ret) {
 		if (map->type == _DRM_REGISTERS)
-			iounmap(map->handle);
-		kfree(map);
-		kfree(list);
+			drm_ioremapfree(map);
+		free(map, DRM_MEM_MAPS);
+		free(list, DRM_MEM_MAPS);
+#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
+#endif
 		return ret;
 	}
 
 	list->user_token = list->hash.key << PAGE_SHIFT;
-#endif /* __linux__ */
+#else /* DRM_NEWER_MAPLIST */
+	TAILQ_INSERT_TAIL(&dev->maplist_legacy, map, link);
+#endif /* DRM_NEWER_MAPLIST */
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
 #endif
 
-#ifdef __linux__
+#ifdef DRM_NEWER_MAPLIST
 	if (!(map->flags & _DRM_DRIVER))
 		list->master = dev->primary->master;
 	*maplist = list;
-#endif /* __linux__ */
+#endif
 
 done:
 	/* Jumped to, with lock held, when a kernel map is found. */
@@ -504,33 +580,38 @@ done:
 	DRM_DEBUG("Added map %d 0x%lx/0x%lx\n", map->type, map->offset,
 	    map->size);
 
+#ifdef DRM_NEWER_MAPLIST
+	*maplist = list;
+#else
 	*map_ptr = map;
+#endif
 
 	return 0;
 }
 
 int drm_addmap(struct drm_device * dev, resource_size_t offset,
+/* QUESTION: does userland know size to be unsigned int or unsigned long? */
 #ifdef __linux__
 	       unsigned int size, enum drm_map_type type,
 #else
 	       unsigned long size, enum drm_map_type type,
-#endif
+#endif /* __linux__ */
 	       enum drm_map_flags flags, struct drm_local_map ** map_ptr)
 {
 
-#ifdef __linux__
+#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *list;
-#endif /* __linux__ */
+#endif
 
 	int rc;
 
-#ifdef __linux__
+#ifdef DRM_NEWER_MAPLIST
 	rc = drm_addmap_core(dev, offset, size, type, flags, &list);
 	if (!rc)
 		*map_ptr = list->map;
 #else
 	rc = drm_addmap_core(dev, offset, size, type, flags, map_ptr);
-#endif /* __linux__ */
+#endif
 	return rc;
 }
 
@@ -583,7 +664,6 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
-/* newer UNIMPLEMENTED */
 /**
  * Remove a map private from list and deallocate resources if the mapping
  * isn't in use.
@@ -596,6 +676,10 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
  */
 int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 {
+	if (map == NULL)
+		return EINVAL;
+
+#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list = NULL, *list_t;
 	drm_dma_handle_t dmah;
 	int found = 0;
@@ -608,71 +692,17 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 			list_del(&r_list->head);
 			drm_ht_remove_key(&dev->map_hash,
 					  r_list->user_token >> PAGE_SHIFT);
-#ifdef __linux__
-			kfree(r_list);
-#else
 			free(r_list, DRM_MEM_MAPS);
-#endif
 			found = 1;
 			break;
 		}
 	}
 
 	if (!found)
-		return -EINVAL;
-
-	switch (map->type) {
-	case _DRM_REGISTERS:
-		iounmap(map->handle);
-		/* FALLTHROUGH */
-	case _DRM_FRAME_BUFFER:
-		if (drm_core_has_MTRR(dev) && map->mtrr >= 0) {
-			int retcode;
-			retcode = mtrr_del(map->mtrr, map->offset, map->size);
-			DRM_DEBUG("mtrr_del=%d\n", retcode);
-		}
-		break;
-	case _DRM_SHM:
-		vfree(map->handle);
-		if (master) {
-			if (dev->sigdata.lock == master->lock.hw_lock)
-				dev->sigdata.lock = NULL;
-			master->lock.hw_lock = NULL;   /* SHM removed */
-			master->lock.file_priv = NULL;
-			wake_up_interruptible_all(&master->lock.lock_queue);
-		}
-		break;
-	case _DRM_AGP:
-	case _DRM_SCATTER_GATHER:
-		break;
-	case _DRM_CONSISTENT:
-		dmah.vaddr = map->handle;
-		dmah.busaddr = map->offset;
-		dmah.size = map->size;
-		__drm_pci_free(dev, &dmah);
-		break;
-	case _DRM_GEM:
-		DRM_ERROR("tried to rmmap GEM object\n");
-		break;
-	}
-#ifdef __linux__
-	kfree(map);
-#else
-	free(map, DRM_MEM_MAPS);
-#endif
-
-	return 0;
-}
-EXPORT_SYMBOL(drm_rmmap_locked);
-
-int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
-{
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-
-	if (map == NULL)
-		return -EINVAL;
-
+		return EINVAL;
+#else /* DRM_NEWER_MAPLIST */
 	TAILQ_REMOVE(&dev->maplist_legacy, map, link);
+#endif /* DRM_NEWER_MAPLIST */
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
@@ -697,8 +727,8 @@ int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 #endif /* __linux__ */
 		break;
 	case _DRM_SHM:
-#ifdef DRM_NEWER_FILELIST
 		free(map->handle, DRM_MEM_MAPS);
+#ifdef DRM_NEWER_FILELIST
 		if (master) {
 			if (dev->sigdata.lock == master->lock.hw_lock)
 				dev->sigdata.lock = NULL;
@@ -707,7 +737,6 @@ int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 			DRM_WAKEUP_INT(&master->lock.lock_queue);
 		}
 #else /* DRM_NEWER_FILELIST */
-		free(map->handle, DRM_MEM_MAPS);
 		if (dev->lock.hw_lock) {
 			dev->lock.hw_lock = NULL; /* SHM removed */
 			dev->lock.file_priv = NULL;
@@ -735,7 +764,6 @@ int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 		DRM_ERROR("Bad map type %d\n", map->type);
 		break;
 	}
-
 #ifndef __linux__
 	if (map->bsr != NULL) {
 		bus_release_resource(dev->device, SYS_RES_MEMORY, map->rid,
@@ -744,7 +772,28 @@ int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 #endif /* __linux__ */
 
 	free(map, DRM_MEM_MAPS);
+
 	return 0;
+}
+EXPORT_SYMBOL(drm_rmmap_locked);
+
+int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
+{
+	int ret;
+
+#ifndef DRM_NEWER_LOCK
+	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+#endif
+
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#endif
+	ret = drm_rmmap_locked(dev, map);
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#endif
+
+	return ret;
 }
 
 /* Remove a map private from list and deallocate resources if the mapping
@@ -768,14 +817,44 @@ int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv)
 {
-	drm_local_map_t *map;
 	struct drm_map *request = data;
+	struct drm_local_map *map = NULL;
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *r_list;
+#endif
+	int ret;
+
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
 #else
 	DRM_LOCK();
 #endif
+
+#ifdef DRM_NEWER_MAPLIST
+	list_for_each_entry(r_list, &dev->maplist, head) {
+		if (r_list->map &&
+		    r_list->user_token == (unsigned long)request->handle &&
+		    r_list->map->flags & _DRM_REMOVABLE) {
+			map = r_list->map;
+			break;
+		}
+	}
+
+	/* List has wrapped around to the head pointer, or its empty we didn't
+	 * find anything.
+	 */
+	if (list_empty(&dev->maplist) || !map) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#else
+		DRM_UNLOCK();
+#endif
+		return EINVAL;
+	}
+
+#else /* DRM_NEWER_MAPLIST */
+
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (map->handle == request->handle &&
 		    map->flags & _DRM_REMOVABLE)
@@ -792,14 +871,16 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 		return EINVAL;
 	}
 
-	drm_rmmap(dev, map);
+#endif /* DRM_NEWER_MAPLIST */
+
+	ret = drm_rmmap_locked(dev, map);
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
 #else
 	DRM_UNLOCK();
 #endif
-	return 0;
+	return ret;
 }
 
 /**
