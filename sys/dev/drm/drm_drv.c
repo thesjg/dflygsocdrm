@@ -726,6 +726,7 @@ int drm_lastclose(struct drm_device * dev)
 	struct drm_vma_entry *vma, *vma_temp;
 #else
 	struct drm_magic_entry *pt, *next;
+	drm_local_map_t *map, *mapsave;
 #endif /* __linux__ */
 	int i;
 
@@ -744,7 +745,7 @@ int drm_lastclose(struct drm_device * dev)
 	if (dev->irq_enabled && !drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_irq_uninstall(dev);
 
-#ifdef DRM_NEWER_LOCK
+#ifdef DRM_NEWER_FILELIST
 	mutex_lock(&dev->struct_mutex);
 #endif
 
@@ -807,6 +808,13 @@ int drm_lastclose(struct drm_device * dev)
 		dev->sg = NULL;
 	}
 
+#ifndef __linux__
+	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
+		if (!(map->flags & _DRM_DRIVER))
+			drm_rmmap(dev, map);
+	}
+#endif /* __linux__ */
+
 #ifdef __linux__
 	/* Clear vma list (only built for debugging) */
 	list_for_each_entry_safe(vma, vma_temp, &dev->vmalist, head) {
@@ -844,8 +852,7 @@ int drm_lastclose(struct drm_device * dev)
 #endif /* __linux__ */
 
 	dev->dev_mapping = NULL;
-
-#ifdef DRM_NEWER_LOCK
+#ifdef DRM_NEWER_FILELIST
 	mutex_unlock(&dev->struct_mutex);
 #endif
 
@@ -961,7 +968,6 @@ error:
 static void drm_unload(struct drm_device *dev)
 {
 	struct drm_driver *driver;
-	drm_local_map_t *map, *mapsave;
 	struct drm_map_list *r_list, *list_temp;
 	int i;
 
@@ -976,13 +982,7 @@ static void drm_unload(struct drm_device *dev)
 	drm_sysctl_cleanup(dev);
 	destroy_dev(dev->devnode);
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
-	drm_lastclose(dev);
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
+	drm_ctxbitmap_cleanup(dev);
 
 #ifdef __linux__
 	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
@@ -1003,44 +1003,15 @@ static void drm_unload(struct drm_device *dev)
 	}
 #endif /* __linux__ */
 
-	if (dev->driver->unload != NULL) {
-#ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
-		dev->driver->unload(dev);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
-	}
-
-	if (dev->agp) {
-		free(dev->agp, DRM_MEM_AGPLISTS);
-		dev->agp = NULL;
-	}
-
 	drm_vblank_cleanup(dev);
 
-	drm_mem_uninit();
-
-#ifndef __linux__
-	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
-		if (!(map->flags & _DRM_DRIVER))
-			drm_rmmap(dev, map);
-	}
-#endif /* __linux__ */
-	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
-		drm_rmmap(dev, r_list->map);
-	drm_ht_remove(&dev->map_hash);
-
-	drm_ctxbitmap_cleanup(dev);
-
-	if (drm_core_check_feature(dev, DRIVER_MODESET))
-		drm_put_minor(&dev->control);
-
-	if (driver->driver_features & DRIVER_GEM)
-		drm_gem_destroy(dev);
-
-	drm_put_minor(&dev->primary);
+#ifndef DRM_NEWER_LOCK
+	DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
+	drm_lastclose(dev);
+#ifndef DRM_NEWER_LOCK
+	DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
 
 	/* Clean up PCI resources allocated by drm_bufs.c.  We're not really
 	 * worried about resource consumption while the DRM is inactive (between
@@ -1054,6 +1025,35 @@ static void drm_unload(struct drm_device *dev)
 		    dev->pcirid[i], dev->pcir[i]);
 		dev->pcir[i] = NULL;
 	}
+
+	if (dev->agp) {
+		free(dev->agp, DRM_MEM_AGPLISTS);
+		dev->agp = NULL;
+	}
+
+	if (dev->driver->unload != NULL) {
+#ifndef DRM_NEWER_LOCK
+		DRM_LOCK();
+#endif /* DRM_NEWER_LOCK */
+		dev->driver->unload(dev);
+#ifndef DRM_NEWER_LOCK
+		DRM_UNLOCK();
+#endif /* DRM_NEWER_LOCK */
+	}
+
+	drm_mem_uninit();
+
+	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
+		drm_rmmap(dev, r_list->map);
+	drm_ht_remove(&dev->map_hash);
+
+	if (drm_core_check_feature(dev, DRIVER_MODESET))
+		drm_put_minor(&dev->control);
+
+	if (driver->driver_features & DRIVER_GEM)
+		drm_gem_destroy(dev);
+
+	drm_put_minor(&dev->primary);
 
 	pci_disable_busmaster(dev->device);
 
