@@ -256,19 +256,24 @@ err:
 	return retcode;
 }
 
-int drm_irq_uninstall(struct drm_device *dev)
+/**
+ * Uninstall the IRQ handler.
+ *
+ * \param dev DRM device.
+ *
+ * Calls the driver's \c drm_driver_irq_uninstall() function, and stops the irq.
+ */
+int drm_irq_uninstall(struct drm_device * dev)
 {
-	int crtc;
+	int irq_enabled, crtc;
+
+	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
+		return EINVAL;
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
 #endif
-	if (!dev->irq_enabled) {
-#ifdef DRM_NEWER_LOCK
-		mutex_unlock(&dev->struct_mutex);
-#endif
-		return EINVAL;
-	}
+	irq_enabled = dev->irq_enabled;
 	dev->irq_enabled = 0;
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
@@ -288,14 +293,28 @@ int drm_irq_uninstall(struct drm_device *dev)
 	}
 	DRM_SPINUNLOCK(&dev->vbl_lock);
 
+	if (!irq_enabled)
+		return EINVAL;
+
 	DRM_DEBUG("irq=%d\n", dev->irq);
+
+#ifdef __linux__
+	if (!drm_core_check_feature(dev, DRIVER_MODESET))
+		vga_client_register(dev->pdev, NULL, NULL, NULL);
+#endif /* __linux__ */
 
 	dev->driver->irq_uninstall(dev);
 
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
+
+#ifdef __linux__
+	free_irq(dev->pdev->irq, dev);
+#else
 	bus_teardown_intr(dev->device, dev->irqr, dev->irqh);
+#endif /* __linux__ */
+
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
