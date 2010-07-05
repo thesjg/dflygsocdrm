@@ -697,18 +697,23 @@ int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 #endif /* __linux__ */
 		break;
 	case _DRM_SHM:
-#ifdef __linux__
-		vfree(map->handle);
+#ifdef DRM_NEWER_FILELIST
+		free(map->handle, DRM_MEM_MAPS);
 		if (master) {
 			if (dev->sigdata.lock == master->lock.hw_lock)
 				dev->sigdata.lock = NULL;
 			master->lock.hw_lock = NULL;   /* SHM removed */
 			master->lock.file_priv = NULL;
-			wake_up_interruptible_all(&master->lock.lock_queue);
+			DRM_WAKEUP_INT(&master->lock.lock_queue);
 		}
-#else
+#else /* DRM_NEWER_FILELIST */
 		free(map->handle, DRM_MEM_MAPS);
-#endif /* __linux__ */
+		if (dev->lock.hw_lock) {
+			dev->lock.hw_lock = NULL; /* SHM removed */
+			dev->lock.file_priv = NULL;
+			DRM_WAKEUP_INT((void *)&dev->lock.lock_queue);
+		}
+#endif /* DRM_NEWER_FILELIST */
 		break;
 	case _DRM_AGP:
 	case _DRM_SCATTER_GATHER:

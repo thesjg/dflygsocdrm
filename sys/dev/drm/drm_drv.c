@@ -726,7 +726,6 @@ int drm_lastclose(struct drm_device * dev)
 	struct drm_vma_entry *vma, *vma_temp;
 #else
 	struct drm_magic_entry *pt, *next;
-	drm_local_map_t *map, *mapsave;
 #endif /* __linux__ */
 	int i;
 
@@ -808,13 +807,6 @@ int drm_lastclose(struct drm_device * dev)
 		dev->sg = NULL;
 	}
 
-#ifndef __linux__
-	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
-		if (!(map->flags & _DRM_DRIVER))
-			drm_rmmap(dev, map);
-	}
-#endif /* __linux__ */
-
 #ifdef __linux__
 	/* Clear vma list (only built for debugging) */
 	list_for_each_entry_safe(vma, vma_temp, &dev->vmalist, head) {
@@ -841,7 +833,7 @@ int drm_lastclose(struct drm_device * dev)
 	    !drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_dma_takedown(dev);
 
-#ifndef __linux__
+#if 0
 #ifndef DRM_NEWER_FILELIST
 	if (dev->lock.hw_lock) {
 		dev->lock.hw_lock = NULL; /* SHM removed */
@@ -969,6 +961,7 @@ static void drm_unload(struct drm_device *dev)
 {
 	struct drm_driver *driver;
 	struct drm_map_list *r_list, *list_temp;
+	drm_local_map_t *map, *mapsave;
 	int i;
 
 	DRM_DEBUG("\n");
@@ -1042,6 +1035,21 @@ static void drm_unload(struct drm_device *dev)
 	}
 
 	drm_mem_uninit();
+
+#ifndef DRM_NEWER_LOCK
+	DRM_LOCK();
+#endif
+
+#ifndef __linux__
+	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
+		if (!(map->flags & _DRM_DRIVER))
+			drm_rmmap(dev, map);
+	}
+#endif /* __linux__ */
+
+#ifndef DRM_NEWER_LOCK
+	DRM_UNLOCK();
+#endif
 
 	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
 		drm_rmmap(dev, r_list->map);
