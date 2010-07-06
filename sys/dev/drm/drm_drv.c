@@ -565,6 +565,7 @@ err_g1:
 int drm_detach(device_t kdev)
 {
 	struct drm_device *dev;
+	int i;
 
 	dev = device_get_softc(kdev);
 
@@ -981,7 +982,6 @@ static void drm_unload(struct drm_device *dev)
 	struct drm_driver *driver;
 	struct drm_map_list *r_list, *list_temp;
 	drm_local_map_t *map, *mapsave;
-	int i;
 
 	DRM_DEBUG("\n");
 
