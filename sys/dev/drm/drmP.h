@@ -1716,6 +1716,7 @@ extern int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
 		       struct drm_driver *driver);
 extern void drm_put_dev(struct drm_device *dev);
 #ifndef __linux__
+extern int drm_master_init(struct drm_master *master);
 extern int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type);
 #endif /* __linux__ */
 extern int drm_put_minor(struct drm_minor **minor);

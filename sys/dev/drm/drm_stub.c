@@ -115,6 +115,23 @@ again:
 	return new_id;
 }
 
+/* Initialization of drm_master without changing minor */
+int drm_master_init(struct drm_master *master)
+{
+	int ret = 0;
+
+	if (!master)
+		return ENOMEM;
+
+	kref_init(&master->refcount);
+	spin_lock_init(&master->lock.spinlock);
+	init_waitqueue_head(&master->lock.lock_queue);
+	ret = drm_ht_create(&master->magiclist, DRM_MAGIC_HASH_ORDER);
+	INIT_LIST_HEAD(&master->magicfree);
+
+	return ret;
+}
+
 struct drm_master *drm_master_create(struct drm_minor *minor)
 {
 	struct drm_master *master;

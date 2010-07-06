@@ -1511,27 +1511,17 @@ done:
  */
 int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 {
-
-#ifdef __linux__
-	struct drm_file *file_priv = filp->private_data;
-	struct drm_device *dev;
-
-#else /* __linux__ */
-
 	struct cdev *kdev = ap->a_head.a_dev;
 	u_long cmd = ap->a_cmd;
 	caddr_t data = ap->a_data;
 	struct thread *p = curthread;
 
-#ifdef DRM_NEWER_FILELIST
-	struct drm_file *file_priv = kdev->si_drv2;
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
-#else
-	struct drm_device *dev = drm_get_device_from_kdev(kdev);
-	struct drm_file *file_priv = drm_find_file_by_proc(dev, p);
-#endif
+	struct drm_file *file_priv;
 
-#endif /* __linux__ */
+	DRM_LOCK();
+	file_priv = drm_find_file_by_proc(dev, p);
+	DRM_UNLOCK();
 
 	if (!file_priv) {
 		DRM_ERROR("drm_close() file_priv null, can't find authenticator\n");
