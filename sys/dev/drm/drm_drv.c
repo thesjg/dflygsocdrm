@@ -1258,6 +1258,10 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 #ifndef __linux__
 
+#ifdef DRM_NEWER_LOCKKERNEL
+lock_kernel();
+#endif
+
 #ifdef DRM_NEWER_LOCK
 	lock_kernel();
 #else
@@ -1494,6 +1498,10 @@ done:
 	DRM_UNLOCK();
 #endif
 
+#ifdef DRM_NEWER_LOCKKERNEL
+unlock_kernel();
+#endif
+
 	return (0);
 }
 
@@ -1616,12 +1624,28 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 #endif
 
 	if (is_driver_ioctl) {
+#ifdef DRM_NEWER_LOCKKERNEL
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			lock_kernel();
+#endif
 		DRM_LOCK();
 		/* shared code returns -errno */
 		retcode = -func(dev, data, file_priv);
 		DRM_UNLOCK();
+#ifdef DRM_NEWER_LOCKKERNEL
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			unlock_kernel();
+#endif
 	} else {
+#ifdef DRM_NEWER_LOCKKERNEL
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			lock_kernel();
+#endif
 		retcode = func(dev, data, file_priv);
+#ifdef DRM_NEWER_LOCKKERNEL
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			unlock_kernel();
+#endif
 	}
 
 	if (retcode != 0)
