@@ -82,12 +82,12 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	struct drm_lock *lock = data;
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	struct drm_master *master = file_priv->master;
 #endif
 	int ret = 0;
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	++file_priv->lock_count;
 #endif
 
@@ -115,7 +115,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	add_wait_queue(&master->lock.lock_queue, &entry);
 #endif /* __linux__ */
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	spin_lock_bh(&master->lock.spinlock);
 	master->lock.user_waiters++;
 	spin_unlock_bh(&master->lock.spinlock);
@@ -123,7 +123,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	for (;;) {
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 		if (!master->lock.hw_lock) {
 			/* Device has been unregistered */
 			DRM_INFO("drm_lock pid (%d) hw_lock == 0 device unregistered\n",
@@ -144,7 +144,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		}
 #endif
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 		if (drm_lock_take(&master->lock, lock->context)) {
 			master->lock.file_priv = file_priv;
 			master->lock.lock_time = jiffies;
@@ -161,7 +161,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #endif
 
 		/* Contention */
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 		tsleep_interlock((void *)&master->lock.lock_queue, PCATCH);
 #else
 		tsleep_interlock((void *)&dev->lock.lock_queue, PCATCH);
@@ -171,7 +171,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		DRM_UNLOCK();
 #endif
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 		ret = tsleep((void *)&master->lock.lock_queue,
 			     PCATCH | PINTERLOCKED, "drmlk2", 0);
 #else
@@ -186,7 +186,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 			break;
 	}
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	spin_lock_bh(&master->lock.spinlock);
 	master->lock.user_waiters--;
 	spin_unlock_bh(&master->lock.spinlock);
@@ -209,7 +209,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	 * really probably not the correct answer but lets us debug xkb
 	 * xserver for now */
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 
 	if (!file_priv->is_master) {
 #ifdef __linux__
@@ -282,11 +282,11 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	DRM_LOCK();
 #endif
 
-#ifndef DRM_NEWER_FILELIST  /* not in linux drm */
+#ifndef DRM_NEWER_HWLOCK  /* not in linux drm */
 	drm_lock_transfer(&dev->lock, DRM_KERNEL_CONTEXT);
 #endif
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	if (drm_lock_free(&master->lock, lock->context)) {
 		/* FIXME: Should really bail out here. */
 		DRM_ERROR("drm_unlock, drm_lock_free nonzero return\n");
@@ -323,7 +323,7 @@ int drm_lock_take(struct drm_lock_data *lock_data,
 	unsigned int old, new;
 	volatile unsigned int *lock = &lock_data->hw_lock->lock;
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	spin_lock_bh(&lock_data->spinlock);
 #endif
 
@@ -332,7 +332,7 @@ int drm_lock_take(struct drm_lock_data *lock_data,
 		if (old & _DRM_LOCK_HELD)
 			new = old | _DRM_LOCK_CONT;
 		else {
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 			new = context | _DRM_LOCK_HELD |
 				((lock_data->user_waiters + lock_data->kernel_waiters > 1) ?
 				 _DRM_LOCK_CONT : 0);
@@ -342,7 +342,7 @@ int drm_lock_take(struct drm_lock_data *lock_data,
 		}
 	} while (!atomic_cmpset_int(lock, old, new));
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	spin_unlock_bh(&lock_data->spinlock);
 #endif
 
@@ -356,7 +356,7 @@ int drm_lock_take(struct drm_lock_data *lock_data,
 		}
 	}
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	if ((_DRM_LOCKING_CONTEXT(new)) == context && (new & _DRM_LOCK_HELD)) {
 		/* Have lock */
 		return 1;
@@ -366,7 +366,7 @@ int drm_lock_take(struct drm_lock_data *lock_data,
 		/* Have lock */
 		return 1;
 	}
-#endif /* DRM_NEWER_FILELIST */
+#endif
 
 	return 0;
 }
@@ -416,11 +416,11 @@ int drm_lock_free(struct drm_lock_data *lock_data, unsigned int context)
 	unsigned int old, new;
 	volatile unsigned int *lock = &lock_data->hw_lock->lock;
 
-#ifndef DRM_NEWER_FILELIST
+#ifndef DRM_NEWER_HWLOCK
 	lock_data->file_priv = NULL;
 #endif
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 	spin_lock_bh(&lock_data->spinlock);
 	if (lock_data->kernel_waiters != 0) {
 		drm_lock_transfer(lock_data, 0);
@@ -433,7 +433,7 @@ int drm_lock_free(struct drm_lock_data *lock_data, unsigned int context)
 
 	do {
 		old = *lock;
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 		new = _DRM_LOCKING_CONTEXT(old);
 #else
 		new = 0;
@@ -528,7 +528,7 @@ EXPORT_SYMBOL(drm_idlelock_take);
 
 void drm_idlelock_release(struct drm_lock_data *lock_data)
 {
-#ifdef DRM_NEWER_FILELIST
+#ifdef __linux__
 	unsigned int old, prev;
 #else
 	unsigned int old;

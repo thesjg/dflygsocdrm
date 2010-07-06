@@ -336,8 +336,13 @@ int drm_getstats(struct drm_device *dev, void *data,
 
 	for (i = 0; i < dev->counters; i++) {
 		if (dev->types[i] == _DRM_STAT_LOCK)
+#ifdef DRM_NEWER_HWLOCK
+			stats->data[i].value =
+			    (file_priv->master->lock.hw_lock ? file_priv->master->lock.hw_lock->lock : 0);
+#else
 			stats->data[i].value =
 			    (dev->lock.hw_lock ? dev->lock.hw_lock->lock : 0);
+#endif
 		else 
 			stats->data[i].value = atomic_read(&dev->counts[i]);
 		stats->data[i].type = dev->types[i];

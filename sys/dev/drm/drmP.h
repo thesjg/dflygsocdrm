@@ -323,14 +323,15 @@ extern void drm_ut_debug_printk(unsigned int request_level,
  * \param dev DRM device.
  * \param filp file pointer of the caller.
  */
-#ifdef __linux__
+
+#ifdef DRM_NEWER_HWLOCK
 
 #define LOCK_TEST_WITH_RETURN( dev, _file_priv )				\
 do {										\
 	if (!_DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock) ||	\
 	    _file_priv->master->lock.file_priv != _file_priv)	{		\
 		DRM_ERROR( "%s called without lock held, held  %d owner %p %p\n",\
-			   __func__, _DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock),\
+			   __FUNCTION__, _DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock),\
 			   _file_priv->master->lock.file_priv, _file_priv);	\
 		return -EINVAL;							\
 	}									\

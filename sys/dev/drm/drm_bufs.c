@@ -370,7 +370,7 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 			DRM_LOCK();
 #endif
 
-#ifdef DRM_NEWER_MAPLIST
+#ifdef DRM_NEWER_HWLOCK
 
 			if (dev->primary->master->lock.hw_lock != NULL) {
 #ifndef DRM_NEWER_LOCK
@@ -386,7 +386,7 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 			dev->primary->master->lock.hw_lock = map->handle;	/* Pointer to lock */
 			dev->sigdata.lock = dev->primary->master->lock.hw_lock;	/* Pointer to lock */
 
-#else /* DRM_NEWER_MAPLIST */
+#else /* DRM_NEWER_HWLOCK */
 
 			if (dev->lock.hw_lock != NULL) {
 #ifndef DRM_NEWER_LOCK
@@ -401,7 +401,7 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 			}
 			dev->lock.hw_lock = map->handle; /* Pointer to lock */
 
-#endif /* DRM_NEWER_MAPLIST */
+#endif /* DRM_NEWER_HWLOCK */
 
 #ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
@@ -728,7 +728,7 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		break;
 	case _DRM_SHM:
 		free(map->handle, DRM_MEM_MAPS);
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_HWLOCK
 		if (master) {
 			if (dev->sigdata.lock == master->lock.hw_lock)
 				dev->sigdata.lock = NULL;
@@ -736,13 +736,13 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 			master->lock.file_priv = NULL;
 			DRM_WAKEUP_INT(&master->lock.lock_queue);
 		}
-#else /* DRM_NEWER_FILELIST */
+#else /* DRM_NEWER_HWLOCK */
 		if (dev->lock.hw_lock) {
 			dev->lock.hw_lock = NULL; /* SHM removed */
 			dev->lock.file_priv = NULL;
 			DRM_WAKEUP_INT((void *)&dev->lock.lock_queue);
 		}
-#endif /* DRM_NEWER_FILELIST */
+#endif /* DRM_NEWER_HWLOCK */
 		break;
 	case _DRM_AGP:
 	case _DRM_SCATTER_GATHER:

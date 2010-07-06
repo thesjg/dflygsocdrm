@@ -248,9 +248,9 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 {
 	struct drm_ctx_priv_map *request = data;
 	drm_local_map_t *map;
-#ifdef __linux__
+#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *_entry;
-#endif /* __linux__ */
+#endif
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
@@ -274,7 +274,7 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 	DRM_UNLOCK();
 #endif
 
-#ifdef __linux__
+#ifdef DRM_NEWER_MAPLIST
 	request->handle = NULL;
 	list_for_each_entry(_entry, &dev->maplist, head) {
 		if (_entry->map == map) {
@@ -284,10 +284,10 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 		}
 	}
 	if (request->handle == NULL)
-		return -EINVAL;
+		return EINVAL;
 #else
 	request->handle = map->handle;
-#endif /* __linux__ */
+#endif
 
 	return 0;
 }
@@ -309,12 +309,31 @@ int drm_setsareactx(struct drm_device *dev, void *data,
 {
 	struct drm_ctx_priv_map *request = data;
 	drm_local_map_t *map = NULL;
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *r_list = NULL;
+#endif
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
 #else
 	DRM_LOCK();
 #endif
+
+#ifdef DRM_NEWER_MAPLIST
+
+	list_for_each_entry(r_list, &dev->maplist, head) {
+		if (r_list->map
+		    && r_list->user_token == (unsigned long) request->handle) {
+			if (dev->max_context < 0)
+				goto bad;
+			if (request->ctx_id >= (unsigned) dev->max_context)
+				goto bad;
+			goto found;
+		}
+	}
+
+#else /* DRM_NEWER_MAPLIST */
+
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (map->handle == request->handle) {
 			if (dev->max_context < 0)
@@ -331,6 +350,8 @@ int drm_setsareactx(struct drm_device *dev, void *data,
 		}
 	}
 
+#endif /* DRM_NEWER_MAPLIST */
+
 bad:
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
@@ -338,6 +359,23 @@ bad:
 	DRM_UNLOCK();
 #endif
 	return EINVAL;
+
+#ifdef DRM_NEWER_MAPLIST
+
+found:
+	map = r_list->map;
+	if (!map)
+		goto bad;
+
+	dev->context_sareas[request->ctx_id] = map;
+#ifdef DRM_NEWER_LOCK
+	mutex_unlock(&dev->struct_mutex);
+#else
+	DRM_UNLOCK();
+#endif
+	return 0;
+
+#endif /* DRM_NEWER_MAPLIST */
 }
 
 /*@}*/

@@ -1039,13 +1039,16 @@ static void drm_unload(struct drm_device *dev)
 	DRM_LOCK();
 #endif
 
+#ifdef DRM_NEWER_MAPLIST
+	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
+		drm_rmmap(dev, r_list->map);
+	drm_ht_remove(&dev->map_hash);
+#else
 	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
 		if (!(map->flags & _DRM_DRIVER))
 			drm_rmmap(dev, map);
 	}
-	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
-		drm_rmmap(dev, r_list->map);
-	drm_ht_remove(&dev->map_hash);
+#endif
 
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
@@ -1381,8 +1384,9 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 	funsetown(dev->buf_sigio);
 
-/* newer */
+#ifndef DRM_NEWER_ONELOCK
 	mutex_lock(&dev->struct_mutex);
+#endif
 
 	if (file_priv->is_master) {
 		struct drm_master *master = file_priv->master;
@@ -1433,8 +1437,9 @@ int drm_close_legacy(struct dev_close_args *ap)
 	}
 #endif
 
+#ifndef DRM_NEWER_ONELOCK
 	mutex_unlock(&dev->struct_mutex);
-/* end newer */
+#endif
 
 	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file_priv);
@@ -1627,6 +1632,18 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 
 drm_local_map_t *drm_getsarea(struct drm_device *dev)
 {
+
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *entry;
+
+	list_for_each_entry(entry, &dev->maplist, head) {
+		if (entry->map && entry->map->type == _DRM_SHM &&
+		    (entry->map->flags & _DRM_CONTAINS_LOCK)) {
+			return entry->map;
+		}
+	}
+
+#else /* DRM_NEWER_MAPLIST */
 	drm_local_map_t *map;
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
@@ -1634,6 +1651,8 @@ drm_local_map_t *drm_getsarea(struct drm_device *dev)
 		if (map->type == _DRM_SHM && (map->flags & _DRM_CONTAINS_LOCK))
 			return map;
 	}
+
+#endif /* DRM_NEWER_MAPLIST */
 
 	return NULL;
 }

@@ -207,7 +207,7 @@ static void drm_master_destroy(struct kref *kref)
 #ifdef __linux__
 	kfree(master);
 #else
-	DRM_INFO("pid (%d), minor_id (%d) master destroyed\n",
+	DRM_INFO("master destroyed by pid (%d), minor_id (%d)\n",
 		DRM_CURRENTPID, master->minor->index);
 	free(master, DRM_MEM_STUB);
 #endif /* __linux__ */
