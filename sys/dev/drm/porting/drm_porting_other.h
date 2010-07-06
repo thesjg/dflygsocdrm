@@ -258,6 +258,3 @@ drm_free(void *pt, size_t size, struct malloc_type *area)
 #endif
 
 #endif
-
-/* #define DRM_NEWER_ONELOCK 1 */
-#define DRM_NEWER_LOCKKERNEL 1
