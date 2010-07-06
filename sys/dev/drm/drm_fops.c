@@ -231,6 +231,10 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 #ifdef DRM_NEWER_ONELOCK
 				DRM_LOCK();
 #else
+
+#ifdef DRM_NEWER_MAPLIST
+				DRM_LOCK();
+#endif
 				mutex_lock(&dev->struct_mutex);
 #endif
 				/* drop both references if this fails */
@@ -240,6 +244,11 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 				DRM_UNLOCK();
 #else
 				mutex_unlock(&dev->struct_mutex);
+
+#ifdef DRM_NEWER_MAPLIST
+				DRM_UNLOCK();
+#endif
+
 #endif
 				goto out_free;
 			}
@@ -254,8 +263,15 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 			ret = dev->driver->master_set(dev, priv, true);
 			if (ret) {
 				/* drop both references if this fails */
+#ifdef DRM_NEWER_MAPLIST
+				DRM_LOCK();
+#endif
 				drm_master_put(&priv->minor->master);
 				drm_master_put(&priv->master);
+#ifdef DRM_NEWER_MAPLIST
+				DRM_UNLOCK();
+#endif
+
 #ifdef DRM_NEWER_ONELOCK
 				DRM_UNLOCK();
 #else

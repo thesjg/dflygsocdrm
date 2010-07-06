@@ -528,6 +528,9 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 		if (map->type == _DRM_REGISTERS)
 			drm_ioremapfree(map);
 		free(map, DRM_MEM_MAPS);
+#ifndef DRM_NEWER_LOCK
+		DRM_LOCK();
+#endif
 		return EINVAL;
 	}
 	list->map = map;
@@ -834,7 +837,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 #ifdef DRM_NEWER_MAPLIST
 	list_for_each_entry(r_list, &dev->maplist, head) {
 		if (r_list->map &&
-		    r_list->user_token == (unsigned long)request->handle &&
+		    ((r_list->map->handle == request->handle) || (r_list->user_token == (unsigned long)request->handle)) &&
 		    r_list->map->flags & _DRM_REMOVABLE) {
 			map = r_list->map;
 			break;

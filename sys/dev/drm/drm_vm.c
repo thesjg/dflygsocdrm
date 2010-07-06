@@ -75,6 +75,10 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv = NULL;
 	drm_local_map_t *map;
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *r_list;
+	struct drm_map_list *r_list_found = NULL;
+#endif
 	enum drm_map_type type;
 	vm_paddr_t phys;
 
@@ -127,19 +131,37 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
+
+#ifdef DRM_NEWER_MAPLIST
+	list_for_each_entry(r_list, &dev->maplist, head) {
+		if (offset >= r_list->map->offset && offset < r_list->map->offset + r_list->map->size) {
+			r_list_found = r_list;
+			break;
+		}
+	}
+	if (r_list_found == NULL) {
+		map = NULL;
+	}
+	else {
+		map = r_list_found->map;
+	}
+#else
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 		if (offset >= map->offset && offset < map->offset + map->size)
 			break;
 	}
+#endif
 
 	if (map == NULL) {
 		DRM_DEBUG("Can't find map, requested offset = %016lx\n",
 		    (unsigned long)offset);
+#if 0
 		TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
 			DRM_DEBUG("map offset = %016lx, handle = %016lx\n",
 			    (unsigned long)map->offset,
 			    (unsigned long)map->handle);
 		}
+#endif
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif

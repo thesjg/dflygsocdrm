@@ -1945,6 +1945,18 @@ drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
 static __inline__ struct drm_local_map *
 drm_core_findmap(struct drm_device *dev, unsigned long offset)
 {
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *_entry;
+	list_for_each_entry(_entry, &dev->maplist, head)
+#ifdef __linux__
+	    if (_entry->user_token == offset)
+		return _entry->map;
+#else
+	    if (_entry->map->offset == offset)
+		return _entry->map;
+#endif /* __linux__ */
+	return NULL;
+#else
 	drm_local_map_t *map;
 
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
@@ -1953,6 +1965,7 @@ drm_core_findmap(struct drm_device *dev, unsigned long offset)
 			return map;
 	}
 	return NULL;
+#endif
 }
 
 static __inline__ void drm_core_dropmap(struct drm_map *map)

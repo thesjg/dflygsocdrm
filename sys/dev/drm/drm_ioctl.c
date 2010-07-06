@@ -212,10 +212,15 @@ drm_set_busid(struct drm_device *dev)
 int drm_getmap(struct drm_device *dev, void *data,
 	       struct drm_file *file_priv)
 {
-	struct drm_map     *map = data;
+	struct drm_map *map = data;
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *r_list = NULL;
+	struct list_head *list;
+#else
 	drm_local_map_t    *mapinlist;
-	int          idx;
-	int	     i = 0;
+#endif
+	int idx;
+	int i = 0;
 
 	idx = map->offset;
 
@@ -233,6 +238,35 @@ int drm_getmap(struct drm_device *dev, void *data,
 		return EINVAL;
 	}
 
+#ifdef DRM_NEWER_MAPLIST
+	i = 0;
+	list_for_each(list, &dev->maplist) {
+		if (i == idx) {
+			r_list = list_entry(list, struct drm_map_list, head);
+			break;
+		}
+		i++;
+	}
+	if (!r_list || !r_list->map) {
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#else
+		DRM_UNLOCK();
+#endif
+		return EINVAL;
+	}
+	map->offset = r_list->map->offset;
+	map->size = r_list->map->size;
+	map->type = r_list->map->type;
+	map->flags = r_list->map->flags;
+#ifdef __linux__
+	map->handle = (void *)(unsigned long) r_list->user_token;
+#else
+	map->handle = r_list->map->handle;
+#endif /* __linux__ */
+	map->mtrr = r_list->map->mtrr;
+
+#else /* DRM_NEWER_MAPLIST */
 	TAILQ_FOREACH(mapinlist, &dev->maplist_legacy, link) {
 		if (i == idx) {
 			map->offset = mapinlist->offset;
@@ -245,6 +279,7 @@ int drm_getmap(struct drm_device *dev, void *data,
 		}
 		i++;
 	}
+#endif /* DRM_NEWER_MAPLIST */
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
@@ -252,8 +287,10 @@ int drm_getmap(struct drm_device *dev, void *data,
 	DRM_UNLOCK();
 #endif
 
+#ifndef DRM_NEWER_MAPLIST
  	if (mapinlist == NULL)
 		return EINVAL;
+#endif
 
 	return 0;
 }

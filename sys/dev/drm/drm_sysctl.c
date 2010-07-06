@@ -163,6 +163,9 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
 	struct drm_device *dev = arg1;
 	drm_local_map_t *map, *tempmaps;
+#ifdef DRM_NEWER_MAPLIST
+	struct drm_map_list *r_list;
+#endif
 	const char   *types[] = { "FB", "REG", "SHM", "AGP", "SG" };
 	const char *type, *yesno;
 	int i, mapcount;
@@ -179,8 +182,14 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 #endif
 
 	mapcount = 0;
+#ifdef DRM_NEWER_MAPLIST
+	list_for_each_entry(r_list, &dev->maplist, head) {
+		mapcount++;
+	}
+#else
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
 		mapcount++;
+#endif
 
 #ifdef DRM_NEWER_LOCK
 	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount, DRM_MEM_DRIVER,
@@ -199,8 +208,15 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	}
 
 	i = 0;
+
+#ifdef DRM_NEWER_MAPLIST
+	list_for_each_entry(r_list, &dev->maplist, head) {
+		tempmaps[i++] = *map;
+	}
+#else
 	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
 		tempmaps[i++] = *map;
+#endif
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
@@ -225,9 +241,11 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 			yesno = "yes";
 
 		DRM_SYSCTL_PRINT(
-		    "%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx %s\n", i,
-		    map->offset, map->size, type, map->flags,
-		    (unsigned long)map->handle, yesno);
+			"%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx %s\n",
+			i,
+			map->offset,
+			map->size, type, map->flags,
+			(unsigned long)map->handle, yesno);
 	}
 	SYSCTL_OUT(req, "", 1);
 

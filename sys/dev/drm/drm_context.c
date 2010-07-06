@@ -248,9 +248,9 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 {
 	struct drm_ctx_priv_map *request = data;
 	drm_local_map_t *map;
-#ifdef DRM_NEWER_MAPLIST
+#ifdef __linux__
 	struct drm_map_list *_entry;
-#endif
+#endif /* __linux__ */
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
@@ -274,7 +274,7 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 	DRM_UNLOCK();
 #endif
 
-#ifdef DRM_NEWER_MAPLIST
+#ifdef __linux__
 	request->handle = NULL;
 	list_for_each_entry(_entry, &dev->maplist, head) {
 		if (_entry->map == map) {
@@ -285,9 +285,9 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 	}
 	if (request->handle == NULL)
 		return EINVAL;
-#else
+#endif /* __linux__ */
+
 	request->handle = map->handle;
-#endif
 
 	return 0;
 }
@@ -323,7 +323,7 @@ int drm_setsareactx(struct drm_device *dev, void *data,
 
 	list_for_each_entry(r_list, &dev->maplist, head) {
 		if (r_list->map
-		    && r_list->user_token == (unsigned long) request->handle) {
+		    && (r_list->map->handle == request->handle)) {
 			if (dev->max_context < 0)
 				goto bad;
 			if (request->ctx_id >= (unsigned) dev->max_context)
