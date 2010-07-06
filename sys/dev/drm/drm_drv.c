@@ -1367,10 +1367,14 @@ lock_kernel();
 			}
 			/* Contention */
 			tsleep_interlock((void *)&dev->lock.lock_queue, PCATCH);
+#ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
+#endif
 			retcode = tsleep((void *)&dev->lock.lock_queue,
 					 PCATCH | PINTERLOCKED, "drmlk2", 0);
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif
 			if (retcode)
 				break;
 		}
@@ -1388,9 +1392,7 @@ lock_kernel();
 
 	funsetown(dev->buf_sigio);
 
-#ifndef DRM_NEWER_ONELOCK
 	mutex_lock(&dev->struct_mutex);
-#endif
 
 	if (file_priv->is_master) {
 		struct drm_master *master = file_priv->master;
@@ -1431,19 +1433,7 @@ lock_kernel();
 	file_priv->is_master = 0;
 	list_del(&file_priv->lhead);
 
-#ifdef DRM_NEWER_FILELIST
-/* INVARIANT: kdev file_priv == head(dev->filelist) */
-	if (list_empty(dev->filelist)) {
-		kdev->si_drv2 = NULL;
-	}
-	else {
-		kdev->si_drv2 = container_of(dev->filelist->next, struct drm_file, lhead);
-	}
-#endif
-
-#ifndef DRM_NEWER_ONELOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
 
 	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file_priv);
@@ -1458,7 +1448,7 @@ lock_kernel();
 done:
 	atomic_inc(&dev->counts[_DRM_STAT_CLOSES]);
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_IOCTL
 	device_unbusy(dev->device);
 	spin_lock(&dev->count_lock);
 	if (!--dev->open_count) {
@@ -1470,6 +1460,9 @@ done:
 			unlock_kernel();
 #else
 			DRM_UNLOCK();
+#ifdef DRM_NEWER_LOCKKERNEL
+			unlock_kernel();
+#endif
 #endif
 			return EBUSY;
 		}
@@ -1478,19 +1471,22 @@ done:
 		unlock_kernel();
 #else
 		DRM_UNLOCK();
+#ifdef DRM_NEWER_LOCKKERNEL
+			unlock_kernel();
+#endif
 #endif
 		return drm_lastclose(dev);
 	}
 	spin_unlock(&dev->count_lock);
 
-#else /* DRM_NEWER_FILELIST */
+#else /* DRM_NEWER_IOCTL */
 
 	device_unbusy(dev->device);
 	if (--dev->open_count == 0) {
 		retcode = drm_lastclose(dev);
 	}
 
-#endif /* DRM_NEWER_FILELIST */
+#endif /* DRM_NEWER_IOCTL */
 
 #ifdef DRM_NEWER_LOCK
 	unlock_kernel();
@@ -1562,7 +1558,7 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 #endif /* __linux__ */
 
 	dev = file_priv->minor->dev;
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_IOCTL
 	atomic_inc(&dev->ioctl_count);
 #endif
 	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
@@ -1576,18 +1572,33 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	switch (cmd) {
 	case FIONBIO:
 	case FIOASYNC:
+#ifdef DRM_NEWER_IOCTL
+		atomic_dec(&dev->ioctl_count);
+#endif
 		return 0;
 
 	case FIOSETOWN:
+#ifdef DRM_NEWER_IOCTL
+		retcode = fsetown(*(int *)data, &dev->buf_sigio);
+		atomic_dec(&dev->ioctl_count);
+		return retcode;
+#else
 		return fsetown(*(int *)data, &dev->buf_sigio);
+#endif
 
 	case FIOGETOWN:
 		*(int *) data = fgetown(dev->buf_sigio);
+#ifdef DRM_NEWER_IOCTL
+		atomic_dec(&dev->ioctl_count);
+#endif
 		return 0;
 	}
 
 	if (IOCGROUP(cmd) != DRM_IOCTL_BASE) {
 		DRM_DEBUG("Bad ioctl group 0x%x\n", (int)IOCGROUP(cmd));
+#ifdef DRM_NEWER_IOCTL
+		atomic_dec(&dev->ioctl_count);
+#endif
 		return EINVAL;
 	}
 
@@ -1599,6 +1610,9 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		if (nr > dev->driver->max_ioctl) {
 			DRM_DEBUG("Bad driver ioctl number, 0x%x (of 0x%x)\n",
 			    nr, dev->driver->max_ioctl);
+#ifdef DRM_NEWER_IOCTL
+			atomic_dec(&dev->ioctl_count);
+#endif
 			return EINVAL;
 		}
 		ioctl = &dev->driver->ioctls[nr];
@@ -1608,18 +1622,29 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 
 	if (func == NULL) {
 		DRM_DEBUG("no function\n");
+#ifdef DRM_NEWER_IOCTL
+		atomic_dec(&dev->ioctl_count);
+#endif
 		return EINVAL;
 	}
 
 #ifdef DRM_NEWER_FILELIST
 	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
 	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
-	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master))
+	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
+#ifdef DRM_NEWER_IOCTL
+		atomic_dec(&dev->ioctl_count);
+#endif
 		return EACCES;
+	}
 #else
 	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
 	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
-	    ((ioctl->flags & DRM_MASTER) && !file_priv->master_legacy))
+	    ((ioctl->flags & DRM_MASTER) && !file_priv->master_legacy)) {
+#ifdef DRM_NEWER_IOCTL
+		atomic_dec(&dev->ioctl_count);
+#endif
+	}
 		return EACCES;
 #endif
 
@@ -1651,6 +1676,9 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	if (retcode != 0)
 		DRM_DEBUG("    returning %d\n", retcode);
 
+#ifdef DRM_NEWER_IOCTL
+	atomic_dec(&dev->ioctl_count);
+#endif
 	return retcode;
 }
 
