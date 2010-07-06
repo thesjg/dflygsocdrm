@@ -36,7 +36,7 @@
  * schemes evolved.
  */
 
-#include "dev/drm/drmP.h"
+#include "drmP.h"
 
 int drm_dma_setup(struct drm_device *dev)
 {

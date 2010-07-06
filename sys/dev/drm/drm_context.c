@@ -90,7 +90,7 @@ void drm_ctxbitmap_free(struct drm_device *dev, int ctx_handle)
  * Allocate a new idr from drm_device::ctx_idr while holding the
  * drm_device::struct_mutex lock.
  */
-int drm_ctxbitmap_next(struct drm_device *dev)
+static int drm_ctxbitmap_next(struct drm_device *dev)
 {
 	int bit;
 
@@ -394,7 +394,7 @@ found:
  *
  * Attempt to set drm_device::context_flag.
  */
-int drm_context_switch(struct drm_device *dev, int old, int new)
+static int drm_context_switch(struct drm_device *dev, int old, int new)
 {
 	if (test_and_set_bit(0, &dev->context_flag)) {
 		DRM_ERROR("Reentering -- FIXME\n");
@@ -422,16 +422,12 @@ int drm_context_switch(struct drm_device *dev, int old, int new)
  * hardware lock is held, clears the drm_device::context_flag and wakes up
  * drm_device::context_wait.
  */
-#ifdef __linux__
 static int drm_context_switch_complete(struct drm_device *dev,
 				       struct drm_file *file_priv, int new)
-#else
-int drm_context_switch_complete(struct drm_device *dev, int new)
-#endif /* __linux__ */
 {
 	dev->last_context = new;  /* PRE/POST: This is the _only_ writer. */
 
-#ifdef __linux__ /* no code seems to use dev->last_switch */
+#ifdef DRM_NEWER_HWLOCK /* no code seems to use dev->last_switch */
 	dev->last_switch = jiffies;
 
 	if (!_DRM_LOCK_IS_HELD(file_priv->master->lock.hw_lock->lock)) {
@@ -441,7 +437,7 @@ int drm_context_switch_complete(struct drm_device *dev, int new)
 	if (!_DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock)) {
 		DRM_ERROR("Lock isn't held after context switch\n");
 	}
-#endif /* __linux__ */
+#endif
 
 	/* If a context switch is ever initiated
 	   when the kernel holds the lock, release
@@ -597,16 +593,13 @@ int drm_switchctx(struct drm_device *dev, void *data,
  *
  * Calls context_switch_complete().
  */
-int drm_newctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int drm_newctx(struct drm_device *dev, void *data,
+		struct drm_file *file_priv)
 {
 	struct drm_ctx *ctx = data;
 
 	DRM_DEBUG("%d\n", ctx->handle);
-#ifdef __linux__
 	drm_context_switch_complete(dev, file_priv, ctx->handle);
-#else
-	drm_context_switch_complete(dev, ctx->handle);
-#endif /* __linux__ */
 
 	return 0;
 }

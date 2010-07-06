@@ -349,7 +349,7 @@ do {									\
 	}								\
 } while (0)
 
-#endif /* LOCK_TEST_WITH_RETURN */
+#endif /* DRM_NEWER_HWLOCK */
 
 /**
  * Ioctl function type.
@@ -1446,11 +1446,6 @@ void	*drm_ioremap(struct drm_device *dev, drm_local_map_t *map);
 void	drm_ioremapfree(drm_local_map_t *map);
 int	drm_mtrr_add(unsigned long offset, size_t size, int flags);
 int	drm_mtrr_del(int handle, unsigned long offset, size_t size, int flags);
-
-int	drm_context_switch(struct drm_device *dev, int old, int new);
-int	drm_context_switch_complete(struct drm_device *dev, int new);
-
-int	drm_ctxbitmap_next(struct drm_device *dev);
 
 				/* Misc. IOCTL support (drm_ioctl.h) */
 /* shared */

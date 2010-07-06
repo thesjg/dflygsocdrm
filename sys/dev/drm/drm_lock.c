@@ -97,11 +97,11 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		return EINVAL;
 	}
 
-#ifdef __linux__
+#ifdef DRM_NEWER_HWLOCK
 	DRM_DEBUG("%d (pid %d) requests lock (0x%08x), flags = 0x%08x\n",
 		lock->context, DRM_CURRENTPID,
-		dev->lock.hw_lock->lock, lock->flags);
-#endif /* __linux__ */
+		master->lock.hw_lock->lock, lock->flags);
+#endif
 
 	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE))
 		if (lock->context < 0)
@@ -192,6 +192,11 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	spin_unlock_bh(&master->lock.spinlock);
 #endif
 
+#ifdef __linux__
+	__set_current_state(TASK_RUNNING);
+	remove_wait_queue(&master->lock.lock_queue, &entry);
+#endif /* __linux__ */
+
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
@@ -263,12 +268,6 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_lock *lock = data;
 	struct drm_master *master = file_priv->master;
-
-#if 0
-	DRM_DEBUG("%d (pid %d) requests unlock (0x%08x), flags = 0x%08x\n",
-	    lock->context, DRM_CURRENTPID, dev->lock.hw_lock->lock,
-	    lock->flags);
-#endif
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",
@@ -487,7 +486,7 @@ static int drm_notifier(void *priv)
 		prev = cmpxchg(&s->lock->lock, old, new);
 	} while (prev != old);
 #else
-	} while (atomic_cmpset_int(&s->lock->lock, old, new));
+	} while (!atomic_cmpset_int(&s->lock->lock, old, new));
 #endif
 	return 0;
 }
@@ -546,7 +545,7 @@ void drm_idlelock_release(struct drm_lock_data *lock_data)
 #else
 			do {
 				old = *lock;
-			} while (atomic_cmpset_int(lock, old, DRM_KERNEL_CONTEXT));
+			} while (!atomic_cmpset_int(lock, old, DRM_KERNEL_CONTEXT));
 #endif /* __linux__ */
 
 #ifdef __linux__
