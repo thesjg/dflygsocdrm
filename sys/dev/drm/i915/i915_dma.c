@@ -40,10 +40,10 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	drm_i915_ring_buffer_t *ring = &(dev_priv->ring);
-	u32 last_head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
 	u32 acthd_reg = IS_I965G(dev) ? ACTHD_I965 : ACTHD;
 	u32 last_acthd = I915_READ(acthd_reg);
 	u32 acthd;
+	u32 last_head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
 	int i;
 
 	for (i = 0; i < 100000; i++) {
@@ -55,8 +55,16 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 		if (ring->space >= n)
 			return 0;
 
+#ifdef DRM_NEWER_SAREA
+		if (dev->primary->master) {
+			struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
+			if (master_priv->sarea_priv)
+				master_priv->sarea_priv->perf_boxes |= I915_BOX_WAIT;
+		}
+#else
 		if (dev_priv->sarea_priv)
 			dev_priv->sarea_priv->perf_boxes |= I915_BOX_WAIT;
+#endif
 
 		if (ring->head != last_head)
 			i = 0;
@@ -123,7 +131,15 @@ static void i915_free_hws(struct drm_device *dev)
 void i915_kernel_lost_context(struct drm_device * dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
+	struct drm_i915_master_private *master_priv;
 	drm_i915_ring_buffer_t *ring = &(dev_priv->ring);
+
+	/*
+	 * We should never lose context on the ring with modesetting
+	 * as we don't expose it to userspace
+	 */
+	if (drm_core_check_feature(dev, DRIVER_MODESET))
+		return;
 
 	ring->head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
 	ring->tail = I915_READ(PRB0_TAIL) & TAIL_ADDR;
@@ -131,8 +147,17 @@ void i915_kernel_lost_context(struct drm_device * dev)
 	if (ring->space < 0)
 		ring->space += ring->Size;
 
+#ifdef DRM_NEWER_SAREA
+	if (!dev->primary->master)
+		return;
+
+	master_priv = dev->primary->master->driver_priv;
+	if (ring->head == ring->tail && master_priv->sarea_priv)
+		master_priv->sarea_priv->perf_boxes |= I915_BOX_RING_EMPTY;
+#else
 	if (ring->head == ring->tail && dev_priv->sarea_priv)
 		dev_priv->sarea_priv->perf_boxes |= I915_BOX_RING_EMPTY;
+#endif
 }
 
 static int i915_dma_cleanup(struct drm_device * dev)
@@ -163,6 +188,17 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
+
+	master_priv->sarea = drm_getsarea(dev);
+	if (master_priv->sarea) {
+		master_priv->sarea_priv = (drm_i915_sarea_t *)
+			((u8 *)master_priv->sarea->handle + init->sarea_priv_offset);
+	} else {
+		DRM_DEBUG_DRIVER("sarea not found assuming DRI2 userspace\n");
+	}
+#else
 	dev_priv->sarea = drm_getsarea(dev);
 	if (!dev_priv->sarea) {
 		DRM_ERROR("can not find sarea!\n");
@@ -172,6 +208,7 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 
 	dev_priv->sarea_priv = (drm_i915_sarea_t *)
 	    ((u8 *) dev_priv->sarea->handle + init->sarea_priv_offset);
+#endif
 
 	if (init->ring_size != 0) {
 		if (dev_priv->ring.ring_obj != NULL) {
@@ -182,8 +219,9 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 		}
 
 		dev_priv->ring.Size = init->ring_size;
+#ifndef __linux__
 		dev_priv->ring.tail_mask = dev_priv->ring.Size - 1;
-
+#endif
 		dev_priv->ring.map.offset = init->ring_start;
 		dev_priv->ring.map.size = init->ring_size;
 		dev_priv->ring.map.type = 0;
@@ -206,7 +244,12 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 	dev_priv->back_offset = init->back_offset;
 	dev_priv->front_offset = init->front_offset;
 	dev_priv->current_page = 0;
+#ifdef DRM_NEWER_SAREA
+	if (master_priv->sarea_priv)
+		master_priv->sarea_priv->pf_current_page = 0;
+#else
 	dev_priv->sarea_priv->pf_current_page = 0;
+#endif
 
 	/* Allow hardware batchbuffers unless told otherwise.
 	 */
@@ -221,10 +264,12 @@ static int i915_dma_resume(struct drm_device * dev)
 
 	DRM_DEBUG("\n");
 
+#ifndef DRM_NEWER_SAREA
 	if (!dev_priv->sarea) {
 		DRM_ERROR("can not find sarea!\n");
 		return -EINVAL;
 	}
+#endif
 
 	if (dev_priv->ring.map.handle == NULL) {
 		DRM_ERROR("can not ioremap virtual address for"
@@ -434,12 +479,21 @@ int i915_emit_box(struct drm_device * dev,
 static void i915_emit_breadcrumb(struct drm_device *dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
+#endif
+
 	RING_LOCALS;
 
 	if (++dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
+#ifdef DRM_NEWER_SAREA
+	if (master_priv->sarea_priv)
+		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
+#else
 	if (dev_priv->sarea_priv)
 		dev_priv->sarea_priv->last_enqueue = dev_priv->counter;
+#endif
 
 	BEGIN_LP_RING(4);
 	OUT_RING(MI_STORE_DWORD_INDEX);
@@ -535,6 +589,19 @@ static int i915_dispatch_batchbuffer(struct drm_device * dev,
 static int i915_dispatch_flip(struct drm_device * dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv =
+		dev->primary->master->driver_priv;
+	RING_LOCALS;
+
+	if (!master_priv->sarea_priv)
+		return -EINVAL;
+
+	DRM_DEBUG_DRIVER("%s: page=%d pfCurrentPage=%d\n",
+			  __func__,
+			 dev_priv->current_page,
+			 master_priv->sarea_priv->pf_current_page);
+#else
 	RING_LOCALS;
 
 	if (!dev_priv->sarea_priv)
@@ -544,6 +611,7 @@ static int i915_dispatch_flip(struct drm_device * dev)
 		  __func__,
 		  dev_priv->current_page,
 		  dev_priv->sarea_priv->pf_current_page);
+#endif
 
 	i915_kernel_lost_context(dev);
 
@@ -570,10 +638,17 @@ static int i915_dispatch_flip(struct drm_device * dev)
 	OUT_RING(0);
 	ADVANCE_LP_RING();
 
+#ifndef __linux__
 	if (++dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
+#endif
+
+#ifdef DRM_NEWER_SAREA
+	master_priv->sarea_priv->last_enqueue = dev_priv->counter++;
+#else
 	if (dev_priv->sarea_priv)
 		dev_priv->sarea_priv->last_enqueue = dev_priv->counter;
+#endif
 
 	BEGIN_LP_RING(4);
 	OUT_RING(MI_STORE_DWORD_INDEX);
@@ -582,7 +657,11 @@ static int i915_dispatch_flip(struct drm_device * dev)
 	OUT_RING(0);
 	ADVANCE_LP_RING();
 
+#ifdef DRM_NEWER_SAREA
+	master_priv->sarea_priv->pf_current_page = dev_priv->current_page;
+#else
 	dev_priv->sarea_priv->pf_current_page = dev_priv->current_page;
+#endif
 	return 0;
 }
 
@@ -610,8 +689,14 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv)
 {
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
+	drm_i915_sarea_t *sarea_priv = (drm_i915_sarea_t *)
+	    master_priv->sarea_priv;
+#else
 	drm_i915_sarea_t *sarea_priv = (drm_i915_sarea_t *)
 	    dev_priv->sarea_priv;
+#endif
 	drm_i915_batchbuffer_t *batch = data;
 	size_t cliplen;
 	int ret;
@@ -652,8 +737,14 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv)
 {
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
+	drm_i915_sarea_t *sarea_priv = (drm_i915_sarea_t *)
+	    master_priv->sarea_priv;
+#else
 	drm_i915_sarea_t *sarea_priv = (drm_i915_sarea_t *)
 	    dev_priv->sarea_priv;
+#endif
 	drm_i915_cmdbuffer_t *cmdbuf = data;
 	size_t cliplen;
 	int ret;

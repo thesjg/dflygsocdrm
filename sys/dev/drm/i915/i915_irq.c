@@ -185,6 +185,9 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 {
 	struct drm_device *dev = (struct drm_device *) arg;
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv;
+#endif
 	u32 iir, new_iir;
 	u32 pipea_stats, pipeb_stats;
 	u32 vblank_status;
@@ -233,9 +236,18 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		I915_WRITE(IIR, iir);
 		new_iir = I915_READ(IIR); /* Flush posted writes */
 
+#ifdef DRM_NEWER_SAREA
+		if (dev->primary->master) {
+			master_priv = dev->primary->master->driver_priv;
+			if (master_priv->sarea_priv)
+				master_priv->sarea_priv->last_dispatch =
+					READ_BREADCRUMB(dev_priv);
+		}
+#else
 		if (dev_priv->sarea_priv)
 			dev_priv->sarea_priv->last_dispatch =
 			    READ_BREADCRUMB(dev_priv);
+#endif
 
 		if (iir & I915_USER_INTERRUPT) {
 			DRM_WAKEUP(&dev_priv->irq_queue);
@@ -269,14 +281,29 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 static int i915_emit_irq(struct drm_device * dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
+#endif
 	RING_LOCALS;
 
 	i915_kernel_lost_context(dev);
 
+#ifdef __linux__
+	dev_priv->counter++;
+	if (dev_priv->counter > 0x7FFFFFFFUL)
+		dev_priv->counter = 1;
+#else
 	if (++dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
+#endif
+
+#ifdef DRM_NEWER_SAREA
+	if (master_priv->sarea_priv)
+		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
+#else
 	if (dev_priv->sarea_priv)
 		dev_priv->sarea_priv->last_enqueue = dev_priv->counter;
+#endif
 
 	DRM_DEBUG("emitting: %d\n", dev_priv->counter);
 
@@ -321,6 +348,22 @@ void i915_user_irq_put(struct drm_device *dev)
 static int i915_wait_irq(struct drm_device * dev, int irq_nr)
 {
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
+#ifdef DRM_NEWER_SAREA
+	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
+	int ret = 0;
+
+	DRM_DEBUG_DRIVER("irq_nr=%d breadcrumb=%d\n", irq_nr,
+		  READ_BREADCRUMB(dev_priv));
+
+	if (READ_BREADCRUMB(dev_priv) >= irq_nr) {
+		if (master_priv->sarea_priv)
+			master_priv->sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
+		return 0;
+	}
+
+	if (master_priv->sarea_priv)
+		master_priv->sarea_priv->perf_boxes |= I915_BOX_WAIT;
+#else
 	int ret = 0;
 
 	if (READ_BREADCRUMB(dev_priv) >= irq_nr) {
@@ -336,6 +379,7 @@ static int i915_wait_irq(struct drm_device * dev, int irq_nr)
 
 	DRM_DEBUG("irq_nr=%d breadcrumb=%d\n", irq_nr,
 		  READ_BREADCRUMB(dev_priv));
+#endif
 
 	i915_user_irq_get(dev);
 	DRM_WAIT_ON(ret, dev_priv->irq_queue, 3 * DRM_HZ,
