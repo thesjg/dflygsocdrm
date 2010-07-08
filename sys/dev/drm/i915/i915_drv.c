@@ -602,6 +602,10 @@ static void i915_configure(struct drm_device *dev)
 	dev->driver->irq_postinstall	= i915_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= i915_driver_irq_uninstall;
 	dev->driver->irq_handler	= i915_driver_irq_handler;
+#ifdef DRM_NEWER_SAREA
+	dev->driver->master_create = i915_master_create;
+	dev->driver->master_destroy = i915_master_destroy;
+#endif
 
 	dev->driver->ioctls		= i915_ioctls;
 	dev->driver->max_ioctl		= i915_max_ioctl;

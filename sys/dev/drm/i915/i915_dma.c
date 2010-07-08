@@ -915,6 +915,38 @@ static int i915_set_status_page(struct drm_device *dev, void *data,
 	return 0;
 }
 
+int i915_master_create(struct drm_device *dev, struct drm_master *master)
+{
+	struct drm_i915_master_private *master_priv;
+
+#ifdef __linux__
+	master_priv = kzalloc(sizeof(*master_priv), GFP_KERNEL);
+#else
+	master_priv = malloc(sizeof(*master_priv), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
+	if (!master_priv)
+		return -ENOMEM;
+
+	master->driver_priv = master_priv;
+	return 0;
+}
+
+void i915_master_destroy(struct drm_device *dev, struct drm_master *master)
+{
+	struct drm_i915_master_private *master_priv = master->driver_priv;
+
+	if (!master_priv)
+		return;
+
+#ifdef __linux__
+	kfree(master_priv);
+#else
+	free(master_priv, DRM_MEM_DRIVER);
+#endif
+
+	master->driver_priv = NULL;
+}
+
 int i915_driver_load(struct drm_device *dev, unsigned long flags)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
