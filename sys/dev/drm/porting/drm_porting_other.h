@@ -261,3 +261,4 @@ drm_free(void *pt, size_t size, struct malloc_type *area)
 
 #define DRM_NEWER_MAPLIST 1
 #define DRM_NEWER_HWLOCK 1
+#define DRM_NEWER_SAREA 1
