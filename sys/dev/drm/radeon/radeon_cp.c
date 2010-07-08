@@ -2198,6 +2198,7 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return;
 
+#ifdef __linux__
 	if (master_priv->sarea_priv &&
 	    master_priv->sarea_priv->pfCurrentPage != 0)
 		radeon_cp_dispatch_flip(dev, master);
@@ -2205,6 +2206,7 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	master_priv->sarea_priv = NULL;
 	if (master_priv->sarea)
 		drm_rmmap_locked(dev, master_priv->sarea);
+#endif
 
 	free(master_priv, DRM_MEM_DRIVER);
 
