@@ -644,7 +644,12 @@ static int i915_dispatch_flip(struct drm_device * dev)
 #endif
 
 #ifdef DRM_NEWER_SAREA
+#ifdef __linux__
 	master_priv->sarea_priv->last_enqueue = dev_priv->counter++;
+#else
+	if (master_priv->sarea_priv)
+		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
+#endif /* __linux__ */
 #else
 	if (dev_priv->sarea_priv)
 		dev_priv->sarea_priv->last_enqueue = dev_priv->counter;
