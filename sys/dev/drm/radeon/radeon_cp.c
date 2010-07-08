@@ -1319,12 +1319,16 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	}
 
 #ifndef __linux__
+#if 0
 	unsigned long old_sarea_priv = (unsigned long)master_priv->sarea_priv;
+#endif
 	master_priv->sarea_priv =
 	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
 				    init->sarea_priv_offset);
+#if 0
 	DRM_INFO("radeon_master_create sarea_priv = 0x%016lx, radeon_do_init_cp sarea_priv = 0x%016lx\n",
 		old_sarea_priv, (unsigned long)master_priv->sarea_priv);
+#endif
 #endif
 
 #if __OS_HAS_AGP
@@ -2169,6 +2173,7 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return -ENOMEM;
 
+#ifdef __linux__
 	/* prebuild the SAREA */
 	sareapage = max_t(unsigned long, SAREA_MAX, PAGE_SIZE);
 	ret = drm_addmap(dev, 0, sareapage, _DRM_SHM, _DRM_CONTAINS_LOCK,
@@ -2180,6 +2185,7 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	}
 	master_priv->sarea_priv = master_priv->sarea->handle + sizeof(struct drm_sarea);
 	master_priv->sarea_priv->pfCurrentPage = 0;
+#endif /* __linux__ */
 
 	master->driver_priv = master_priv;
 	return 0;
