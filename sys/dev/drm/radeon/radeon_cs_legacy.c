@@ -836,7 +836,7 @@ static void r600_ib_free(struct drm_radeon_cs_parser *parser, int error)
 		if (!error)
 			r600_cp_dispatch_indirect(dev, buf, 0,
 						  parser->chunks[parser->ib_index].length_dw * sizeof(uint32_t));
-		radeon_cp_discard_buffer(dev, buf);
+		radeon_cp_discard_buffer(dev, buf->file_priv->master, buf);
 		COMMIT_RING();
 	}
 }

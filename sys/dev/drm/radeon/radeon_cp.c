@@ -426,7 +426,7 @@ static int radeon_do_wait_for_idle(drm_radeon_private_t * dev_priv)
 
 static void radeon_init_pipes(struct drm_device *dev)
 {
-        drm_radeon_private_t *dev_priv = dev->dev_private;
+	drm_radeon_private_t *dev_priv = dev->dev_private;
 	uint32_t gb_tile_config, gb_pipe_sel = 0;
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV530) {
@@ -732,9 +732,7 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 				       drm_radeon_private_t *dev_priv,
 				       struct drm_file *file_priv)
 {
-#ifdef DRM_NEWER_MASTER
 	struct drm_radeon_master_private *master_priv;
-#endif
 	u32 ring_start, cur_read_ptr;
 
 	/* Initialize the memory controller. With new memory map, the fb location
@@ -829,20 +827,12 @@ static void radeon_cp_init_ring_buffer(struct drm_device * dev,
 	RADEON_WRITE(RADEON_LAST_CLEAR_REG, 0);
 
 	/* reset sarea copies of these */
-#ifdef DRM_NEWER_MASTER
 	master_priv = file_priv->master->driver_priv;
 	if (master_priv->sarea_priv) {
 		master_priv->sarea_priv->last_frame = 0;
 		master_priv->sarea_priv->last_dispatch = 0;
 		master_priv->sarea_priv->last_clear = 0;
 	}
-#else
-	if (dev_priv->sarea_priv) {
-		dev_priv->sarea_priv->last_frame = 0;
-		dev_priv->sarea_priv->last_dispatch = 0;
-		dev_priv->sarea_priv->last_clear = 0;
-	}
-#endif
 
 	radeon_do_wait_for_idle(dev_priv);
 
@@ -1166,9 +1156,7 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 			     struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
-#ifdef DRM_NEWER_MASTER
 	struct drm_radeon_master_private *master_priv = file_priv->master->driver_priv;
-#endif
 
 	DRM_DEBUG("\n");
 
@@ -1293,21 +1281,12 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	dev_priv->buffers_offset = init->buffers_offset;
 	dev_priv->gart_textures_offset = init->gart_textures_offset;
 
-#ifdef DRM_NEWER_MASTER
 	master_priv->sarea = drm_getsarea(dev);
 	if (!master_priv->sarea) {
 		DRM_ERROR("could not find sarea!\n");
 		radeon_do_cleanup_cp(dev);
 		return -EINVAL;
 	}
-#else
-	dev_priv->sarea = drm_getsarea(dev);
-	if (!dev_priv->sarea) {
-		DRM_ERROR("could not find sarea!\n");
-		radeon_do_cleanup_cp(dev);
-		return -EINVAL;
-	}
-#endif
 
 	dev_priv->cp_ring = drm_core_findmap(dev, init->ring_offset);
 	if (!dev_priv->cp_ring) {
@@ -1339,9 +1318,9 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
-#ifndef DRM_NEWER_MASTER
-	dev_priv->sarea_priv =
-	    (drm_radeon_sarea_t *) ((u8 *) dev_priv->sarea->handle +
+#ifndef __linux__
+	master_priv->sarea_priv =
+	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
 				    init->sarea_priv_offset);
 #endif
 
@@ -1651,9 +1630,9 @@ static int radeon_do_resume_cp(struct drm_device *dev, struct drm_file *file_pri
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
-#ifdef DRM_NEWER_MASTER
+#ifdef __linux__
 	dev_priv->have_z_offset = 0;
-#endif
+#endif /* __linux__ */
 	radeon_do_engine_reset(dev);
 	radeon_irq_set_state(dev, RADEON_SW_INT_ENABLE, 1);
 
@@ -2183,11 +2162,7 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	unsigned long sareapage;
 	int ret;
 
-#ifdef __linux__
-	master_priv = kzalloc(sizeof(*master_priv), GFP_KERNEL);
-#else
 	master_priv = malloc(sizeof(*master_priv), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-#endif
 	if (!master_priv)
 		return -ENOMEM;
 
@@ -2197,11 +2172,7 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 			 &master_priv->sarea);
 	if (ret) {
 		DRM_ERROR("SAREA setup failed\n");
-#ifdef __linux__
-		kfree(master_priv);
-#else
 		free(master_priv, DRM_MEM_DRIVER);
-#endif /* __linux__ */
 		return ret;
 	}
 	master_priv->sarea_priv = master_priv->sarea->handle + sizeof(struct drm_sarea);
@@ -2226,11 +2197,7 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	if (master_priv->sarea)
 		drm_rmmap_locked(dev, master_priv->sarea);
 
-#ifdef __linux__
-	kfree(master_priv);
-#else
 	free(master_priv, DRM_MEM_DRIVER);
-#endif
 
 	master->driver_priv = NULL;
 }

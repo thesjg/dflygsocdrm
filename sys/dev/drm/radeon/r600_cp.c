@@ -1606,6 +1606,7 @@ static void r600_cp_init_ring_buffer(struct drm_device *dev,
 				       drm_radeon_private_t *dev_priv,
 				       struct drm_file *file_priv)
 {
+	struct drm_radeon_master_private *master_priv;
 	u32 ring_start;
 	u64 rptr_addr;
 
@@ -1748,10 +1749,11 @@ static void r600_cp_init_ring_buffer(struct drm_device *dev,
 	RADEON_WRITE(R600_LAST_CLEAR_REG, 0);
 
 	/* reset sarea copies of these */
-	if (dev_priv->sarea_priv) {
-		dev_priv->sarea_priv->last_frame = 0;
-		dev_priv->sarea_priv->last_dispatch = 0;
-		dev_priv->sarea_priv->last_clear = 0;
+	master_priv = file_priv->master->driver_priv;
+	if (master_priv->sarea_priv) {
+		master_priv->sarea_priv->last_frame = 0;
+		master_priv->sarea_priv->last_dispatch = 0;
+		master_priv->sarea_priv->last_clear = 0;
 	}
 
 	r600_do_wait_for_idle(dev_priv);
@@ -1806,6 +1808,7 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		    struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
+	struct drm_radeon_master_private *master_priv = file_priv->master->driver_priv;
 
 	DRM_DEBUG("\n");
 
@@ -1874,8 +1877,8 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	dev_priv->buffers_offset = init->buffers_offset;
 	dev_priv->gart_textures_offset = init->gart_textures_offset;
 
-	dev_priv->sarea = drm_getsarea(dev);
-	if (!dev_priv->sarea) {
+	master_priv->sarea = drm_getsarea(dev);
+	if (!master_priv->sarea) {
 		DRM_ERROR("could not find sarea!\n");
 		r600_do_cleanup_cp(dev);
 		return -EINVAL;
@@ -1911,9 +1914,14 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
+	master_priv->sarea_priv =
+	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
+				    init->sarea_priv_offset);
+#if 0
 	dev_priv->sarea_priv =
 	    (drm_radeon_sarea_t *) ((u8 *) dev_priv->sarea->handle +
 				    init->sarea_priv_offset);
+#endif
 
 #if __OS_HAS_AGP
 	/* XXX */
@@ -2234,10 +2242,12 @@ int r600_cp_dispatch_indirect(struct drm_device *dev,
 	return 0;
 }
 
-void r600_cp_dispatch_swap(struct drm_device * dev)
+void r600_cp_dispatch_swap(struct drm_device *dev, struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
-	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;
+	struct drm_master *master = file_priv->master;
+	struct drm_radeon_master_private *master_priv = master->driver_priv;
+	drm_radeon_sarea_t *sarea_priv = master_priv->sarea_priv;
 	int nbox = sarea_priv->nbox;
 	struct drm_clip_rect *pbox = sarea_priv->boxes;
 	int i, cpp, src_pitch, dst_pitch;
@@ -2250,7 +2260,7 @@ void r600_cp_dispatch_swap(struct drm_device * dev)
 	else
 		cpp = 2;
 
-	if (dev_priv->sarea_priv->pfCurrentPage == 0) {
+	if (sarea_priv->pfCurrentPage == 0) {
 		src_pitch = dev_priv->back_pitch;
 		dst_pitch = dev_priv->front_pitch;
 		src = dev_priv->back_offset + dev_priv->fb_location;
@@ -2262,7 +2272,7 @@ void r600_cp_dispatch_swap(struct drm_device * dev)
 		dst = dev_priv->back_offset + dev_priv->fb_location;
 	}
 
-	if (r600_prepare_blit_copy(dev)) {
+	if (r600_prepare_blit_copy(dev, file_priv)) {
 		DRM_ERROR("unable to allocate vertex buffer for swap buffer\n");
 		return;
 	}
@@ -2285,10 +2295,10 @@ void r600_cp_dispatch_swap(struct drm_device * dev)
 	 * throttle the framerate by waiting for this value before
 	 * performing the swapbuffer ioctl.
 	 */
-	dev_priv->sarea_priv->last_frame++;
+	sarea_priv->last_frame++;
 
 	BEGIN_RING(3);
-	R600_FRAME_AGE(dev_priv->sarea_priv->last_frame);
+	R600_FRAME_AGE(sarea_priv->last_frame);
 	ADVANCE_RING();
 }
 
@@ -2322,7 +2332,13 @@ int r600_cp_dispatch_texture(struct drm_device * dev,
 
 	dst_offset = tex->offset;
 
-	r600_prepare_blit_copy(dev);
+	if (r600_prepare_blit_copy(dev, file_priv)) {
+		DRM_ERROR("unable to allocate vertex buffer for swap buffer\n");
+		return -EAGAIN;
+	}
+#if 0
+	r600_prepare_blit_copy(dev, file_priv);
+#endif
 	do {
 		data = (const u8 __user *)image->data;
 		pass_size = size;
@@ -2354,7 +2370,7 @@ int r600_cp_dispatch_texture(struct drm_device * dev,
 
 		r600_blit_copy(dev, src_offset, dst_offset, pass_size);
 
-		radeon_cp_discard_buffer(dev, buf);
+		radeon_cp_discard_buffer(dev, file_priv->master, buf);
 
 		/* Update the input parameters for next time */
 		image->data = (const u8 __user *)image->data + pass_size;

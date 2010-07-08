@@ -360,12 +360,16 @@ static __inline__ int r300_emit_packet0(drm_radeon_private_t *dev_priv,
 	sz = header.packet0.count;
 	reg = (header.packet0.reghi << 8) | header.packet0.reglo;
 
-	DRM_DEBUG("R300_CMD_PACKET0: reg %04x, sz %d\n", reg, sz);
 	if (!sz)
 		return 0;
 
+#ifdef __linux__
+	if (sz * 4 > drm_buffer_unprocessed(cmdbuf->buffer))
+		return -EINVAL;
+#else
 	if (sz * 4 > cmdbuf->bufsz)
 		return -EINVAL;
+#endif
 
 	if (reg + sz * 4 >= 0x10000) {
 		DRM_ERROR("No such registers in hardware reg=%04x sz=%d\n", reg,
@@ -385,8 +389,10 @@ static __inline__ int r300_emit_packet0(drm_radeon_private_t *dev_priv,
 	OUT_RING_TABLE((int *)cmdbuf->buf, sz);
 	ADVANCE_RING();
 
+#ifndef __linux__
 	cmdbuf->buf += sz * 4;
 	cmdbuf->bufsz -= sz * 4;
+#endif
 
 	return 0;
 }
@@ -869,12 +875,12 @@ static __inline__ void r300_pacify(drm_radeon_private_t *dev_priv)
  * The actual age emit is done by r300_do_cp_cmdbuf, which is why you must
  * be careful about how this function is called.
  */
-static void r300_discard_buffer(struct drm_device * dev, struct drm_buf * buf)
+static void r300_discard_buffer(struct drm_device *dev, struct drm_master *master, struct drm_buf *buf)
 {
-	drm_radeon_private_t *dev_priv = dev->dev_private;
 	drm_radeon_buf_priv_t *buf_priv = buf->dev_private;
+	struct drm_radeon_master_private *master_priv = master->driver_priv;
 
-	buf_priv->age = ++dev_priv->sarea_priv->last_dispatch;
+	buf_priv->age = ++master_priv->sarea_priv->last_dispatch;
 	buf->pending = 1;
 	buf->used = 0;
 }
@@ -1035,6 +1041,7 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 		      drm_radeon_kcmd_buffer_t *cmdbuf)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
+	struct drm_radeon_master_private *master_priv = file_priv->master->driver_priv;
 	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf *buf = NULL;
 	int emit_dispatch_age = 0;
@@ -1141,7 +1148,7 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 			}
 
 			emit_dispatch_age = 1;
-			r300_discard_buffer(dev, buf);
+			r300_discard_buffer(dev, file_priv->master, buf);
 			break;
 
 		case R300_CMD_WAIT:
@@ -1196,7 +1203,7 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 
 		/* Emit the vertex buffer age */
 		BEGIN_RING(2);
-		RADEON_DISPATCH_AGE(dev_priv->sarea_priv->last_dispatch);
+		RADEON_DISPATCH_AGE(master_priv->sarea_priv->last_dispatch);
 		ADVANCE_RING();
 	}
 

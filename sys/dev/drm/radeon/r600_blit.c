@@ -1094,6 +1094,13 @@ static u32 r6xx_ps[] =
 	0x00000000,
 };
 
+#ifndef __linux__ /* from r600_blit_shaders.c */
+const u32 r6xx_ps_size = ARRAY_SIZE(r6xx_ps);
+const u32 r6xx_vs_size = ARRAY_SIZE(r6xx_vs);
+const u32 r6xx_default_size = ARRAY_SIZE(r6xx_default_state);
+const u32 r7xx_default_size = ARRAY_SIZE(r7xx_default_state);
+#endif
+
 #define DI_PT_RECTLIST 0x11
 #define DI_INDEX_SIZE_16_BIT 0x0
 #define DI_SRC_SEL_AUTO_INDEX 0x2
@@ -1291,11 +1298,17 @@ set_shaders(struct drm_device *dev)
 	vs = (u32 *) ((char *)dev->agp_buffer_map->handle + dev_priv->blit_vb->offset);
 	ps = (u32 *) ((char *)dev->agp_buffer_map->handle + dev_priv->blit_vb->offset + 256);
 
+#if 0
 	shader_size = sizeof(r6xx_vs) / 4;
 	for (i= 0; i < shader_size; i++)
 		vs[i] = r6xx_vs[i];
 	shader_size = sizeof(r6xx_ps) / 4;
 	for (i= 0; i < shader_size; i++)
+		ps[i] = r6xx_ps[i];
+#endif
+	for (i = 0; i < r6xx_vs_size; i++)
+		vs[i] = r6xx_vs[i];
+	for (i = 0; i < r6xx_ps_size; i++)
 		ps[i] = r6xx_ps[i];
 
 	dev_priv->blit_vb->used = 512;
@@ -1622,10 +1635,15 @@ set_default_state(drm_radeon_private_t *dev_priv)
 		for (i = 0; i < default_state_dw; i++)
 			OUT_RING(r7xx_default_state[i]);
 	} else {
+		BEGIN_RING(r6xx_default_size + 10);
+		for (i = 0; i < r6xx_default_size; i++)
+			OUT_RING(r6xx_default_state[i]);
+#if 0
 		default_state_dw = sizeof(r6xx_default_state) / 4;
 		BEGIN_RING(default_state_dw + 10);
 		for (i = 0; i < default_state_dw; i++)
 			OUT_RING(r6xx_default_state[i]);
+#endif
 	}
 	OUT_RING(CP_PACKET3(R600_IT_EVENT_WRITE, 0));
 	OUT_RING(R600_CACHE_FLUSH_AND_INV_EVENT);
@@ -1666,17 +1684,48 @@ static inline uint32_t i2f(uint32_t input)
 	return result;
 }
 
-int
-r600_prepare_blit_copy(struct drm_device *dev)
+static inline int r600_nomm_get_vb(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
-	DRM_DEBUG("\n");
-
 	dev_priv->blit_vb = radeon_freelist_get(dev);
 	if (!dev_priv->blit_vb) {
 		DRM_ERROR("Unable to allocate vertex buffer for blit\n");
 		return -EAGAIN;
 	}
+	return 0;
+}
+
+static inline void r600_nomm_put_vb(struct drm_device *dev)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+
+	dev_priv->blit_vb->used = 0;
+	radeon_cp_discard_buffer(dev, dev_priv->blit_vb->file_priv->master, dev_priv->blit_vb);
+}
+
+static inline void *r600_nomm_get_vb_ptr(struct drm_device *dev)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+	return (((char *)dev->agp_buffer_map->handle +
+		 dev_priv->blit_vb->offset + dev_priv->blit_vb->used));
+}
+
+int
+r600_prepare_blit_copy(struct drm_device *dev, struct drm_file *file_priv)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+	DRM_DEBUG("\n");
+
+	r600_nomm_get_vb(dev);
+
+	dev_priv->blit_vb->file_priv = file_priv;
+#if 0
+	dev_priv->blit_vb = radeon_freelist_get(dev);
+	if (!dev_priv->blit_vb) {
+		DRM_ERROR("Unable to allocate vertex buffer for blit\n");
+		return -EAGAIN;
+	}
+#endif
 
 	set_default_state(dev_priv);
 	set_shaders(dev);
@@ -1702,8 +1751,11 @@ r600_done_blit_copy(struct drm_device *dev)
 	ADVANCE_RING();
 	COMMIT_RING();
 
+	r600_nomm_put_vb(dev);
+#if 0
 	dev_priv->blit_vb->used = 0;
 	radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
+#endif
 }
 
 void
@@ -1716,12 +1768,16 @@ r600_blit_copy(struct drm_device *dev,
 	u64 vb_addr;
 	u32 *vb;
 
+	vb = r600_nomm_get_vb_ptr(dev);
+#if 0
 	vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
 	    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
+#endif
+#if 0
 	DRM_DEBUG("src=0x%016llx, dst=0x%016llx, size=%d\n",
 	    (unsigned long long)src_gpu_addr,
 	    (unsigned long long)dst_gpu_addr, size_bytes);
-
+#endif
 	if ((size_bytes & 3) || (src_gpu_addr & 3) || (dst_gpu_addr & 3)) {
 		max_bytes = 8192;
 
@@ -1751,14 +1807,22 @@ r600_blit_copy(struct drm_device *dev,
 			}
 
 			if ((dev_priv->blit_vb->used + 48) > dev_priv->blit_vb->total) {
+
+				r600_nomm_put_vb(dev);
+				r600_nomm_get_vb(dev);
+#if 0
 				dev_priv->blit_vb->used = 0;
 				radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
 				dev_priv->blit_vb = radeon_freelist_get(dev);
+#endif
 				if (!dev_priv->blit_vb)
 					return;
 				set_shaders(dev);
+				vb = r600_nomm_get_vb_ptr(dev);
+#if 0
 				vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
 				    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
+#endif
 			}
 
 			vb[0] = i2f(dst_x);
@@ -1841,14 +1905,21 @@ r600_blit_copy(struct drm_device *dev,
 			}
 
 			if ((dev_priv->blit_vb->used + 48) > dev_priv->blit_vb->total) {
+				r600_nomm_put_vb(dev);
+				r600_nomm_get_vb(dev);
+#if 0
 				dev_priv->blit_vb->used = 0;
 				radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
 				dev_priv->blit_vb = radeon_freelist_get(dev);
+#endif
 				if (!dev_priv->blit_vb)
 					return;
 				set_shaders(dev);
+				vb = r600_nomm_get_vb_ptr(dev);
+#if 0
 				vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
 				    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
+#endif
 			}
 
 			vb[0] = i2f(dst_x / 4);
@@ -1919,15 +1990,23 @@ r600_blit_swap(struct drm_device *dev,
 	u32 *vb;
 
 	if ((dev_priv->blit_vb->used + 48) > dev_priv->blit_vb->total) {
+
+		r600_nomm_put_vb(dev);
+		r600_nomm_get_vb(dev);
+#if 0
 		dev_priv->blit_vb->used = 0;
 		radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
 		dev_priv->blit_vb = radeon_freelist_get(dev);
+#endif
 		if (!dev_priv->blit_vb)
 			return;
 		set_shaders(dev);
 	}
+	vb = r600_nomm_get_vb_ptr(dev);
+#if 0
 	vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
 	    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
+#endif
 
 	sx2 = sx + w;
 	sy2 = sy + h;

@@ -486,11 +486,7 @@ static __inline__ int radeon_check_offset(drm_radeon_private_t *dev_priv,
 }
 
 /* radeon_state.c */
-#ifdef __linux__
 extern void radeon_cp_discard_buffer(struct drm_device *dev, struct drm_master *master, struct drm_buf *buf);
-#else
-extern void radeon_cp_discard_buffer(struct drm_device * dev, struct drm_buf * buf);
-#endif
 
 				/* radeon_cp.c */
 extern int radeon_cp_init(struct drm_device *dev, void *data, struct drm_file *file_priv);
@@ -586,22 +582,14 @@ extern int r600_cp_dispatch_indirect(struct drm_device *dev,
 extern int r600_page_table_init(struct drm_device *dev);
 extern void r600_page_table_cleanup(struct drm_device *dev, struct drm_ati_pcigart_info *gart_info);
 extern int r600_cs_legacy_ioctl(struct drm_device *dev, void *data, struct drm_file *fpriv);
-#ifdef __linux__
 extern void r600_cp_dispatch_swap(struct drm_device *dev, struct drm_file *file_priv);
-#else
-extern void r600_cp_dispatch_swap(struct drm_device * dev);
-#endif
 extern int r600_cp_dispatch_texture(struct drm_device * dev,
 				    struct drm_file *file_priv,
 				    drm_radeon_texture_t * tex,
 				    drm_radeon_tex_image_t * image);
 
 /* r600_blit.c */
-#ifdef __linux__
 extern int r600_prepare_blit_copy(struct drm_device *dev, struct drm_file *file_priv);
-#else
-extern int r600_prepare_blit_copy(struct drm_device *dev);
-#endif
 extern void r600_done_blit_copy(struct drm_device *dev);
 extern void r600_blit_copy(struct drm_device *dev,
 		           uint64_t src_gpu_addr, uint64_t dst_gpu_addr,
@@ -2201,8 +2189,6 @@ do {									\
 	}								\
 } while (0)
 
-#ifdef __linux__
-
 #define VB_AGE_TEST_WITH_RETURN( dev_priv )				\
 do {								\
 	struct drm_radeon_master_private *master_priv = file_priv->master->driver_priv;	\
@@ -2218,25 +2204,6 @@ do {								\
 		radeon_freelist_reset( dev );				\
 	}								\
 } while (0)
-
-#else /* __linux__ */
-
-#define VB_AGE_TEST_WITH_RETURN( dev_priv )				\
-do {								\
-	drm_radeon_sarea_t *sarea_priv = dev_priv->sarea_priv;	\
-	if ( sarea_priv->last_dispatch >= RADEON_MAX_VB_AGE ) {		\
-		int __ret;						\
-		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600) \
-			__ret = r600_do_cp_idle(dev_priv);		\
-		else							\
-			__ret = radeon_do_cp_idle(dev_priv);		\
-		if ( __ret ) return __ret;				\
-		sarea_priv->last_dispatch = 0;				\
-		radeon_freelist_reset( dev );				\
-	}								\
-} while (0)
-
-#endif /* __linux__ */
 
 #define RADEON_DISPATCH_AGE( age ) do {					\
 	OUT_RING( CP_PACKET0( RADEON_LAST_DISPATCH_REG, 0 ) );		\
