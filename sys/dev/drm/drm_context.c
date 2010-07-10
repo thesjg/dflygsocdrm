@@ -1,4 +1,14 @@
-/*-
+/**
+ * \file drm_context.c
+ * IOCTLs for generic contexts
+ *
+ * \author Rickard E. (Rik) Faith <faith@valinux.com>
+ * \author Gareth Hughes <gareth@valinux.com>
+ */
+
+/*
+ * Created: Fri Nov 24 18:31:37 2000 by gareth@valinux.com
+ *
  * Copyright 1999, 2000 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
@@ -21,11 +31,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- *
- * Authors:
- *    Rickard E. (Rik) Faith <faith@valinux.com>
- *    Gareth Hughes <gareth@valinux.com>
- *
  */
 
 /*
@@ -33,10 +38,6 @@
  *  2001-11-16	Torsten Duwe <duwe@caldera.de>
  *		added context constructor/destructor hooks,
  *		needed by SiS driver's memory management.
- */
-
-/** @file drm_context.c
- * Implementation of the context management ioctls.
  */
 
 #include "drmP.h"
@@ -57,26 +58,26 @@
  */
 void drm_ctxbitmap_free(struct drm_device *dev, int ctx_handle)
 {
+
+#ifdef DRM_NEWER_LOCK
+	mutex_lock(&dev->struct_mutex);
+#endif
+
 	if (ctx_handle < 0 || ctx_handle >= DRM_MAX_CTXBITMAP || 
 	    dev->ctx_bitmap == NULL) {
 		DRM_ERROR("Attempt to free invalid context handle: %d\n",
 		   ctx_handle);
+#ifdef DRM_NEWER_LOCK
+		mutex_unlock(&dev->struct_mutex);
+#endif
 		return;
 	}
-
-#ifdef DRM_NEWER_LOCK
-	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_LOCK();
-#endif
 
 	clear_bit(ctx_handle, dev->ctx_bitmap);
 	dev->context_sareas[ctx_handle] = NULL;
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
-	DRM_UNLOCK();
 #endif
 	return;
 }
@@ -92,10 +93,7 @@ void drm_ctxbitmap_free(struct drm_device *dev, int ctx_handle)
  */
 static int drm_ctxbitmap_next(struct drm_device *dev)
 {
-	int bit;
-
-	if (dev->ctx_bitmap == NULL)
-		return -1;
+	int new_id;
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
@@ -103,8 +101,8 @@ static int drm_ctxbitmap_next(struct drm_device *dev)
 	DRM_LOCK();
 #endif
 
-	bit = find_first_zero_bit(dev->ctx_bitmap, DRM_MAX_CTXBITMAP);
-	if (bit >= DRM_MAX_CTXBITMAP) {
+	if (dev->ctx_bitmap == NULL) {
+		DRM_ERROR("in drm_ctxbitmap_next() ctx_bitmap uninitialized\n");
 #ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
 #else
@@ -113,25 +111,29 @@ static int drm_ctxbitmap_next(struct drm_device *dev)
 		return -1;
 	}
 
-	set_bit(bit, dev->ctx_bitmap);
-	DRM_DEBUG("bit : %d\n", bit);
-	if ((bit+1) > dev->max_context) {
-		drm_local_map_t **ctx_sareas;
-		int max_ctx = (bit+1);
-
+	new_id = find_first_zero_bit(dev->ctx_bitmap, DRM_MAX_CTXBITMAP);
+	if (new_id >= DRM_MAX_CTXBITMAP) {
 #ifdef DRM_NEWER_LOCK
-		ctx_sareas = realloc(dev->context_sareas,
-		    max_ctx * sizeof(*dev->context_sareas),
-		    DRM_MEM_SAREA, M_WAITOK);
+		mutex_unlock(&dev->struct_mutex);
 #else
-		ctx_sareas = realloc(dev->context_sareas,
-		    max_ctx * sizeof(*dev->context_sareas),
-		    DRM_MEM_SAREA, M_NOWAIT);
+		DRM_UNLOCK();
 #endif
+		return -1;
+	}
+
+	set_bit(new_id, dev->ctx_bitmap);
+	if ((new_id + 1) > dev->max_context) {
+		drm_local_map_t **ctx_sareas;
+		int max_ctx = (new_id + 1);
+
+		ctx_sareas = realloc(dev->context_sareas,
+			max_ctx * sizeof(*dev->context_sareas),
+			DRM_MEM_SAREA, M_WAITOK);
 
 		if (ctx_sareas == NULL) {
-			clear_bit(bit, dev->ctx_bitmap);
-			DRM_DEBUG("failed to allocate bit : %d\n", bit);
+			clear_bit(new_id, dev->ctx_bitmap);
+			DRM_ERROR("drm_ctxbitmap_next () failed to allocate bit : %d\n",
+				new_id);
 #ifdef DRM_NEWER_LOCK
 			mutex_unlock(&dev->struct_mutex);
 #else
@@ -141,14 +143,14 @@ static int drm_ctxbitmap_next(struct drm_device *dev)
 		}
 		dev->max_context = max_ctx;
 		dev->context_sareas = ctx_sareas;
-		dev->context_sareas[bit] = NULL;
+		dev->context_sareas[new_id] = NULL;
 	}
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
 #else
 	DRM_UNLOCK();
 #endif
-	return bit;
+	return new_id;
 }
 
 /**
@@ -493,6 +495,7 @@ int drm_resctx(struct drm_device *dev, void *data,
 int drm_addctx(struct drm_device *dev, void *data,
 		struct drm_file *file_priv)
 {
+	struct drm_ctx_list *ctx_entry;
 	struct drm_ctx *ctx = data;
 
 	ctx->handle = drm_ctxbitmap_next(dev);
@@ -507,17 +510,25 @@ int drm_addctx(struct drm_device *dev, void *data,
 		return ENOMEM;
 	}
 
-	if (dev->driver->context_ctor && ctx->handle != DRM_KERNEL_CONTEXT) {
+	if (ctx->handle != DRM_KERNEL_CONTEXT) {
+		if (dev->driver->context_ctor) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
 #endif
-		dev->driver->context_ctor(dev, ctx->handle);
+/* used in legacy sis driver but not the linux sis driver */
+			if (!dev->driver->context_ctor(dev, ctx->handle)) {
+				DRM_DEBUG("Running out of ctxs or memory.\n");
+#ifndef DRM_NEWER_LOCK
+				DRM_UNLOCK();
+#endif
+				return -ENOMEM;
+			}
+		}
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 	}
 
-#ifdef __linux__
 	ctx_entry = malloc(sizeof(*ctx_entry), DRM_MEM_CTXBITMAP, M_WAITOK);
 	if (!ctx_entry) {
 		DRM_DEBUG("out of memory\n");
@@ -532,7 +543,6 @@ int drm_addctx(struct drm_device *dev, void *data,
 	list_add(&ctx_entry->head, &dev->ctxlist);
 	++dev->ctx_count;
 	mutex_unlock(&dev->ctxlist_mutex);
-#endif /* __linux__ */
 
 	return 0;
 }
@@ -615,26 +625,23 @@ int drm_newctx(struct drm_device *dev, void *data,
  *
  * If not the special kernel context, calls ctxbitmap_free() to free the specified context.
  */
-int drm_rmctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int drm_rmctx(struct drm_device *dev, void *data,
+	      struct drm_file *file_priv)
 {
 	struct drm_ctx *ctx = data;
+
+#ifndef DRM_NEWER_LOCK
+	DRM_LOCK();
+#endif
 
 	DRM_DEBUG("%d\n", ctx->handle);
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {
 		if (dev->driver->context_dtor) {
-#ifndef DRM_NEWER_LOCK
-			DRM_LOCK();
-#endif
 			dev->driver->context_dtor(dev, ctx->handle);
-#ifndef DRM_NEWER_LOCK
-			DRM_UNLOCK();
-#endif
 		}
-
 		drm_ctxbitmap_free(dev, ctx->handle);
 	}
 
-#ifdef __linux__
 	mutex_lock(&dev->ctxlist_mutex);
 	if (!list_empty(&dev->ctxlist)) {
 		struct drm_ctx_list *pos, *n;
@@ -648,7 +655,12 @@ int drm_rmctx(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		}
 	}
 	mutex_unlock(&dev->ctxlist_mutex);
-#endif /* __linux__ */
+
+#ifndef DRM_NEWER_LOCK
+	DRM_UNLOCK();
+#endif
 
 	return 0;
 }
+
+/*@}*/
