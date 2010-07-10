@@ -1451,6 +1451,10 @@ lock_kernel();
 	    !dev->driver->reclaim_buffers_locked)
 		drm_core_reclaim_buffers(dev, file_priv);
 
+#ifndef __linux__
+	funsetown(dev->buf_sigio);
+#endif /* __linux__ */
+
 #ifdef __linux__
 	drm_events_release(file_priv);
 
@@ -1459,10 +1463,6 @@ lock_kernel();
 
 	if (dev->driver->driver_features & DRIVER_MODESET)
 		drm_fb_release(file_priv);
-#endif /* __linux__ */
-
-#ifndef __linux__
-	funsetown(dev->buf_sigio);
 #endif /* __linux__ */
 
 	mutex_lock(&dev->ctxlist_mutex);
