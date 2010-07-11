@@ -660,11 +660,13 @@ static int drm_firstopen(struct drm_device *dev)
 	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
 #endif /* DRM_NEWER_LOCK */
 
+#if 0
 	/* prebuild the SAREA */
 	i = drm_addmap(dev, 0, SAREA_MAX, _DRM_SHM,
 	    _DRM_CONTAINS_LOCK, &map);
 	if (i != 0)
 		return i;
+#endif
 #endif /* !__linux__ */
 
 	if (dev->driver->firstopen) {
