@@ -38,17 +38,7 @@
  *
  */
 
-/** @file drm_auth.c
- * Implementation of the get/authmagic ioctls implementing the authentication
- * scheme between the master and clients.
- */
-
 #include "drmP.h"
-
-static int drm_hash_magic(drm_magic_t magic)
-{
-	return magic & (DRM_HASH_SIZE-1);
-}
 
 /**
  * Find the file with the given magic number.
@@ -60,30 +50,20 @@ static int drm_hash_magic(drm_magic_t magic)
  * the one with matching magic number, while holding the drm_device::struct_mutex
  * lock.
  */
-static struct drm_file *drm_find_file(struct drm_device *dev, drm_magic_t magic)
+static struct drm_file *drm_find_file(struct drm_master *master, drm_magic_t magic)
 {
+	struct drm_file *retval = NULL;
 	struct drm_magic_entry *pt;
-	int hash = drm_hash_magic(magic);
+	struct drm_hash_item *hash;
+	struct drm_device *dev = master->minor->dev;
 
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-#endif
-
-	for (pt = dev->magiclist[hash].head; pt; pt = pt->next) {
-		if (pt->magic == magic) {
-#ifdef DRM_NEWER_LOCK
-			mutex_unlock(&dev->struct_mutex);
-#endif
-			return pt->priv;
-		}
+	if (!drm_ht_find_item(&master->magiclist, (unsigned long)magic, &hash)) {
+		pt = drm_hash_entry(hash, struct drm_magic_entry, hash_item);
+		retval = pt->priv;
 	}
-
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
-	return NULL;
+	return retval;
 }
 
 /**
@@ -97,99 +77,58 @@ static struct drm_file *drm_find_file(struct drm_device *dev, drm_magic_t magic)
  * associated the magic number hash key in drm_device::magiclist, while holding
  * the drm_device::struct_mutex lock.
  */
-static int drm_add_magic(struct drm_device *dev, struct drm_file *priv,
+static int drm_add_magic(struct drm_master *master, struct drm_file *priv,
 			 drm_magic_t magic)
 {
-	int		  hash;
 	struct drm_magic_entry *entry;
-
+	struct drm_device *dev = master->minor->dev;
 	DRM_DEBUG("%d\n", magic);
 
-#ifndef DRM_NEWER_LOCK
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-#endif
-
-	hash = drm_hash_magic(magic);
-#ifdef DRM_NEWER_LOCK
 	entry = malloc(sizeof(*entry), DRM_MEM_MAGIC, M_ZERO | M_WAITOK);
-#else
-	entry = malloc(sizeof(*entry), DRM_MEM_MAGIC, M_ZERO | M_NOWAIT);
-#endif
 	if (!entry)
 		return ENOMEM;
-	entry->magic = magic;
-	entry->priv  = priv;
-	entry->next  = NULL;
-
-#ifdef DRM_NEWER_LOCK
+	entry->priv = priv;
+	entry->hash_item.key = (unsigned long)magic;
 	mutex_lock(&dev->struct_mutex);
-#endif
-	if (dev->magiclist[hash].tail) {
-		dev->magiclist[hash].tail->next = entry;
-		dev->magiclist[hash].tail	= entry;
-	} else {
-		dev->magiclist[hash].head	= entry;
-		dev->magiclist[hash].tail	= entry;
-	}
-#ifdef DRM_NEWER_LOCK
+	drm_ht_insert_item(&master->magiclist, &entry->hash_item);
+	list_add_tail(&entry->head, &master->magicfree);
 	mutex_unlock(&dev->struct_mutex);
-#endif
 
 	return 0;
 }
 
 /**
- * Removes the given magic number from the hash table of used magic number
- * lists.
+ * Remove a magic number.
+ *
+ * \param dev DRM device.
+ * \param magic magic number.
+ *
+ * Searches and unlinks the entry in drm_device::magiclist with the magic
+ * number hash key, while holding the drm_device::struct_mutex lock.
  */
-static int drm_remove_magic(struct drm_device *dev, drm_magic_t magic)
+static int drm_remove_magic(struct drm_master *master, drm_magic_t magic)
 {
-	struct drm_magic_entry *prev = NULL;
 	struct drm_magic_entry *pt;
-	int		  hash;
-
-#ifndef DRM_NEWER_LOCK
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-#endif
+	struct drm_hash_item *hash;
+	struct drm_device *dev = master->minor->dev;
 
 	DRM_DEBUG("%d\n", magic);
-	hash = drm_hash_magic(magic);
 
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#endif
-	for (pt = dev->magiclist[hash].head; pt; prev = pt, pt = pt->next) {
-		if (pt->magic == magic) {
-			if (dev->magiclist[hash].head == pt) {
-				dev->magiclist[hash].head = pt->next;
-			}
-			if (dev->magiclist[hash].tail == pt) {
-				dev->magiclist[hash].tail = prev;
-			}
-			if (prev) {
-				prev->next = pt->next;
-			}
-#ifdef DRM_NEWER_LOCK
-			mutex_unlock(&dev->struct_mutex);
-#endif
-			free(pt, DRM_MEM_MAGIC);
-			return 0;
-		}
+	if (drm_ht_find_item(&master->magiclist, (unsigned long)magic, &hash)) {
+		mutex_unlock(&dev->struct_mutex);
+		return EINVAL;
 	}
-#ifdef DRM_NEWER_LOCK
+	pt = drm_hash_entry(hash, struct drm_magic_entry, hash_item);
+	drm_ht_remove_item(&master->magiclist, hash);
+	list_del(&pt->head);
 	mutex_unlock(&dev->struct_mutex);
-#endif
-	return EINVAL;
+
+	free(pt, DRM_MEM_MAGIC);
+
+	return 0;
 }
 
-/**
- * Called by the client, this returns a unique magic number to be authorized
- * by the master.
- *
- * The master may use its own knowledge of the client (such as the X
- * connection that the magic is passed over) to determine if the magic number
- * should be authenticated.
- */
 /**
  * Get a unique magic number (ioctl).
  *
@@ -206,52 +145,47 @@ static int drm_remove_magic(struct drm_device *dev, drm_magic_t magic)
 int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	static drm_magic_t sequence = 0;
+#ifdef __linux__
+	static DEFINE_SPINLOCK(lock);
+#endif /* __linux__ */
 	struct drm_auth *auth = data;
+
+#ifdef DRM_NEWER_LOCK
+	DRM_LOCK();
+#endif
 
 	/* Find unique magic */
 	if (file_priv->magic) {
 		auth->magic = file_priv->magic;
 	} else {
-#ifdef __linux__
 		do {
+#ifdef __linux__
 			spin_lock(&lock);
+#else
+			spin_lock(&dev->auth_lock);
+#endif /* __linux__ */
 			if (!sequence)
 				++sequence;	/* reserve 0 */
 			auth->magic = sequence++;
+#ifdef __linux__
 			spin_unlock(&lock);
+#else
+			spin_unlock(&dev->auth_lock);
+#endif /* __linux__ */
 		} while (drm_find_file(file_priv->master, auth->magic));
 		file_priv->magic = auth->magic;
 		drm_add_magic(file_priv->master, file_priv, auth->magic);
-#else /* __linux__ */
-
-#ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
-#endif
-		do {
-			int old = sequence;
-
-			auth->magic = old+1;
-
-			if (!atomic_cmpset_int(&sequence, old, auth->magic))
-				continue;
-		} while (drm_find_file(dev, auth->magic));
-		file_priv->magic = auth->magic;
-		drm_add_magic(dev, file_priv, auth->magic);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-
-#endif /* __linux__ */
 	}
+
+#ifdef DRM_NEWER_LOCK
+	DRM_UNLOCK();
+#endif
 
 	DRM_DEBUG("%u\n", auth->magic);
 
 	return 0;
 }
 
-/**
- * Marks the client associated with the given magic number as authenticated.
- */
 /**
  * Authenticate with a magic.
  *
@@ -267,25 +201,25 @@ int drm_authmagic(struct drm_device *dev, void *data,
 		  struct drm_file *file_priv)
 {
 	struct drm_auth *auth = data;
-	struct drm_file *priv;
-
-	DRM_DEBUG("%u\n", auth->magic);
+	struct drm_file *file;
 
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
-	priv = drm_find_file(dev, auth->magic);
-	if (priv != NULL) {
-		priv->authenticated = 1;
-		drm_remove_magic(dev, auth->magic);
+
+	DRM_DEBUG("%u\n", auth->magic);
+	if ((file = drm_find_file(file_priv->master, auth->magic))) {
+		file->authenticated = 1;
+		drm_remove_magic(file_priv->master, auth->magic);
+
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 		return 0;
-	} else {
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		return EINVAL;
 	}
+
+#ifndef DRM_NEWER_LOCK
+	DRM_UNLOCK();
+#endif
+	return EINVAL;
 }

@@ -252,6 +252,7 @@ static int drm_fill_in_dev(struct drm_device *dev,
 	lwkt_serialize_init(&dev->irq_lock);
 /* Should perhaps be initialized in drm_irq.c as in linux drm */
 	DRM_SPININIT(&dev->vbl_lock, "drmvbl");
+	DRM_SPININIT(&dev->auth_lock, "drmvbl");
 #endif /* __linux__ */
 
 #ifdef __linux__
@@ -699,7 +700,7 @@ static int drm_firstopen(struct drm_device *dev)
 	for (i = 0; i < ARRAY_SIZE(dev->counts); i++)
 		atomic_set(&dev->counts[i], 0);
 
-#ifndef __linux__
+#if 0
 	for (i = 0; i < DRM_HASH_SIZE; i++) {
 		dev->magiclist[i].head = NULL;
 		dev->magiclist[i].tail = NULL;
@@ -797,6 +798,7 @@ int drm_lastclose(struct drm_device * dev)
 		dev->unique = NULL;
 		dev->unique_len = 0;
 	}
+#if 0
 	/* Clear pid list */
 	for (i = 0; i < DRM_HASH_SIZE; i++) {
 		for (pt = dev->magiclist[i].head; pt; pt = next) {
@@ -806,6 +808,7 @@ int drm_lastclose(struct drm_device * dev)
 		dev->magiclist[i].head = dev->magiclist[i].tail = NULL;
 	}
 #endif
+#endif /* !__linux__ */
 
 #ifndef DRM_NEWER_FILELIST
 	DRM_UNLOCK();

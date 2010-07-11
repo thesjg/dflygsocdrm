@@ -383,9 +383,7 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 			       priv->authenticated ? 'y' : 'n',
 			       priv->minor_legacy,
 			       priv->pid,
-			       priv->uid,
-			       priv->magic,
-			       priv->ioctl_count);
+			       priv->uid, priv->magic, priv->ioctl_count);
 	}
 
 	SYSCTL_OUT(req, "", 1);

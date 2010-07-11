@@ -183,11 +183,8 @@ static void drm_master_destroy(struct kref *kref)
 	}
 
 	if (master->unique) {
-#ifdef __linux__
-		kfree(master->unique);
-#else /* allocated in drm_ioctl.c */
+/* allocated in drm_ioctl.c */
 		free(master->unique, DRM_MEM_DRIVER);
-#endif /* __linux__ */
 		master->unique = NULL;
 		master->unique_len = 0;
 	}
@@ -195,22 +192,15 @@ static void drm_master_destroy(struct kref *kref)
 	list_for_each_entry_safe(pt, next, &master->magicfree, head) {
 		list_del(&pt->head);
 		drm_ht_remove_item(&master->magiclist, &pt->hash_item);
-#ifdef __linux__
-		kfree(pt);
-#else /* allocated in drm_auth.c */
+/* allocated in drm_auth.c */
 		free(pt, DRM_MEM_MAGIC);
-#endif /* __linux__ */
 	}
 
 	drm_ht_remove(&master->magiclist);
 
-#ifdef __linux__
-	kfree(master);
-#else
 	DRM_INFO("master destroyed by pid (%d), minor_id (%d)\n",
 		DRM_CURRENTPID, master->minor->index);
 	free(master, DRM_MEM_STUB);
-#endif /* __linux__ */
 }
 
 void drm_master_put(struct drm_master **master)
