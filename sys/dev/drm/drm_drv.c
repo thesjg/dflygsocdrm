@@ -1176,7 +1176,6 @@ int drm_open_legacy(struct dev_open_args *ap)
 	if (minor && (dev != minor->dev)) {
 		DRM_ERROR("Minor device != softc device for %d\n", minor_id);
 	}
-	DRM_DEBUG("open_count = %d\n", dev->open_count);
 #endif /* __linux__ */
 
 #ifdef __linux__

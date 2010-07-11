@@ -229,7 +229,9 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #ifdef __linux__
 		block_all_signals(drm_notifier, &dev->sigdata, &dev->sigmask);
 #endif /* __linux__ */
+#ifdef __linux__
 		DRM_INFO("drm_lock pid (%d) needs signals blocked\n", DRM_CURRENTPID);
+#endif /* __linux__ */
 	}
 
 #endif

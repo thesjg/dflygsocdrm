@@ -162,7 +162,8 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 	add = DRM_MAP_HASH_OFFSET >> PAGE_SHIFT;
 
 #if 0
-/* SHMLBA in sys/shm.h is defined to be PAGE_SIZE in DragonFly BSD */
+/* SHMLBA in sys/shm.h is defined to be PAGE_SIZE
+ * in DragonFly BSD and in FreeBSD */
 	if (shm && (SHMLBA > PAGE_SIZE)) {
 		int bits = ilog2(SHMLBA >> PAGE_SHIFT) + 1;
 
@@ -182,6 +183,8 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 		add |= ((user_token >> PAGE_SHIFT) & ((1UL << bits) - 1UL));
 	}
 #endif
+	DRM_INFO("call to drm_ht_just_insert_please(): user_token (%016lx), shift (%08x), add (%016lx)\n",
+		user_token, shift, add);
 
 	return drm_ht_just_insert_please(&dev->map_hash, hash,
 					 user_token, 32 - PAGE_SHIFT - 3,
@@ -408,8 +411,7 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 #endif
 		}
 		break;
-	case _DRM_AGP:
-#ifdef __linux__
+	case _DRM_AGP: {
 		struct drm_agp_mem *entry;
 		int valid = 0;
 
@@ -420,7 +422,6 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 #endif
 			return EINVAL;
 		}
-#endif /* __linux__ */
 
 		/* In some cases (i810 driver), user space may have already
 		 * added the AGP base itself, because dev->agp->base previously
@@ -435,7 +436,6 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 		}
 		map->mtrr   = dev->agp->mtrr; /* for getmap */
 
-#ifdef __linux
 		/* This assumes the DRM is in total control of AGP space.
 		 * It's not always the case as AGP can be in the control
 		 * of user space (i.e. i810 driver). So this loop will get
@@ -450,12 +450,15 @@ static int drm_addmap_core(struct drm_device * dev, unsigned long offset,
 			}
 		}
 		if (!list_empty(&dev->agp->memory) && !valid) {
+			DRM_ERROR("drm_addmap_core() agp invalid\n");
+#ifdef __linux__
 			free(map, DRM_MEM_MAPS);
 			return -EPERM;
-		}
 #endif /* __linux__ */
+		}
 
 		break;
+	}
 	case _DRM_GEM:
 		DRM_ERROR("tried to addmap GEM object\n");
 		break;
@@ -769,6 +772,7 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 	}
 #ifndef __linux__
 	if (map->bsr != NULL) {
+		DRM_INFO("drm_rmmap_locked(): map->bsr != NULL\n");
 		bus_release_resource(dev->device, SYS_RES_MEMORY, map->rid,
 		    map->bsr);
 	}
@@ -935,9 +939,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 {
 	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf_entry *entry;
-#ifdef __linux__
 	struct drm_agp_mem *agp_entry;
-#endif /* __linux__ */
 	struct drm_buf *buf;
 	unsigned long offset;
 	unsigned long agp_offset;
@@ -948,10 +950,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 	int page_order;
 	int total;
 	int byte_count;
-	int i;
-#ifdef __linux__
-	int valid;
-#endif /* __linux__ */
+	int i, valid;
 	struct drm_buf **temp_buflist;
 
 	if (!dma)
@@ -965,7 +964,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 	size = 1 << order;
 
 	alignment  = (request->flags & _DRM_PAGE_ALIGN)
-	    ? round_page(size) : size;
+	    ? PAGE_ALIGN(size) : size;
 	page_order = order - PAGE_SHIFT > 0 ? order - PAGE_SHIFT : 0;
 	total = PAGE_SIZE << page_order;
 
@@ -992,7 +991,6 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 	 * memory.  Safe to ignore for now because these ioctls are still
 	 * root-only.
 	 */
-#ifdef __linux__
 	valid = 0;
 	list_for_each_entry(agp_entry, &dev->agp->memory, head) {
 		if ((agp_offset >= agp_entry->bound) &&
@@ -1002,10 +1000,12 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 		}
 	}
 	if (!list_empty(&dev->agp->memory) && !valid) {
+		DRM_ERROR("drm_addbufs_agp(): zone invalid\n");
 		DRM_DEBUG("zone invalid\n");
+#ifdef __linux__
 		return -EINVAL;
-	}
 #endif /* __linux__ */
+	}
 
 #ifdef DRM_NEWER_LOCK
 	spin_lock(&dev->count_lock);
@@ -1203,7 +1203,7 @@ int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 #endif
 
 	alignment = (request->flags & _DRM_PAGE_ALIGN)
-	    ? round_page(size) : size;
+	    ? PAGE_ALIGN(size) : size;
 	page_order = order - PAGE_SHIFT > 0 ? order - PAGE_SHIFT : 0;
 	total = PAGE_SIZE << page_order;
 
@@ -1323,8 +1323,8 @@ int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 			DRM_DEBUG("page %d @ %p\n",
 			    dma->page_count + page_count,
 			    (char *)dmah->vaddr + PAGE_SIZE * i);
-			temp_pagelist[dma->page_count + page_count++] = 
-			    (long)dmah->vaddr + PAGE_SIZE * i;
+			temp_pagelist[dma->page_count + page_count++]
+				= (unsigned long)dmah->vaddr + PAGE_SIZE * i;
 		}
 		for (offset = 0;
 		    offset + size <= total && entry->buf_count < count;
