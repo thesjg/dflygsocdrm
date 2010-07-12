@@ -375,11 +375,12 @@ static int drm_vblank_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	DRM_SYSCTL_PRINT("\ncrtc ref count    last     enabled inmodeset\n");
 	for(i = 0 ; i < dev->num_crtcs ; i++) {
 		DRM_SYSCTL_PRINT("  %02d  %02d %08d %08d %02d      %02d\n",
-		    i, atomic_load_acq_32(&dev->vblank[i].refcount),
-		    atomic_load_acq_32(&dev->vblank[i].count),
-		    atomic_load_acq_32(&dev->vblank[i].last),
-		    atomic_load_acq_int(&dev->vblank[i].enabled),
-		    atomic_load_acq_int(&dev->vblank[i].inmodeset));
+			i,
+			atomic_read(&dev->vblank_refcount[i]),
+			atomic_read(&dev->_vblank_count[i]),
+			atomic_read(&dev->last_vblank[i]),
+			atomic_read(&dev->vblank_enabled[i]),
+			atomic_read(&dev->vblank_inmodeset[i]));
 	}
 
 	SYSCTL_OUT(req, "", -1);
