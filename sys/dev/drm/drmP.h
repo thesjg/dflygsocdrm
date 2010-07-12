@@ -1891,8 +1891,12 @@ extern void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *d
 
 /* legacy */
 /* sysctl support (drm_sysctl.h) */
+extern int drm_sysctl_init(struct drm_minor *minor, int minor_id, DRM_PROC_DIR_ENTRY root);
+extern int drm_sysctl_cleanup(struct drm_minor *minor);
+#if 0
 extern int		drm_sysctl_init(struct drm_device *dev);
 extern int		drm_sysctl_cleanup(struct drm_device *dev);
+#endif
 
 /* DMA support (drm_dma.c) */
 int	drm_dma(struct drm_device *dev, void *data, struct drm_file *file_priv);

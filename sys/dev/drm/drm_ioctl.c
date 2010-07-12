@@ -53,12 +53,6 @@
 #include "drm_core.h"
 #endif
 
-/*
- * Beginning in revision 1.1 of the DRM interface, getunique will return
- * a unique in the form pci:oooo:bb:dd.f (o=domain, b=bus, d=device, f=function)
- * before setunique has been called.  The format for the bus-specific part of
- * the unique is not defined for any other bus.
- */
 /**
  * Get the bus id.
  *
@@ -74,19 +68,17 @@ int drm_getunique(struct drm_device *dev, void *data,
 		  struct drm_file *file_priv)
 {
 	struct drm_unique *u = data;
+	struct drm_master *master = file_priv->master;
 
-	if (u->unique_len >= dev->unique_len) {
-		if (DRM_COPY_TO_USER(u->unique, dev->unique, dev->unique_len))
+	if (u->unique_len >= master->unique_len) {
+		if (DRM_COPY_TO_USER(u->unique, master->unique, master->unique_len))
 			return EFAULT;
 	}
-	u->unique_len = dev->unique_len;
+	u->unique_len = master->unique_len;
 
 	return 0;
 }
 
-/* Deprecated in DRM version 1.1, and will return EBUSY when setversion has
- * requested version 1.1 or greater.
- */
 /**
  * Set the bus id.
  *
@@ -105,29 +97,76 @@ int drm_setunique(struct drm_device *dev, void *data,
 		  struct drm_file *file_priv)
 {
 	struct drm_unique *u = data;
+	struct drm_master *master = file_priv->master;
 	int domain, bus, slot, func, ret;
-	char *busid;
+
+#ifndef DRM_NEWER_LOCK
+	DRM_LOCK();
+#endif
+
+	if (master->unique_len || master->unique) {
+#ifndef DRM_NEWER_LOCK
+		DRM_UNLOCK();
+#endif
+		return EBUSY;
+	}
 
 	/* Check and copy in the submitted Bus ID */
-	if (!u->unique_len || u->unique_len > 1024)
+	if (!u->unique_len || u->unique_len > 1024) {
+#ifndef DRM_NEWER_LOCK
+		DRM_UNLOCK();
+#endif
 		return EINVAL;
+	}
 
-	busid = malloc(u->unique_len + 1, DRM_MEM_DRIVER, M_WAITOK);
-	if (busid == NULL)
+	master->unique_len = u->unique_len;
+	master->unique_size = u->unique_len + 1;
+	master->unique = malloc(master->unique_size, DRM_MEM_DRIVER, M_WAITOK);
+
+	if (!master->unique) {
+		master->unique_len = 0;
+#ifndef DRM_NEWER_LOCK
+		DRM_UNLOCK();
+#endif
 		return ENOMEM;
+	}
 
-	if (DRM_COPY_FROM_USER(busid, u->unique, u->unique_len)) {
-		free(busid, DRM_MEM_DRIVER);
+	if (DRM_COPY_FROM_USER(master->unique, u->unique, master->unique_len)) {
+#ifndef __linux__
+		free(master->unique, DRM_MEM_DRIVER);
+		master->unique_len = 0;
+		master->unique = NULL;
+#ifndef DRM_NEWER_LOCK
+		DRM_UNLOCK();
+#endif
+#endif /* __linux__ */
 		return EFAULT;
 	}
-	busid[u->unique_len] = '\0';
+	master->unique[u->unique_len] = '\0';
+
+#ifdef __linux__
+	dev->devname = kmalloc(strlen(dev->driver->pci_driver.name) +
+			       strlen(master->unique) + 2, GFP_KERNEL);
+	if (!dev->devname)
+		return -ENOMEM;
+
+	sprintf(dev->devname, "%s@%s", dev->driver->pci_driver.name,
+		master->unique);
+#endif /* __linux__ */
 
 	/* Return error if the busid submitted doesn't match the device's actual
 	 * busid.
 	 */
-	ret = sscanf(busid, "PCI:%d:%d:%d", &bus, &slot, &func);
+	ret = sscanf(master->unique, "PCI:%d:%d:%d", &bus, &slot, &func);
 	if (ret != 3) {
-		free(busid, DRM_MEM_DRIVER);
+#ifndef __linux__
+		free(master->unique, DRM_MEM_DRIVER);
+		master->unique_len = 0;
+		master->unique = NULL;
+#ifndef DRM_NEWER_LOCK
+		DRM_UNLOCK();
+#endif
+#endif /* __linux__ */
 		return EINVAL;
 	}
 	domain = bus >> 8;
@@ -137,57 +176,73 @@ int drm_setunique(struct drm_device *dev, void *data,
 	    (bus != dev->pci_bus) ||
 	    (slot != dev->pci_slot) ||
 	    (func != dev->pci_func)) {
-		free(busid, DRM_MEM_DRIVER);
-		return EINVAL;
-	}
-
-	/* Actually set the device's busid now. */
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-	if (dev->unique_len || dev->unique) {
+#ifndef __linux__
+		free(master->unique, DRM_MEM_DRIVER);
+		master->unique_len = 0;
+		master->unique = NULL;
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
-		return EBUSY;
+#endif /* __linux__ */
+		return EINVAL;
 	}
 
-	dev->unique_len = u->unique_len;
-	dev->unique = busid;
+#ifndef __linux__
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
+#endif /* __linux__ */
 
 	return 0;
 }
 
-
-static int
-drm_set_busid(struct drm_device *dev)
+static int drm_set_busid(struct drm_device *dev, struct drm_file *file_priv)
 {
+	struct drm_master *master = file_priv->master;
+	int len;
 
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
 
-	if (dev->unique != NULL) {
+	if (master->unique != NULL) {
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 		return EBUSY;
 	}
 
-	dev->unique_len = 20;
-	dev->unique = malloc(dev->unique_len + 1, DRM_MEM_DRIVER, M_NOWAIT);
-	if (dev->unique == NULL) {
+	master->unique_len = 40;
+	master->unique_size = master->unique_len;
+	master->unique = malloc(master->unique_size, DRM_MEM_DRIVER, M_WAITOK);
+	if (master->unique == NULL) {
+		master->unique_len = 0;
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 		return ENOMEM;
 	}
 
-	snprintf(dev->unique, dev->unique_len, "pci:%04x:%02x:%02x.%1x",
-	    dev->pci_domain, dev->pci_bus, dev->pci_slot, dev->pci_func);
+	len = snprintf(master->unique, master->unique_len, "pci:%04x:%02x:%02x.%d",
+		dev->pci_domain,
+		dev->pci_bus,
+		dev->pci_slot,
+		dev->pci_func);
+
+	if (len >= master->unique_len)
+		DRM_ERROR("buffer overflow");
+	else
+		master->unique_len = len;
+
+#ifdef __linux__
+	dev->devname = kmalloc(strlen(dev->driver->pci_driver.name) +
+			       master->unique_len + 2, GFP_KERNEL);
+	if (dev->devname == NULL)
+		return -ENOMEM;
+
+	sprintf(dev->devname, "%s@%s", dev->driver->pci_driver.name,
+		master->unique);
+#endif /* __linux__ */
 
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
@@ -434,7 +489,7 @@ int drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_pri
 			/*
 			 * Version 1.1 includes tying of DRM to specific device
 			 */
-			drm_set_busid(dev);
+			drm_set_busid(dev, file_priv);
 		}
 	}
 

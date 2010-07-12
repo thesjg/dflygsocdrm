@@ -277,7 +277,9 @@ static int drm_fill_in_dev(struct drm_device *dev,
 	dev->id_entry = id_entry;
 
 	TAILQ_INIT(&dev->maplist_legacy);
+#if 0
 	drm_sysctl_init(dev);
+#endif
 	TAILQ_INIT(&dev->files);
 
 /* also done in drm_fops.c */
@@ -909,7 +911,9 @@ static int drm_load(struct drm_device *dev)
 	TAILQ_INIT(&dev->maplist_legacy);
 
 	drm_mem_init();
+#if 0
 	drm_sysctl_init(dev);
+#endif
 	TAILQ_INIT(&dev->files);
 
 	dev->counters  = 6;
@@ -982,7 +986,9 @@ static int drm_load(struct drm_device *dev)
 	return 0;
 
 error:
+#if 0
 	drm_sysctl_cleanup(dev);
+#endif
 	DRM_LOCK();
 	drm_lastclose(dev);
 	DRM_UNLOCK();
@@ -1088,7 +1094,9 @@ static void drm_unload(struct drm_device *dev)
 	if (driver->driver_features & DRIVER_GEM)
 		drm_gem_destroy(dev);
 
+#if 0
 	drm_sysctl_cleanup(dev);
+#endif
 	destroy_dev(dev->devnode);
 
 	drm_put_minor(&dev->primary);
@@ -1789,11 +1797,16 @@ drm_local_map_t *drm_getsarea(struct drm_device *dev)
 
 static int __init drm_core_init(void)
 {
-#ifdef __linux__
 	int ret = -ENOMEM;
-#endif /* __linux__ */
 
 	idr_init(&drm_minors_idr);
+
+	drm_sysctl_root = drm_sysctl_mkroot("dri");
+	if (!drm_sysctl_root) {
+		DRM_ERROR("Cannot create sysctl hw.dri\n");
+		ret = -1;
+		goto err_p2;
+	}
 
 #ifdef __linux__
 	if (register_chrdev(DRM_MAJOR, "drm", &drm_stub_fops))
@@ -1804,13 +1817,6 @@ static int __init drm_core_init(void)
 		printk(KERN_ERR "DRM: Error creating drm class.\n");
 		ret = PTR_ERR(drm_class);
 		goto err_p2;
-	}
-
-	drm_proc_root = proc_mkdir("dri", NULL);
-	if (!drm_proc_root) {
-		DRM_ERROR("Cannot create /proc/dri\n");
-		ret = -1;
-		goto err_p3;
 	}
 
 	drm_debugfs_root = debugfs_create_dir("dri", NULL);
@@ -1827,13 +1833,13 @@ static int __init drm_core_init(void)
 #ifdef __linux__
 err_p3:
 	drm_sysfs_destroy();
-err_p2:
 	unregister_chrdev(DRM_MAJOR, "drm");
 
+#endif /* __linux */
+err_p2:
 	idr_destroy(&drm_minors_idr);
 err_p1:
 	return ret;
-#endif /* __linux */
 }
 
 static void __exit drm_core_exit(void)
@@ -1845,7 +1851,10 @@ static void __exit drm_core_exit(void)
 
 	unregister_chrdev(DRM_MAJOR, "drm");
 #endif /* __linux__ */
-
+	DRM_INFO("Exiting drm module %s %d.%d.%d %s\n",
+		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
+	drm_sysctl_rmroot(drm_sysctl_root);
+	drm_sysctl_root = NULL;
 	idr_destroy(&drm_minors_idr);
 }
 

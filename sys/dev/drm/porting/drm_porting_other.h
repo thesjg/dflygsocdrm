@@ -249,6 +249,19 @@ drm_free(void *pt, size_t size, struct malloc_type *area)
 	free(pt, area);
 }
 
+struct drm_sysctl_info {
+	struct sysctl_ctx_list ctx;
+	char name[5];
+};
+
+typedef struct sysctl_oid *DRM_PROC_DIR_ENTRY;
+
+extern DRM_PROC_DIR_ENTRY drm_sysctl_mkroot(const char *name);
+
+extern void drm_sysctl_rmroot(DRM_PROC_DIR_ENTRY root);
+
+extern DRM_PROC_DIR_ENTRY drm_sysctl_root;
+
 /* Switching to Linux drm drm_pciids.h format */
 #define DRM_NEWER_PCIID 1
 #ifdef DRM_NEWER_PCIID

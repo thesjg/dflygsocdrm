@@ -48,43 +48,54 @@ struct drm_sysctl_list {
 };
 #define DRM_SYSCTL_ENTRIES (sizeof(drm_sysctl_list)/sizeof(drm_sysctl_list[0]))
 
-struct drm_sysctl_info {
-	struct sysctl_ctx_list ctx;
-	char		       name[2];
-};
+DRM_PROC_DIR_ENTRY drm_sysctl_root;
 
-int drm_sysctl_init(struct drm_device *dev)
-{
-	struct drm_sysctl_info *info;
-	struct sysctl_oid *oid;
-	struct sysctl_oid *top, *drioid;
-	int		  i;
-
-	info = malloc(sizeof *info, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-	if ( !info )
-		return 1;
-	dev->sysctl = info;
+DRM_PROC_DIR_ENTRY drm_sysctl_mkroot(const char *name) {
+	struct sysctl_oid *drioid;
 
 	/* Add the sysctl node for DRI if it doesn't already exist */
-	drioid = SYSCTL_ADD_NODE( &info->ctx, &sysctl__hw_children, OID_AUTO, "dri", CTLFLAG_RW, NULL, "DRI Graphics");
+	drioid = SYSCTL_ADD_NODE(NULL, &sysctl__hw_children, OID_AUTO, name, CTLFLAG_RW, NULL, "DRI Graphics");
 	if (!drioid)
-		return 1;
+		return NULL;
 
-	/* Find the next free slot under hw.dri */
-	i = 0;
-	SLIST_FOREACH(oid, SYSCTL_CHILDREN(drioid), oid_link) {
-		if (i <= oid->oid_arg2)
-			i = oid->oid_arg2 + 1;
-	}
-	if (i>9)
-		return 1;
+	return drioid;
+}
+
+void drm_sysctl_rmroot(DRM_PROC_DIR_ENTRY root) {
+/* 1 == delete but 0 == do not recurse */
+	sysctl_remove_oid(root, 1, 0);
+}
+
+int drm_sysctl_init(struct drm_minor *minor, int minor_id,
+	DRM_PROC_DIR_ENTRY root)
+{
+	struct drm_device *dev = minor->dev;
+	struct sysctl_oid *drioid = root;
+	struct drm_sysctl_info *info;
+	struct sysctl_oid *oid;
+	struct sysctl_oid *top;
+	int i;
+
+	info = malloc(sizeof *info, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+	if (!info)
+		return ENOMEM;
+
+	dev->sysctl = info;
+
+	if ((minor_id < 0) || (minor_id > 9999))
+		return EINVAL;
+
+	info->name[0] = 0;
+	info->name[1] = 0;
+	info->name[2] = 0;
+	info->name[3] = 0;
+	snprintf(info->name, 5, "%d", minor_id);
+	info->name[4] = 0;
 	
 	/* Add the hw.dri.x for our device */
-	info->name[0] = '0' + i;
-	info->name[1] = 0;
-	top = SYSCTL_ADD_NODE( &info->ctx, SYSCTL_CHILDREN(drioid), OID_AUTO, info->name, CTLFLAG_RW, NULL, NULL);
+	top = SYSCTL_ADD_NODE(&info->ctx, SYSCTL_CHILDREN(drioid), OID_AUTO, info->name, CTLFLAG_RW, NULL, NULL);
 	if (!top)
-		return 1;
+		return EINVAL;
 	
 	for (i = 0; i < DRM_SYSCTL_ENTRIES; i++) {
 		oid = SYSCTL_ADD_OID(&info->ctx, 
@@ -92,7 +103,7 @@ int drm_sysctl_init(struct drm_device *dev)
 			OID_AUTO, 
 			drm_sysctl_list[i].name, 
 			CTLTYPE_INT | CTLFLAG_RD, 
-			dev, 
+			minor,
 			0, 
 			drm_sysctl_list[i].f, 
 			"A", 
@@ -107,8 +118,9 @@ int drm_sysctl_init(struct drm_device *dev)
 	return 0;
 }
 
-int drm_sysctl_cleanup(struct drm_device *dev)
+int drm_sysctl_cleanup(struct drm_minor *minor)
 {
+	struct drm_device *dev = minor->dev;
 	int error;
 	error = sysctl_ctx_free( &dev->sysctl->ctx );
 
@@ -126,9 +138,20 @@ do {								\
 		goto done;					\
 } while (0)
 
+/**
+ * Called when "/proc/dri/.../name" is read.
+ *
+ * Prints the device name together with the bus id if available.
+ */
 static int drm_name_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
-	struct drm_device *dev = arg1;
+	struct drm_minor *minor = arg1;
+	struct drm_device *dev = minor->dev;
+	struct drm_master *master = minor->master;
+
+	if (!master)
+		return 0;
+
 	char buf[128];
 	int retcode;
 	int hasunique = 0;
@@ -140,8 +163,8 @@ static int drm_name_info_legacy DRM_SYSCTL_HANDLER_ARGS
 #else
 	DRM_LOCK();
 #endif
-	if (dev->unique) {
-		snprintf(buf, sizeof(buf), " %s", dev->unique);
+	if (master->unique) {
+		snprintf(buf, sizeof(buf), " %s", master->unique);
 		hasunique = 1;
 	}
 #ifdef DRM_NEWER_LOCK
@@ -161,7 +184,8 @@ done:
 
 static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
-	struct drm_device *dev = arg1;
+	struct drm_minor *minor = arg1;
+	struct drm_device *dev = minor->dev;
 	drm_local_map_t *map, *tempmaps;
 #ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list;
@@ -254,9 +278,13 @@ done:
 	return retcode;
 }
 
+/**
+ * Called when "/proc/dri/.../bufs" is read.
+ */
 static int drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
-	struct drm_device	 *dev = arg1;
+	struct drm_minor *minor = arg1;
+	struct drm_device *dev = minor->dev;
 	struct drm_device_dma *dma = dev->dma;
 	struct drm_device_dma tempdma;
 	int *templists;
@@ -333,9 +361,40 @@ done:
 	return retcode;
 }
 
+/**
+ * Called when "/proc/dri/.../vblank" is read.
+ */
+static int drm_vblank_info_legacy DRM_SYSCTL_HANDLER_ARGS
+{
+	struct drm_minor *minor = arg1;
+	struct drm_device *dev = minor->dev;
+	char buf[128];
+	int retcode;
+	int i;
+
+	DRM_SYSCTL_PRINT("\ncrtc ref count    last     enabled inmodeset\n");
+	for(i = 0 ; i < dev->num_crtcs ; i++) {
+		DRM_SYSCTL_PRINT("  %02d  %02d %08d %08d %02d      %02d\n",
+		    i, atomic_load_acq_32(&dev->vblank[i].refcount),
+		    atomic_load_acq_32(&dev->vblank[i].count),
+		    atomic_load_acq_32(&dev->vblank[i].last),
+		    atomic_load_acq_int(&dev->vblank[i].enabled),
+		    atomic_load_acq_int(&dev->vblank[i].inmodeset));
+	}
+
+	SYSCTL_OUT(req, "", -1);
+done:
+	return retcode;
+}
+
+/**
+ * Called when "/proc/dri/.../clients" is read.
+ *
+ */
 static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 {
-	struct drm_device *dev = arg1;
+	struct drm_minor *minor = arg1;
+	struct drm_device *dev = minor->dev;
 	struct drm_file *priv, *tempprivs;
 	char buf[128];
 	int retcode;
@@ -389,27 +448,5 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	SYSCTL_OUT(req, "", 1);
 done:
 	free(tempprivs, DRM_MEM_DRIVER);
-	return retcode;
-}
-
-static int drm_vblank_info_legacy DRM_SYSCTL_HANDLER_ARGS
-{
-	struct drm_device *dev = arg1;
-	char buf[128];
-	int retcode;
-	int i;
-
-	DRM_SYSCTL_PRINT("\ncrtc ref count    last     enabled inmodeset\n");
-	for(i = 0 ; i < dev->num_crtcs ; i++) {
-		DRM_SYSCTL_PRINT("  %02d  %02d %08d %08d %02d      %02d\n",
-		    i, atomic_load_acq_32(&dev->vblank[i].refcount),
-		    atomic_load_acq_32(&dev->vblank[i].count),
-		    atomic_load_acq_32(&dev->vblank[i].last),
-		    atomic_load_acq_int(&dev->vblank[i].enabled),
-		    atomic_load_acq_int(&dev->vblank[i].inmodeset));
-	}
-
-	SYSCTL_OUT(req, "", -1);
-done:
 	return retcode;
 }

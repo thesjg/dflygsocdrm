@@ -183,7 +183,6 @@ static void drm_master_destroy(struct kref *kref)
 	}
 
 	if (master->unique) {
-/* allocated in drm_ioctl.c */
 		free(master->unique, DRM_MEM_DRIVER);
 		master->unique = NULL;
 		master->unique_len = 0;
@@ -192,14 +191,15 @@ static void drm_master_destroy(struct kref *kref)
 	list_for_each_entry_safe(pt, next, &master->magicfree, head) {
 		list_del(&pt->head);
 		drm_ht_remove_item(&master->magiclist, &pt->hash_item);
-/* allocated in drm_auth.c */
 		free(pt, DRM_MEM_MAGIC);
 	}
 
 	drm_ht_remove(&master->magiclist);
 
+#ifndef __linux__
 	DRM_INFO("master destroyed by pid (%d), minor_id (%d)\n",
 		DRM_CURRENTPID, master->minor->index);
+#endif /* __linux__ */
 	free(master, DRM_MEM_STUB);
 }
 
@@ -398,6 +398,7 @@ int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type)
 #ifdef __linux__
 		ret = drm_proc_init(new_minor, minor_id, drm_proc_root);
 #else /* to compile maybe should initialize drm_sysctl here */
+		ret = drm_sysctl_init(new_minor, minor_id, drm_sysctl_root);
 		ret = 0;
 #endif
 		if (ret) {
@@ -555,10 +556,11 @@ int drm_put_minor(struct drm_minor **minor_p)
 	struct drm_minor *minor = *minor_p;
 
 	DRM_DEBUG("release secondary minor %d\n", minor->index);
-#ifdef __linux__
 
 	if (minor->type == DRM_MINOR_LEGACY)
-		drm_proc_cleanup(minor, drm_proc_root);
+		drm_sysctl_cleanup(minor);
+
+#ifdef __linux__
 #if defined(CONFIG_DEBUG_FS)
 	drm_debugfs_cleanup(minor);
 #endif
