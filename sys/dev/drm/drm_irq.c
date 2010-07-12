@@ -583,11 +583,6 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 				drm_update_vblank_count(dev, crtc);
 			}
 		}
-	} else {
-		if (!dev->vblank_enabled[crtc]) {
-			atomic_dec(&dev->vblank_refcount[crtc]);
-			ret = EINVAL;
-		}
 	}
 
 	if (dev->vblank_enabled[crtc])
