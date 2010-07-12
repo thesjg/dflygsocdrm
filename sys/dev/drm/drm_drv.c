@@ -795,12 +795,12 @@ int drm_lastclose(struct drm_device * dev)
 #endif
 
 #ifndef __linux__
+#if 0
 	if (dev->unique) {
 		free(dev->unique, DRM_MEM_DRIVER);
 		dev->unique = NULL;
 		dev->unique_len = 0;
 	}
-#if 0
 	/* Clear pid list */
 	for (i = 0; i < DRM_HASH_SIZE; i++) {
 		for (pt = dev->magiclist[i].head; pt; pt = next) {
