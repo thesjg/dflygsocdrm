@@ -162,7 +162,7 @@ int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #ifdef __linux__
 			spin_lock(&lock);
 #else
-			spin_lock(&dev->auth_lock);
+			spin_lock(&dev->static_lock);
 #endif /* __linux__ */
 			if (!sequence)
 				++sequence;	/* reserve 0 */
@@ -170,7 +170,7 @@ int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #ifdef __linux__
 			spin_unlock(&lock);
 #else
-			spin_unlock(&dev->auth_lock);
+			spin_unlock(&dev->static_lock);
 #endif /* __linux__ */
 		} while (drm_find_file(file_priv->master, auth->magic));
 		file_priv->magic = auth->magic;
