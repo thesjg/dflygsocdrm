@@ -506,7 +506,7 @@ int drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
  */
 u32 drm_vblank_count(struct drm_device *dev, int crtc)
 {
-	return atomic_read(&dev->_vblank_count[crtc]);
+	return atomic_load_acq_32(&dev->_vblank_count[crtc]);
 }
 
 /**
@@ -547,7 +547,7 @@ static void drm_update_vblank_count(struct drm_device *dev, int crtc)
 	DRM_DEBUG("enabling vblank interrupts on crtc %d, missed %d\n",
 		  crtc, diff);
 
-	atomic_add(diff, &dev->_vblank_count[crtc]);
+	atomic_add_rel_32(&dev->_vblank_count[crtc], diff);
 }
 
 /**
@@ -572,7 +572,7 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 	DRM_SPINLOCK(&dev->vbl_lock);
 #endif
 	/* Going from 0->1 means we have to enable interrupts again */
-	if (atomic_fetchadd_int(&dev->vblank_refcount[crtc], 1) == 0) {
+	if (++dev->vblank_refcount[crtc] == 1) {
 		if (!dev->vblank_enabled[crtc]) {
 			ret = dev->driver->enable_vblank(dev, crtc);
 			DRM_DEBUG("enabling vblank on crtc %d, ret: %d\n", crtc, ret);
@@ -616,7 +616,7 @@ void drm_vblank_put(struct drm_device *dev, int crtc)
 #endif
 
 	/* Last user schedules interrupt disable */
-	if (atomic_fetchadd_int(&dev->vblank_refcount[crtc], -1) == 1)
+	if (--dev->vblank_refcount[crtc] == 0)
 		callout_reset(&dev->vblank_disable_timer, 5 * DRM_HZ,
 			(timeout_t *)vblank_disable_fn, (void *)dev);
 
