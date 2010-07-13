@@ -673,7 +673,9 @@ void drm_vblank_post_modeset(struct drm_device *dev, int crtc)
 {
 	unsigned long irqflags;
 
+#ifdef DRM_NEWER_LOCK
 	spin_lock_irqsave(&dev->vbl_lock, irqflags);
+#endif
 	if (dev->vblank_inmodeset[crtc]) {
 
 		if (dev->vblank_inmodeset[crtc] & 0x2)
@@ -682,7 +684,9 @@ void drm_vblank_post_modeset(struct drm_device *dev, int crtc)
 		dev->vblank_inmodeset[crtc] = 0;
 	}
 	dev->vblank_disable_allowed = 1;
+#ifdef DRM_NEWER_LOCK
 	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
+#endif
 }
 EXPORT_SYMBOL(drm_vblank_post_modeset);
 
@@ -720,12 +724,15 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 		DRM_SPINLOCK(&dev->vbl_lock);
 #endif
 		drm_vblank_pre_modeset(dev, crtc);
+		break;
+	case _DRM_POST_MODESET:
+#ifndef DRM_NEWER_LOCK
+		DRM_SPINLOCK(&dev->vbl_lock);
+#endif
+		drm_vblank_post_modeset(dev, crtc);
 #ifndef DRM_NEWER_LOCK
 		DRM_SPINUNLOCK(&dev->vbl_lock);
 #endif
-		break;
-	case _DRM_POST_MODESET:
-		drm_vblank_post_modeset(dev, crtc);
 		break;
 	default:
 		ret = EINVAL;
