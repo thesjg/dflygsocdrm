@@ -253,8 +253,8 @@ int drm_vblank_init(struct drm_device *dev, int num_crtcs)
 	DRM_SPINLOCK(&dev->vbl_lock);
 	for (i = 0; i < num_crtcs; i++) {
 		DRM_INIT_WAITQUEUE(&dev->vbl_queue[i]);
-		atomic_set(&dev->_vblank_count[i], 0);
-		atomic_set(&dev->vblank_refcount[i], 0);
+		dev->vblank_refcount[i] = 0;
+		dev->_vblank_count[i] = 0;
 	}
 
 	dev->vblank_disable_allowed = 0;
@@ -313,8 +313,6 @@ int drm_irq_install(struct drm_device *dev)
 		return EBUSY;
 	}
 	dev->irq_enabled = 1;
-
-	dev->context_flag = 0;
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
@@ -724,6 +722,9 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 		DRM_SPINLOCK(&dev->vbl_lock);
 #endif
 		drm_vblank_pre_modeset(dev, crtc);
+#ifndef DRM_NEWER_LOCK
+		DRM_SPINUNLOCK(&dev->vbl_lock);
+#endif
 		break;
 	case _DRM_POST_MODESET:
 #ifndef DRM_NEWER_LOCK
