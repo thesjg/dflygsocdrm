@@ -138,7 +138,7 @@ static void vblank_disable_fn(void *arg)
 			dev->vblank_enabled[i] = 0;
 		}
 #else /* __linux__ */
-		if (atomic_read(&dev->vblank_refcount[i]) == 0 &&
+		if (dev->vblank_refcount[i] == 0 &&
 		    dev->vblank_enabled[i] && !dev->vblank_inmodeset[i]) {
 			DRM_DEBUG("disabling vblank on crtc %d\n", i);
 			dev->last_vblank[i] =

@@ -613,7 +613,9 @@ int drm_detach(device_t kdev)
 	pci_disable_busmaster(dev->device);
 
 	DRM_SPINUNINIT(&dev->drw_lock);
+#if 0
 	DRM_SPINUNINIT(&dev->vbl_lock);
+#endif
 	DRM_SPINUNINIT(&dev->dev_lock);
 	
 	if (dev->irqr) {
@@ -997,7 +999,9 @@ error:
 	destroy_dev(dev->devnode);
 
 	DRM_SPINUNINIT(&dev->drw_lock);
+#if 0
 	DRM_SPINUNINIT(&dev->vbl_lock);
+#endif
 	DRM_SPINUNINIT(&dev->dev_lock);
 
 	return retcode;
