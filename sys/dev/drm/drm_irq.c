@@ -280,8 +280,10 @@ int drm_irq_install(struct drm_device *dev)
 	int ret = 0;
 	int crtc;
 
+#ifdef __linux__
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 		return EINVAL;
+#endif /* __linux__ */
 
 	if (dev->irq == 0)
 		return EINVAL;
@@ -311,6 +313,8 @@ int drm_irq_install(struct drm_device *dev)
 		return EBUSY;
 	}
 	dev->irq_enabled = 1;
+
+	dev->context_flag = 0;
 
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
@@ -353,7 +357,6 @@ int drm_irq_install(struct drm_device *dev)
 	DRM_UNLOCK();
 #endif
 
-#ifndef __linux
 	if (dev->driver->enable_vblank) {
 		DRM_SPINLOCK(&dev->vbl_lock);
 		for( crtc = 0 ; crtc < dev->num_crtcs ; crtc++) {
@@ -365,7 +368,6 @@ int drm_irq_install(struct drm_device *dev)
 		    (timeout_t *)vblank_disable_fn, (void *)dev);
 		DRM_SPINUNLOCK(&dev->vbl_lock);
 	}
-#endif /* !__linux__ */
 
 	return 0;
 err:
@@ -395,13 +397,14 @@ int drm_irq_uninstall(struct drm_device * dev)
 {
 	int irq_enabled, i;
 
+#ifdef __linux__
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 		return EINVAL;
+#endif /* __linux__ */
 
 #ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
 #endif
-	irq_enabled = dev->irq_enabled;
 	dev->irq_enabled = 0;
 #ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
@@ -412,14 +415,13 @@ int drm_irq_uninstall(struct drm_device * dev)
 	*/
 	DRM_SPINLOCK(&dev->vbl_lock);
 	for (i = 0; i < dev->num_crtcs; i++) {
-		DRM_WAKEUP(&dev->vbl_queue[i]);
-		dev->vblank_enabled[i] = 0;
-		dev->last_vblank[i] = dev->driver->get_vblank_counter(dev, i);
+		if (dev->vblank_enabled[i]) {
+			DRM_WAKEUP(&dev->vbl_queue[i]);
+			dev->last_vblank[i] = dev->driver->get_vblank_counter(dev, i);
+			dev->vblank_enabled[i] = 0;
+		}
 	}
 	DRM_SPINUNLOCK(&dev->vbl_lock);
-
-	if (!irq_enabled)
-		return EINVAL;
 
 	DRM_DEBUG("irq=%d\n", dev->irq);
 
