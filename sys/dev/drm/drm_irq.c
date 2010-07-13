@@ -577,7 +577,7 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 			ret = dev->driver->enable_vblank(dev, crtc);
 			DRM_DEBUG("enabling vblank on crtc %d, ret: %d\n", crtc, ret);
 			if (ret)
-				atomic_dec(&dev->vblank_refcount[crtc]);
+				--dev->vblank_refcount[crtc];
 			else {
 				dev->vblank_enabled[crtc] = 1;
 				drm_update_vblank_count(dev, crtc);
@@ -671,16 +671,16 @@ void drm_vblank_post_modeset(struct drm_device *dev, int crtc)
 {
 	unsigned long irqflags;
 
+	spin_lock_irqsave(&dev->vbl_lock, irqflags);
 	if (dev->vblank_inmodeset[crtc]) {
-		spin_lock_irqsave(&dev->vbl_lock, irqflags);
-		dev->vblank_disable_allowed = 1;
-		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 
 		if (dev->vblank_inmodeset[crtc] & 0x2)
 			drm_vblank_put(dev, crtc);
 
 		dev->vblank_inmodeset[crtc] = 0;
 	}
+	dev->vblank_disable_allowed = 1;
+	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 }
 EXPORT_SYMBOL(drm_vblank_post_modeset);
 
@@ -754,10 +754,7 @@ int drm_wait_vblank(struct drm_device *dev, void *data, struct drm_file *file_pr
 	int ret = 0;
 	unsigned int flags, seq, crtc;
 
-	if (!dev->irq || !dev->irq_enabled)
-		return EINVAL;
-
-	if (vblwait->request.type & _DRM_VBLANK_SIGNAL & _DRM_VBLANK_FLAGS_MASK)
+	if (!dev->irq_enabled)
 		return EINVAL;
 
 	if (vblwait->request.type &
@@ -806,6 +803,11 @@ int drm_wait_vblank(struct drm_device *dev, void *data, struct drm_file *file_pr
 	if ((flags & _DRM_VBLANK_NEXTONMISS) &&
 	    (seq - vblwait->request.sequence) <= (1<<23)) {
 		vblwait->request.sequence = seq + 1;
+	}
+
+	if (flags & _DRM_VBLANK_SIGNAL) {
+		ret = EINVAL;
+		goto done;
 	}
 
 	DRM_DEBUG("waiting on vblank count %d, crtc %d\n",
