@@ -250,11 +250,7 @@ static int drm_fill_in_dev(struct drm_device *dev,
 #ifndef __linux__
 	DRM_SPININIT(&dev->dev_lock, "drmdev");
 	lwkt_serialize_init(&dev->irq_lock);
-/* Should perhaps be initialized in drm_irq.c as in linux drm */
-#if 0
-	DRM_SPININIT(&dev->vbl_lock, "drmvbl");
-#endif
-	DRM_SPININIT(&dev->auth_lock, "drmaut");
+	DRM_SPININIT(&dev->static_lock, "drmsta");
 #endif /* __linux__ */
 
 #ifdef __linux__
