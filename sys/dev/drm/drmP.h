@@ -1264,7 +1264,7 @@ struct drm_device {
 	int		  pci_slot;
 	int		  pci_func;
 
-	struct drm_vblank_info *vblank;		/* per crtc vblank info */
+//	struct drm_vblank_info *vblank;		/* per crtc vblank info */
 
 	struct sigio      *buf_sigio;	/* Processes waiting for SIGIO     */
 

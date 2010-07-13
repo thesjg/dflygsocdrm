@@ -867,8 +867,8 @@ done:
  */
 void drm_handle_vblank(struct drm_device *dev, int crtc)
 {
-	atomic_inc(&dev->_vblank_count[crtc]);
-	DRM_WAKEUP(&dev->vblank[crtc].queue);
+	atomic_add_rel_32(&dev->_vblank_count[crtc], 1);
+	DRM_WAKEUP(&dev->vbl_queue[crtc]);
 #ifdef __linux__
 	drm_handle_vblank_events(dev, crtc);
 #endif /* __linux__ */
