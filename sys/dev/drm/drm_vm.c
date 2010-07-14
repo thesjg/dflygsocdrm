@@ -68,6 +68,19 @@
 #endif
 #endif /* __linux__ */
 
+/**
+ * mmap DMA memory.
+ *
+ * \param file_priv DRM file private.
+ * \param vma virtual memory area.
+ * \return zero on success or a negative number on failure.
+ *
+ * If the virtual memory area has no offset associated with it then it's a DMA
+ * area, so calls mmap_dma(). Otherwise searches the map in drm_device::maplist,
+ * checks that the restricted flag is not set, sets the virtual memory operations
+ * according to the mapping type and remaps the pages. Finally sets the file
+ * pointer and calls vm_open().
+ */
 static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
@@ -75,10 +88,8 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv = NULL;
 	drm_local_map_t *map;
-#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list;
 	struct drm_map_list *r_list_found = NULL;
-#endif
 	enum drm_map_type type;
 	vm_paddr_t phys;
 
@@ -101,22 +112,12 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	if (dev->dma && offset < ptoa(dev->dma->page_count)) {
 		struct drm_device_dma *dma = dev->dma;
 
-#ifndef DRM_NEWER_LOCK
-		DRM_SPINLOCK(&dev->dma_lock);
-#endif
-
 		if (dma->pagelist != NULL) {
 			unsigned long page = offset >> PAGE_SHIFT;
 			unsigned long phys = dma->pagelist[page];
 			ap->a_result = atop(phys);
-#ifndef DRM_NEWER_LOCK
-			DRM_SPINUNLOCK(&dev->dma_lock);
-#endif
 			return 0;
 		} else {
-#ifndef DRM_NEWER_LOCK
-			DRM_SPINUNLOCK(&dev->dma_lock);
-#endif
 			return -1;
 		}
 	}
@@ -132,7 +133,6 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	DRM_LOCK();
 #endif
 
-#ifdef DRM_NEWER_MAPLIST
 	list_for_each_entry(r_list, &dev->maplist, head) {
 		if (offset >= r_list->map->offset && offset < r_list->map->offset + r_list->map->size) {
 			r_list_found = r_list;
@@ -145,23 +145,11 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	else {
 		map = r_list_found->map;
 	}
-#else
-	TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
-		if (offset >= map->offset && offset < map->offset + map->size)
-			break;
-	}
-#endif
 
 	if (map == NULL) {
-		DRM_DEBUG("Can't find map, requested offset = %016lx\n",
-		    (unsigned long)offset);
-#if 0
-		TAILQ_FOREACH(map, &dev->maplist_legacy, link) {
-			DRM_DEBUG("map offset = %016lx, handle = %016lx\n",
-			    (unsigned long)map->offset,
-			    (unsigned long)map->handle);
-		}
-#endif
+		DRM_ERROR("Can't find map, requested offset = %016lx\n",
+			(unsigned long)offset);
+
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
@@ -203,16 +191,14 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 int drm_mmap_legacy(struct dev_mmap_args *ap)
 {
+	struct cdev *kdev = ap->a_head.a_dev;
+	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	int ret;
 
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#endif
 	ret = drm_mmap_legacy_locked(ap);
-
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
+
 	return ret;
 }
 

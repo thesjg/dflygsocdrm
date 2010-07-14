@@ -158,18 +158,16 @@ static int drm_name_info_legacy DRM_SYSCTL_HANDLER_ARGS
 
 	DRM_SYSCTL_PRINT("%s 0x%x", dev->driver->name, dev2udev(dev->devnode));
 
-#ifdef DRM_NEWER_LOCK
-	mutex_lock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
+	mutex_lock(&dev->struct_mutex);
 	if (master->unique) {
 		snprintf(buf, sizeof(buf), " %s", master->unique);
 		hasunique = 1;
 	}
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
 	
@@ -187,9 +185,7 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	struct drm_minor *minor = arg1;
 	struct drm_device *dev = minor->dev;
 	drm_local_map_t *map, *tempmaps;
-#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list;
-#endif
 	const char   *types[] = { "FB", "REG", "SHM", "AGP", "SG" };
 	const char *type, *yesno;
 	int i, mapcount;
@@ -199,52 +195,32 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	/* We can't hold the lock while doing SYSCTL_OUTs, so allocate a
 	 * temporary copy of all the map entries and then SYSCTL_OUT that.
 	 */
-#ifdef DRM_NEWER_LOCK
-	mutex_lock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
-
+	mutex_lock(&dev->struct_mutex);
 	mapcount = 0;
-#ifdef DRM_NEWER_MAPLIST
 	list_for_each_entry(r_list, &dev->maplist, head) {
 		mapcount++;
 	}
-#else
-	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
-		mapcount++;
-#endif
 
-#ifdef DRM_NEWER_LOCK
-	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount, DRM_MEM_DRIVER,
-	    M_WAITOK);
-#else
-	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount, DRM_MEM_DRIVER,
-	    M_NOWAIT);
-#endif
+	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount,
+		DRM_MEM_DRIVER, M_WAITOK);
 	if (tempmaps == NULL) {
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 		return ENOMEM;
 	}
 
 	i = 0;
-
-#ifdef DRM_NEWER_MAPLIST
 	list_for_each_entry(r_list, &dev->maplist, head) {
+		map = r_list->map;
 		tempmaps[i++] = *map;
 	}
-#else
-	TAILQ_FOREACH(map, &dev->maplist_legacy, link)
-		tempmaps[i++] = *map;
-#endif
-
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
 
@@ -295,40 +271,26 @@ static int drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	/* We can't hold the locks around DRM_SYSCTL_PRINT, so make a temporary
 	 * copy of the whole structure and the relevant data from buflist.
 	 */
-#ifdef DRM_NEWER_LOCK
-	mutex_lock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
+	mutex_lock(&dev->struct_mutex);
 	if (dma == NULL) {
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 		return 0;
 	}
-#ifndef DRM_NEWER_LOCK
-	DRM_SPINLOCK(&dev->dma_lock);
-#endif
 	tempdma = *dma;
-#ifdef DRM_NEWER_LOCK
-	templists = malloc(sizeof(int) * dma->buf_count, DRM_MEM_DRIVER,
-	    M_WAITOK);
-#else
-	templists = malloc(sizeof(int) * dma->buf_count, DRM_MEM_DRIVER,
-	    M_NOWAIT);
-#endif
+	templists = malloc(sizeof(int) * dma->buf_count,
+		DRM_MEM_DRIVER, M_WAITOK);
 	for (i = 0; i < dma->buf_count; i++)
 		templists[i] = dma->buflist[i]->list;
 	dma = &tempdma;
-#ifndef DRM_NEWER_LOCK
-	DRM_SPINUNLOCK(&dev->dma_lock);
-#endif
 
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
 
@@ -401,27 +363,20 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	int retcode;
 	int privcount, i;
 
-#ifdef DRM_NEWER_LOCK
-	mutex_lock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
+	mutex_lock(&dev->struct_mutex);
 
 	privcount = 0;
 	TAILQ_FOREACH(priv, &dev->files, link)
 		privcount++;
 
-#ifdef DRM_NEWER_LOCK
-	tempprivs = malloc(sizeof(struct drm_file) * privcount, DRM_MEM_DRIVER,
-	    M_WAITOK);
-#else
-	tempprivs = malloc(sizeof(struct drm_file) * privcount, DRM_MEM_DRIVER,
-	    M_NOWAIT);
-#endif
+	tempprivs = malloc(sizeof(struct drm_file) * privcount,
+		DRM_MEM_DRIVER, M_WAITOK);
 	if (tempprivs == NULL) {
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 		return ENOMEM;
@@ -429,10 +384,8 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	i = 0;
 	TAILQ_FOREACH(priv, &dev->files, link)
 		tempprivs[i++] = *priv;
-
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
 
