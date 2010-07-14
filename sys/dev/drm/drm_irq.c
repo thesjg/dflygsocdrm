@@ -88,12 +88,12 @@ int drm_irq_by_busid(struct drm_device *dev, void *data,
 	struct drm_irq_busid *p = data;
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
-		return EINVAL;
+		return -EINVAL;
 
 	if ((p->busnum >> 8) != dev->pci_domain ||
 	    (p->busnum & 0xff) != dev->pci_bus ||
 	    p->devnum != dev->pci_slot || p->funcnum != dev->pci_func)
-		return EINVAL;
+		return -EINVAL;
 
 	p->irq = dev->irq;
 
@@ -136,16 +136,6 @@ static void vblank_disable_fn(void *arg)
 			dev->driver->disable_vblank(dev, i);
 			dev->vblank_enabled[i] = 0;
 		}
-#if 0
-		if (dev->vblank_refcount[i] == 0 &&
-		    dev->vblank_enabled[i] && !dev->vblank_inmodeset[i]) {
-			DRM_DEBUG("disabling vblank on crtc %d\n", i);
-			dev->last_vblank[i] =
-			    dev->driver->get_vblank_counter(dev, i);
-			dev->driver->disable_vblank(dev, i);
-			dev->vblank_enabled[i] = 0;
-		}
-#endif /* __linux__ */
 	}
 	DRM_SPINUNLOCK(&dev->vbl_lock);
 }
@@ -170,27 +160,16 @@ void drm_vblank_cleanup(struct drm_device *dev)
 	free(dev->last_vblank_wait, DRM_MEM_DRIVER);
 	free(dev->vblank_inmodeset, DRM_MEM_DRIVER);
 
-#if 0
-	free(dev->vblank, DRM_MEM_DRIVER);
-#endif
-
 	dev->num_crtcs = 0;
 }
 
 int drm_vblank_init(struct drm_device *dev, int num_crtcs)
 {
-	int i, ret = ENOMEM;
+	int i, ret = -ENOMEM;
 
 	callout_init(&dev->vblank_disable_timer);
 	DRM_SPININIT(&dev->vbl_lock, "drmvbl");
 	dev->num_crtcs = num_crtcs;
-
-#if 0
-	dev->vblank = malloc(sizeof(struct drm_vblank_info) * num_crtcs,
-		DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-	if (!dev->vblank)
-	    goto err;
-#endif
 
 	dev->vbl_queue = malloc(sizeof(wait_queue_head_t) * num_crtcs,
 		DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
@@ -257,54 +236,32 @@ err:
 int drm_irq_install(struct drm_device *dev)
 {
 	int ret = 0;
-	int crtc;
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
-		return EINVAL;
+		return -EINVAL;
 
 	if (dev->irq == 0 || dev->dev_private == NULL)
-		return EINVAL;
+		return -EINVAL;
 
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_LOCK();
-#endif
 
 	/* Driver must have been initialized */
 	if (!dev->dev_private) {
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
-		DRM_UNLOCK();
-#endif
-		return EINVAL;
+		return -EINVAL;
 	}
 
 	if (dev->irq_enabled) {
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
-		DRM_UNLOCK();
-#endif
-		return EBUSY;
+		return -EBUSY;
 	}
 	dev->irq_enabled = 1;
-
-	dev->context_flag = 0;
-
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
 
 	DRM_DEBUG("irq=%d\n", dev->irq);
 
 	/* Before installing handler */
 	dev->driver->irq_preinstall(dev);
-
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 
 #ifdef __linux__
 	/* Install handler */
@@ -317,7 +274,10 @@ int drm_irq_install(struct drm_device *dev)
 				 dev->driver->irq_handler, dev, &dev->irqh,
 				 &dev->irq_lock);
 	if (ret != 0) {
-		goto err;
+		mutex_lock(&dev->struct_mutex);
+		dev->irq_enabled = 0;
+		mutex_unlock(&dev->struct_mutex);
+		return ret;
 	}
 
 #ifdef __linux__
@@ -325,9 +285,6 @@ int drm_irq_install(struct drm_device *dev)
 		vga_client_register(dev->pdev, (void *)dev, drm_irq_vgaarb_nokms, NULL);
 #endif /* __linux__ */
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
 	/* After installing handler */
 	ret = dev->driver->irq_postinstall(dev);
 	if (ret != 0) {
@@ -335,37 +292,6 @@ int drm_irq_install(struct drm_device *dev)
 		dev->irq_enabled = 0;
 		mutex_unlock(&dev->struct_mutex);
 	}
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
-
-#if 0
-	if (dev->driver->enable_vblank) {
-		DRM_SPINLOCK(&dev->vbl_lock);
-		for( crtc = 0 ; crtc < dev->num_crtcs ; crtc++) {
-			if (dev->driver->enable_vblank(dev, crtc) == 0) {
-				dev->vblank_enabled[crtc] = 1;
-			}
-		}
-		callout_reset(&dev->vblank_disable_timer, 5 * DRM_HZ,
-		    (timeout_t *)vblank_disable_fn, (void *)dev);
-		DRM_SPINUNLOCK(&dev->vbl_lock);
-	}
-#endif
-
-	return ret;
-err:
-#ifdef DRM_NEWER_LOCK
-	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_LOCK();
-#endif
-	dev->irq_enabled = 0;
-#ifdef DRM_NEWER_LOCK
-	mutex_unlock(&dev->struct_mutex);
-#else
-	DRM_UNLOCK();
-#endif
 
 	return ret;
 }
@@ -383,7 +309,7 @@ int drm_irq_uninstall(struct drm_device * dev)
 	int irq_enabled, i;
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
-		return EINVAL;
+		return -EINVAL;
 
 	mutex_lock(&dev->struct_mutex);
 	irq_enabled = dev->irq_enabled;
@@ -404,7 +330,7 @@ int drm_irq_uninstall(struct drm_device * dev)
 	DRM_SPINUNLOCK(&dev->vbl_lock);
 
 	if (!irq_enabled)
-		return EINVAL;
+		return -EINVAL;
 
 	DRM_DEBUG("irq=%d\n", dev->irq);
 
@@ -415,15 +341,7 @@ int drm_irq_uninstall(struct drm_device * dev)
 
 	dev->driver->irq_uninstall(dev);
 
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
-
 	bus_teardown_intr(dev->device, dev->irqr, dev->irqh);
-
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
 
 	return 0;
 }
@@ -442,7 +360,6 @@ int drm_irq_uninstall(struct drm_device * dev)
 int drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	struct drm_control *ctl = data;
-	int err;
 
 	/* if we haven't irq we fallback for compatibility reasons - this used to be a separate function in drm_dma.h */
 
@@ -451,32 +368,24 @@ int drm_control(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	case DRM_INST_HANDLER:
 		if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 			return 0;
-#ifdef DRM_NEWER_LOCK
+#ifdef __linux__
 		if (drm_core_check_feature(dev, DRIVER_MODESET))
 			return 0;
 #endif
 		if (dev->if_version < DRM_IF_VERSION(1, 2) &&
 		    ctl->irq != dev->irq)
-			return EINVAL;
+			return -EINVAL;
 		return drm_irq_install(dev);
 	case DRM_UNINST_HANDLER:
 		if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 			return 0;
-#ifdef DRM_NEWER_LOCK
+#ifdef __linux__
 		if (drm_core_check_feature(dev, DRIVER_MODESET))
 			return 0;
 #endif
-
-#ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
-#endif
-		err = drm_irq_uninstall(dev);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		return err;
+		return drm_irq_uninstall(dev);
 	default:
-		return EINVAL;
+		return -EINVAL;
 	}
 }
 
@@ -551,10 +460,6 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 	unsigned long irqflags;
 	int ret = 0;
 
-#if 0
-	/* Make sure that we are called with the lock held */
-	KKASSERT(lockstatus(&dev->vbl_lock, curthread) != 0);
-#endif
 	spin_lock_irqsave(&dev->vbl_lock, irqflags);
 	/* Going from 0->1 means we have to enable interrupts again */
 	if (atomic_fetchadd_int(&dev->vblank_refcount[crtc], 1) == 0) {
@@ -574,11 +479,6 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
 			ret = -EINVAL;
 		}
 	}
-#if 0
-	if (dev->vblank_enabled[crtc])
-		dev->last_vblank[crtc] =
-		    dev->driver->get_vblank_counter(dev, crtc);
-#endif
 	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 
 	return ret;
@@ -594,26 +494,16 @@ int drm_vblank_get(struct drm_device *dev, int crtc)
  */
 void drm_vblank_put(struct drm_device *dev, int crtc)
 {
-#if 0
-	/* Make sure that we are called with the lock held */
-	KKASSERT(lockstatus(&dev->vbl_lock, curthread) != 0);
-#endif
+	KASSERT(dev->vblank_refcount[crtc] > 0, ("invalid refcount"));
 
-	KASSERT(dev->vblank_refcount[crtc] > 0,
-	    ("invalid refcount"));
-
-#ifdef DRM_NEWER_LOCK
 	DRM_SPINLOCK(&dev->vbl_lock);
-#endif
 
 	/* Last user schedules interrupt disable */
 	if (atomic_fetchadd_int(&dev->vblank_refcount[crtc], -1) == 1)
 		callout_reset(&dev->vblank_disable_timer, 5 * DRM_HZ,
 			(timeout_t *)vblank_disable_fn, (void *)dev);
 
-#ifdef DRM_NEWER_LOCK
 	DRM_SPINUNLOCK(&dev->vbl_lock);
-#endif
 }
 
 void drm_vblank_off(struct drm_device *dev, int crtc)
@@ -698,7 +588,7 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 
 	crtc = modeset->crtc;
 	if (crtc >= dev->num_crtcs) {
-		ret = EINVAL;
+		ret = -EINVAL;
 		goto out;
 	}
 
@@ -710,7 +600,7 @@ int drm_modeset_ctl(struct drm_device *dev, void *data,
 		drm_vblank_post_modeset(dev, crtc);
 		break;
 	default:
-		ret = EINVAL;
+		ret = -EINVAL;
 		break;
 	}
 
@@ -840,7 +730,6 @@ void drm_handle_vblank(struct drm_device *dev, int crtc)
 	drm_handle_vblank_events(dev, crtc);
 #endif /* __linux__ */
 }
-
 
 #ifdef __linux__ /* enable when update drm_handle_vblank */
 void drm_handle_vblank_events(struct drm_device *dev, int crtc)
