@@ -69,7 +69,6 @@ int drm_debug_flag = 1;
 int drm_debug_flag = 0;
 #endif
 
-static int drm_load(struct drm_device *dev);
 static void drm_unload(struct drm_device *dev);
 static DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device,
 	DRM_PCI_DEVICE_ID *idlist);
@@ -215,20 +214,13 @@ static int drm_msi_is_blacklisted(int vendor, int device)
 	return 0;
 }
 
-#ifdef __linux__
-static int drm_fill_in_dev(struct drm_device * dev, struct pci_dev *pdev,
-			   const struct pci_device_id *ent,
-			   struct drm_driver *driver)
-#else
-static int drm_fill_in_dev(struct drm_device *dev,
-	device_t kdev, DRM_PCI_DEVICE_ID *idlist)
-#endif /* __linux__ */
+static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
+			DRM_PCI_DEVICE_ID *idlist)
 {
-	int retcode;
-#ifndef __linux__
 	int i;
 	DRM_PCI_DEVICE_ID *id_entry;
-#endif /* __linux__ */
+
+	int retcode;
 
 	INIT_LIST_HEAD(&dev->filelist);
 	INIT_LIST_HEAD(&dev->ctxlist);
@@ -237,9 +229,7 @@ static int drm_fill_in_dev(struct drm_device *dev,
 	INIT_LIST_HEAD(&dev->vblank_event_list);
 
 	spin_lock_init(&dev->count_lock);
-/* both newer and legacy */
 	DRM_SPININIT(&dev->drw_lock, "drmdrw");
-/* end both newer and legacy */
 	spin_lock_init(&dev->event_lock);
 	init_timer(&dev->timer);
 	mutex_init(&dev->struct_mutex);
@@ -253,16 +243,10 @@ static int drm_fill_in_dev(struct drm_device *dev,
 	DRM_SPININIT(&dev->static_lock, "drmsta");
 #endif /* __linux__ */
 
-#ifdef __linux__
-	dev->pdev = pdev;
-	dev->pci_device = pdev->device;
-	dev->pci_vendor = pdev->vendor;
-#else
 	dev->device = kdev;
 	dev->unit = device_get_unit(kdev);
 	dev->pci_device = pci_get_device(dev->device);
 	dev->pci_vendor = pci_get_vendor(dev->device);
-#endif /* __linux__ */
 
 #ifndef __linux__
 	dev->pci_domain = 0;
@@ -275,9 +259,6 @@ static int drm_fill_in_dev(struct drm_device *dev,
 	dev->id_entry = id_entry;
 
 	TAILQ_INIT(&dev->maplist_legacy);
-#if 0
-	drm_sysctl_init(dev);
-#endif
 	TAILQ_INIT(&dev->files);
 
 /* also done in drm_fops.c */
@@ -285,10 +266,6 @@ static int drm_fill_in_dev(struct drm_device *dev,
 		atomic_set(&dev->counts[i], 0);
 
 #endif /* __linux__ */
-
-#ifdef __alpha__
-	dev->hose = pdev->sysdata;
-#endif
 
 	if (drm_ht_create(&dev->map_hash, 12)) {
 		return -ENOMEM;
@@ -379,8 +356,8 @@ int drm_probe(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 			pci_get_class(kdev), pci_get_subclass(kdev), device_get_desc(kdev));
 		if (!device_get_desc(kdev)) {
 			DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
-#if 0
 			device_set_desc(kdev, "UNKNOWN");
+#if 0
 			device_set_desc(kdev, id_entry->name);
 #endif
 		}
@@ -392,71 +369,23 @@ int drm_probe(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 
 int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 {
+	int unit;
+
 	struct drm_device *dev;
 	int ret;
-
-	DRM_INFO("drm_attach: vendor 0x%4x, device 0x%4x, class 0x%4x, subclass 0x%4x, device_get_desc %s\n",
-		pci_get_vendor(kdev), pci_get_device(kdev),
-		pci_get_class(kdev), pci_get_subclass(kdev), device_get_desc(kdev));
-	if (!device_get_desc(kdev)) {
-		DRM_DEBUG("desc : %s\n", device_get_desc(kdev));
-		device_set_desc(kdev, "UNKNOWN");
-#if 0
-			device_set_desc(kdev, id_entry->name);
-#endif
-	}
-
-#ifndef __linux__
-#if 0
-	DRM_PCI_DEVICE_ID *id_entry;
-#endif
-	int unit;
-#endif /* __linux__ */
 
 #if 0
 	int msicount;
 #endif
 
-#ifdef __linux__
-	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
-#else /* already allocated in driver _drv.c */
 	unit = device_get_unit(kdev);
 	dev = device_get_softc(kdev);
-#if 0
-/* drmsub appears nowhere, relic of sub to drm rejected by linux */
-	if (!strcmp(device_get_name(kdev), "drmsub"))
-		dev->device = device_get_parent(kdev);
-	else
-#endif
 	dev->device = kdev;
-#endif /* __linux__ */
+
 	if (!dev)
 		return -ENOMEM;
 
-#ifdef __linux__
-	ret = pci_enable_device(pdev);
-	if (ret)
-		goto err_g1;
-
-	pci_set_master(pdev);
-#else
 	pci_enable_busmaster(dev->device);
-#endif /* __linux__ */
-
-#if 0
-	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
-				DRM_DEV_MODE, "dri/card%d", unit);
-#endif
-
-#if 0
-	dev->pci_domain = 0;
-	dev->pci_bus = pci_get_bus(dev->device);
-	dev->pci_slot = pci_get_slot(dev->device);
-	dev->pci_func = pci_get_function(dev->device);
-
-	dev->pci_vendor = pci_get_vendor(dev->device);
-	dev->pci_device = pci_get_device(dev->device);
-#endif
 
 	if (drm_core_check_feature(dev, DRIVER_HAVE_IRQ)) {
 		if (drm_msi &&
@@ -485,32 +414,12 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 		dev->irq = (int) rman_get_start(dev->irqr);
 	}
 
-#if 0
-	DRM_SPININIT(&dev->dev_lock, "drmdev");
-	lwkt_serialize_init(&dev->irq_lock);
-	DRM_SPININIT(&dev->vbl_lock, "drmvbl");
-	DRM_SPININIT(&dev->drw_lock, "drmdrw");
-
-	id_entry = drm_find_description(dev->pci_vendor,
-	    dev->pci_device, idlist);
-	dev->id_entry = id_entry;
-
-	return drm_load(dev);
-#endif
-
-#ifdef __linux__
-	if ((ret = drm_fill_in_dev(dev, pdev, ent, driver))) {
-#else
 	if ((ret = drm_fill_in_dev(dev, kdev, idlist))) {
-#endif /* __linux__ */
 		printk(KERN_ERR "DRM: Fill_in_dev failed.\n");
 		goto err_g2;
 	}
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-#ifdef __linux__
-		pci_set_drvdata(pdev, dev);
-#endif /* __linux__ */
 		ret = drm_get_minor(dev, &dev->control, DRM_MINOR_CONTROL);
 		if (ret)
 			goto err_g2;
@@ -520,25 +429,14 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 		goto err_g3;
 
 	if (dev->driver->load) {
-#ifdef __linux__
-		ret = dev->driver->load(dev, ent->driver_data);
-#else
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
 #endif /* DRM_NEWER_LOCK */
 		/* Shared code returns -errno. */
-#ifdef DRM_NEWER_PCIID
 		ret = -dev->driver->load(dev, dev->id_entry->driver_data);
-#else
-		ret = -dev->driver->load(dev, dev->id_entry->driver_private);
-#endif /* _DRM_NEWER_PCIID */
-#if 0
-		pci_enable_busmaster(dev->device);
-#endif
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif /* DRM_NEWER_LOCK */
-#endif /* __linux__ */
 		if (ret)
 			goto err_g4;
 	}
@@ -564,13 +462,9 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 #endif /* __linux__ */
 
 	DRM_INFO("Initialized %s %d.%d.%d %s for %s on minor %d\n",
-#ifdef __linux__
-		 driver->name, driver->major, driver->minor, driver->patchlevel,
-		 driver->date, pci_name(pdev), dev->primary->index);
-#else
-		dev->driver->name, dev->driver->major, dev->driver->minor, dev->driver->patchlevel,
+		dev->driver->name, dev->driver->major,
+		dev->driver->minor, dev->driver->patchlevel,
 		dev->driver->date, device_get_desc(kdev), dev->unit);
-#endif /* __linux__ */
 
 	return 0;
 
@@ -794,30 +688,13 @@ int drm_lastclose(struct drm_device * dev)
 	mutex_lock(&dev->struct_mutex);
 #endif
 
-#ifndef __linux__
-#if 0
-	if (dev->unique) {
-		free(dev->unique, DRM_MEM_DRIVER);
-		dev->unique = NULL;
-		dev->unique_len = 0;
-	}
-	/* Clear pid list */
-	for (i = 0; i < DRM_HASH_SIZE; i++) {
-		for (pt = dev->magiclist[i].head; pt; pt = next) {
-			next = pt->next;
-			free(pt, DRM_MEM_MAGIC);
-		}
-		dev->magiclist[i].head = dev->magiclist[i].tail = NULL;
-	}
-#endif
-#endif /* !__linux__ */
-
 #ifndef DRM_NEWER_FILELIST
 	DRM_UNLOCK();
 #endif
 	/* Free drawable information memory */
 	drm_drawable_free_all(dev);
 	del_timer(&dev->timer);
+
 #ifndef DRM_NEWER_FILELIST
 	DRM_LOCK();
 #endif
@@ -881,126 +758,14 @@ int drm_lastclose(struct drm_device * dev)
 	    !drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_dma_takedown(dev);
 
-#if 0
-#ifndef DRM_NEWER_FILELIST
-	if (dev->lock.hw_lock) {
-		dev->lock.hw_lock = NULL; /* SHM removed */
-		dev->lock.file_priv = NULL;
-		DRM_WAKEUP_INT((void *)&dev->lock.lock_queue);
-	}
-#endif
-#endif /* __linux__ */
-
 	dev->dev_mapping = NULL;
+
 #ifdef DRM_NEWER_FILELIST
 	mutex_unlock(&dev->struct_mutex);
 #endif
 
 	DRM_DEBUG("lastclose completed\n");
 	return 0;
-}
-
-static int drm_load(struct drm_device *dev)
-{
-	int i, retcode;
-
-	int unit;
-
-	DRM_DEBUG("\n");
-
-	TAILQ_INIT(&dev->maplist_legacy);
-
-	drm_mem_init();
-#if 0
-	drm_sysctl_init(dev);
-#endif
-	TAILQ_INIT(&dev->files);
-
-	dev->counters  = 6;
-	dev->types[0]  = _DRM_STAT_LOCK;
-	dev->types[1]  = _DRM_STAT_OPENS;
-	dev->types[2]  = _DRM_STAT_CLOSES;
-	dev->types[3]  = _DRM_STAT_IOCTLS;
-	dev->types[4]  = _DRM_STAT_LOCKS;
-	dev->types[5]  = _DRM_STAT_UNLOCKS;
-
-	for (i = 0; i < DRM_ARRAY_SIZE(dev->counts); i++)
-		atomic_set(&dev->counts[i], 0);
-
-	if (dev->driver->load != NULL) {
-#ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
-#endif
-		/* Shared code returns -errno. */
-#ifdef DRM_NEWER_PCIID
-		retcode = -dev->driver->load(dev,
-		    dev->id_entry->driver_data);
-#else
-		retcode = -dev->driver->load(dev,
-		    dev->id_entry->driver_private);
-#endif
-#if 0
-		pci_enable_busmaster(dev->device);
-#endif
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		if (retcode != 0)
-			goto error;
-	}
-
-	if (drm_core_has_AGP(dev)) {
-		if (drm_device_is_agp(dev))
-			dev->agp = drm_agp_init((struct drm_device *)NULL);
-		if (drm_core_check_feature(dev, DRIVER_REQUIRE_AGP) &&
-		    dev->agp == NULL) {
-			DRM_ERROR("Card isn't AGP, or couldn't initialize "
-			    "AGP.\n");
-			retcode = ENOMEM;
-			goto error;
-		}
-		if (dev->agp != NULL) {
-			if (drm_mtrr_add(dev->agp->info.ai_aperture_base,
-			    dev->agp->info.ai_aperture_size, DRM_MTRR_WC) == 0)
-				dev->agp->mtrr = 1;
-		}
-	}
-
-	retcode = drm_ctxbitmap_init(dev);
-	if (retcode != 0) {
-		DRM_ERROR("Cannot allocate memory for context bitmap.\n");
-		goto error;
-	}
-
-	unit = device_get_unit(dev->device);
-	dev->devnode = make_dev(&drm_cdevsw, unit, DRM_DEV_UID, DRM_DEV_GID,
-				DRM_DEV_MODE, "dri/card%d", unit);
-
-	DRM_INFO("Initialized %s %d.%d.%d %s\n",
-	    dev->driver->name,
-	    dev->driver->major,
-	    dev->driver->minor,
-	    dev->driver->patchlevel,
-	    dev->driver->date);
-
-	return 0;
-
-error:
-#if 0
-	drm_sysctl_cleanup(dev);
-#endif
-	DRM_LOCK();
-	drm_lastclose(dev);
-	DRM_UNLOCK();
-	destroy_dev(dev->devnode);
-
-	DRM_SPINUNINIT(&dev->drw_lock);
-#if 0
-	DRM_SPINUNINIT(&dev->vbl_lock);
-#endif
-	DRM_SPINUNINIT(&dev->dev_lock);
-
-	return retcode;
 }
 
 /**
@@ -1052,7 +817,7 @@ static void drm_unload(struct drm_device *dev)
 	}
 #endif /* __linux__ */
 
-	if (dev->driver->unload != NULL) {
+	if (dev->driver->unload) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
 #endif /* DRM_NEWER_LOCK */
@@ -1073,16 +838,9 @@ static void drm_unload(struct drm_device *dev)
 	DRM_LOCK();
 #endif
 
-#ifdef DRM_NEWER_MAPLIST
 	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
 		drm_rmmap(dev, r_list->map);
 	drm_ht_remove(&dev->map_hash);
-#else
-	TAILQ_FOREACH_MUTABLE(map, &dev->maplist_legacy, link, mapsave) {
-		if (!(map->flags & _DRM_DRIVER))
-			drm_rmmap(dev, map);
-	}
-#endif
 
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
@@ -1096,11 +854,7 @@ static void drm_unload(struct drm_device *dev)
 	if (driver->driver_features & DRIVER_GEM)
 		drm_gem_destroy(dev);
 
-#if 0
-	drm_sysctl_cleanup(dev);
-#endif
 	destroy_dev(dev->devnode);
-
 	drm_put_minor(&dev->primary);
 }
 
@@ -1311,32 +1065,11 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
  */
 int drm_close_legacy(struct dev_close_args *ap)
 {
-#ifdef __linux__
-	struct drm_file *file_priv = filp->private_data;
-	struct drm_device *dev = file_priv->minor->dev;
-#else /* __linux__ */
 	struct cdev *kdev = ap->a_head.a_dev;
 
-#ifdef DRM_NEWER_FILELIST
-	struct drm_file *file_priv = kdev->si_drv2;
-	if (!file_priv) {
-		DRM_ERROR("drm_close() file_priv null\n");
-		return EINVAL;
-	}
-	struct drm_device *dev = file_priv->minor->dev;
-	if (dev !=  DRIVER_SOFTC(minor(kdev))) {
-		DRM_ERROR("drm_close() unequal minors\n");
-	}
-#else
 	struct drm_file *file_priv;
-	struct drm_device *dev;
-	dev = DRIVER_SOFTC(minor(kdev));
-#endif
-
-#endif /* __linux__ */
+	struct drm_device *dev = DRIVER_SOFTC(minor(kdev));
 	int retcode = 0;
-
-#ifndef __linux__
 
 #ifdef DRM_NEWER_LOCKKERNEL
 lock_kernel();
@@ -1348,7 +1081,6 @@ lock_kernel();
 	DRM_LOCK();
 #endif /* DRM_NEWER_LOCK */
 
-#ifndef DRM_NEWER_FILELIST
 	file_priv = drm_find_file_by_proc(dev, curthread);
 	if (!file_priv->minor) {
 		DRM_ERROR("drm_close() no minor for file!\n");
@@ -1356,19 +1088,9 @@ lock_kernel();
 	if (file_priv->minor && (dev != file_priv->minor->dev)) {
 		DRM_ERROR("drm_close() softc device != minor device!\n");
 	}
-#endif /* !DRM_NEWER_FILELIST */
-
-#endif /* __linux__ */
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
 
-#ifdef DRM_NEWER_FILELIST
-	DRM_INFO("close %d by pid (%d), uid (%d), on minor_id (%d)\n",
-		1,
-		file_priv->pid,
-		file_priv->uid,
-		file_priv->minor->index);
-#else /* DRM_NEWER_FILELIST */
 	DRM_INFO("close %d by pid (%d), uid (%d), on minor_id (%d)\n",
 		file_priv->refs,
 		file_priv->pid,
@@ -1378,7 +1100,6 @@ lock_kernel();
 	if (--file_priv->refs != 0) {
 		goto done;
 	}
-#endif /* DRM_NEWER_FILELIST */
 
 	if (dev->driver->preclose != NULL)
 		dev->driver->preclose(dev, file_priv);
@@ -1388,9 +1109,10 @@ lock_kernel();
 	 */
 
 	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
-	    DRM_CURRENTPID, (long)dev->device, dev->open_count);
+		DRM_CURRENTPID,
+		(long)dev->device,
+		dev->open_count);
 
-#ifdef DRM_NEWER_HWLOCK
 	/* if the master has gone away we can't do anything with the lock */
 	if (file_priv->minor->master) {
 
@@ -1409,56 +1131,7 @@ lock_kernel();
 		drm_lock_free(&file_priv->master->lock,
 			      _DRM_LOCKING_CONTEXT(file_priv->master->lock.hw_lock->lock));
 	}
-
 	}
-#else /* DRM_NEWER_HWLOCK */
-
-	if (dev->lock.hw_lock && _DRM_LOCK_IS_HELD(dev->lock.hw_lock->lock)
-	    && dev->lock.file_priv == file_priv) {
-		DRM_DEBUG("Process %d dead, freeing lock for context %d\n",
-			  DRM_CURRENTPID,
-			  _DRM_LOCKING_CONTEXT(dev->lock.hw_lock->lock));
-		if (dev->driver->reclaim_buffers_locked != NULL)
-			dev->driver->reclaim_buffers_locked(dev, file_priv);
-
-		drm_lock_free(&dev->lock,
-		    _DRM_LOCKING_CONTEXT(dev->lock.hw_lock->lock));
-		
-				/* FIXME: may require heavy-handed reset of
-                                   hardware at this point, possibly
-                                   processed via a callback to the X
-                                   server. */
-	} else if (dev->driver->reclaim_buffers_locked != NULL &&
-	    dev->lock.hw_lock != NULL) {
-		/* The lock is required to reclaim buffers */
-		for (;;) {
-			if (!dev->lock.hw_lock) {
-				/* Device has been unregistered */
-				retcode = EINTR;
-				break;
-			}
-			if (drm_lock_take(&dev->lock, DRM_KERNEL_CONTEXT)) {
-				dev->lock.file_priv = file_priv;
-				dev->lock.lock_time = jiffies;
-				atomic_inc(&dev->counts[_DRM_STAT_LOCKS]);
-				break;	/* Got lock */
-			}
-			/* Contention */
-			tsleep_interlock((void *)&dev->lock.lock_queue, PCATCH);
-			DRM_UNLOCK();
-			retcode = tsleep((void *)&dev->lock.lock_queue,
-					 PCATCH | PINTERLOCKED, "drmlk2", 0);
-			DRM_LOCK();
-			if (retcode)
-				break;
-		}
-		if (retcode == 0) {
-			dev->driver->reclaim_buffers_locked(dev, file_priv);
-			drm_lock_free(&dev->lock, DRM_KERNEL_CONTEXT);
-		}
-	}
-
-#endif /* DRM_NEWER_HWLOCK */
 
 /* There apparently is a savage_reclaim_buffers */
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
@@ -1500,9 +1173,7 @@ lock_kernel();
 	}
 	mutex_unlock(&dev->ctxlist_mutex);
 
-#ifndef DRM_NEWER_ONELOCK
 	mutex_lock(&dev->struct_mutex);
-#endif
 
 	if (file_priv->is_master) {
 		struct drm_master *master = file_priv->master;
@@ -1523,15 +1194,7 @@ lock_kernel();
 				dev->sigdata.lock = NULL;
 			master->lock.hw_lock = NULL;
 			master->lock.file_priv = NULL;
-#ifdef DRM_NEWER_FILELIST
 			DRM_WAKEUP_INT(&master->lock.lock_queue);
-#else
-
-#ifdef DRM_NEWER_HWLOCK
-			DRM_WAKEUP_INT(&master->lock.lock_queue);
-#endif
-
-#endif
 		}
 
 		if (file_priv->minor->master == file_priv->master) {
@@ -1547,19 +1210,7 @@ lock_kernel();
 	file_priv->is_master = 0;
 	list_del(&file_priv->lhead);
 
-#ifdef DRM_NEWER_FILELIST
-/* INVARIANT: kdev file_priv == head(dev->filelist) */
-	if (list_empty(dev->filelist)) {
-		kdev->si_drv2 = NULL;
-	}
-	else {
-		kdev->si_drv2 = container_of(dev->filelist->next, struct drm_file, lhead);
-	}
-#endif
-
-#ifndef DRM_NEWER_ONELOCK
 	mutex_unlock(&dev->struct_mutex);
-#endif
 
 	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file_priv);
@@ -1574,39 +1225,10 @@ lock_kernel();
 done:
 	atomic_inc(&dev->counts[_DRM_STAT_CLOSES]);
 
-#ifdef DRM_NEWER_FILELIST
-	device_unbusy(dev->device);
-	spin_lock(&dev->count_lock);
-	if (!--dev->open_count) {
-		if (atomic_read(&dev->ioctl_count)) {
-			DRM_ERROR("Device busy: %d\n",
-				  atomic_read(&dev->ioctl_count));
-			spin_unlock(&dev->count_lock);
-#ifdef DRM_NEWER_LOCK
-			unlock_kernel();
-#else
-			DRM_UNLOCK();
-#endif
-			return EBUSY;
-		}
-		spin_unlock(&dev->count_lock);
-#ifdef DRM_NEWER_LOCK
-		unlock_kernel();
-#else
-		DRM_UNLOCK();
-#endif
-		return drm_lastclose(dev);
-	}
-	spin_unlock(&dev->count_lock);
-
-#else /* DRM_NEWER_FILELIST */
-
 	device_unbusy(dev->device);
 	if (--dev->open_count == 0) {
 		retcode = drm_lastclose(dev);
 	}
-
-#endif /* DRM_NEWER_FILELIST */
 
 #ifdef DRM_NEWER_LOCK
 	unlock_kernel();
@@ -1962,192 +1584,3 @@ void drm_exit(struct drm_driver *driver)
 }
 
 EXPORT_SYMBOL(drm_exit);
-
-#if DRM_LINUX
-
-#include <sys/sysproto.h>
-
-MODULE_DEPEND(DRIVER_NAME, linux, 1, 1, 1);
-
-#define LINUX_IOCTL_DRM_MIN		0x6400
-#define LINUX_IOCTL_DRM_MAX		0x64ff
-
-static linux_ioctl_function_t drm_linux_ioctl;
-static struct linux_ioctl_handler drm_handler = {drm_linux_ioctl,
-    LINUX_IOCTL_DRM_MIN, LINUX_IOCTL_DRM_MAX};
-
-SYSINIT(drm_register, SI_SUB_KLD, SI_ORDER_MIDDLE,
-    linux_ioctl_register_handler, &drm_handler);
-SYSUNINIT(drm_unregister, SI_SUB_KLD, SI_ORDER_MIDDLE,
-    linux_ioctl_unregister_handler, &drm_handler);
-
-/* The bits for in/out are switched on Linux */
-#define LINUX_IOC_IN	IOC_OUT
-#define LINUX_IOC_OUT	IOC_IN
-
-static int
-drm_linux_ioctl(DRM_STRUCTPROC *p, struct linux_ioctl_args* args)
-{
-	int error;
-	int cmd = args->cmd;
-
-	args->cmd &= ~(LINUX_IOC_IN | LINUX_IOC_OUT);
-	if (cmd & LINUX_IOC_IN)
-		args->cmd |= IOC_IN;
-	if (cmd & LINUX_IOC_OUT)
-		args->cmd |= IOC_OUT;
-
-	error = ioctl(p, (struct ioctl_args *)args);
-
-	return error;
-}
-
-/* newer UNIMPLEMENTED */
-
-/** File operations structure */
-static const struct file_operations drm_stub_fops = {
-	.owner = THIS_MODULE,
-	.open = drm_stub_open
-};
-
-module_init(drm_core_init);
-module_exit(drm_core_exit);
-
-/**
- * Copy and IOCTL return string to user space
- */
-static int drm_copy_field(char *buf, size_t *buf_len, const char *value)
-{
-	int len;
-
-	/* don't overflow userbuf */
-	len = strlen(value);
-	if (len > *buf_len)
-		len = *buf_len;
-
-	/* let userspace know exact length of driver value (which could be
-	 * larger than the userspace-supplied buffer) */
-	*buf_len = strlen(value);
-
-	/* finally, try filling in the userbuf */
-	if (len && buf)
-		if (copy_to_user(buf, value, len))
-			return -EFAULT;
-	return 0;
-}
-
-/**
- * Called whenever a process performs an ioctl on /dev/drm.
- *
- * \param inode device inode.
- * \param file_priv DRM file private.
- * \param cmd command.
- * \param arg user argument.
- * \return zero on success or negative number on failure.
- *
- * Looks up the ioctl function in the ::ioctls table, checking for root
- * previleges if so required, and dispatches to the respective function.
- */
-long drm_ioctl(struct file *filp,
-	      unsigned int cmd, unsigned long arg)
-{
-	struct drm_file *file_priv = filp->private_data;
-	struct drm_device *dev;
-	struct drm_ioctl_desc *ioctl;
-	drm_ioctl_t *func;
-	unsigned int nr = DRM_IOCTL_NR(cmd);
-	int retcode = -EINVAL;
-	char stack_kdata[128];
-	char *kdata = NULL;
-
-	dev = file_priv->minor->dev;
-	atomic_inc(&dev->ioctl_count);
-	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
-	++file_priv->ioctl_count;
-
-	DRM_DEBUG("pid=%d, cmd=0x%02x, nr=0x%02x, dev 0x%lx, auth=%d\n",
-		  task_pid_nr(current), cmd, nr,
-		  (long)old_encode_dev(file_priv->minor->device),
-		  file_priv->authenticated);
-
-	if ((nr >= DRM_CORE_IOCTL_COUNT) &&
-	    ((nr < DRM_COMMAND_BASE) || (nr >= DRM_COMMAND_END)))
-		goto err_i1;
-	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
-	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
-		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
-	else if ((nr >= DRM_COMMAND_END) || (nr < DRM_COMMAND_BASE)) {
-		ioctl = &drm_ioctls[nr];
-		cmd = ioctl->cmd;
-	} else
-		goto err_i1;
-
-	/* Do not trust userspace, use our own definition */
-	func = ioctl->func;
-	/* is there a local override? */
-	if ((nr == DRM_IOCTL_NR(DRM_IOCTL_DMA)) && dev->driver->dma_ioctl)
-		func = dev->driver->dma_ioctl;
-
-	if (!func) {
-		DRM_DEBUG("no function\n");
-		retcode = -EINVAL;
-	} else if (((ioctl->flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN)) ||
-		   ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
-		   ((ioctl->flags & DRM_MASTER) && !file_priv->is_master) ||
-		   (!(ioctl->flags & DRM_CONTROL_ALLOW) && (file_priv->minor->type == DRM_MINOR_CONTROL))) {
-		retcode = -EACCES;
-	} else {
-		if (cmd & (IOC_IN | IOC_OUT)) {
-			if (_IOC_SIZE(cmd) <= sizeof(stack_kdata)) {
-				kdata = stack_kdata;
-			} else {
-#ifdef __linux__
-				kdata = kmalloc(_IOC_SIZE(cmd), GFP_KERNEL);
-#else
-				kdata = malloc(_IOC_SIZE(cmd), DRM_MEM_IOCTLS, M_WAITOK);
-#endif
-				if (!kdata) {
-					retcode = -ENOMEM;
-					goto err_i1;
-				}
-			}
-		}
-
-		if (cmd & IOC_IN) {
-			if (copy_from_user(kdata, (void __user *)arg,
-					   _IOC_SIZE(cmd)) != 0) {
-				retcode = -EFAULT;
-				goto err_i1;
-			}
-		}
-		if (ioctl->flags & DRM_UNLOCKED)
-			retcode = func(dev, kdata, file_priv);
-		else {
-			lock_kernel();
-			retcode = func(dev, kdata, file_priv);
-			unlock_kernel();
-		}
-
-		if (cmd & IOC_OUT) {
-			if (copy_to_user((void __user *)arg, kdata,
-					 _IOC_SIZE(cmd)) != 0)
-				retcode = -EFAULT;
-		}
-	}
-
-      err_i1:
-	if (kdata != stack_kdata)
-#ifdef __linux__
-		kfree(kdata);
-#else
-		free(kdata, DRM_MEM_IOCTLS);
-#endif
-	atomic_dec(&dev->ioctl_count);
-	if (retcode)
-		DRM_DEBUG("ret = %x\n", retcode);
-	return retcode;
-}
-
-EXPORT_SYMBOL(drm_ioctl);
-
-#endif /* DRM_LINUX */
