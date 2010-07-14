@@ -65,15 +65,10 @@ int drm_adddraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	struct drm_draw *draw = data;
 	struct bsd_drm_drawable_info *info;
 
-#ifdef DRM_NEWER_LOCK
-	info = malloc(sizeof(struct bsd_drm_drawable_info), DRM_MEM_DRAWABLE,
-	    M_WAITOK | M_ZERO);
-#else
-	info = malloc(sizeof(struct bsd_drm_drawable_info), DRM_MEM_DRAWABLE,
-	    M_NOWAIT | M_ZERO);
-#endif
+	info = malloc(sizeof(struct bsd_drm_drawable_info),
+		DRM_MEM_DRAWABLE, M_WAITOK | M_ZERO);
 	if (info == NULL)
-		return ENOMEM;
+		return -ENOMEM;
 
 	/*
 	 * XXX Only valid for sizeof(int) == sizeof(void *)
@@ -109,7 +104,7 @@ int drm_rmdraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		return 0;
 	} else {
 		DRM_SPINUNLOCK(&dev->drw_lock);
-		return EINVAL;
+		return -EINVAL;
 	}
 }
 
@@ -119,10 +114,10 @@ int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_pr
 	struct drm_update_draw *update = (struct drm_update_draw *)data;
 	int ret;
 
-/* BSD bug? Someone needs to hold the spinlock? */
 	info = drm_get_drawable_info(dev, update->handle);
-	if (info == NULL)
+	if (!info) {
 		return EINVAL;
+	}
 
 	switch (update->type) {
 	case DRM_DRAWABLE_CLIPRECTS:
@@ -137,13 +132,8 @@ int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_pr
 			return 0;
 		}
 		if (info->rects == NULL) {
-#ifdef DRM_NEWER_LOCK
-			info->rects = malloc(sizeof(*info->rects) *
-			    update->num, DRM_MEM_DRAWABLE, M_WAITOK);
-#else
-			info->rects = malloc(sizeof(*info->rects) *
-			    update->num, DRM_MEM_DRAWABLE, M_NOWAIT);
-#endif
+			info->rects = malloc(sizeof(*info->rects) * update->num,
+				DRM_MEM_DRAWABLE, M_WAITOK);
 			if (info->rects == NULL) {
 				DRM_SPINUNLOCK(&dev->drw_lock);
 				return ENOMEM;
@@ -152,7 +142,7 @@ int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_pr
 		}
 		/* For some reason the pointer arg is unsigned long long. */
 		ret = copyin((void *)(intptr_t)update->data, info->rects,
-		    sizeof(*info->rects) * info->num_rects);
+			sizeof(*info->rects) * info->num_rects);
 		DRM_SPINUNLOCK(&dev->drw_lock);
 		return ret;
 	default:
