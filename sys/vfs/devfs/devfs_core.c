@@ -460,7 +460,6 @@ devfs_unlinkp(struct devfs_node *node)
 	if (parent)	{
 		TAILQ_REMOVE(DEVFS_DENODE_HEAD(parent), node, link);
 		parent->nchildren--;
-		KKASSERT((parent->nchildren >= 0));
 		node->flags &= ~DEVFS_NODE_LINKED;
 	}
 	/* hotplug handler */
@@ -2138,6 +2137,7 @@ devfs_new_cdev(struct dev_ops *ops, int minor, struct dev_ops *bops)
 	dev->si_lastread = 0;		/* time_second */
 	dev->si_lastwrite = 0;		/* time_second */
 
+	dev->si_dict = NULL;
 	dev->si_ops = ops;
 	dev->si_flags = 0;
 	dev->si_umajor = 0;

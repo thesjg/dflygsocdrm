@@ -43,6 +43,7 @@ SUBDIR=	adjkerntz \
 	kldunload \
 	ldconfig \
 	md5 \
+	mkinitrd \
 	mknod \
 	mountctl \
 	mount \
@@ -90,6 +91,7 @@ SUBDIR=	adjkerntz \
 	swapon \
 	sysctl \
 	tunefs \
+	udevd \
 	umount \
 	vinum
 

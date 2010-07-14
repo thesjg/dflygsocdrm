@@ -109,6 +109,7 @@
 #include <sys/dsched.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
+#include <sys/udev.h>
 
 static MALLOC_DEFINE(M_DISK, "disk", "disk data");
 static int disk_debug_enable = 0;
@@ -216,6 +217,12 @@ disk_probe_slice(struct disk *dp, cdev_t dev, int slice, int reprobe)
 						UID_ROOT, GID_OPERATOR, 0640,
 						"%s%c", dev->si_name, 'a'+ i);
 					ndev->si_disk = dp;
+					udev_dict_set_cstr(ndev, "subsystem", "disk");
+					/* Inherit parent's disk type */
+					if (dp->d_disktype) {
+						udev_dict_set_cstr(ndev, "disk-type", 
+						    __DECONST(char *, dp->d_disktype));
+					}
 					if (dp->d_info.d_serialno) {
 						make_dev_alias(ndev,
 						    "serno/%s.s%d%c",
@@ -322,6 +329,12 @@ disk_probe(struct disk *dp, int reprobe)
 					dkmakewholeslice(dkunit(dev), i),
 					UID_ROOT, GID_OPERATOR, 0640,
 					"%ss%d", dev->si_name, sno);
+			udev_dict_set_cstr(ndev, "subsystem", "disk");
+			/* Inherit parent's disk type */
+			if (dp->d_disktype) {
+				udev_dict_set_cstr(ndev, "disk-type", 
+				    __DECONST(char *, dp->d_disktype));
+			}
 			if (dp->d_info.d_serialno) {
 				make_dev_alias(ndev, "serno/%s.s%d",
 					       dp->d_info.d_serialno, sno);
@@ -499,15 +512,22 @@ disk_msg_send_sync(uint32_t cmd, void *load, void *load2)
 cdev_t
 disk_create(int unit, struct disk *dp, struct dev_ops *raw_ops)
 {
+	return disk_create_named(NULL, unit, dp, raw_ops);
+}
+
+cdev_t
+disk_create_named(const char *name, int unit, struct disk *dp, struct dev_ops *raw_ops)
+{
 	cdev_t rawdev;
 
-	disk_debug(1,
-		    "disk_create (begin): %s%d\n",
-			raw_ops->head.name, unit);
+	if (name == NULL)
+		name = raw_ops->head.name;
+
+	disk_debug(1, "disk_create (begin): %s%d\n", name, unit);
 
 	rawdev = make_only_dev(raw_ops, dkmakewholedisk(unit),
 			    UID_ROOT, GID_OPERATOR, 0640,
-			    "%s%d", raw_ops->head.name, unit);
+			    "%s%d", name, unit);
 
 	bzero(dp, sizeof(*dp));
 
@@ -517,21 +537,29 @@ disk_create(int unit, struct disk *dp, struct dev_ops *raw_ops)
 	dp->d_cdev = make_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
 			    dkmakewholedisk(unit),
 			    UID_ROOT, GID_OPERATOR, 0640,
-			    "%s%d", raw_ops->head.name, unit);
-
+			    "%s%d", name, unit);
+	udev_dict_set_cstr(dp->d_cdev, "subsystem", "disk");
 	dp->d_cdev->si_disk = dp;
 
-	dsched_disk_create_callback(dp, raw_ops->head.name, unit);
+	dsched_disk_create_callback(dp, name, unit);
 
 	lwkt_gettoken(&disklist_token);
 	LIST_INSERT_HEAD(&disklist, dp, d_list);
 	lwkt_reltoken(&disklist_token);
 
-	disk_debug(1, "disk_create (end): %s%d\n", raw_ops->head.name, unit);
+	disk_debug(1, "disk_create (end): %s%d\n", name, unit);
 
 	return (dp->d_rawdev);
 }
 
+int
+disk_setdisktype(struct disk *disk, const char *type)
+{
+	KKASSERT(disk != NULL);
+
+	disk->d_disktype = type;
+	return udev_dict_set_cstr(disk->d_cdev, "disk-type", __DECONST(char *, type));
+}
 
 static void
 _setdiskinfo(struct disk *disk, struct disk_info *info)
@@ -863,8 +891,12 @@ diskioctl(struct dev_ioctl_args *ap)
 		return disk_dumpconf(dev, u);
 	}
 
-	error = dsioctl(dev, ap->a_cmd, ap->a_data, ap->a_fflag,
-			&dp->d_slice, &dp->d_info);
+	if (&dp->d_slice == NULL || dp->d_slice == NULL) {
+		error = ENOIOCTL;
+	} else {
+		error = dsioctl(dev, ap->a_cmd, ap->a_data, ap->a_fflag,
+				&dp->d_slice, &dp->d_info);
+	}
 
 	if (error == ENOIOCTL) {
 		error = dev_dioctl(dp->d_rawdev, ap->a_cmd, ap->a_data,
@@ -1122,6 +1154,38 @@ bioqwritereorder(struct bio_queue_head *bioq)
 			break;
 		left -= n;
 	}
+}
+
+/*
+ * Bounds checking against the media size, used for the raw partition.
+ * secsize, mediasize and b_blkno must all be the same units.
+ * Possibly this has to be DEV_BSIZE (512).
+ */
+int
+bounds_check_with_mediasize(struct bio *bio, int secsize, uint64_t mediasize)
+{
+	struct buf *bp = bio->bio_buf;
+	int64_t sz;
+
+	sz = howmany(bp->b_bcount, secsize);
+
+	if (bio->bio_offset/DEV_BSIZE + sz > mediasize) {
+		sz = mediasize - bio->bio_offset/DEV_BSIZE;
+		if (sz == 0) {
+			/* If exactly at end of disk, return EOF. */
+			bp->b_resid = bp->b_bcount;
+			return 0;
+		}
+		if (sz < 0) {
+			/* If past end of disk, return EINVAL. */
+			bp->b_error = EINVAL;
+			return 0;
+		}
+		/* Otherwise, truncate request. */
+		bp->b_bcount = sz * secsize;
+	}
+
+	return 1;
 }
 
 /*

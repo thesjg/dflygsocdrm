@@ -13,16 +13,16 @@ FILES=	DAEMON LOGIN NETWORKING SERVERS abi accounting addswap adjkerntz \
 	inetd initdiskless initrandom ip6fw ipfilter ipfs ipfw ipmon \
 	ipnat ipsec ipxrouted isdnd jail \
 	keyserv \
-	ldconfig local localdaemons lockd lpd \
+	ldconfig local localdaemons lockd lpd lvm \
 	mixer motd mountcritlocal mountcritremote \
 	mountd moused mroute6d mrouted msgs \
 	netif netoptions newsyslog \
 	network_ipv6 nfsclient nfsd nfsserver nisdomain nscd nsswitch \
-	dntpd othermta pf pflog ppp ppp-user pppoed pwcheck \
+	dntpd othermta pf pflog powerd ppp ppp-user pppoed pwcheck \
 	quota random rarpd rcconf resident rndcontrol root route6d routed \
 	routing rpcbind rtadvd rtsold rwho sysdb savecore sdpd securelevel \
 	sendmail sensorsd serial sppp sshd statd swap1 syscons sysctl syslogd \
-	timed ttys usbd varsym vinum vkernel virecover \
+	timed ttys udevd usbd varsym vinum vkernel virecover \
 	watchdogd wpa_supplicant \
 	ypbind yppasswdd ypserv ypset ypupdated ypxfrd
 

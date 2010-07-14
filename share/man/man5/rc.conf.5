@@ -24,7 +24,7 @@
 .\"
 .\" $FreeBSD: src/share/man/man5/rc.conf.5,v 1.197 2003/07/28 13:56:00 mbr Exp $
 .\"
-.Dd April 8, 2010
+.Dd June 29, 2010
 .Dt RC.CONF 5
 .Os
 .Sh NAME
@@ -163,6 +163,16 @@ is set to
 these are the flags to pass to the
 .Xr devd 8
 daemon.
+.It Va powerd_enable
+.Pq Vt bool
+Set to
+.Dq Li NO
+by default.
+Setting this to
+.Dq Li YES
+enables
+.Xr powerd 8 ,
+a CPU speed control daemon.
 .It Va sensorsd_enable
 .Pq Vt bool
 Set to
@@ -2639,6 +2649,11 @@ to be used within a jail.
 If set to
 .Dq Li YES ,
 allow applications within a jail to use System V IPC.
+.It Va lvm_enable
+.Pq Vt bool
+If set to
+.Dq Li YES
+LVM volumes will be discovered and configured on boot.
 .It Va newsyslog_enable
 .Pq Vt bool
 If set to
@@ -2788,6 +2803,11 @@ If set, start a watchdog timer in the background which will terminate
 if
 .Xr shutdown 8
 has not completed within the specified time (in seconds).
+.It Va udevd_enable
+.Pq Vt bool
+If set to
+.Dq Li YES ,
+the udevd daemon will be started on boot.
 .It Va vkernel_enable
 .Pq Vt bool
 If set to

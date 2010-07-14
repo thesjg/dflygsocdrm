@@ -76,6 +76,7 @@ SUBDIR= 802_11 \
 	pfctl \
 	pflogd \
 	pnpinfo \
+	powerd \
 	ppp \
 	pppctl \
 	pppd \
@@ -122,7 +123,6 @@ SUBDIR= 802_11 \
 	traceroute6 \
 	trpt \
 	tzsetup \
-	udevd \
 	usbd \
 	usbdevs \
 	vidcontrol \
