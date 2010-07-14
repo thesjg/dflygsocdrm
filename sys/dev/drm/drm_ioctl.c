@@ -43,14 +43,11 @@
  * information and reporting DRM information to userland.
  */
 
-#ifdef __linux__
 #include "drmP.h"
 #include "drm_core.h"
 
+#ifdef __linux__
 #include "linux/pci.h"
-#else
-#include "drmP.h"
-#include "drm_core.h"
 #endif
 
 /**
@@ -72,7 +69,7 @@ int drm_getunique(struct drm_device *dev, void *data,
 
 	if (u->unique_len >= master->unique_len) {
 		if (DRM_COPY_TO_USER(u->unique, master->unique, master->unique_len))
-			return EFAULT;
+			return -EFAULT;
 	}
 	u->unique_len = master->unique_len;
 
@@ -100,48 +97,25 @@ int drm_setunique(struct drm_device *dev, void *data,
 	struct drm_master *master = file_priv->master;
 	int domain, bus, slot, func, ret;
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-
 	if (master->unique_len || master->unique) {
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		return EBUSY;
+		return -EBUSY;
 	}
 
-	/* Check and copy in the submitted Bus ID */
 	if (!u->unique_len || u->unique_len > 1024) {
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		return EINVAL;
+		return -EINVAL;
 	}
 
 	master->unique_len = u->unique_len;
 	master->unique_size = u->unique_len + 1;
 	master->unique = malloc(master->unique_size, DRM_MEM_DRIVER, M_WAITOK);
-
 	if (!master->unique) {
 		master->unique_len = 0;
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		return ENOMEM;
+		return -ENOMEM;
+	}
+	if (DRM_COPY_FROM_USER(master->unique, u->unique, master->unique_len)) {
+		return -EFAULT;
 	}
 
-	if (DRM_COPY_FROM_USER(master->unique, u->unique, master->unique_len)) {
-#ifndef __linux__
-		free(master->unique, DRM_MEM_DRIVER);
-		master->unique_len = 0;
-		master->unique = NULL;
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-#endif /* __linux__ */
-		return EFAULT;
-	}
 	master->unique[u->unique_len] = '\0';
 
 #ifdef __linux__
@@ -159,15 +133,7 @@ int drm_setunique(struct drm_device *dev, void *data,
 	 */
 	ret = sscanf(master->unique, "PCI:%d:%d:%d", &bus, &slot, &func);
 	if (ret != 3) {
-#ifndef __linux__
-		free(master->unique, DRM_MEM_DRIVER);
-		master->unique_len = 0;
-		master->unique = NULL;
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-#endif /* __linux__ */
-		return EINVAL;
+		return -EINVAL;
 	}
 	domain = bus >> 8;
 	bus &= 0xff;
@@ -176,22 +142,8 @@ int drm_setunique(struct drm_device *dev, void *data,
 	    (bus != dev->pci_bus) ||
 	    (slot != dev->pci_slot) ||
 	    (func != dev->pci_func)) {
-#ifndef __linux__
-		free(master->unique, DRM_MEM_DRIVER);
-		master->unique_len = 0;
-		master->unique = NULL;
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-#endif /* __linux__ */
-		return EINVAL;
+		return -EINVAL;
 	}
-
-#ifndef __linux__
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
-#endif /* __linux__ */
 
 	return 0;
 }
@@ -201,15 +153,8 @@ static int drm_set_busid(struct drm_device *dev, struct drm_file *file_priv)
 	struct drm_master *master = file_priv->master;
 	int len;
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-
 	if (master->unique != NULL) {
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		return EBUSY;
+		return -EBUSY;
 	}
 
 	master->unique_len = 40;
@@ -217,10 +162,7 @@ static int drm_set_busid(struct drm_device *dev, struct drm_file *file_priv)
 	master->unique = malloc(master->unique_size, DRM_MEM_DRIVER, M_WAITOK);
 	if (master->unique == NULL) {
 		master->unique_len = 0;
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	len = snprintf(master->unique, master->unique_len, "pci:%04x:%02x:%02x.%d",
@@ -244,10 +186,6 @@ static int drm_set_busid(struct drm_device *dev, struct drm_file *file_priv)
 		master->unique);
 #endif /* __linux__ */
 
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
-
 	return 0;
 }
 
@@ -268,32 +206,19 @@ int drm_getmap(struct drm_device *dev, void *data,
 	       struct drm_file *file_priv)
 {
 	struct drm_map *map = data;
-#ifdef DRM_NEWER_MAPLIST
 	struct drm_map_list *r_list = NULL;
 	struct list_head *list;
-#else
-	drm_local_map_t    *mapinlist;
-#endif
 	int idx;
-	int i = 0;
+	int i;
 
 	idx = map->offset;
 
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_LOCK();
-#endif
 	if (idx < 0) {
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
-		DRM_UNLOCK();
-#endif
-		return EINVAL;
+		return -EINVAL;
 	}
 
-#ifdef DRM_NEWER_MAPLIST
 	i = 0;
 	list_for_each(list, &dev->maplist) {
 		if (i == idx) {
@@ -303,12 +228,8 @@ int drm_getmap(struct drm_device *dev, void *data,
 		i++;
 	}
 	if (!r_list || !r_list->map) {
-#ifdef DRM_NEWER_LOCK
 		mutex_unlock(&dev->struct_mutex);
-#else
-		DRM_UNLOCK();
-#endif
-		return EINVAL;
+		return -EINVAL;
 	}
 	map->offset = r_list->map->offset;
 	map->size = r_list->map->size;
@@ -320,32 +241,7 @@ int drm_getmap(struct drm_device *dev, void *data,
 	map->handle = r_list->map->handle;
 #endif /* __linux__ */
 	map->mtrr = r_list->map->mtrr;
-
-#else /* DRM_NEWER_MAPLIST */
-	TAILQ_FOREACH(mapinlist, &dev->maplist_legacy, link) {
-		if (i == idx) {
-			map->offset = mapinlist->offset;
-			map->size   = mapinlist->size;
-			map->type   = mapinlist->type;
-			map->flags  = mapinlist->flags;
-			map->handle = mapinlist->handle;
-			map->mtrr   = mapinlist->mtrr;
-			break;
-		}
-		i++;
-	}
-#endif /* DRM_NEWER_MAPLIST */
-
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
-	DRM_UNLOCK();
-#endif
-
-#ifndef DRM_NEWER_MAPLIST
- 	if (mapinlist == NULL)
-		return EINVAL;
-#endif
 
 	return 0;
 }
@@ -372,11 +268,8 @@ int drm_getclient(struct drm_device *dev, void *data,
 	int i = 0;
 
 	idx = client->idx;
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_LOCK();
-#endif
+
 	TAILQ_FOREACH(pt, &dev->files, link) {
 		if (i == idx) {
 			client->auth  = pt->authenticated;
@@ -384,22 +277,14 @@ int drm_getclient(struct drm_device *dev, void *data,
 			client->uid   = pt->uid;
 			client->magic = pt->magic;
 			client->iocs  = pt->ioctl_count;
-#ifdef DRM_NEWER_LOCK
 			mutex_unlock(&dev->struct_mutex);
-#else
-			DRM_UNLOCK();
-#endif
 			return 0;
 		}
 		i++;
 	}
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
-	DRM_UNLOCK();
-#endif
 
-	return EINVAL;
+	return -EINVAL;
 }
 
 /**
@@ -420,21 +305,12 @@ int drm_getstats(struct drm_device *dev, void *data,
 
 	memset(stats, 0, sizeof(*stats));
 
-#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
-#else
-	DRM_LOCK();
-#endif
 
 	for (i = 0; i < dev->counters; i++) {
 		if (dev->types[i] == _DRM_STAT_LOCK)
-#ifdef DRM_NEWER_HWLOCK
 			stats->data[i].value =
 			    (file_priv->master->lock.hw_lock ? file_priv->master->lock.hw_lock->lock : 0);
-#else
-			stats->data[i].value =
-			    (dev->lock.hw_lock ? dev->lock.hw_lock->lock : 0);
-#endif
 		else 
 			stats->data[i].value = atomic_read(&dev->counts[i]);
 		stats->data[i].type = dev->types[i];
@@ -442,11 +318,7 @@ int drm_getstats(struct drm_device *dev, void *data,
 	
 	stats->count = dev->counters;
 
-#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
-#else
-	DRM_UNLOCK();
-#endif
 
 	return 0;
 }
