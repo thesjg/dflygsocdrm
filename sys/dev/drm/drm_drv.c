@@ -1198,12 +1198,12 @@ lock_kernel();
 	drm_master_put(&file_priv->master);
 	file_priv->is_master = 0;
 	list_del(&file_priv->lhead);
-
+	TAILQ_REMOVE(&dev->files, file_priv, link);
 	mutex_unlock(&dev->struct_mutex);
 
 	if (dev->driver->postclose)
 		dev->driver->postclose(dev, file_priv);
-#ifndef DRM_NEWER_FILELIST
+#if 0
 	TAILQ_REMOVE(&dev->files, file_priv, link);
 #endif /* DRM_NEWER_FILELIST */
 	free(file_priv, DRM_MEM_FILES);
