@@ -397,21 +397,12 @@ int drm_addctx(struct drm_device *dev, void *data,
 
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {
 		if (dev->driver->context_ctor) {
-#ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
-#endif
 /* used in legacy sis driver but not the linux sis driver */
 			if (!dev->driver->context_ctor(dev, ctx->handle)) {
 				DRM_DEBUG("Running out of ctxs or memory.\n");
-#ifndef DRM_NEWER_LOCK
-				DRM_UNLOCK();
-#endif
 				return -ENOMEM;
 			}
 		}
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 	}
 
 	ctx_entry = malloc(sizeof(*ctx_entry), DRM_MEM_CTXBITMAP, M_WAITOK);
@@ -515,10 +506,6 @@ int drm_rmctx(struct drm_device *dev, void *data,
 {
 	struct drm_ctx *ctx = data;
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-
 	DRM_DEBUG("%d\n", ctx->handle);
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {
 		if (dev->driver->context_dtor) {
@@ -540,10 +527,6 @@ int drm_rmctx(struct drm_device *dev, void *data,
 		}
 	}
 	mutex_unlock(&dev->ctxlist_mutex);
-
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 
 	return 0;
 }

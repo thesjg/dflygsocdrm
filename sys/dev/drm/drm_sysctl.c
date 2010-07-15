@@ -158,18 +158,12 @@ static int drm_name_info_legacy DRM_SYSCTL_HANDLER_ARGS
 
 	DRM_SYSCTL_PRINT("%s 0x%x", dev->driver->name, dev2udev(dev->devnode));
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
 	mutex_lock(&dev->struct_mutex);
 	if (master->unique) {
 		snprintf(buf, sizeof(buf), " %s", master->unique);
 		hasunique = 1;
 	}
 	mutex_unlock(&dev->struct_mutex);
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 	
 	if (hasunique)
 		SYSCTL_OUT(req, buf, strlen(buf));
@@ -195,9 +189,6 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	/* We can't hold the lock while doing SYSCTL_OUTs, so allocate a
 	 * temporary copy of all the map entries and then SYSCTL_OUT that.
 	 */
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
 	mutex_lock(&dev->struct_mutex);
 	mapcount = 0;
 	list_for_each_entry(r_list, &dev->maplist, head) {
@@ -208,9 +199,6 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 		DRM_MEM_DRIVER, M_WAITOK);
 	if (tempmaps == NULL) {
 		mutex_unlock(&dev->struct_mutex);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 		return ENOMEM;
 	}
 
@@ -220,9 +208,6 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 		tempmaps[i++] = *map;
 	}
 	mutex_unlock(&dev->struct_mutex);
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 
 	DRM_SYSCTL_PRINT("\nslot offset	        size       "
 	    "type flags address            mtrr\n");
@@ -271,15 +256,9 @@ static int drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	/* We can't hold the locks around DRM_SYSCTL_PRINT, so make a temporary
 	 * copy of the whole structure and the relevant data from buflist.
 	 */
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
 	mutex_lock(&dev->struct_mutex);
 	if (dma == NULL) {
 		mutex_unlock(&dev->struct_mutex);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 		return 0;
 	}
 	tempdma = *dma;
@@ -290,9 +269,6 @@ static int drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	dma = &tempdma;
 
 	mutex_unlock(&dev->struct_mutex);
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 
 	DRM_SYSCTL_PRINT("\n o     size count  free	 segs pages    kB\n");
 	for (i = 0; i <= DRM_MAX_ORDER; i++) {
@@ -363,9 +339,6 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	int retcode;
 	int privcount, i;
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
 	mutex_lock(&dev->struct_mutex);
 
 	privcount = 0;
@@ -376,18 +349,12 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 		DRM_MEM_DRIVER, M_WAITOK);
 	if (tempprivs == NULL) {
 		mutex_unlock(&dev->struct_mutex);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 		return ENOMEM;
 	}
 	i = 0;
 	TAILQ_FOREACH(priv, &dev->files, link)
 		tempprivs[i++] = *priv;
 	mutex_unlock(&dev->struct_mutex);
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 
 	DRM_SYSCTL_PRINT("\na dev	pid    uid	magic	  ioctls\n");
 	for (i = 0; i < privcount; i++) {

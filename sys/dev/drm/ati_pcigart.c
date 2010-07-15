@@ -221,6 +221,10 @@ drm_ati_pcigart_init(struct drm_device *dev,
 
 	ret = 1;
 
+#if defined(__i386__) || defined(__x86_64__)
+	wbinvd();
+#endif
+
     done:
 	gart_info->addr = address;
 	gart_info->bus_addr = bus_address;

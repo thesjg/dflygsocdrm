@@ -150,10 +150,6 @@ int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #endif /* __linux__ */
 	struct drm_auth *auth = data;
 
-#ifdef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-
 	/* Find unique magic */
 	if (file_priv->magic) {
 		auth->magic = file_priv->magic;
@@ -177,10 +173,6 @@ int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		drm_add_magic(file_priv->master, file_priv, auth->magic);
 	}
 
-#ifdef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
-
 	DRM_DEBUG("%u\n", auth->magic);
 
 	return 0;
@@ -203,23 +195,11 @@ int drm_authmagic(struct drm_device *dev, void *data,
 	struct drm_auth *auth = data;
 	struct drm_file *file;
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-
 	DRM_DEBUG("%u\n", auth->magic);
 	if ((file = drm_find_file(file_priv->master, auth->magic))) {
 		file->authenticated = 1;
 		drm_remove_magic(file_priv->master, auth->magic);
-
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 		return 0;
 	}
-
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
-	return EINVAL;
+	return -EINVAL;
 }

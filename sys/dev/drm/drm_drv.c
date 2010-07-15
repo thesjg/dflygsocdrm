@@ -955,36 +955,25 @@ int drm_open_legacy(struct dev_open_args *ap)
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
 
-#ifdef DRM_NEWER_LOCK
-		spin_lock(&dev->count_lock);
-#else
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
 #endif
+		spin_lock(&dev->count_lock);
 
 #ifndef __linux__
 		device_busy(dev->device);
 #endif /* !__linux__ */
 
 		if (!dev->open_count++) {
-#ifdef __linux__
 			spin_unlock(&dev->count_lock);
-			retcode = drm_setup(dev);
-			goto out;
-#else /* __linux__ */
-
-#ifdef DRM_NEWER_LOCK
-			spin_unlock(&dev->count_lock);
-#endif
 			retcode = drm_firstopen(dev);
 #ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
 #endif
 			goto out;
-#endif /* __linux__ */
 		}
-#ifdef DRM_NEWER_LOCK
 		spin_unlock(&dev->count_lock);
-#else
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif
 	}
@@ -1225,10 +1214,13 @@ lock_kernel();
 done:
 	atomic_inc(&dev->counts[_DRM_STAT_CLOSES]);
 
+	spin_lock(&dev->count_lock);
 	device_unbusy(dev->device);
 	if (--dev->open_count == 0) {
+		spin_unlock(&dev->count_lock);
 		retcode = drm_lastclose(dev);
 	}
+	spin_unlock(&dev->count_lock);
 
 #ifdef DRM_NEWER_LOCK
 	unlock_kernel();
