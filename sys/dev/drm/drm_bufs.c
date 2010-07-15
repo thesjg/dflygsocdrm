@@ -1039,10 +1039,10 @@ int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER)
 		return -EINVAL;
 
-#ifdef DRM_NEWER_LOCK
+#ifdef __linux__
 	if (dev->queue_count)
 		return -EBUSY;	/* Not while in use */
-#endif
+#endif /* __linux__ */
 
 	alignment = (request->flags & _DRM_PAGE_ALIGN)
 	    ? PAGE_ALIGN(size) : size;

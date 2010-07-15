@@ -71,6 +71,7 @@ static void mach64_configure(struct drm_device *dev)
 	dev->driver->major		= DRIVER_MAJOR;
 	dev->driver->minor		= DRIVER_MINOR;
 	dev->driver->patchlevel		= DRIVER_PATCHLEVEL;
+	dev->driver->num_ioctls		= mach64_max_ioctl;
 }
 
 static struct drm_driver driver = {
