@@ -1,4 +1,13 @@
-/*-
+/**
+ * \file drm_scatter.c
+ * IOCTLs to manage scatter/gather memory
+ *
+ * \author Gareth Hughes <gareth@valinux.com>
+ */
+
+/*
+ * Created: Mon Dec 18 23:20:54 2000 by gareth@valinux.com
+ *
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
@@ -20,44 +29,33 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
- *
+ */
+
+ /*
  * Authors:
  *   Gareth Hughes <gareth@valinux.com>
  *   Eric Anholt <anholt@FreeBSD.org>
  *
  */
 
-/** @file drm_scatter.c
- * Allocation of memory for scatter-gather mappings by the graphics chip.
- *
- * The memory allocated here is then made into an aperture in the card
- * by drm_ati_pcigart_init().
- */
-
 #ifdef __linux__
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
+#endif /* __linux__ */
 #include "drmP.h"
-#else
-#include "dev/drm/drmP.h"
-#endif
 
 #define DEBUG_SCATTER 0
 
-/* newer UNIMPLEMENTED */
 static inline void *drm_vmalloc_dma(unsigned long size)
 {
 #if defined(__powerpc__) && defined(CONFIG_NOT_COHERENT_CACHE)
 	return __vmalloc(size, GFP_KERNEL, PAGE_KERNEL | _PAGE_NO_CACHE);
 #else
-	return vmalloc_32(size);
+	return malloc(size, DRM_MEM_DMA, M_WAITOK | M_ZERO);
 #endif
 }
 
-/* shared API */
-
-void
-drm_sg_cleanup(struct drm_sg_mem *entry)
+void drm_sg_cleanup(struct drm_sg_mem * entry)
 {
 	struct drm_dma_handle *dmah = entry->dmah;
 
@@ -78,35 +76,38 @@ drm_sg_cleanup(struct drm_sg_mem *entry)
 static void drm_sg_alloc_cb(void *arg, bus_dma_segment_t *segs,
 			    int nsegs, int error);
 
-int
-drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather *request)
+int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 {
 	struct drm_sg_mem *entry;
 	struct drm_dma_handle *dmah;
 	unsigned long pages;
 	int ret;
 
+	DRM_DEBUG("\n");
+
+	if (!drm_core_check_feature(dev, DRIVER_SG))
+		return -EINVAL;
+
 	if (dev->sg)
-		return EINVAL;
+		return -EINVAL;
 
 	entry = malloc(sizeof(*entry), DRM_MEM_SGLISTS, M_WAITOK | M_ZERO);
 	if (!entry)
-		return ENOMEM;
+		return -ENOMEM;
 
 	pages = round_page(request->size) / PAGE_SIZE;
-	DRM_DEBUG("sg size=%ld pages=%ld\n", request->size, pages);
+	DRM_DEBUG("size=%ld pages=%ld\n", request->size, pages);
 
 	entry->pages = pages;
-
-	entry->busaddr = malloc(pages * sizeof(*entry->busaddr), DRM_MEM_PAGES,
-	    M_WAITOK | M_ZERO);
+	entry->busaddr = malloc(pages * sizeof(*entry->busaddr),
+		DRM_MEM_PAGES, M_WAITOK | M_ZERO);
 	if (!entry->busaddr) {
 		free(entry, DRM_MEM_SGLISTS);
 		return ENOMEM;
 	}
 
-	dmah = malloc(sizeof(struct drm_dma_handle), DRM_MEM_DMA,
-	    M_ZERO | M_WAITOK);
+	dmah = malloc(sizeof(struct drm_dma_handle),
+		DRM_MEM_DMA, M_WAITOK | M_ZERO);
 	if (dmah == NULL) {
 		free(entry->busaddr, DRM_MEM_PAGES);
 		free(entry, DRM_MEM_SGLISTS);
@@ -123,7 +124,7 @@ drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather *request)
 		free(dmah, DRM_MEM_DMA);
 		free(entry->busaddr, DRM_MEM_PAGES);
 		free(entry, DRM_MEM_SGLISTS);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	/* XXX BUS_DMA_NOCACHE */
@@ -134,7 +135,7 @@ drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather *request)
 		free(dmah, DRM_MEM_DMA);
 		free(entry->busaddr, DRM_MEM_PAGES);
 		free(entry, DRM_MEM_SGLISTS);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	ret = bus_dmamap_load(dmah->tag, dmah->map, dmah->vaddr,
@@ -145,31 +146,20 @@ drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather *request)
 		free(dmah, DRM_MEM_DMA);
 		free(entry->busaddr, DRM_MEM_PAGES);
 		free(entry, DRM_MEM_SGLISTS);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	entry->dmah = dmah;
 	entry->handle = (unsigned long)dmah->vaddr;
-	
-	DRM_DEBUG("sg alloc handle  = %08lx\n", entry->handle);
-
 	entry->virtual = (void *)entry->handle;
+
+	DRM_DEBUG("handle  = %08lx\n", entry->handle);
+	DRM_DEBUG("virtual = %p\n", entry->virtual);
+
 	request->handle = entry->handle;
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-	if (dev->sg) {
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-		drm_sg_cleanup(entry);
-		return EINVAL;
-	}
 	dev->sg = entry;
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
+
 	return 0;
 }
 
@@ -187,36 +177,30 @@ drm_sg_alloc_cb(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
 	}
 }
 
-int
-drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
-		   struct drm_file *file_priv)
+int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv)
 {
 	struct drm_scatter_gather *request = data;
-
-	DRM_DEBUG("\n");
 
 	return drm_sg_alloc(dev, request);
 }
 
-int
-drm_sg_free(struct drm_device *dev, void *data, struct drm_file *file_priv)
+int drm_sg_free(struct drm_device *dev, void *data,
+		struct drm_file *file_priv)
 {
 	struct drm_scatter_gather *request = data;
 	struct drm_sg_mem *entry;
 
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
+	if (!drm_core_check_feature(dev, DRIVER_SG))
+		return -EINVAL;
+
 	entry = dev->sg;
 	dev->sg = NULL;
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 
 	if (!entry || entry->handle != request->handle)
-		return EINVAL;
+		return -EINVAL;
 
-	DRM_DEBUG("sg free virtual = 0x%lx\n", entry->handle);
+	DRM_DEBUG("virtual  = %p\n", entry->virtual);
 
 	drm_sg_cleanup(entry);
 
