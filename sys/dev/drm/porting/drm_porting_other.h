@@ -275,3 +275,6 @@ extern DRM_PROC_DIR_ENTRY drm_sysctl_root;
 #define DRM_NEWER_MAPLIST 1
 #define DRM_NEWER_HWLOCK 1
 #define DRM_NEWER_SAREA 1
+
+#define DRM_OPEN_ARGS  struct dev_open_args *ap
+#define DRM_GET_DEV_ARGS  device_t kdev, DRM_PCI_DEVICE_ID *idlist

@@ -1391,9 +1391,6 @@ extern int drm_release(struct inode *inode, struct file *filp);
 
 /* File operations helpers (drm_fops.c) */
 /* legacy functions */
-extern int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt,
-					 DRM_STRUCTPROC *p,
-					struct drm_device *dev);
 extern struct drm_file	*drm_find_file_by_proc(struct drm_device *dev,
 					DRM_STRUCTPROC *p);
 
@@ -1710,12 +1707,10 @@ extern int drm_dropmaster_ioctl(struct drm_device *dev, void *data,
 struct drm_master *drm_master_create(struct drm_minor *minor);
 extern struct drm_master *drm_master_get(struct drm_master *master);
 extern void drm_master_put(struct drm_master **master);
-extern int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
-		       struct drm_driver *driver);
+extern int drm_get_dev(DRM_GET_DEV_ARGS);
 extern void drm_put_dev(struct drm_device *dev);
 #ifndef __linux__
-extern int drm_master_init(struct drm_master *master);
-extern int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int type);
+extern DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device, DRM_PCI_DEVICE_ID *idlist);
 #endif /* __linux__ */
 extern int drm_put_minor(struct drm_minor **minor);
 extern unsigned int drm_debug;
