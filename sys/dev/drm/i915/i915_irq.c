@@ -413,7 +413,9 @@ int i915_irq_emit(struct drm_device *dev, void *data,
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+	mutex_lock(&dev->struct_mutex);
 	result = i915_emit_irq(dev);
+	mutex_unlock(&dev->struct_mutex);
 
 	if (DRM_COPY_TO_USER(emit->irq_seq, &result, sizeof(int))) {
 		DRM_ERROR("copy_to_user\n");
