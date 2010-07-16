@@ -93,13 +93,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	enum drm_map_type type;
 	vm_paddr_t phys;
 
-#ifndef DRM_NEWER_LOCK
-        DRM_LOCK();
-#endif
         file_priv = drm_find_file_by_proc(dev, DRM_CURPROC);
-#ifndef DRM_NEWER_LOCK
-        DRM_UNLOCK();
-#endif
 
         if (file_priv == NULL) {
                 DRM_ERROR("can't find authenticator\n");
@@ -129,10 +123,6 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 				   once, so it doesn't have to be optimized
 				   for performance, even if the list was a
 				   bit longer. */
-#ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
-#endif
-
 	list_for_each_entry(r_list, &dev->maplist, head) {
 		if (offset >= r_list->map->offset && offset < r_list->map->offset + r_list->map->size) {
 			r_list_found = r_list;
@@ -150,22 +140,13 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 		DRM_ERROR("Can't find map, requested offset = %016lx\n",
 			(unsigned long)offset);
 
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 		return -1;
 	}
 	if (((map->flags&_DRM_RESTRICTED) && !DRM_SUSER(DRM_CURPROC))) {
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 		DRM_DEBUG("restricted map\n");
 		return -1;
 	}
 	type = map->type;
-#ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
-#endif
 
 	switch (type) {
 	case _DRM_FRAME_BUFFER:
