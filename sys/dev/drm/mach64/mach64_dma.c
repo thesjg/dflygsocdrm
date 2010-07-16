@@ -836,14 +836,14 @@ static int mach64_bm_dma_test(struct drm_device * dev)
 	DRM_DEBUG("Allocating data memory ...\n");
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif /* DRM_NEWER_LOCK */
 #endif
 	cpu_addr_dmah =
 	    drm_pci_alloc(dev, 0x1000, 0x1000);
 #if defined(__FreeBSD__) || defined(__DragonFly__)
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif /* DRM_NEWER_LOCK */
 #endif
 	if (!cpu_addr_dmah) {
