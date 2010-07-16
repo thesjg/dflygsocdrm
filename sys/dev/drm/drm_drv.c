@@ -431,12 +431,12 @@ int drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 	if (dev->driver->load) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif
 		/* Shared code returns -errno. */
 		ret = -dev->driver->load(dev, dev->id_entry->driver_data);
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif
 		if (ret)
 			goto err_g4;
 	}
@@ -794,11 +794,11 @@ static void drm_unload(struct drm_device *dev)
 
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif
 	drm_lastclose(dev);
 #ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif
 
 #ifdef __linux__
 	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
@@ -822,11 +822,11 @@ static void drm_unload(struct drm_device *dev)
 	if (dev->driver->unload) {
 #ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif
 		dev->driver->unload(dev);
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif
 	}
 
 	if (drm_core_has_AGP(dev) && dev->agp) {
@@ -1072,8 +1072,9 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
-#endif /* DRM_NEWER_LOCK */
+#endif
 
+	mutex_lock(&dev->struct_mutex);
 	file_priv = drm_find_file_by_proc(dev, curthread);
 	if (!file_priv->minor) {
 		DRM_ERROR("drm_close() no minor for file!\n");
@@ -1091,8 +1092,10 @@ int drm_close_legacy(struct dev_close_args *ap)
 		file_priv->minor->index);
 
 	if (--file_priv->refs != 0) {
+		mutex_unlock(&dev->struct_mutex);
 		goto done;
 	}
+	mutex_unlock(&dev->struct_mutex);
 
 	if (dev->driver->preclose != NULL)
 		dev->driver->preclose(dev, file_priv);

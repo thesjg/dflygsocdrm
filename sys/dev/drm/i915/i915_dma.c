@@ -689,7 +689,9 @@ static int i915_flush_ioctl(struct drm_device *dev, void *data,
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+	mutex_lock(&dev->struct_mutex);
 	ret = i915_quiescent(dev);
+	mutex_unlock(&dev->struct_mutex);
 
 	return ret;
 }
@@ -731,6 +733,8 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 #endif
 		return -EFAULT;
 	}
+	mutex_lock(&dev->struct_mutex);
+
 	if (batch->num_cliprects) {
 		vslock((caddr_t)batch->cliprects, cliplen);
 	}
@@ -739,6 +743,8 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 
 	if (batch->num_cliprects)
 		vsunlock((caddr_t)batch->cliprects, cliplen);
+
+	mutex_unlock(&dev->struct_mutex);
 
 	if (sarea_priv)
 		sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
@@ -779,6 +785,8 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 #endif
 		return -EFAULT;
 	}
+
+	mutex_lock(&dev->struct_mutex);
 	if (cmdbuf->num_cliprects) {
 		vslock((caddr_t)cmdbuf->cliprects, cliplen);
 		vslock((caddr_t)cmdbuf->buf, cmdbuf->sz);
@@ -790,6 +798,8 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 		vsunlock((caddr_t)cmdbuf->buf, cmdbuf->sz);
 		vsunlock((caddr_t)cmdbuf->cliprects, cliplen);
 	}
+	mutex_unlock(&dev->struct_mutex);
+
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
@@ -812,7 +822,9 @@ static int i915_flip_bufs(struct drm_device *dev, void *data,
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+	mutex_lock(&dev->struct_mutex);
 	ret = i915_dispatch_flip(dev);
+	mutex_unlock(&dev->struct_mutex);
 
 	return ret;
 }
