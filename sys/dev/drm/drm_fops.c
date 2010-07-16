@@ -151,8 +151,8 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 			find_priv->authenticated
 			);
 		kdev->si_drv1 = dev;
-
 		mutex_unlock(&dev->struct_mutex);
+
 #ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
 #endif

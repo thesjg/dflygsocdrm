@@ -733,18 +733,17 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 #endif
 		return -EFAULT;
 	}
-	mutex_lock(&dev->struct_mutex);
 
 	if (batch->num_cliprects) {
 		vslock((caddr_t)batch->cliprects, cliplen);
 	}
 
+	mutex_lock(&dev->struct_mutex);
 	ret = i915_dispatch_batchbuffer(dev, batch);
+	mutex_unlock(&dev->struct_mutex);
 
 	if (batch->num_cliprects)
 		vsunlock((caddr_t)batch->cliprects, cliplen);
-
-	mutex_unlock(&dev->struct_mutex);
 
 	if (sarea_priv)
 		sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
@@ -786,19 +785,19 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 		return -EFAULT;
 	}
 
-	mutex_lock(&dev->struct_mutex);
 	if (cmdbuf->num_cliprects) {
 		vslock((caddr_t)cmdbuf->cliprects, cliplen);
 		vslock((caddr_t)cmdbuf->buf, cmdbuf->sz);
 	}
 
+	mutex_lock(&dev->struct_mutex);
 	ret = i915_dispatch_cmdbuffer(dev, cmdbuf);
+	mutex_unlock(&dev->struct_mutex);
 
 	if (cmdbuf->num_cliprects) {
 		vsunlock((caddr_t)cmdbuf->buf, cmdbuf->sz);
 		vsunlock((caddr_t)cmdbuf->cliprects, cliplen);
 	}
-	mutex_unlock(&dev->struct_mutex);
 
 #ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
