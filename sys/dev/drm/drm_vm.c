@@ -176,9 +176,11 @@ int drm_mmap_legacy(struct dev_mmap_args *ap)
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	int ret;
 
+	spin_lock(&dev->file_priv_lock);
 	mutex_lock(&dev->struct_mutex);
 	ret = drm_mmap_legacy_locked(ap);
 	mutex_unlock(&dev->struct_mutex);
+	spin_unlock(&dev->file_priv_lock);
 
 	return ret;
 }

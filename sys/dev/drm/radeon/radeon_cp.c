@@ -1766,13 +1766,13 @@ void radeon_do_release(struct drm_device * dev)
 					tsleep_interlock(&dev->lock.lock_queue,
 							 PCATCH);
 #ifndef DRM_NEWER_LOCK
-                			DRM_UNLOCK();
+//                			DRM_UNLOCK();
 #endif
 					ret = tsleep(&dev->lock.lock_queue,
 						    PCATCH | PINTERLOCKED,
 						    "rdnrel", 0);
 #ifndef DRM_NEWER_LOCK
-                			DRM_LOCK();
+//                			DRM_LOCK();
 #endif
 /* DragonFly equivalent of
  *					mtx_sleep(&ret, &dev->dev_lock, 0,
@@ -1785,13 +1785,13 @@ void radeon_do_release(struct drm_device * dev)
 					tsleep_interlock(&dev->lock.lock_queue,
 							 PCATCH);
 #ifndef DRM_NEWER_LOCK
-                			DRM_UNLOCK();
+//                			DRM_UNLOCK();
 #endif
 					ret = tsleep(&dev->lock.lock_queue,
 						    PCATCH | PINTERLOCKED,
 						    "rdnrel", 0);
 #ifndef DRM_NEWER_LOCK
-                			DRM_LOCK();
+//                			DRM_LOCK();
 #endif
 				}
 			}

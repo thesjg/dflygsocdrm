@@ -1279,6 +1279,7 @@ struct drm_device {
 	/* Added for DragonFly port for backwards compatibility */
 	int unit; /* return value of device_get_unit() */
 	DRM_SPINTYPE static_lock;	/* substitutes for static locks */
+	DRM_SPINTYPE file_priv_lock;	/* file_priv process synch */
 };
 
 static inline int drm_dev_to_irq(struct drm_device *dev)
