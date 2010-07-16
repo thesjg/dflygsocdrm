@@ -214,14 +214,17 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 		if (dev->driver->master_create) {
 			ret = dev->driver->master_create(dev, priv->master);
 			if (ret) {
-
+#ifndef DRM_NEWER_LOCK
 				DRM_LOCK();
+#endif
 				mutex_lock(&dev->struct_mutex);
 				/* drop both references if this fails */
 				drm_master_put(&priv->minor->master);
 				drm_master_put(&priv->master);
 				mutex_unlock(&dev->struct_mutex);
+#ifndef DRM_NEWER_LOCK
 				DRM_UNLOCK();
+#endif
 				goto out_free;
 			}
 		}
@@ -231,10 +234,14 @@ int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC
 			ret = dev->driver->master_set(dev, priv, true);
 			if (ret) {
 				/* drop both references if this fails */
+#ifndef DRM_NEWER_LOCK
 				DRM_LOCK();
+#endif
 				drm_master_put(&priv->minor->master);
 				drm_master_put(&priv->master);
+#ifndef DRM_NEWER_LOCK
 				DRM_UNLOCK();
+#endif
 				mutex_unlock(&dev->struct_mutex);
 				goto out_free;
 			}
