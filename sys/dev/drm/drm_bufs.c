@@ -63,11 +63,11 @@ static int drm_alloc_resource(struct drm_device *dev, int resource)
 	}
 
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 	if (dev->pcir[resource] != NULL) {
 #ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
+//		DRM_LOCK();
 #endif
 		return 0;
 	}
@@ -76,7 +76,7 @@ static int drm_alloc_resource(struct drm_device *dev, int resource)
 	dev->pcir[resource] = bus_alloc_resource_any(dev->device,
 	    SYS_RES_MEMORY, &dev->pcirid[resource], RF_SHAREABLE);
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 
 	if (dev->pcir[resource] == NULL) {
@@ -248,7 +248,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	}
 
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 
 	/* Allocate a new map structure, fill it in, and do any type-specific
@@ -258,7 +258,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 
 	if (!map) {
 #ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
+//		DRM_LOCK();
 #endif
 		return ENOMEM;
 	}
@@ -279,7 +279,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	    size, type);
 
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 
 	/* Check if this is just another version of a kernel-allocated map, and
@@ -301,11 +301,11 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 				map = map_entry;
 				DRM_DEBUG("Found kernel map %d\n", type);
 #ifndef DRM_NEWER_LOCK
-				DRM_UNLOCK();
+//				DRM_UNLOCK();
 #endif
 				free(map_free, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-				DRM_LOCK();
+//				DRM_LOCK();
 #endif
 				goto done;
 			}
@@ -313,7 +313,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	}
 
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 
 	switch (map->type) {
@@ -337,7 +337,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		if (!map->handle) {
 			free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-			DRM_LOCK();
+//			DRM_LOCK();
 #endif
 			return ENOMEM;
 		}
@@ -345,17 +345,17 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		if (map->flags & _DRM_CONTAINS_LOCK) {
 			/* Prevent a 2nd X Server from creating a 2nd lock */
 #ifndef DRM_NEWER_LOCK
-			DRM_LOCK();
+//			DRM_LOCK();
 #endif
 
 			if (dev->primary->master->lock.hw_lock != NULL) {
 #ifndef DRM_NEWER_LOCK
-				DRM_UNLOCK();
+//				DRM_UNLOCK();
 #endif
 				free(map->handle, DRM_MEM_MAPS);
 				free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-				DRM_LOCK();
+//				DRM_LOCK();
 #endif
 				return EBUSY;
 			}
@@ -363,7 +363,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			dev->sigdata.lock = dev->primary->master->lock.hw_lock;	/* Pointer to lock */
 
 #ifndef DRM_NEWER_LOCK
-			DRM_UNLOCK();
+//			DRM_UNLOCK();
 #endif
 		}
 		break;
@@ -374,7 +374,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		if (!drm_core_has_AGP(dev)) {
 			free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-			DRM_LOCK();
+//			DRM_LOCK();
 #endif
 			return EINVAL;
 		}
@@ -422,7 +422,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		if (!dev->sg) {
 			free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-			DRM_LOCK();
+//			DRM_LOCK();
 #endif
 			return EINVAL;
 		}
@@ -463,7 +463,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		if (map->dmah == NULL) {
 			free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-			DRM_LOCK();
+//			DRM_LOCK();
 #endif
 			return ENOMEM;
 		}
@@ -475,7 +475,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	default:
 		free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
+//		DRM_LOCK();
 #endif
 		return EINVAL;
 	}
@@ -486,14 +486,14 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			drm_ioremapfree(map);
 		free(map, DRM_MEM_MAPS);
 #ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
+//		DRM_LOCK();
 #endif
 		return EINVAL;
 	}
 	list->map = map;
 
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 
 	mutex_lock(&dev->struct_mutex);
@@ -569,12 +569,12 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 		return EACCES;
 
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 	err = drm_addmap(dev, request->offset, request->size, request->type,
 	    request->flags, &map);
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 	if (err != 0)
 		return err;
@@ -699,7 +699,7 @@ int drm_rmmap(struct drm_device *dev, struct drm_local_map *map)
 	int ret;
 
 #ifndef DRM_NEWER_LOCK
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+//	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
 #endif
 
 	mutex_lock(&dev->struct_mutex);
@@ -737,7 +737,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 
 
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 
 	mutex_lock(&dev->struct_mutex);
@@ -757,7 +757,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 	if (list_empty(&dev->maplist) || !map) {
 		mutex_unlock(&dev->struct_mutex);
 #ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
+//		DRM_UNLOCK();
 #endif
 		return EINVAL;
 	}
@@ -767,7 +767,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 	mutex_unlock(&dev->struct_mutex);
 
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 	return ret;
 }

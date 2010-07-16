@@ -68,7 +68,7 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 		return ENOMEM;
 
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 	ret = bus_dma_tag_create(NULL, PAGE_SIZE, 0, /* tag, align, boundary */
 	    gart_info->table_mask, BUS_SPACE_MAXADDR, /* lowaddr, highaddr */
@@ -96,7 +96,7 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 		return ENOMEM;
 	}
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 
 	ret = bus_dmamap_load(dmah->tag, dmah->map, dmah->vaddr,
