@@ -686,18 +686,18 @@ int drm_lastclose(struct drm_device * dev)
 	if (dev->irq_enabled && !drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_irq_uninstall(dev);
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_LOCK
 	mutex_lock(&dev->struct_mutex);
 #endif
 
-#ifndef DRM_NEWER_FILELIST
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
 #endif
 	/* Free drawable information memory */
 	drm_drawable_free_all(dev);
 	del_timer(&dev->timer);
 
-#ifndef DRM_NEWER_FILELIST
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
 #endif
 
@@ -762,7 +762,7 @@ int drm_lastclose(struct drm_device * dev)
 
 	dev->dev_mapping = NULL;
 
-#ifdef DRM_NEWER_FILELIST
+#ifdef DRM_NEWER_LOCK
 	mutex_unlock(&dev->struct_mutex);
 #endif
 
@@ -1025,10 +1025,14 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 			if (locked)
 				break;
 			tsleep_interlock((void *)&file_priv->master->lock.lock_queue, PCATCH);
+#ifndef DRM_NEWER_LOCK
 			DRM_UNLOCK();
+#endif
 			tsleep((void *)&file_priv->master->lock.lock_queue,
 					 PCATCH | PINTERLOCKED, "drmlk2", _end);
+#ifndef DRM_NEWER_LOCK
 			DRM_LOCK();
+#endif
 		} while (0);
 
 		if (!locked) {
@@ -1362,10 +1366,13 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	if (is_driver_ioctl) {
 		if (!(ioctl->flags & DRM_UNLOCKED))
 			lock_kernel();
-
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		retcode = -func(dev, data, file_priv);
+#ifndef DRM_NEWER_LOCK
 		DRM_UNLOCK();
+#endif
 
 		if (!(ioctl->flags & DRM_UNLOCKED))
 			unlock_kernel();
