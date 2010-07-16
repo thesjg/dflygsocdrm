@@ -89,10 +89,14 @@ static int i915_init_phys_hws(struct drm_device *dev)
 	drm_i915_private_t *dev_priv = dev->dev_private;
 
 	/* Program Hardware Status Page */
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	dev_priv->status_page_dmah =
 		drm_pci_alloc(dev, PAGE_SIZE, PAGE_SIZE);
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	if (!dev_priv->status_page_dmah) {
 		DRM_ERROR("Can not allocate hardware status page\n");
 		return -ENOMEM;
@@ -716,11 +720,15 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	cliplen = batch->num_cliprects * sizeof(struct drm_clip_rect);
 	if (batch->num_cliprects && DRM_VERIFYAREA_READ(batch->cliprects,
 	    cliplen)) {
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		return -EFAULT;
 	}
 	if (batch->num_cliprects) {
@@ -759,12 +767,16 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+#ifndef DRM_NEWER_LOCK
 	DRM_UNLOCK();
+#endif
 	cliplen = cmdbuf->num_cliprects * sizeof(struct drm_clip_rect);
 	if (cmdbuf->num_cliprects && DRM_VERIFYAREA_READ(cmdbuf->cliprects,
 	    cliplen)) {
 		DRM_ERROR("Fault accessing cliprects\n");
+#ifndef DRM_NEWER_LOCK
 		DRM_LOCK();
+#endif
 		return -EFAULT;
 	}
 	if (cmdbuf->num_cliprects) {
@@ -778,7 +790,9 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 		vsunlock((caddr_t)cmdbuf->buf, cmdbuf->sz);
 		vsunlock((caddr_t)cmdbuf->cliprects, cliplen);
 	}
+#ifndef DRM_NEWER_LOCK
 	DRM_LOCK();
+#endif
 	if (ret) {
 		DRM_ERROR("i915_dispatch_cmdbuffer failed\n");
 		return ret;
