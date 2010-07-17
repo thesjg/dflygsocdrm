@@ -69,6 +69,27 @@ int drm_debug_flag = 1;
 int drm_debug_flag = 0;
 #endif
 
+#ifndef DRM_DEV_NAME
+#define DRM_DEV_NAME "drm"
+#endif
+
+devclass_t drm_devclass;
+
+DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device,
+	DRM_PCI_DEVICE_ID *idlist)
+{
+	int i = 0;
+
+	for (i = 0; idlist[i].vendor != 0; i++) {
+		if ((idlist[i].vendor == vendor) &&
+		    ((idlist[i].device == device) ||
+		    (idlist[i].device == 0))) {
+			return &idlist[i];
+		}
+	}
+	return NULL;
+}
+
 #define DRIVER_SOFTC(unit) \
 	((struct drm_device *)devclass_get_softc(drm_devclass, unit))
 
@@ -274,6 +295,82 @@ int drm_lastclose(struct drm_device * dev)
 	return 0;
 }
 
+/**
+ * Module initialization. Called via init_module at module load time, or via
+ * linux/init/main.c (this is not currently supported).
+ *
+ * \return zero on success or a negative number on failure.
+ *
+ * Initializes an array of drm_device structures, and attempts to
+ * initialize all available devices, using consecutive minors, registering the
+ * stubs and initializing the AGP device.
+ *
+ * Expands the \c DRIVER_PREINIT and \c DRIVER_POST_INIT macros before and
+ * after the initialization for driver customization.
+ */
+int drm_init(struct drm_driver *driver)
+{
+#ifdef __linux__
+	struct pci_dev *pdev = NULL;
+	const struct pci_device_id *pid;
+	int i;
+#endif /* __linux__ */
+
+	DRM_DEBUG("\n");
+
+	INIT_LIST_HEAD(&driver->device_list);
+
+#ifdef __linux__
+	if (driver->driver_features & DRIVER_MODESET)
+		return pci_register_driver(&driver->pci_driver);
+
+	/* If not using KMS, fall back to stealth mode manual scanning. */
+	for (i = 0; driver->pci_driver.id_table[i].vendor != 0; i++) {
+		pid = &driver->pci_driver.id_table[i];
+
+		/* Loop around setting up a DRM device for each PCI device
+		 * matching our ID and device class.  If we had the internal
+		 * function that pci_get_subsys and pci_get_class used, we'd
+		 * be able to just pass pid in instead of doing a two-stage
+		 * thing.
+		 */
+		pdev = NULL;
+		while ((pdev =
+			pci_get_subsys(pid->vendor, pid->device, pid->subvendor,
+				       pid->subdevice, pdev)) != NULL) {
+			if ((pdev->class & pid->class_mask) != pid->class)
+				continue;
+
+			/* stealth mode requires a manual probe */
+			pci_dev_get(pdev);
+			drm_get_dev(pdev, pid, driver);
+		}
+	}
+#endif /* __linux__ */
+	return 0;
+}
+
+EXPORT_SYMBOL(drm_init);
+
+void drm_exit(struct drm_driver *driver)
+{
+#ifdef __linux__
+	struct drm_device *dev, *tmp;
+	DRM_DEBUG("\n");
+
+	if (driver->driver_features & DRIVER_MODESET) {
+		pci_unregister_driver(&driver->pci_driver);
+	} else {
+		list_for_each_entry_safe(dev, tmp, &driver->device_list, driver_item)
+			drm_put_dev(dev);
+	}
+#endif /* __linux__ */
+
+	DRM_INFO("Module unloaded\n");
+}
+
+EXPORT_SYMBOL(drm_exit);
+
 int drm_probe(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 {
 	DRM_PCI_DEVICE_ID *id_entry;
@@ -349,216 +446,6 @@ int drm_detach(device_t kdev)
 	}
 
 	return 0;
-}
-
-#ifndef DRM_DEV_NAME
-#define DRM_DEV_NAME "drm"
-#endif
-
-devclass_t drm_devclass;
-
-DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device,
-	DRM_PCI_DEVICE_ID *idlist)
-{
-	int i = 0;
-	
-	for (i = 0; idlist[i].vendor != 0; i++) {
-		if ((idlist[i].vendor == vendor) &&
-		    ((idlist[i].device == device) ||
-		    (idlist[i].device == 0))) {
-			return &idlist[i];
-		}
-	}
-	return NULL;
-}
-/**
- * Get version information
- *
- * \param inode device inode.
- * \param filp file pointer.
- * \param cmd command.
- * \param arg user argument, pointing to a drm_version structure.
- * \return zero on success or negative number on failure.
- *
- * Fills in the version information in \p arg.
- */
-static int drm_version(struct drm_device *dev, void *data,
-		       struct drm_file *file_priv)
-{
-	struct drm_version *version = data;
-	int len;
-
-#define DRM_COPY( name, value )						\
-	len = strlen( value );						\
-	if ( len > name##_len ) len = name##_len;			\
-	name##_len = strlen( value );					\
-	if ( len && name ) {						\
-		if ( DRM_COPY_TO_USER( name, value, len ) )		\
-			return EFAULT;				\
-	}
-
-	version->version_major		= dev->driver->major;
-	version->version_minor		= dev->driver->minor;
-	version->version_patchlevel	= dev->driver->patchlevel;
-
-	DRM_COPY(version->name, dev->driver->name);
-	DRM_COPY(version->date, dev->driver->date);
-	DRM_COPY(version->desc, dev->driver->desc);
-
-	return 0;
-}
-
-/**
- * Called whenever a process performs an ioctl on /dev/drm.
- *
- * \param inode device inode.
- * \param file_priv DRM file private.
- * \param cmd command.
- * \param arg user argument.
- * \return zero on success or negative number on failure.
- *
- * Looks up the ioctl function in the ::ioctls table, checking for root
- * previleges if so required, and dispatches to the respective function.
- */
-int drm_ioctl_legacy(struct dev_ioctl_args *ap)
-{
-	struct cdev *kdev = ap->a_head.a_dev;
-	u_long cmd = ap->a_cmd;
-	caddr_t data = ap->a_data;
-	struct thread *p = curthread;
-
-	struct drm_device *dev = drm_get_device_from_kdev(kdev);
-	struct drm_file *file_priv;
-
-	spin_lock(&dev->file_priv_lock);
-	file_priv = drm_find_file_by_proc(dev, p);
-	spin_unlock(&dev->file_priv_lock);
-
-	if (!file_priv) {
-		DRM_ERROR("drm_ioctl() file_priv null\n");
-		return EINVAL;
-	}
-	if (!file_priv->minor) {
-		DRM_ERROR("drm_ioctl() file_priv no minor\n");
-	}
-	if (file_priv->minor && (dev != file_priv->minor->dev)) {
-		DRM_ERROR("drm_ioctl() drm_get_device_from_kdev dev != file_priv->minor->dev\n");
-	}
-
-	struct drm_ioctl_desc *ioctl;
-	drm_ioctl_t *func;
-	unsigned int nr = DRM_IOCTL_NR(cmd);
-	int retcode = EINVAL;
-#if 0
-	int (*func)(struct drm_device *dev, void *data, struct drm_file *file_priv);
-	int nr = DRM_IOCTL_NR(cmd);
-	int retcode = 0;
-#endif /* __linux__ */
-
-#ifdef __linux__
-	char stack_kdata[128];
-	char *kdata = NULL;
-#else /* __linux__ */
-	int is_driver_ioctl = 0;
-#endif /* __linux__ */
-
-	dev = file_priv->minor->dev;
-	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
-	++file_priv->ioctl_count;
-
-	DRM_DEBUG("pid=%d, cmd=0x%02lx, nr=0x%02x, dev 0x%lx, auth=%d\n",
-		DRM_CURRENTPID, cmd, nr,
-		(long)dev->device,
-		file_priv->authenticated);
-
-	switch (cmd) {
-	case FIONBIO:
-	case FIOASYNC:
-		return 0;
-
-	case FIOSETOWN:
-		return fsetown(*(int *)data, &dev->buf_sigio);
-
-	case FIOGETOWN:
-		*(int *) data = fgetown(dev->buf_sigio);
-		return 0;
-	}
-
-	if (IOCGROUP(cmd) != DRM_IOCTL_BASE) {
-		DRM_DEBUG("Bad ioctl group 0x%x\n", (int)IOCGROUP(cmd));
-		return EINVAL;
-	}
-
-	atomic_inc(&dev->ioctl_count);
-
-	ioctl = &drm_ioctls[nr];
-	/* It's not a core DRM ioctl, try driver-specific. */
-	if (ioctl->func == NULL && nr >= DRM_COMMAND_BASE) {
-		/* The array entries begin at DRM_COMMAND_BASE ioctl nr */
-		nr -= DRM_COMMAND_BASE;
-		if (nr > dev->driver->num_ioctls) {
-			DRM_DEBUG("Bad driver ioctl number, 0x%x (of 0x%x)\n",
-			    nr, dev->driver->num_ioctls);
-			goto err_i1;
-		}
-		ioctl = &dev->driver->ioctls[nr];
-		is_driver_ioctl = 1;
-	}
-	func = ioctl->func;
-
-	if (func == NULL) {
-		DRM_DEBUG("no function\n");
-		goto err_i1;
-	}
-
-	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
-	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
-	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
-		retcode = EACCES;
-		goto err_i1;
-	}
-
-	if (is_driver_ioctl) {
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			lock_kernel();
-#ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
-#endif
-		retcode = -func(dev, data, file_priv);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
-
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			unlock_kernel();
-	} else {
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			lock_kernel();
-
-		retcode = func(dev, data, file_priv);
-
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			unlock_kernel();
-	}
-
-      err_i1:
-	atomic_dec(&dev->ioctl_count);
-	if (retcode)
-		DRM_DEBUG("ret = %x\n", retcode);
-	return retcode;
-}
-
-drm_local_map_t *drm_getsarea(struct drm_device *dev)
-{
-	struct drm_map_list *entry;
-
-	list_for_each_entry(entry, &dev->maplist, head) {
-		if (entry->map && entry->map->type == _DRM_SHM &&
-		    (entry->map->flags & _DRM_CONTAINS_LOCK)) {
-			return entry->map;
-		}
-	}
-	return NULL;
 }
 
 static int __init drm_core_init(void)
@@ -652,77 +539,183 @@ MODULE_DEPEND(drm, agp, 1, 1, 1);
 MODULE_DEPEND(drm, pci, 1, 1, 1);
 
 /**
- * Module initialization. Called via init_module at module load time, or via
- * linux/init/main.c (this is not currently supported).
+ * Called whenever a process performs an ioctl on /dev/drm.
  *
- * \return zero on success or a negative number on failure.
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument.
+ * \return zero on success or negative number on failure.
  *
- * Initializes an array of drm_device structures, and attempts to
- * initialize all available devices, using consecutive minors, registering the
- * stubs and initializing the AGP device.
- *
- * Expands the \c DRIVER_PREINIT and \c DRIVER_POST_INIT macros before and
- * after the initialization for driver customization.
+ * Looks up the ioctl function in the ::ioctls table, checking for root
+ * previleges if so required, and dispatches to the respective function.
  */
-int drm_init(struct drm_driver *driver)
+int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 {
+	struct cdev *kdev = ap->a_head.a_dev;
+	u_long cmd = ap->a_cmd;
+	caddr_t data = ap->a_data;
+	struct thread *p = curthread;
+
+	struct drm_device *dev = drm_get_device_from_kdev(kdev);
+	struct drm_file *file_priv;
+
+	spin_lock(&dev->file_priv_lock);
+	file_priv = drm_find_file_by_proc(dev, p);
+	spin_unlock(&dev->file_priv_lock);
+
+	if (!file_priv) {
+		DRM_ERROR("drm_ioctl() file_priv null\n");
+		return EINVAL;
+	}
+	if (!file_priv->minor) {
+		DRM_ERROR("drm_ioctl() file_priv no minor\n");
+	}
+	if (file_priv->minor && (dev != file_priv->minor->dev)) {
+		DRM_ERROR("drm_ioctl() drm_get_device_from_kdev dev != file_priv->minor->dev\n");
+	}
+
+	struct drm_ioctl_desc *ioctl;
+	drm_ioctl_t *func;
+	unsigned int nr = DRM_IOCTL_NR(cmd);
+	int retcode = EINVAL;
+
 #ifdef __linux__
-	struct pci_dev *pdev = NULL;
-	const struct pci_device_id *pid;
-	int i;
+	char stack_kdata[128];
+	char *kdata = NULL;
+#else /* __linux__ */
+	int is_driver_ioctl = 0;
 #endif /* __linux__ */
 
-	DRM_DEBUG("\n");
+	dev = file_priv->minor->dev;
+	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
+	++file_priv->ioctl_count;
 
-	INIT_LIST_HEAD(&driver->device_list);
+	DRM_DEBUG("pid=%d, cmd=0x%02lx, nr=0x%02x, dev 0x%lx, auth=%d\n",
+		DRM_CURRENTPID, cmd, nr,
+		(long)dev->device,
+		file_priv->authenticated);
 
-#ifdef __linux__
-	if (driver->driver_features & DRIVER_MODESET)
-		return pci_register_driver(&driver->pci_driver);
+	switch (cmd) {
+	case FIONBIO:
+	case FIOASYNC:
+		return 0;
 
-	/* If not using KMS, fall back to stealth mode manual scanning. */
-	for (i = 0; driver->pci_driver.id_table[i].vendor != 0; i++) {
-		pid = &driver->pci_driver.id_table[i];
+	case FIOSETOWN:
+		return fsetown(*(int *)data, &dev->buf_sigio);
 
-		/* Loop around setting up a DRM device for each PCI device
-		 * matching our ID and device class.  If we had the internal
-		 * function that pci_get_subsys and pci_get_class used, we'd
-		 * be able to just pass pid in instead of doing a two-stage
-		 * thing.
-		 */
-		pdev = NULL;
-		while ((pdev =
-			pci_get_subsys(pid->vendor, pid->device, pid->subvendor,
-				       pid->subdevice, pdev)) != NULL) {
-			if ((pdev->class & pid->class_mask) != pid->class)
-				continue;
+	case FIOGETOWN:
+		*(int *) data = fgetown(dev->buf_sigio);
+		return 0;
+	}
 
-			/* stealth mode requires a manual probe */
-			pci_dev_get(pdev);
-			drm_get_dev(pdev, pid, driver);
+	if (IOCGROUP(cmd) != DRM_IOCTL_BASE) {
+		DRM_DEBUG("Bad ioctl group 0x%x\n", (int)IOCGROUP(cmd));
+		return EINVAL;
+	}
+
+	atomic_inc(&dev->ioctl_count);
+
+	ioctl = &drm_ioctls[nr];
+	/* It's not a core DRM ioctl, try driver-specific. */
+	if (ioctl->func == NULL && nr >= DRM_COMMAND_BASE) {
+		/* The array entries begin at DRM_COMMAND_BASE ioctl nr */
+		nr -= DRM_COMMAND_BASE;
+		if (nr > dev->driver->num_ioctls) {
+			DRM_DEBUG("Bad driver ioctl number, 0x%x (of 0x%x)\n",
+			    nr, dev->driver->num_ioctls);
+			goto err_i1;
+		}
+		ioctl = &dev->driver->ioctls[nr];
+		is_driver_ioctl = 1;
+	}
+	func = ioctl->func;
+
+	if (func == NULL) {
+		DRM_DEBUG("no function\n");
+		goto err_i1;
+	}
+
+	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
+	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
+	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
+		retcode = EACCES;
+		goto err_i1;
+	}
+
+	if (is_driver_ioctl) {
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			lock_kernel();
+/* this lock seems essential for stability */
+		DRM_LOCK();
+		retcode = -func(dev, data, file_priv);
+		DRM_UNLOCK();
+
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			unlock_kernel();
+	} else {
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			lock_kernel();
+
+		retcode = func(dev, data, file_priv);
+
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			unlock_kernel();
+	}
+
+      err_i1:
+	atomic_dec(&dev->ioctl_count);
+	if (retcode)
+		DRM_DEBUG("ret = %x\n", retcode);
+	return retcode;
+}
+
+drm_local_map_t *drm_getsarea(struct drm_device *dev)
+{
+	struct drm_map_list *entry;
+
+	list_for_each_entry(entry, &dev->maplist, head) {
+		if (entry->map && entry->map->type == _DRM_SHM &&
+		    (entry->map->flags & _DRM_CONTAINS_LOCK)) {
+			return entry->map;
 		}
 	}
-#endif /* __linux__ */
+	return NULL;
+}
+
+/**
+ * Get version information
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_version structure.
+ * \return zero on success or negative number on failure.
+ *
+ * Fills in the version information in \p arg.
+ */
+static int drm_version(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv)
+{
+	struct drm_version *version = data;
+	int len;
+
+#define DRM_COPY( name, value )						\
+	len = strlen( value );						\
+	if ( len > name##_len ) len = name##_len;			\
+	name##_len = strlen( value );					\
+	if ( len && name ) {						\
+		if ( DRM_COPY_TO_USER( name, value, len ) )		\
+			return EFAULT;				\
+	}
+
+	version->version_major		= dev->driver->major;
+	version->version_minor		= dev->driver->minor;
+	version->version_patchlevel	= dev->driver->patchlevel;
+
+	DRM_COPY(version->name, dev->driver->name);
+	DRM_COPY(version->date, dev->driver->date);
+	DRM_COPY(version->desc, dev->driver->desc);
+
 	return 0;
 }
-
-EXPORT_SYMBOL(drm_init);
-
-void drm_exit(struct drm_driver *driver)
-{
-#ifdef __linux__
-	struct drm_device *dev, *tmp;
-	DRM_DEBUG("\n");
-
-	if (driver->driver_features & DRIVER_MODESET) {
-		pci_unregister_driver(&driver->pci_driver);
-	} else {
-		list_for_each_entry_safe(dev, tmp, &driver->device_list, driver_item)
-			drm_put_dev(dev);
-	}
-#endif /* __linux__ */
-
-	DRM_INFO("Module unloaded\n");
-}
-
-EXPORT_SYMBOL(drm_exit);
