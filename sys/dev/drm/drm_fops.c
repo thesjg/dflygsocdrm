@@ -487,10 +487,8 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 	}
 }
 
-static void drm_master_release(struct drm_device *dev, struct file *filp)
+static void drm_master_release(struct drm_device *dev, struct drm_file *file_priv)
 {
-	struct drm_file *file_priv = filp->private_data;
-
 	if (dev->driver->reclaim_buffers_locked &&
 	    file_priv->master->lock.hw_lock)
 		drm_reclaim_locked_buffers(dev, file_priv);
@@ -512,10 +510,12 @@ static void drm_master_release(struct drm_device *dev, struct file *filp)
 			      _DRM_LOCKING_CONTEXT(file_priv->master->lock.hw_lock->lock));
 	}
 
+#ifdef __linux__
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !dev->driver->reclaim_buffers_locked) {
 		dev->driver->reclaim_buffers(dev, file_priv);
 	}
+#endif /* __linux__ */
 }
 
 static void drm_events_release(struct drm_file *file_priv)
@@ -598,29 +598,15 @@ int drm_close_legacy(struct dev_close_args *ap)
 		dev->open_count);
 
 	/* if the master has gone away we can't do anything with the lock */
-	if (file_priv->minor->master) {
+	if (file_priv->minor->master)
+		drm_master_release(dev, file_priv);
 
-	if (dev->driver->reclaim_buffers_locked &&
-	    file_priv->master->lock.hw_lock)
-		drm_reclaim_locked_buffers(dev, file_priv);
-
-	if (dev->driver->reclaim_buffers_idlelocked &&
-	    file_priv->master->lock.hw_lock) {
-		drm_idlelock_take(&file_priv->master->lock);
-		dev->driver->reclaim_buffers_idlelocked(dev, file_priv);
-		drm_idlelock_release(&file_priv->master->lock);
-	}
-
-	if (drm_i_have_hw_lock(dev, file_priv)) {
-		drm_lock_free(&file_priv->master->lock,
-			      _DRM_LOCKING_CONTEXT(file_priv->master->lock.hw_lock->lock));
-	}
-	}
-
+#ifndef __linux__
 /* There apparently is a savage_reclaim_buffers */
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !dev->driver->reclaim_buffers_locked)
 		drm_core_reclaim_buffers(dev, file_priv);
+#endif /* !__linux__ */
 
 #ifndef __linux__
 	funsetown(dev->buf_sigio);
