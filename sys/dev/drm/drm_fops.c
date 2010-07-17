@@ -61,10 +61,29 @@ struct drm_file *drm_find_file_by_proc(struct drm_device *dev, DRM_STRUCTPROC *p
 static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STRUCTPROC *p,
 		    struct drm_device *dev);
 
-static int drm_setup(struct drm_device * dev)
+static int drm_setup(struct drm_device *dev)
 {
 	int i;
 	int ret;
+
+#ifndef __linux__
+
+#if 0
+	drm_local_map_t *map;
+#endif
+
+#ifndef DRM_NEWER_LOCK
+	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
+#endif /* DRM_NEWER_LOCK */
+
+#if 0
+	/* prebuild the SAREA */
+	i = drm_addmap(dev, 0, SAREA_MAX, _DRM_SHM,
+	    _DRM_CONTAINS_LOCK, &map);
+	if (i != 0)
+		return i;
+#endif
+#endif /* !__linux__ */
 
 	if (dev->driver->firstopen) {
 		ret = dev->driver->firstopen(dev);
@@ -85,7 +104,11 @@ static int drm_setup(struct drm_device * dev)
 		atomic_set(&dev->buf_alloc, 0);
 
 		i = drm_dma_setup(dev);
+#ifdef __linux__
+		if (i < 0)
+#else
 		if (i != 0)
+#endif /* __linux__ */
 			return i;
 	}
 
@@ -98,6 +121,15 @@ static int drm_setup(struct drm_device * dev)
 	dev->queue_reserved = 0;
 	dev->queue_slots = 0;
 	dev->queuelist = NULL;
+
+#ifndef __linux__
+	dev->lock.lock_queue = 0;
+#endif /* !__linux__ */
+
+#ifndef __linux__
+	dev->irq_enabled = 0;
+#endif /* __linux__ */
+
 	dev->context_flag = 0;
 	dev->interrupt_flag = 0;
 	dev->dma_flag = 0;
@@ -115,7 +147,6 @@ static int drm_setup(struct drm_device * dev)
 	init_waitqueue_head(&dev->buf_writers);
 
 #ifndef __linux__
-	dev->irq_enabled = 0;
 	dev->buf_sigio = NULL;
 #endif /* __linux__ */
 
@@ -152,28 +183,35 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 	struct thread *p = curthread;
 #endif /* __linux__ */
 	struct drm_device *dev = NULL;
+#ifdef __linux__
+	int minor_id = iminor(inode);
+#else
 	int minor_id = minor(kdev);
+#endif /* __linux__ */
 	struct drm_minor *minor;
 	int retcode = 0;
 
 	minor = idr_find(&drm_minors_idr, minor_id);
-	if (!minor) {
-		DRM_ERROR("no minor for %d\n", minor_id);
+	if (!minor)
+#ifdef __linux__
 		return -ENODEV;
-	}
+#else
+		DRM_ERROR("No minor for %d\n", minor_id);
+#endif /* __linux__ */
 
 #ifdef __linux__
 	if (!(dev = minor->dev))
 		return -ENODEV;
 #else
 	if (minor && !minor->dev) {
-		DRM_ERROR("no minor device for %d\n", minor_id);
-	}
-	dev = DRIVER_SOFTC(minor_id);
-	if (minor && (dev != minor->dev)) {
-		DRM_ERROR("minor device != softc device for %d\n", minor_id);
+		DRM_ERROR("No minor device for %d\n", minor_id);
 	}
 #endif /* __linux__ */
+
+	dev = DRIVER_SOFTC(minor_id);
+	if (minor && (dev != minor->dev)) {
+		DRM_ERROR("Minor device != softc device for %d\n", minor_id);
+	}
 
 	retcode = drm_open_helper_legacy(kdev, flags, fmt, p, dev);
 	if (!retcode) {
@@ -313,12 +351,25 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	priv->minor_legacy = minor_id;
 #endif /* !__linux__ */
 
+#ifdef __linux__
+	filp->private_data = priv;
+	priv->filp = filp;
+	priv->uid = current_euid();
+	priv->pid = task_pid_nr(current);
+#else /* __linux__ */
 	priv->uid = p->td_proc->p_ucred->cr_svuid;
 	priv->pid = p->td_proc->p_pid;
+#endif /* __linux__ */
+
 	priv->minor = idr_find(&drm_minors_idr, minor_id);
 	priv->ioctl_count = 0;
 	/* for compatibility root is always authenticated */
+#ifdef __linux__
+	priv->authenticated = capable(CAP_SYS_ADMIN);
+#else /* __linux__ */
 	priv->authenticated = DRM_SUSER(p);
+#endif /* __linux__ */
+
 	priv->lock_count = 0;
 
 	INIT_LIST_HEAD(&priv->lhead);
@@ -356,6 +407,7 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	/* if there is no current master make this fd it */
 	mutex_lock(&dev->struct_mutex);
 	kdev->si_drv1 = dev;
+	priv->master_legacy = TAILQ_EMPTY(&dev->files);
 	if (!priv->minor->master) {
 		/* create a new master */
 		priv->minor->master = drm_master_create(priv->minor);
@@ -448,7 +500,11 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 	if (drm_i_have_hw_lock(dev, file_priv)) {
 		dev->driver->reclaim_buffers_locked(dev, file_priv);
 	} else {
+#ifdef __linux__
 		unsigned long _end = jiffies + 3 * DRM_HZ;
+#else
+		unsigned long _end = jiffies + 3 * DRM_HZ;
+#endif
 		int locked = 0;
 
 		drm_idlelock_take(&file_priv->master->lock);
@@ -480,8 +536,10 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 	}
 }
 
-static void drm_master_release(struct drm_device *dev, struct drm_file *file_priv)
+static void drm_master_release(struct drm_device *dev, struct file *filp)
 {
+	struct drm_file *file_priv = filp->private_data;
+
 	if (dev->driver->reclaim_buffers_locked &&
 	    file_priv->master->lock.hw_lock)
 		drm_reclaim_locked_buffers(dev, file_priv);
@@ -589,8 +647,29 @@ int drm_close_legacy(struct dev_close_args *ap)
 		dev->open_count);
 
 	/* if the master has gone away we can't do anything with the lock */
-	if (file_priv->minor->master)
-		drm_master_release(dev, file_priv);
+	if (file_priv->minor->master) {
+
+	if (dev->driver->reclaim_buffers_locked &&
+	    file_priv->master->lock.hw_lock)
+		drm_reclaim_locked_buffers(dev, file_priv);
+
+	if (dev->driver->reclaim_buffers_idlelocked &&
+	    file_priv->master->lock.hw_lock) {
+		drm_idlelock_take(&file_priv->master->lock);
+		dev->driver->reclaim_buffers_idlelocked(dev, file_priv);
+		drm_idlelock_release(&file_priv->master->lock);
+	}
+
+	if (drm_i_have_hw_lock(dev, file_priv)) {
+		drm_lock_free(&file_priv->master->lock,
+			      _DRM_LOCKING_CONTEXT(file_priv->master->lock.hw_lock->lock));
+	}
+	}
+
+/* There apparently is a savage_reclaim_buffers */
+	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
+	    !dev->driver->reclaim_buffers_locked)
+		drm_core_reclaim_buffers(dev, file_priv);
 
 #ifndef __linux__
 	funsetown(dev->buf_sigio);
@@ -688,13 +767,14 @@ done:
 		}
 		spin_unlock(&dev->count_lock);
 		unlock_kernel();
-		return drm_lastclose(dev);
+		retcode = drm_lastclose(dev);
+		return retcode;
 	}
 	spin_unlock(&dev->count_lock);
 
 	unlock_kernel();
 
-	return retcode;
+	return (0);
 }
 
 static bool
