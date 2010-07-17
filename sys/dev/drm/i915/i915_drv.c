@@ -556,12 +556,12 @@ static int i915_suspend(device_t kdev)
 	}
 
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 	DRM_DEBUG("starting suspend\n");
 	i915_save_state(dev);
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 
 	return (bus_generic_suspend(kdev));
@@ -572,12 +572,12 @@ static int i915_resume(device_t kdev)
 	struct drm_device *dev = device_get_softc(kdev);
 
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 	i915_restore_state(dev);
 	DRM_DEBUG("finished resume\n");
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 
 	return (bus_generic_resume(kdev));

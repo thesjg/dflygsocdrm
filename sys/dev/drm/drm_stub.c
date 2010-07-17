@@ -566,12 +566,12 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 
 	if (dev->driver->load) {
 #ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
+//		DRM_LOCK();
 #endif
 		/* Shared code returns -errno. */
 		ret = -dev->driver->load(dev, dev->id_entry->driver_data);
 #ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
+//		DRM_UNLOCK();
 #endif
 		if (ret)
 			goto err_g4;
@@ -696,11 +696,11 @@ void drm_put_dev(struct drm_device *dev)
 
 	if (dev->driver->unload) {
 #ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
+//		DRM_LOCK();
 #endif
 		dev->driver->unload(dev);
 #ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
+//		DRM_UNLOCK();
 #endif
 	}
 
@@ -712,7 +712,7 @@ void drm_put_dev(struct drm_device *dev)
 	drm_vblank_cleanup(dev);
 
 #ifndef DRM_NEWER_LOCK
-	DRM_LOCK();
+//	DRM_LOCK();
 #endif
 
 	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
@@ -720,7 +720,7 @@ void drm_put_dev(struct drm_device *dev)
 	drm_ht_remove(&dev->map_hash);
 
 #ifndef DRM_NEWER_LOCK
-	DRM_UNLOCK();
+//	DRM_UNLOCK();
 #endif
 
 	drm_ctxbitmap_cleanup(dev);

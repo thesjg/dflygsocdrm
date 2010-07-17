@@ -208,44 +208,25 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 	}
 #endif /* __linux__ */
 
-#ifndef __linux__
 	dev = DRIVER_SOFTC(minor_id);
 	if (minor && (dev != minor->dev)) {
 		DRM_ERROR("Minor device != softc device for %d\n", minor_id);
 	}
-#endif /* __linux__ */
 
-#ifdef __linux__
-	retcode = drm_open_helper(inode, filp, dev);
-#else
 	retcode = drm_open_helper_legacy(kdev, flags, fmt, p, dev);
-#endif /* __linux__ */
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
-
-#ifndef DRM_NEWER_LOCK
-		DRM_LOCK();
-#endif
 		spin_lock(&dev->count_lock);
 
-#ifndef __linux__
 		device_busy(dev->device);
-#endif /* !__linux__ */
 
 		if (!dev->open_count++) {
 			spin_unlock(&dev->count_lock);
 			retcode = drm_setup(dev);
-#ifndef DRM_NEWER_LOCK
-			DRM_UNLOCK();
-#endif
 			goto out;
 		}
 		spin_unlock(&dev->count_lock);
-#ifndef DRM_NEWER_LOCK
-		DRM_UNLOCK();
-#endif
 	}
-
 out:
 #ifdef __linux__
 	if (!retcode) {
@@ -539,15 +520,9 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 				break;
 			tsleep_interlock((void *)&file_priv->master->lock.lock_queue, PCATCH);
 			spin_unlock(&dev->file_priv_lock);
-#ifndef DRM_NEWER_LOCK
-//			DRM_UNLOCK();
-#endif
 			tsleep((void *)&file_priv->master->lock.lock_queue,
 					 PCATCH | PINTERLOCKED, "drmlk2", _end);
 			spin_lock(&dev->file_priv_lock);
-#ifndef DRM_NEWER_LOCK
-//			DRM_LOCK();
-#endif
 		} while (0);
 
 		if (!locked) {
