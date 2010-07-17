@@ -66,25 +66,6 @@ static int drm_setup(struct drm_device *dev)
 	int i;
 	int ret;
 
-#ifndef __linux__
-
-#if 0
-	drm_local_map_t *map;
-#endif
-
-#ifndef DRM_NEWER_LOCK
-	DRM_SPINLOCK_ASSERT(&dev->dev_lock);
-#endif /* DRM_NEWER_LOCK */
-
-#if 0
-	/* prebuild the SAREA */
-	i = drm_addmap(dev, 0, SAREA_MAX, _DRM_SHM,
-	    _DRM_CONTAINS_LOCK, &map);
-	if (i != 0)
-		return i;
-#endif
-#endif /* !__linux__ */
-
 	if (dev->driver->firstopen) {
 		ret = dev->driver->firstopen(dev);
 		if (ret != 0)
@@ -104,11 +85,7 @@ static int drm_setup(struct drm_device *dev)
 		atomic_set(&dev->buf_alloc, 0);
 
 		i = drm_dma_setup(dev);
-#ifdef __linux__
-		if (i < 0)
-#else
 		if (i != 0)
-#endif /* __linux__ */
 			return i;
 	}
 
@@ -123,12 +100,8 @@ static int drm_setup(struct drm_device *dev)
 	dev->queuelist = NULL;
 
 #ifndef __linux__
-	dev->lock.lock_queue = 0;
+//	dev->lock.lock_queue = 0;
 #endif /* !__linux__ */
-
-#ifndef __linux__
-	dev->irq_enabled = 0;
-#endif /* __linux__ */
 
 	dev->context_flag = 0;
 	dev->interrupt_flag = 0;
@@ -147,6 +120,7 @@ static int drm_setup(struct drm_device *dev)
 	init_waitqueue_head(&dev->buf_writers);
 
 #ifndef __linux__
+	dev->irq_enabled = 0;
 	dev->buf_sigio = NULL;
 #endif /* __linux__ */
 
@@ -183,11 +157,7 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 	struct thread *p = curthread;
 #endif /* __linux__ */
 	struct drm_device *dev = NULL;
-#ifdef __linux__
-	int minor_id = iminor(inode);
-#else
 	int minor_id = minor(kdev);
-#endif /* __linux__ */
 	struct drm_minor *minor;
 	int retcode = 0;
 
@@ -346,30 +316,15 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 		return ENOMEM;
 	}
 
-#ifndef __linux__
 	priv->refs = 1;
 	priv->minor_legacy = minor_id;
-#endif /* !__linux__ */
 
-#ifdef __linux__
-	filp->private_data = priv;
-	priv->filp = filp;
-	priv->uid = current_euid();
-	priv->pid = task_pid_nr(current);
-#else /* __linux__ */
 	priv->uid = p->td_proc->p_ucred->cr_svuid;
 	priv->pid = p->td_proc->p_pid;
-#endif /* __linux__ */
-
 	priv->minor = idr_find(&drm_minors_idr, minor_id);
 	priv->ioctl_count = 0;
 	/* for compatibility root is always authenticated */
-#ifdef __linux__
-	priv->authenticated = capable(CAP_SYS_ADMIN);
-#else /* __linux__ */
 	priv->authenticated = DRM_SUSER(p);
-#endif /* __linux__ */
-
 	priv->lock_count = 0;
 
 	INIT_LIST_HEAD(&priv->lhead);
@@ -500,11 +455,7 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 	if (drm_i_have_hw_lock(dev, file_priv)) {
 		dev->driver->reclaim_buffers_locked(dev, file_priv);
 	} else {
-#ifdef __linux__
 		unsigned long _end = jiffies + 3 * DRM_HZ;
-#else
-		unsigned long _end = jiffies + 3 * DRM_HZ;
-#endif
 		int locked = 0;
 
 		drm_idlelock_take(&file_priv->master->lock);
