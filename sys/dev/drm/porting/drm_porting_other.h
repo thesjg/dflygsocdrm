@@ -234,13 +234,13 @@ d_mmap_t drm_mmap_legacy;
 static __inline__ void *
 drm_alloc(size_t size, struct malloc_type *area)
 {
-	return malloc(size, area, M_NOWAIT);
+	return malloc(size, area, M_WAITOK);
 }
 
 static __inline__ void *
 drm_calloc(size_t nmemb, size_t size, struct malloc_type *area)
 {
-	return malloc(size * nmemb, area, M_NOWAIT | M_ZERO);
+	return malloc(size * nmemb, area, M_WAITOK | M_ZERO);
 }
 
 static __inline__ void
