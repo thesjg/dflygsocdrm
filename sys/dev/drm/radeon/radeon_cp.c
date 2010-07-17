@@ -2164,8 +2164,10 @@ error:
 int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 {
 	struct drm_radeon_master_private *master_priv;
+#ifdef __linux__
 	unsigned long sareapage;
 	int ret;
+#endif
 
 	master_priv = malloc(sizeof(*master_priv), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!master_priv)
