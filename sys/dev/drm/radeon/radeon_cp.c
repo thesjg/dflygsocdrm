@@ -1773,7 +1773,7 @@ void radeon_do_release(struct drm_device * dev)
 #ifdef __linux__
 					schedule();
 #else
-					tsleep(&ret, PZERO, "rdnrel", 1);
+					tsleep(&ret, PCATCH, "rdnrel", 1);
 #endif
 				}
 			} else {
@@ -1789,7 +1789,7 @@ void radeon_do_release(struct drm_device * dev)
 #ifdef __linux__
 					schedule();
 #else
-					tsleep(&ret, PZERO, "rdnrel", 1);
+					tsleep(&ret, PCATCH, "rdnrel", 1);
 #endif
 				}
 			}
