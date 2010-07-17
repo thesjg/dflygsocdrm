@@ -522,11 +522,11 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		if (!(ioctl->flags & DRM_UNLOCKED))
 			lock_kernel();
 #ifndef DRM_NEWER_LOCK
-//		DRM_LOCK();
+		DRM_LOCK();
 #endif
 		retcode = -func(dev, data, file_priv);
 #ifndef DRM_NEWER_LOCK
-//		DRM_UNLOCK();
+		DRM_UNLOCK();
 #endif
 
 		if (!(ioctl->flags & DRM_UNLOCKED))
