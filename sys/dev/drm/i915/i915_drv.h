@@ -239,12 +239,14 @@ struct intel_fbdev;
 typedef struct drm_i915_private {
 	struct drm_device *dev;
 
-#ifndef __linux__
+#if 0
 	drm_local_map_t *sarea;
+#endif
+/* legacy serves in place of iomapped regs */
 	drm_local_map_t *mmio_map;
-
+#if 0
 	drm_i915_sarea_t *sarea_priv;
-#endif /* __linux__ */
+#endif
 /* newer */
 	const struct intel_device_info *info;
 
