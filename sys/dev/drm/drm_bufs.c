@@ -212,19 +212,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	int ret;
 	int align;
 
-	/* Only allow shared memory to be removable since we only keep enough
-	 * book keeping information about shared memory to allow for removal
-	 * when processes fork.
-	 */
-	if ((flags & _DRM_REMOVABLE) && type != _DRM_SHM) {
-		DRM_ERROR("Requested removable map for non-DRM_SHM\n");
-		return EINVAL;
-	}
-	if ((offset & PAGE_MASK) || (size & PAGE_MASK)) {
-		DRM_ERROR("offset/size not page aligned: 0x%lx/0x%lx\n",
-		    offset, size);
-		return EINVAL;
-	}
 	if (offset + size < offset) {
 		DRM_ERROR("offset and size wrap around: 0x%lx/0x%lx\n",
 		    offset, size);
@@ -249,15 +236,33 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	map->flags = flags;
 	map->type = type;
 
-#ifdef DRM_NEWER_LOCK
-#ifdef __linux__ /* later test for map->mtrr == 0 */
+	/* Only allow shared memory to be removable since we only keep enough
+	 * book keeping information about shared memory to allow for removal
+	 * when processes fork.
+	 */
+	if ((map->flags & _DRM_REMOVABLE) && map->type != _DRM_SHM) {
+		free(map, DRM_MEM_MAPS);
+		return -EINVAL;
+	}
+	DRM_DEBUG("offset = 0x%08llx, size = 0x%08lx, type = %d\n",
+		  (unsigned long long)map->offset, map->size, map->type);
+
+	/* page-align _DRM_SHM maps. They are allocated here so there is no security
+	 * hole created by that and it works around various broken drivers that use
+	 * a non-aligned quantity to map the SAREA. --BenH
+	 */
+	if (map->type == _DRM_SHM)
+		map->size = PAGE_ALIGN(map->size);
+
+	if ((map->offset & (~(resource_size_t)PAGE_MASK)) || (map->size & (~PAGE_MASK))) {
+		free(map, DRM_MEM_MAPS);
+		return -EINVAL;
+	}
+
+#ifdef __linux__ /* legacy later test for map->mtrr == 0 */
 	map->mtrr = -1;
 #endif /* __linux__ */
 	map->handle = NULL;
-#endif
-
-	DRM_DEBUG("offset = 0x%08lx, size = 0x%08lx, type = %d\n", offset,
-	    size, type);
 
 	/* Check if this is just another version of a kernel-allocated map, and
 	 * just hand that back if so.
@@ -408,15 +413,17 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		align = map->size;
 		if ((align & (align - 1)) != 0) {
 			align = PAGE_SIZE;
-			DRM_ERROR("drm_addmap(): map->size (%lx) not aligned\n", map->size);
+			DRM_ERROR("map->size (%lx) not aligned\n", map->size);
 		}
-		map->dmah = drm_pci_alloc(dev, map->size, align);
-		if (map->dmah == NULL) {
+		dmah = drm_pci_alloc(dev, map->size, align);
+		if (!dmah) {
 			free(map, DRM_MEM_MAPS);
 			return -ENOMEM;
 		}
-		map->handle = map->dmah->vaddr;
-		map->offset = map->dmah->busaddr;
+		map->handle = dmah->vaddr;
+		map->offset = (unsigned long)dmah->busaddr;
+/* legacy dmah retained because of dmah->tag for dma free */
+		map->dmah = dmah;
 #endif /* __linux__ */
 
 		break;
@@ -568,7 +575,9 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 	}
 
 	struct drm_map_list *r_list = NULL, *list_t;
+#ifdef __linux__
 	drm_dma_handle_t dmah;
+#endif /* __linux__ */
 	int found = 0;
 	struct drm_master *master;
 
