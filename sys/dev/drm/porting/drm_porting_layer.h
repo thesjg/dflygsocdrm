@@ -106,7 +106,7 @@ module_exit(void (*func)(void)) {
  * Assume pointers are no more than 64-bit and
  * that the last page of possible virtual memory is unmapped.
  */
-#define IS_ERR(ptr) (((uint64_t)ptr) > ((uint64_t)((int64_t)(-0x0800))))
+#define IS_ERR(ptr) (((uintptr_t)ptr) > ((uintptr_t)((intptr_t)(-0x0800))))
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 /* What else can it be but the actual error? */
