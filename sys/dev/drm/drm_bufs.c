@@ -51,6 +51,8 @@
 
 #include "drmP.h"
 
+#define DRM_NEWER_BUFS 1
+
 /* Allocation of PCI memory resources (framebuffer, registers, etc.) for
  * drm_get_resource_*.  Note that they are not RF_ACTIVE, so there's no virtual
  * address for accessing them.  Cleaned up at unload.
@@ -315,17 +317,18 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			return 0;
 		}
 
-		if (map->type == _DRM_FRAME_BUFFER ||
-		    (map->flags & _DRM_WRITE_COMBINING)) {
-			if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
-				map->mtrr = 1;
-		}
 		if (map->type == _DRM_REGISTERS) {
 			map->handle = drm_ioremap(dev, map);
 			if (!map->handle) {
 				free(map, DRM_MEM_MAPS);
 				return -ENOMEM;
 			}
+		}
+
+		if (map->type == _DRM_FRAME_BUFFER ||
+		    (map->flags & _DRM_WRITE_COMBINING)) {
+			if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
+				map->mtrr = 1;
 		}
 
 		break;
@@ -576,7 +579,7 @@ int drm_addmap(struct drm_device * dev, resource_size_t offset,
 int drm_addmap_ioctl(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)
 {
-#ifdef DRM_NEWER_BUFS
+#if 0
 	struct drm_map *map = data;
 	struct drm_map_list *maplist;
 	int err;
@@ -593,7 +596,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	/* avoid a warning on 64-bit, this casting isn't very nice, but the API is set so too late */
 	map->handle = (void *)(unsigned long)maplist->user_token;
 
-#else /* DRM_NEWER_BUFS */
+#endif /* DRM_NEWER_BUFS */
 
 	struct drm_map *request = data;
 	drm_local_map_t *map;
@@ -626,7 +629,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	if (request->type != _DRM_SHM) {
 		request->handle = (void *)request->offset;
 	}
-#endif /* DRM_NEWER_BUFS */
+/* #endif DRM_NEWER_BUFS */
 
 	return 0;
 }
