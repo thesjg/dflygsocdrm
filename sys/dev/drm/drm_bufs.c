@@ -51,8 +51,6 @@
 
 #include "drmP.h"
 
-#define DRM_NEWER_BUFS 1
-
 /* Allocation of PCI memory resources (framebuffer, registers, etc.) for
  * drm_get_resource_*.  Note that they are not RF_ACTIVE, so there's no virtual
  * address for accessing them.  Cleaned up at unload.
