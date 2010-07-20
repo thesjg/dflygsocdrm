@@ -1,6 +1,6 @@
-SUBDIR=	aps coretemp ichsmb kate km lm wbsio ${MACHINE_ARCH}
+SUBDIR=	aps coretemp ichsmb kate km lm wbsio
 .if ${MACHINE_ARCH} == "i386"
-SUBDIR+= powernow
+SUBDIR+= powernow i386
 .endif
 
 .include <bsd.subdir.mk>
