@@ -1,5 +1,4 @@
-
-/*
+/*-
  * ichsmb_reg.h
  *
  * Copyright (c) 2000 Whistle Communications, Inc.
@@ -36,7 +35,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/dev/ichsmb/ichsmb_reg.h,v 1.1.2.1 2000/10/09 00:52:43 archie Exp $
+ * $FreeBSD: src/sys/dev/ichsmb/ichsmb_reg.h,v 1.2 2005/01/06 01:42:45 imp Exp $
  * $DragonFly: src/sys/dev/powermng/ichsmb/ichsmb_reg.h,v 1.2 2003/06/17 04:28:27 dillon Exp $
  */
 

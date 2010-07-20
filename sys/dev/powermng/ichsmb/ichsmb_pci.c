@@ -1,7 +1,7 @@
-
-/*
+/*-
  * ichsmb_pci.c
  *
+ * Author: Archie Cobbs <archie@freebsd.org>
  * Copyright (c) 2000 Whistle Communications, Inc.
  * All rights reserved.
  * 
@@ -34,23 +34,23 @@
  * THIS SOFTWARE, EVEN IF WHISTLE COMMUNICATIONS IS ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
- * Author: Archie Cobbs <archie@freebsd.org>
- *
- * $FreeBSD: src/sys/dev/ichsmb/ichsmb_pci.c,v 1.1.2.3 2002/10/20 14:57:19 nyan Exp $
+ * $FreeBSD: src/sys/dev/ichsmb/ichsmb_pci.c,v 1.16.2.2 2007/12/02 08:56:37 remko Exp $
  * $DragonFly: src/sys/dev/powermng/ichsmb/ichsmb_pci.c,v 1.9 2007/09/23 22:06:10 hasso Exp $
  */
 
 /*
  * Support for the SMBus controller logical device which is part of the
- * Intel 81801AA (ICH) and 81801AB (ICH0) I/O controller hub chips.
+ * Intel 81801AA/AB/BA/CA/DC/EB (ICH/ICH[02345]) I/O controller hub chips.
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/module.h>
 #include <sys/errno.h>
 #include <sys/syslog.h>
 #include <sys/bus.h>
+
 #include <sys/rman.h>
 
 #include <bus/pci/pcivar.h>
@@ -62,31 +62,32 @@
 #include "ichsmb_reg.h"
 
 /* PCI unique identifiers */
-#define ID_6300ESB			0x25A48086
-#define ID_63xxESB			0x269B8086
 #define ID_82801AA			0x24138086
 #define ID_82801AB			0x24238086
 #define ID_82801BA			0x24438086
-#define ID_82801E			0x24538086
 #define ID_82801CA			0x24838086
-#define ID_82801DB			0x24C38086
+#define ID_82801DC			0x24C38086
 #define ID_82801EB			0x24D38086
 #define ID_82801FB			0x266A8086
-#define ID_82801G			0x27DA8086
-#define ID_82801H			0x283E8086
-#define ID_82801I			0x29308086
+#define ID_82801GB			0x27da8086
+#define ID_6300ESB			0x25a48086
 
 #define PCIS_SERIALBUS_SMBUS_PROGIF	0x00
 
 /* Internal functions */
 static int	ichsmb_pci_probe(device_t dev);
 static int	ichsmb_pci_attach(device_t dev);
+/*Use generic one for now*/
+#if 0
+static int	ichsmb_pci_detach(device_t dev);
+#endif
 
 /* Device methods */
 static device_method_t ichsmb_pci_methods[] = {
 	/* Device interface */
         DEVMETHOD(device_probe, ichsmb_pci_probe),
         DEVMETHOD(device_attach, ichsmb_pci_attach),
+        DEVMETHOD(device_detach, ichsmb_detach),
 
 	/* Bus methods */
         DEVMETHOD(bus_print_child, bus_generic_print_child),
@@ -121,12 +122,6 @@ ichsmb_pci_probe(device_t dev)
 {
 	/* Check PCI identifier */
 	switch (pci_get_devid(dev)) {
-	case ID_6300ESB:
-		device_set_desc(dev, "Intel 6300ESB (ESB) SMBus controller");
-		break;
-	case ID_63xxESB:
-		device_set_desc(dev, "Intel 63xxESB (ESB2) SMBus controller");
-		break;
 	case ID_82801AA:
 		device_set_desc(dev, "Intel 82801AA (ICH) SMBus controller");
 		break;
@@ -139,11 +134,8 @@ ichsmb_pci_probe(device_t dev)
 	case ID_82801CA:
 		device_set_desc(dev, "Intel 82801CA (ICH3) SMBus controller");
 		break;
-	case ID_82801DB:
-		device_set_desc(dev, "Intel 82801DB (ICH4) SMBus controller");
-		break;
-	case ID_82801E:
-		device_set_desc(dev, "Intel 82801E (C-ICH) SMBus controller");
+	case ID_82801DC:
+		device_set_desc(dev, "Intel 82801DC (ICH4) SMBus controller");
 		break;
 	case ID_82801EB:
 		device_set_desc(dev, "Intel 82801EB (ICH5) SMBus controller");
@@ -151,21 +143,18 @@ ichsmb_pci_probe(device_t dev)
 	case ID_82801FB:
 		device_set_desc(dev, "Intel 82801FB (ICH6) SMBus controller");
 		break;
-	case ID_82801G:
-		device_set_desc(dev, "Intel 82801G (ICH7) SMBus controller");
+	case ID_82801GB:
+		device_set_desc(dev, "Intel 82801GB (ICH7) SMBus controller");
 		break;
-	case ID_82801H:
-		device_set_desc(dev, "Intel 82801H (ICH8) SMBus controller");
-		break;
-	case ID_82801I:
-		device_set_desc(dev, "Intel 82801I (ICH9) SMBus controller");
+	case ID_6300ESB:
+		device_set_desc(dev, "Intel 6300ESB (ICH) SMBus controller");
 		break;
 	default:
 		if (pci_get_class(dev) == PCIC_SERIALBUS
 		    && pci_get_subclass(dev) == PCIS_SERIALBUS_SMBUS
 		    && pci_get_progif(dev) == PCIS_SERIALBUS_SMBUS_PROGIF) {
 			device_set_desc(dev, "SMBus controller");
-			return (-2);		/* XXX */
+			return (BUS_PROBE_DEFAULT); /* XXX */
 		}
 		return (ENXIO);
 	}
@@ -190,6 +179,9 @@ ichsmb_pci_attach(device_t dev)
 	sc->io_rid = ICH_SMB_BASE;
 	sc->io_res = bus_alloc_resource(dev, SYS_RES_IOPORT,
 	    &sc->io_rid, 0, ~0, 16, RF_ACTIVE);
+	if (sc->io_res == NULL)
+		sc->io_res = bus_alloc_resource(dev, SYS_RES_IOPORT,
+		    &sc->io_rid, 0, ~0, 32, RF_ACTIVE);
 	if (sc->io_res == NULL) {
 		log(LOG_ERR, "%s: can't map I/O\n", device_get_nameunit(dev));
 		error = ENXIO;
@@ -210,7 +202,7 @@ ichsmb_pci_attach(device_t dev)
 
 	/* Set up interrupt handler */
 	error = bus_setup_intr(dev, sc->irq_res, 0, ichsmb_device_intr, sc,
-			       &sc->irq_handle, NULL);
+	    &sc->irq_handle, NULL);
 	if (error != 0) {
 		log(LOG_ERR, "%s: can't setup irq\n", device_get_nameunit(dev));
 		goto fail;
@@ -240,3 +232,6 @@ fail:
 	return (error);
 }
 
+MODULE_DEPEND(ichsmb, pci, 1, 1, 1);
+MODULE_DEPEND(ichsmb, smbus, SMBUS_MINVER, SMBUS_PREFVER, SMBUS_MAXVER);
+MODULE_VERSION(ichsmb, 1);

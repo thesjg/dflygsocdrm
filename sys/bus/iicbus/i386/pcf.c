@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/isa/pcf.c,v 1.14 2000/01/14 00:18:05 nsouch Exp $
+ * $FreeBSD: src/sys/dev/pcf/pcf.c,v 1.21 2003/06/20 07:22:54 jmg Exp $
  * $DragonFly: src/sys/bus/iicbus/i386/pcf.c,v 1.11 2008/08/02 01:14:38 dillon Exp $
  *
  */
@@ -32,9 +32,7 @@
 #include <sys/kernel.h>
 #include <sys/module.h>
 #include <sys/bus.h>
-#include <sys/malloc.h>
 
-#include <machine/clock.h>
 #include <sys/rman.h>
 
 #include <bus/isa/isareg.h>
@@ -139,6 +137,7 @@ pcf_probe(device_t pcfdev)
 {
 	struct pcf_softc *pcf = DEVTOSOFTC(pcfdev);
 	device_t parent = device_get_parent(pcfdev);
+	uintptr_t base;
 
 	device_set_desc(pcfdev, "PCF8584 I2C bus controller");
 
@@ -155,7 +154,8 @@ pcf_probe(device_t pcfdev)
 		device_printf(pcfdev, "cannot reserve I/O port range\n");
 		goto error;
 	}
-	BUS_READ_IVAR(parent, pcfdev, ISA_IVAR_PORT, &pcf->pcf_base);
+	BUS_READ_IVAR(parent, pcfdev, ISA_IVAR_PORT, &base);
+	pcf->pcf_base = base;
 
 	pcf->pcf_flags = device_get_flags(pcfdev);
 
@@ -198,10 +198,10 @@ pcf_attach(device_t pcfdev)
 			return (error);
 	}
 
-	pcf->iicbus = iicbus_alloc_bus(pcfdev);
+	pcf->iicbus = device_add_child(pcfdev, "iicbus", -1);
 
 	/* probe and attach the iicbus */
-	device_probe_and_attach(pcf->iicbus);
+	bus_generic_attach(pcfdev);
 
 	return (0);
 }
@@ -292,7 +292,7 @@ pcf_stop(device_t pcfdev)
 
 	/*
 	 * Send STOP condition iff the START condition was previously sent.
-	 * STOP is sent only once even if a iicbus_stop() is called after
+	 * STOP is sent only once even if an iicbus_stop() is called after
 	 * an iicbus_read()... see pcf_read(): the pcf needs to send the stop
 	 * before the last char is read.
 	 */

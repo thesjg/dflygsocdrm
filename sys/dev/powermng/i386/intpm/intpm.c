@@ -23,7 +23,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/pci/intpm.c,v 1.16.2.1 2001/12/23 08:17:47 pirzyk Exp $
+ * $FreeBSD: src/sys/pci/intpm.c,v 1.34 2006/09/11 20:52:41 jhb Exp $
  * $DragonFly: src/sys/dev/powermng/i386/intpm/intpm.c,v 1.11 2006/12/22 23:26:23 swildner Exp $
  */
 
@@ -70,7 +70,7 @@ static int intsmb_attach(device_t);
 static int intsmb_intr(device_t dev);
 static int intsmb_slvintr(device_t dev);
 static void  intsmb_alrintr(device_t dev);
-static int intsmb_callback(device_t dev, int index, caddr_t data);
+static int intsmb_callback(device_t dev, int index, void *data);
 static int intsmb_quick(device_t dev, u_char slave, int how);
 static int intsmb_sendb(device_t dev, u_char slave, char byte);
 static int intsmb_recvb(device_t dev, u_char slave, char *byte);
@@ -80,7 +80,7 @@ static int intsmb_readb(device_t dev, u_char slave, char cmd, char *byte);
 static int intsmb_readw(device_t dev, u_char slave, char cmd, short *word);
 static int intsmb_pcall(device_t dev, u_char slave, char cmd, short sdata, short *rdata);
 static int intsmb_bwrite(device_t dev, u_char slave, char cmd, u_char count, char *buf);
-static int intsmb_bread(device_t dev, u_char slave, char cmd, u_char count, char *buf);
+static int intsmb_bread(device_t dev, u_char slave, char cmd, u_char *count, char *buf);
 static void intsmb_start(device_t dev,u_char cmd,int nointr);
 static int intsmb_stop(device_t dev);
 static int intsmb_stop_poll(device_t dev);
@@ -149,12 +149,12 @@ static int
 intsmb_probe(device_t dev)
 {
         struct intsmb_softc *sc =(struct intsmb_softc *) device_get_softc(dev);
-        sc->smbus=smbus_alloc_bus(dev);
+        sc->smbus=device_add_child(dev, "smbus", -1);
         if (!sc->smbus)
                 return (EINVAL);    /* XXX don't know what to return else */
         device_set_desc(dev,"Intel PIIX4 SMBUS Interface");
         
-        return (0);          /* XXX don't know what to return else */
+        return (BUS_PROBE_DEFAULT); /* XXX don't know what to return else */
 }
 static int
 intsmb_attach(device_t dev)
@@ -175,7 +175,7 @@ intsmb_attach(device_t dev)
 }
 
 static int 
-intsmb_callback(device_t dev, int index, caddr_t data)
+intsmb_callback(device_t dev, int index, void *data)
 {
 	int error = 0;
 
@@ -583,7 +583,7 @@ intsmb_bwrite(device_t dev, u_char slave, char cmd, u_char count, char *buf)
         struct intsmb_softc *sc = (struct intsmb_softc *)device_get_softc(dev);
         error=intsmb_free(dev);
         if(count>SMBBLOCKTRANS_MAX||count==0)
-                error=EINVAL;
+                error=SMB_EINVAL;
         if(!error){
                 /*Reset internal array index*/
                 bus_space_read_1(sc->st,sc->sh,PIIX4_SMBHSTCNT);
@@ -601,32 +601,35 @@ intsmb_bwrite(device_t dev, u_char slave, char cmd, u_char count, char *buf)
 }
 
 static int
-intsmb_bread(device_t dev, u_char slave, char cmd, u_char count, char *buf)
+intsmb_bread(device_t dev, u_char slave, char cmd, u_char *count, char *buf)
 {
         int error,i;
+	u_char data, nread;
         struct intsmb_softc *sc = (struct intsmb_softc *)device_get_softc(dev);
         error=intsmb_free(dev);
-        if(count>SMBBLOCKTRANS_MAX||count==0)
-                error=EINVAL;
+        if(*count>SMBBLOCKTRANS_MAX||*count==0)
+                error=SMB_EINVAL;
         if(!error){
                 /*Reset internal array index*/
                 bus_space_read_1(sc->st,sc->sh,PIIX4_SMBHSTCNT);
 		
                 bus_space_write_1(sc->st,sc->sh,PIIX4_SMBHSTADD,slave|LSB);
                 bus_space_write_1(sc->st,sc->sh,PIIX4_SMBHSTCMD,cmd);
-                bus_space_write_1(sc->st,sc->sh,PIIX4_SMBHSTDAT0,count);
+                bus_space_write_1(sc->st,sc->sh,PIIX4_SMBHSTDAT0,*count);
                 intsmb_start(dev,PIIX4_SMBHSTCNT_PROT_BLOCK,0);
                 error=intsmb_stop(dev);
                 if(!error){
-                        bzero(buf,count);/*Is it needed?*/
-                        count= bus_space_read_1(sc->st,sc->sh,
+                        nread= bus_space_read_1(sc->st,sc->sh,
 						PIIX4_SMBHSTDAT0);
-                        if(count!=0&&count<=SMBBLOCKTRANS_MAX){
-			        for(i=0;i<count;i++){
-				        buf[i]=bus_space_read_1(sc->st,
+                        if(nread!=0&&nread<=SMBBLOCKTRANS_MAX){
+			        for(i=0;i<nread;i++){
+					data = bus_space_read_1(sc->st,
 								sc->sh,
 								PIIX4_SMBBLKDAT);
+					if (i < *count)
+						buf[i] = data;
 				}
+				*count = nread;
 			}
                         else{
 				error=EIO;
@@ -660,8 +663,7 @@ intpm_attach(device_t dev)
                 }
 
 		rid=PCI_BASE_ADDR_SMB;
-		res=bus_alloc_resource(dev,SYS_RES_IOPORT,&rid,
-				       0,~0,1,RF_ACTIVE);
+		res=bus_alloc_resource_any(dev,SYS_RES_IOPORT,&rid,RF_ACTIVE);
 		if(res==NULL){
 		  device_printf(dev,"Could not allocate Bus space\n");
 		  return ENXIO;
@@ -669,10 +671,12 @@ intpm_attach(device_t dev)
 		sciic->smbst=rman_get_bustag(res);
 		sciic->smbsh=rman_get_bushandle(res);
 		
-		device_printf(dev,"%s %x\n",
+#ifdef __i386__
+		device_printf(dev,"%s %lx\n",
 			      (sciic->smbst==I386_BUS_SPACE_IO)?
 			      "I/O mapped":"Memory",
-			      sciic->smbsh);
+			      rman_get_start(res));
+#endif
 		
 
 #ifndef NO_CHANGE_PCICONF
@@ -732,12 +736,15 @@ intpm_probe(device_t dev)
     if(ep->desc!=NULL){
       device_set_desc(dev,ep->desc);
       bus_set_resource(dev,SYS_RES_IRQ,0,9,1); /* XXX setup intr resource */
-      return 0;
+      return (BUS_PROBE_DEFAULT);
     }else{
       return ENXIO;
     }
 }
 DRIVER_MODULE(intpm, pci , intpm_pci_driver, intpm_devclass, 0, 0);
+DRIVER_MODULE(smbus, intsmb, smbus_driver, smbus_devclass, 0, 0);
+MODULE_DEPEND(intpm, smbus, SMBUS_MINVER, SMBUS_PREFVER, SMBUS_MAXVER);
+MODULE_VERSION(intpm, 1);
 
 static void intpm_intr(void *arg)
 {

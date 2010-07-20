@@ -1,10 +1,10 @@
-
-/*
+/*-
  * ichsmb.c
  *
+ * Author: Archie Cobbs <archie@freebsd.org>
  * Copyright (c) 2000 Whistle Communications, Inc.
  * All rights reserved.
- * 
+ *
  * Subject to the following obligations and disclaimer of warranty, use and
  * redistribution of this software, in source or object code forms, with or
  * without modifications are expressly permitted by Whistle Communications;
@@ -15,7 +15,7 @@
  *    Communications, Inc. trademarks, including the mark "WHISTLE
  *    COMMUNICATIONS" on advertising, endorsements, or otherwise except as
  *    such appears in the above copyright notice or in the software.
- * 
+ *
  * THIS SOFTWARE IS BEING PROVIDED BY WHISTLE COMMUNICATIONS "AS IS", AND
  * TO THE MAXIMUM EXTENT PERMITTED BY LAW, WHISTLE COMMUNICATIONS MAKES NO
  * REPRESENTATIONS OR WARRANTIES, EXPRESS OR IMPLIED, REGARDING THIS SOFTWARE,
@@ -34,21 +34,23 @@
  * THIS SOFTWARE, EVEN IF WHISTLE COMMUNICATIONS IS ADVISED OF THE POSSIBILITY
  * OF SUCH DAMAGE.
  *
- * Author: Archie Cobbs <archie@freebsd.org>
- *
- * $FreeBSD: src/sys/dev/ichsmb/ichsmb.c,v 1.1.2.1 2000/10/09 00:52:43 archie Exp $
+ * $FreeBSD: src/sys/dev/ichsmb/ichsmb.c,v 1.13.2.2 2006/09/22 19:19:16 jhb Exp $
  * $DragonFly: src/sys/dev/powermng/ichsmb/ichsmb.c,v 1.7 2006/10/25 20:56:00 dillon Exp $
  */
 
 /*
  * Support for the SMBus controller logical device which is part of the
  * Intel 81801AA (ICH) and 81801AB (ICH0) I/O controller hub chips.
+ *
+ * This driver assumes that the generic SMBus code will ensure that
+ * at most one process at a time calls into the SMBus methods below.
  */
 
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
 #include <sys/errno.h>
+#include <sys/module.h>
 #include <sys/syslog.h>
 #include <sys/bus.h>
 #include <sys/rman.h>
@@ -63,7 +65,7 @@
  * Enable debugging by defining ICHSMB_DEBUG to a non-zero value.
  */
 #define ICHSMB_DEBUG	0
-#if ICHSMB_DEBUG != 0 && defined(__GNUC__)
+#if ICHSMB_DEBUG != 0
 #define DBG(fmt, args...)	\
 	do { log(LOG_DEBUG, "%s: " fmt, __func__ , ## args); } while (0)
 #else
@@ -91,15 +93,7 @@ static int ichsmb_wait(sc_p sc);
 int
 ichsmb_probe(device_t dev)
 {
-	device_t smb;
-
-	/* Add child: an instance of the "smbus" device */
-	if ((smb = device_add_child(dev, DRIVER_SMBUS, -1)) == NULL) {
-		log(LOG_ERR, "%s: no \"%s\" child found\n",
-		    device_get_nameunit(dev), DRIVER_SMBUS);
-		return (ENXIO);
-	}
-	return (0);
+	return (BUS_PROBE_DEFAULT);
 }
 
 /*
@@ -112,6 +106,13 @@ ichsmb_attach(device_t dev)
 	const sc_p sc = device_get_softc(dev);
 	int error;
 
+	/* Add child: an instance of the "smbus" device */
+	if ((sc->smb = device_add_child(dev, DRIVER_SMBUS, -1)) == NULL) {
+		log(LOG_ERR, "%s: no \"%s\" child found\n",
+		    device_get_nameunit(dev), DRIVER_SMBUS);
+		return (ENXIO);
+	}
+
 	/* Clear interrupt conditions */
 	bus_space_write_1(sc->io_bst, sc->io_bsh, ICH_HST_STA, 0xff);
 
@@ -119,19 +120,18 @@ ichsmb_attach(device_t dev)
 	if ((error = bus_generic_attach(dev)) != 0) {
 		log(LOG_ERR, "%s: failed to attach child: %d\n",
 		    device_get_nameunit(dev), error);
-		error = ENXIO;
+		return (ENXIO);
 	}
 
-	/* Done */
-	return (error);
+	return (0);
 }
 
 /********************************************************************
 			SMBUS METHODS
 ********************************************************************/
 
-int 
-ichsmb_callback(device_t dev, int index, caddr_t data)
+int
+ichsmb_callback(device_t dev, int index, void *data)
 {
 	int smb_error = 0;
 
@@ -367,7 +367,7 @@ ichsmb_bwrite(device_t dev, u_char slave, char cmd, u_char count, char *buf)
 		DBG("%02x: %02x %02x %02x %02x %02x %02x %02x %02x"
 		    "  %c%c%c%c%c%c%c%c", (p - (u_char *)buf),
 		    p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
-		    DISP(p[0]), DISP(p[1]), DISP(p[2]), DISP(p[3]), 
+		    DISP(p[0]), DISP(p[1]), DISP(p[2]), DISP(p[3]),
 		    DISP(p[4]), DISP(p[5]), DISP(p[6]), DISP(p[7]));
 	    }
 	}
@@ -376,7 +376,7 @@ ichsmb_bwrite(device_t dev, u_char slave, char cmd, u_char count, char *buf)
 	KASSERT(sc->ich_cmd == -1,
 	    ("%s: ich_cmd=%d\n", __func__ , sc->ich_cmd));
 	if (count < 1 || count > 32)
-		return (EINVAL);
+		return (SMB_EINVAL);
 	bcopy(buf, sc->block_data, count);
 	sc->block_count = count;
 	sc->block_index = 1;
@@ -398,7 +398,7 @@ ichsmb_bwrite(device_t dev, u_char slave, char cmd, u_char count, char *buf)
 }
 
 int
-ichsmb_bread(device_t dev, u_char slave, char cmd, u_char count, char *buf)
+ichsmb_bread(device_t dev, u_char slave, char cmd, u_char *count, char *buf)
 {
 	const sc_p sc = device_get_softc(dev);
 	int smb_error;
@@ -406,10 +406,10 @@ ichsmb_bread(device_t dev, u_char slave, char cmd, u_char count, char *buf)
 	DBG("slave=0x%02x cmd=0x%02x count=%d\n", slave, (u_char)cmd, count);
 	KASSERT(sc->ich_cmd == -1,
 	    ("%s: ich_cmd=%d\n", __func__ , sc->ich_cmd));
-	if (count < 1 || count > 32)
-		return (EINVAL);
+	if (*count < 1 || *count > 32)
+		return (SMB_EINVAL);
 	bzero(sc->block_data, sizeof(sc->block_data));
-	sc->block_count = count;
+	sc->block_count = 0;
 	sc->block_index = 0;
 	sc->block_write = 0;
 
@@ -418,11 +418,13 @@ ichsmb_bread(device_t dev, u_char slave, char cmd, u_char count, char *buf)
 	bus_space_write_1(sc->io_bst, sc->io_bsh, ICH_XMIT_SLVA,
 	    (slave << 1) | ICH_XMIT_SLVA_READ);
 	bus_space_write_1(sc->io_bst, sc->io_bsh, ICH_HST_CMD, cmd);
-	bus_space_write_1(sc->io_bst, sc->io_bsh, ICH_D0, count); /* XXX? */
+	bus_space_write_1(sc->io_bst, sc->io_bsh, ICH_D0, *count); /* XXX? */
 	bus_space_write_1(sc->io_bst, sc->io_bsh, ICH_HST_CNT,
 	    ICH_HST_CNT_START | ICH_HST_CNT_INTREN | sc->ich_cmd);
-	if ((smb_error = ichsmb_wait(sc)) == SMB_ENOERR)
-		bcopy(sc->block_data, buf, sc->block_count);
+	if ((smb_error = ichsmb_wait(sc)) == SMB_ENOERR) {
+		bcopy(sc->block_data, buf, min(sc->block_count, *count));
+		*count = sc->block_count;
+	}
 	crit_exit();
 	DBG("smb_error=%d\n", smb_error);
 #if ICHSMB_DEBUG
@@ -434,7 +436,7 @@ ichsmb_bread(device_t dev, u_char slave, char cmd, u_char count, char *buf)
 		DBG("%02x: %02x %02x %02x %02x %02x %02x %02x %02x"
 		    "  %c%c%c%c%c%c%c%c", (p - (u_char *)buf),
 		    p[0], p[1], p[2], p[3], p[4], p[5], p[6], p[7],
-		    DISP(p[0]), DISP(p[1]), DISP(p[2]), DISP(p[3]), 
+		    DISP(p[0]), DISP(p[1]), DISP(p[2]), DISP(p[3]),
 		    DISP(p[4]), DISP(p[5]), DISP(p[6]), DISP(p[7]));
 	    }
 	}
@@ -668,3 +670,19 @@ ichsmb_release_resources(sc_p sc)
 	}
 }
 
+int
+ichsmb_detach(device_t dev)
+{
+	const sc_p sc = device_get_softc(dev);
+	int error;
+
+	error = bus_generic_detach(dev);
+	if (error)
+		return (error);
+	device_delete_child(dev, sc->smb);
+	ichsmb_release_resources(sc);
+
+	return 0;
+}
+
+DRIVER_MODULE(smbus, ichsmb, smbus_driver, smbus_devclass, 0, 0);

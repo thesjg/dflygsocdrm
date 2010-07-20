@@ -1,4 +1,3 @@
-
 /*
  * ichsmb_var.h
  *
@@ -36,7 +35,7 @@
  *
  * Author: Archie Cobbs <archie@freebsd.org>
  *
- * $FreeBSD: src/sys/dev/ichsmb/ichsmb_var.h,v 1.1.2.1 2000/10/09 00:52:43 archie Exp $
+ * $FreeBSD: src/sys/dev/ichsmb/ichsmb_var.h,v 1.4 2005/06/10 16:12:43 takawata Exp $
  * $DragonFly: src/sys/dev/powermng/ichsmb/ichsmb_var.h,v 1.2 2003/06/17 04:28:27 dillon Exp $
  */
 
@@ -50,6 +49,7 @@ struct ichsmb_softc {
 
 	/* Device/bus stuff */
 	device_t		dev;		/* this device */
+	device_t		smb;		/* smb device */
 	struct resource		*io_res;        /* i/o port resource */
 	int			io_rid;         /* i/o port bus id */
 	bus_space_tag_t		io_bst;		/* bus space tag */
@@ -86,6 +86,7 @@ extern void	ichsmb_device_intr(void *cookie);
 extern void	ichsmb_release_resources(sc_p sc);
 extern int	ichsmb_probe(device_t dev);
 extern int	ichsmb_attach(device_t dev);
+extern int	ichsmb_detach(device_t dev);
 
 #endif /* _DEV_ICHSMB_ICHSMB_VAR_H */
 
