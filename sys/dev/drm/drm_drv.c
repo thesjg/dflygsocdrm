@@ -56,12 +56,10 @@
 
 #include <machine/limits.h>
 #include "drmP.h"
-#include "drm.h"
 #include "drm_sarea.h"
 #include "drm_core.h"
 
-static int drm_version(struct drm_device *dev, void *data,
-		       struct drm_file *file_priv);
+#define DRM_NEWER_IOCTL 1
 
 #ifdef DRM_DEBUG_DEFAULT_ON
 int drm_debug_flag = 1;
@@ -93,6 +91,10 @@ DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device,
 #define DRIVER_SOFTC(unit) \
 	((struct drm_device *)devclass_get_softc(drm_devclass, unit))
 
+static int drm_version(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv);
+
+/** Ioctl table */
 static struct drm_ioctl_desc drm_ioctls[256] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_VERSION, drm_version, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_UNIQUE, drm_getunique, 0),
@@ -197,6 +199,7 @@ static struct drm_ioctl_desc drm_ioctls[256] = {
 #endif
 };
 
+#define DRM_CORE_IOCTL_COUNT	ARRAY_SIZE( drm_ioctls )
 
 /**
  * Take down the DRM device.
@@ -565,14 +568,14 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	spin_unlock(&dev->file_priv_lock);
 
 	if (!file_priv) {
-		DRM_ERROR("drm_ioctl() file_priv null\n");
+		DRM_ERROR("file_priv null\n");
 		return EINVAL;
 	}
 	if (!file_priv->minor) {
-		DRM_ERROR("drm_ioctl() file_priv no minor\n");
+		DRM_ERROR("file_priv has no minor\n");
 	}
 	if (file_priv->minor && (dev != file_priv->minor->dev)) {
-		DRM_ERROR("drm_ioctl() drm_get_device_from_kdev dev != file_priv->minor->dev\n");
+		DRM_ERROR("drm_get_device_from_kdev dev != file_priv->minor->dev\n");
 	}
 
 	struct drm_ioctl_desc *ioctl;
@@ -592,9 +595,9 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	++file_priv->ioctl_count;
 
 	DRM_DEBUG("pid=%d, cmd=0x%02lx, nr=0x%02x, dev 0x%lx, auth=%d\n",
-		DRM_CURRENTPID, cmd, nr,
-		(long)dev->device,
-		file_priv->authenticated);
+		  DRM_CURRENTPID, cmd, nr,
+		  (long)dev->device,
+		  file_priv->authenticated);
 
 	switch (cmd) {
 	case FIONBIO:
@@ -616,6 +619,21 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 
 	atomic_inc(&dev->ioctl_count);
 
+#ifdef DRM_NEWER_IOCTL
+	if ((nr >= DRM_CORE_IOCTL_COUNT) &&
+	    ((nr < DRM_COMMAND_BASE) || (nr >= DRM_COMMAND_END)))
+		goto err_i1;
+	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
+	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
+		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
+	else if ((nr >= DRM_COMMAND_END) || (nr < DRM_COMMAND_BASE)) {
+		ioctl = &drm_ioctls[nr];
+#ifdef __linux__
+		cmd = ioctl->cmd;
+#endif /* __linux__ */
+	} else
+		goto err_i1;
+#else
 	ioctl = &drm_ioctls[nr];
 	/* It's not a core DRM ioctl, try driver-specific. */
 	if (ioctl->func == NULL && nr >= DRM_COMMAND_BASE) {
@@ -629,10 +647,20 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		ioctl = &dev->driver->ioctls[nr];
 		is_driver_ioctl = 1;
 	}
+#endif
+
+	/* Do not trust userspace, use our own definition */
 	func = ioctl->func;
 
-	if (func == NULL) {
+#ifdef __linux__
+	/* is there a local override? */
+	if ((nr == DRM_IOCTL_NR(DRM_IOCTL_DMA)) && dev->driver->dma_ioctl)
+		func = dev->driver->dma_ioctl;
+#endif /* __linux__ */
+
+	if (!func) {
 		DRM_DEBUG("no function\n");
+		retcode = EINVAL;
 		goto err_i1;
 	}
 
@@ -647,9 +675,13 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		if (!(ioctl->flags & DRM_UNLOCKED))
 			lock_kernel();
 /* this lock seems essential for stability */
+#ifndef __linux__
 		DRM_LOCK();
+#endif /* __linux__ */
 		retcode = -func(dev, data, file_priv);
+#ifndef __linux__
 		DRM_UNLOCK();
+#endif /* __linux__ */
 
 		if (!(ioctl->flags & DRM_UNLOCKED))
 			unlock_kernel();
