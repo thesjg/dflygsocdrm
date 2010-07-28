@@ -95,7 +95,7 @@ static int drm_version(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 
 /** Ioctl table */
-static struct drm_ioctl_desc drm_ioctls[256] = {
+static struct drm_ioctl_desc drm_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_VERSION, drm_version, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_UNIQUE, drm_getunique, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_MAGIC, drm_getmagic, 0),
