@@ -608,7 +608,7 @@ struct drm_gem_open {
 	__u64 size;
 };
 
-#include "dev/drm/drm_mode.h"
+#include "drm_mode.h"
 
 #define DRM_IOCTL_BASE			'd'
 #define DRM_IO(nr)			_IO(DRM_IOCTL_BASE,nr)

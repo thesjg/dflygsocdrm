@@ -28,17 +28,12 @@
  *    Kevin E. Martin <martin@valinux.com>
  *    Gareth Hughes <gareth@valinux.com>
  *    Keith Whitwell <keith@tungstengraphics.com>
- * __FBSDID("$FreeBSD: src/sys/dev/drm/radeon_drm.h,v 1.18 2009/08/23 15:02:58 rnoland Exp $");
  */
 
 #ifndef __RADEON_DRM_H__
 #define __RADEON_DRM_H__
 
-#ifdef __linux__
 #include "drm.h"
-#else
-#include "dev/drm/drm.h"
-#endif
 
 /* WARNING: If you change any of these defines, make sure to change the
  * defines in the X server file (radeon_sarea.h)
@@ -311,7 +306,7 @@ typedef union {
 
 #define RADEON_SCRATCH_REG_OFFSET	32
 
-#define R600_SCRATCH_REG_OFFSET	        256
+#define R600_SCRATCH_REG_OFFSET         256
 
 #define RADEON_NR_SAREA_CLIPRECTS	12
 
@@ -760,7 +755,7 @@ typedef struct drm_radeon_irq_wait {
 
 typedef struct drm_radeon_setparam {
 	unsigned int param;
-	int64_t value;
+	__s64 value;
 } drm_radeon_setparam_t;
 
 #define RADEON_SETPARAM_FB_LOCATION    1	/* determined framebuffer location */
@@ -877,10 +872,8 @@ struct drm_radeon_gem_pwrite {
 	uint64_t data_ptr;
 };
 
-/* New interface which obsolete all previous interface.
- */
-#define RADEON_CHUNK_ID_RELOCS 0x01
-#define RADEON_CHUNK_ID_IB     0x02
+#define RADEON_CHUNK_ID_RELOCS	0x01
+#define RADEON_CHUNK_ID_IB	0x02
 
 #ifndef __linux__
 /* Still used in file radeon_cs.c, function radeon_cs_ioctl() */
@@ -888,9 +881,9 @@ struct drm_radeon_gem_pwrite {
 #endif
 
 struct drm_radeon_cs_chunk {
-	uint32_t chunk_id;
-	uint32_t length_dw;
-	uint64_t chunk_data;
+	uint32_t		chunk_id;
+	uint32_t		length_dw;
+	uint64_t		chunk_data;
 };
 
 struct drm_radeon_cs_reloc {
