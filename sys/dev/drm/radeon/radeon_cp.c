@@ -1637,9 +1637,9 @@ static int radeon_do_resume_cp(struct drm_device *dev, struct drm_file *file_pri
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
-#ifdef __linux__
+#ifdef DRM_NEWER_RCMD
 	dev_priv->have_z_offset = 0;
-#endif /* __linux__ */
+#endif
 	radeon_do_engine_reset(dev);
 	radeon_irq_set_state(dev, RADEON_SW_INT_ENABLE, 1);
 

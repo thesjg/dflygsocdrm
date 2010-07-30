@@ -32,6 +32,8 @@
 #ifndef __RADEON_DRV_H__
 #define __RADEON_DRV_H__
 
+#define DRM_NEWER_RCMD
+
 /* General customization:
  */
 
@@ -451,7 +453,7 @@ struct drm_buffer;
 
 typedef struct drm_radeon_kcmd_buffer {
 	int bufsz;
-#ifdef __linux__
+#ifdef DRM_NEWER_RCMD
 	struct drm_buffer *buffer;
 #else
 	char *buf;
