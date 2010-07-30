@@ -27,6 +27,10 @@
  *    Kevin E. Martin <martin@valinux.com>
  */
 
+#ifndef __linux__
+#include <sys/cdefs.h>
+#endif /* __linux__ */
+
 #include "drmP.h"
 #include "drm.h"
 #include "drm_buffer.h"
@@ -2484,6 +2488,13 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+#ifndef __linux__
+	if (!dev_priv) {
+		DRM_ERROR("called with no initialization\n");
+		return -EINVAL;
+	}
+#endif /* __linux__ */
+
 	DRM_DEBUG("idx=%d s=%d e=%d d=%d\n",
 		  indirect->idx, indirect->start, indirect->end,
 		  indirect->discard);
@@ -3057,7 +3068,11 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 			value = 0;
 		else
+#ifdef __linux__
 			value = drm_dev_to_irq(dev);
+#else
+			value = dev->irq;
+#endif
 		break;
 	case RADEON_PARAM_GART_BASE:
 		value = dev_priv->gart_vm_start;
