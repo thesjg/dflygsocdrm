@@ -3271,7 +3271,7 @@ struct drm_ioctl_desc radeon_ioctls[] = {
 #ifdef __linux__
 	DRM_IOCTL_DEF(DRM_RADEON_CS, r600_cs_legacy_ioctl, DRM_AUTH)
 #else
-	DRM_IOCTL_DEF(DRM_RADEON_CS, r600_cs_ioctl, DRM_AUTH)
+	DRM_IOCTL_DEF(DRM_RADEON_CS, radeon_cs_ioctl, DRM_AUTH)
 #endif /* __linux__ */
 };
 
