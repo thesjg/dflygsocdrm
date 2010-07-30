@@ -926,7 +926,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 #ifdef __linux__
 	ref_age_base = (u32 *)(unsigned long)get_unaligned(ptr_addr);
 #else
-	ref_age_base = (u32 *)(unsigned long)*((uint64_t *)ptr_addr);
+	ref_age_base = (u32 *)(unsigned long)(ptr_addr);
 #endif /* __linux__ */
 
 	for (i=0; i < header.scratch.n_bufs; i++) {
