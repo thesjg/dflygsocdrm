@@ -3268,7 +3268,11 @@ struct drm_ioctl_desc radeon_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_RADEON_SETPARAM, radeon_cp_setparam, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SURF_ALLOC, radeon_surface_alloc, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SURF_FREE, radeon_surface_free, DRM_AUTH),
+#ifdef __linux__
 	DRM_IOCTL_DEF(DRM_RADEON_CS, r600_cs_legacy_ioctl, DRM_AUTH)
+#else
+	DRM_IOCTL_DEF(DRM_RADEON_CS, r600_cs_ioctl, DRM_AUTH)
+#endif /* __linux__ */
 };
 
 int radeon_max_ioctl = DRM_ARRAY_SIZE(radeon_ioctls);
