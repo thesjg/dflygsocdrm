@@ -238,8 +238,17 @@ void r300_init_reg_flags(struct drm_device *dev)
 	ADD_RANGE_MARK(R300_ZB_DEPTHOFFSET, 1, MARK_CHECK_OFFSET);	/* check offset */
 	ADD_RANGE(R300_ZB_DEPTHPITCH, 1);
 	ADD_RANGE(R300_ZB_DEPTHCLEARVALUE, 1);
+#ifdef __linux__
 	ADD_RANGE(R300_ZB_ZMASK_OFFSET, 13);
 	ADD_RANGE(R300_ZB_ZPASS_DATA, 2); /* ZB_ZPASS_DATA, ZB_ZPASS_ADDR */
+#else
+	ADD_RANGE(R300_ZB_ZMASK_OFFSET, 5);
+	ADD_RANGE(R300_ZB_HIZ_OFFSET, 5);
+	ADD_RANGE(R300_ZB_ZPASS_DATA, 1);
+	ADD_RANGE_MARK(R300_ZB_ZPASS_ADDR, 1, MARK_CHECK_OFFSET);       /* check offset */
+	ADD_RANGE(R300_ZB_DEPTHXY_OFFSET, 1)
+
+#endif
 
 	ADD_RANGE(R300_TX_FILTER_0, 16);
 	ADD_RANGE(R300_TX_FILTER1_0, 16);
@@ -474,7 +483,11 @@ static __inline__ int r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
 	u32 narrays;
 	RING_LOCALS;
 
+#ifdef __linux__
 	count = (header & RADEON_CP_PACKET_COUNT_MASK) >> 16;
+#else
+	count = (header >> 16) & 0x3fff;
+#endif /* __linux__ */
 
 	if ((count + 1) > MAX_ARRAY_PACKET) {
 		DRM_ERROR("Too large payload in 3D_LOAD_VBPNTR (count=%d)\n",
@@ -538,8 +551,11 @@ static __inline__ int r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
 	int count, ret;
 	RING_LOCALS;
 
-
+#ifdef __linux__
 	count = (*cmd & RADEON_CP_PACKET_COUNT_MASK) >> 16;
+#else
+	count=((*cmd) >> 16) & 0x3fff;
+#endif /* __linux__ */
 
 	if (*cmd & 0x8000) {
 		u32 offset;
@@ -585,7 +601,11 @@ static __inline__ int r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
 	int expected_count;
 	RING_LOCALS;
 
+#ifdef __linux__
 	count = (*cmd & RADEON_CP_PACKET_COUNT_MASK) >> 16;
+#else
+	count = ((*cmd) >> 16) & 0x3fff;
+#endif /* __linux__ */
 
 	expected_count = *cmd1 >> 16;
 	if (!(*cmd1 & R300_VAP_VF_CNTL__INDEX_SIZE_32bit))
@@ -926,7 +946,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 #ifdef __linux__
 	ref_age_base = (u32 *)(unsigned long)get_unaligned(ptr_addr);
 #else
-	ref_age_base = (u32 *)(unsigned long)(ptr_addr);
+	ref_age_base = (u32 *)(unsigned long)*((uint64_t *)ptr_addr);
 #endif /* __linux__ */
 
 	for (i=0; i < header.scratch.n_bufs; i++) {
