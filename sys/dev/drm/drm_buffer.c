@@ -116,11 +116,7 @@ extern int drm_buffer_copy_from_user(struct drm_buffer *buf,
 	for (idx = 0; idx < nr_pages; ++idx) {
 
 		if (DRM_COPY_FROM_USER(buf->data[idx],
-#ifdef __linux__
 			user_data + idx * PAGE_SIZE,
-#else /* suppress compiler warning about arithmetic */
-			(char *)user_data + idx * PAGE_SIZE,
-#endif /* __linux__ */
 			min(PAGE_SIZE, size - idx * PAGE_SIZE))) {
 			DRM_ERROR("Failed to copy user data (%p) to drm buffer"
 					" (%p) %dth page.\n",
@@ -177,11 +173,7 @@ void *drm_buffer_read_object(struct drm_buffer *buf,
 		/* The object is split which forces copy to temporary object.*/
 		int beginsz = PAGE_SIZE - idx;
 		memcpy(stack_obj, &buf->data[page][idx], beginsz);
-#ifdef __linux__
 		memcpy(stack_obj + beginsz, &buf->data[page + 1][0],
-#else /* suppress compiler warning about arithmetic on void* pointer */
-		memcpy((char *)stack_obj + beginsz, &buf->data[page + 1][0],
-#endif /* __linux__ */
 				objsize - beginsz);
 
 		obj = stack_obj;
