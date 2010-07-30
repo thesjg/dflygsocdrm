@@ -33,7 +33,6 @@
  */
 
 #include "drm_buffer.h"
-#include "porting/drm_porting_memory.h"
 
 /**
  * Allocate the drm buffer object.
@@ -48,9 +47,8 @@ int drm_buffer_alloc(struct drm_buffer **buf, int size)
 
 	/* Allocating pointer table to end of structure makes drm_buffer
 	 * variable sized */
-
-	*buf = kzalloc(sizeof(struct drm_buffer) + nr_pages*sizeof(char *),
-			GFP_KERNEL);
+	*buf = malloc(sizeof(struct drm_buffer) + nr_pages*sizeof(char *),
+			DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 
 	if (*buf == NULL) {
 		DRM_ERROR("Failed to allocate drm buffer object to hold"
@@ -64,8 +62,8 @@ int drm_buffer_alloc(struct drm_buffer **buf, int size)
 	for (idx = 0; idx < nr_pages; ++idx) {
 
 		(*buf)->data[idx] =
-			kmalloc(min(PAGE_SIZE, size - idx * PAGE_SIZE),
-				GFP_KERNEL);
+			malloc(min(PAGE_SIZE, size - idx * PAGE_SIZE),
+				DRM_MEM_DRIVER, M_WAITOK);
 
 
 		if ((*buf)->data[idx] == NULL) {
@@ -83,12 +81,12 @@ error_out:
 
 	/* Only last element can be null pointer so check for it first. */
 	if ((*buf)->data[idx])
-		kfree((*buf)->data[idx]);
+		free((*buf)->data[idx], DRM_MEM_DRIVER);
 
 	for (--idx; idx >= 0; --idx)
-		kfree((*buf)->data[idx]);
+		free((*buf)->data[idx], DRM_MEM_DRIVER);
 
-	kfree(*buf);
+	free(*buf, DRM_MEM_DRIVER);
 	return -ENOMEM;
 }
 EXPORT_SYMBOL(drm_buffer_alloc);
@@ -116,7 +114,7 @@ extern int drm_buffer_copy_from_user(struct drm_buffer *buf,
 	for (idx = 0; idx < nr_pages; ++idx) {
 
 		if (DRM_COPY_FROM_USER(buf->data[idx],
-			user_data + idx * PAGE_SIZE,
+			(char *)user_data + idx * PAGE_SIZE,
 			min(PAGE_SIZE, size - idx * PAGE_SIZE))) {
 			DRM_ERROR("Failed to copy user data (%p) to drm buffer"
 					" (%p) %dth page.\n",
@@ -141,9 +139,9 @@ void drm_buffer_free(struct drm_buffer *buf)
 		int nr_pages = buf->size / PAGE_SIZE + 1;
 		int idx;
 		for (idx = 0; idx < nr_pages; ++idx)
-			kfree(buf->data[idx]);
+			free(buf->data[idx], DRM_MEM_DRIVER);
 
-		kfree(buf);
+		free(buf, DRM_MEM_DRIVER);
 	}
 }
 EXPORT_SYMBOL(drm_buffer_free);
@@ -173,7 +171,8 @@ void *drm_buffer_read_object(struct drm_buffer *buf,
 		/* The object is split which forces copy to temporary object.*/
 		int beginsz = PAGE_SIZE - idx;
 		memcpy(stack_obj, &buf->data[page][idx], beginsz);
-		memcpy(stack_obj + beginsz, &buf->data[page + 1][0],
+
+		memcpy((char *)stack_obj + beginsz, &buf->data[page + 1][0],
 				objsize - beginsz);
 
 		obj = stack_obj;
