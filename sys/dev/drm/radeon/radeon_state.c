@@ -327,6 +327,9 @@ static __inline__ int radeon_check_and_fixup_packet3(drm_radeon_private_t *
 		break;
 
 	case RADEON_3D_LOAD_VBPNTR:
+#ifndef __linux__
+		count = ((*cmd) >> 16) & 0x3fff;
+#endif /* __linux__ */
 
 		if (count > 18) { /* 12 arrays max */
 			DRM_ERROR("Too large payload in 3D_LOAD_VBPNTR (count=%d)\n",
