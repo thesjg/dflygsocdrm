@@ -906,6 +906,7 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 		if (tmp & RADEON_BACK)
 			flags |= RADEON_FRONT;
 	}
+#if 0
 	if (flags & (RADEON_DEPTH|RADEON_STENCIL)) {
 		if (!dev_priv->have_z_offset)
 #ifdef __linux__
@@ -915,6 +916,7 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 #endif /* __linux__ */
 		flags &= ~(RADEON_DEPTH | RADEON_STENCIL);
 	}
+#endif
 
 	if (flags & (RADEON_FRONT | RADEON_BACK)) {
 
