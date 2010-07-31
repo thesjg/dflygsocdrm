@@ -120,13 +120,13 @@ static int i915_init_phys_hws(struct drm_device *dev)
 	dev_priv->hw_status_page = dev_priv->status_page_dmah->vaddr;
 	dev_priv->dma_status_page = dev_priv->status_page_dmah->busaddr;
 
+	memset(dev_priv->hw_status_page, 0, PAGE_SIZE);
+
 #ifdef __linux__
 	if (IS_I965G(dev))
 		dev_priv->dma_status_page |= (dev_priv->dma_status_page >> 28) &
 					     0xf0;
 #endif
-
-	memset(dev_priv->hw_status_page, 0, PAGE_SIZE);
 
 	I915_WRITE(HWS_PGA, dev_priv->dma_status_page);
 	DRM_DEBUG("Enabled hardware status page\n");
@@ -279,13 +279,14 @@ static int i915_dma_resume(struct drm_device * dev)
 		DRM_ERROR("Can not find hardware status page\n");
 		return -EINVAL;
 	}
-	DRM_DEBUG("hw status page @ %p\n", dev_priv->hw_status_page);
+	DRM_DEBUG_DRIVER("hw status page @ %p\n",
+				dev_priv->hw_status_page);
 
 	if (dev_priv->status_gfx_addr != 0)
 		I915_WRITE(HWS_PGA, dev_priv->status_gfx_addr);
 	else
 		I915_WRITE(HWS_PGA, dev_priv->dma_status_page);
-	DRM_DEBUG("Enabled hardware status page\n");
+	DRM_DEBUG_DRIVER("Enabled hardware status page\n");
 
 	return 0;
 }
