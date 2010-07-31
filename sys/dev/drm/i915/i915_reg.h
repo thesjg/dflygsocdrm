@@ -570,8 +570,8 @@
  * this field (only one bit may be set).
  */
 #define   DPLL_FPA01_P1_POST_DIV_MASK_I830_LVDS	0x003f0000
-#define   DPLL_FPA01_P1_POST_DIV_SHIFT		16
-#define   DPLL_FPA01_P1_POST_DIV_SHIFT_IGD	15
+#define   DPLL_FPA01_P1_POST_DIV_SHIFT	16
+#define   DPLL_FPA01_P1_POST_DIV_SHIFT_PINEVIEW 15
 /* i830, required in DVO non-gang */
 #define   PLL_P2_DIVIDE_BY_4		(1 << 23)
 #define   PLL_P1_DIVIDE_BY_TWO		(1 << 21) /* i830 */

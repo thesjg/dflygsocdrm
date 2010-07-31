@@ -30,6 +30,8 @@
 #ifndef _I915_DRV_H_
 #define _I915_DRV_H_
 
+#define DRM_INTEL_NEWER 1
+
 #include "i915_reg.h"
 #include "intel_bios.h"
 #ifdef __linux__
@@ -45,10 +47,17 @@
 #define DRIVER_DESC		"Intel Graphics"
 #define DRIVER_DATE		"20080730"
 
+#ifdef __linux__
+enum pipe {
+	PIPE_A = 0,
+	PIPE_B,
+};
+#else
 enum i915_pipe {
 	PIPE_A = 0,
 	PIPE_B,
 };
+#endif /* __linux__ */
 
 enum plane {
 	PLANE_A = 0,
@@ -1130,6 +1139,38 @@ typedef boolean_t bool;
 
 #define I915_VERBOSE 0
 
+#ifdef DRM_NEWER_INTEL
+
+#define RING_LOCALS	volatile unsigned int *ring_virt__;
+
+#define BEGIN_LP_RING(n) do {						\
+	int bytes__ = 4*(n);						\
+	if (I915_VERBOSE) DRM_DEBUG("BEGIN_LP_RING(%d)\n", (n));	\
+	/* a wrap must occur between instructions so pad beforehand */	\
+	if (unlikely (dev_priv->ring.tail + bytes__ > dev_priv->ring.Size)) \
+		i915_wrap_ring(dev);					\
+	if (unlikely (dev_priv->ring.space < bytes__))			\
+		i915_wait_ring(dev, bytes__, __func__);			\
+	ring_virt__ = (unsigned int *)					\
+	        (dev_priv->ring.virtual_start + dev_priv->ring.tail);	\
+	dev_priv->ring.tail += bytes__;					\
+	dev_priv->ring.tail &= dev_priv->ring.Size - 1;			\
+	dev_priv->ring.space -= bytes__;				\
+} while (0)
+
+#define OUT_RING(n) do {						\
+	if (I915_VERBOSE) DRM_DEBUG("   OUT_RING %x\n", (int)(n));	\
+	*ring_virt__++ = (n);						\
+} while (0)
+
+#define ADVANCE_LP_RING() do {						\
+	if (I915_VERBOSE)						\
+		DRM_DEBUG("ADVANCE_LP_RING %x\n", dev_priv->ring.tail);	\
+	I915_WRITE(PRB0_TAIL, dev_priv->ring.tail);			\
+} while(0)
+
+#else /* DRM_NEWER_INTEL */
+
 #define RING_LOCALS	unsigned int outring, ringmask, outcount; \
                         volatile char *virt;
 
@@ -1159,6 +1200,8 @@ typedef boolean_t bool;
 	I915_WRITE(PRB0_TAIL, outring);			\
 } while(0)
 
+#endif /* DRM_NEWER_INTEL */
+
 /**
  * Reads a dword out of the status page, which is written to from the command
  * queue by automatic updates, MI_REPORT_HEAD, MI_STORE_DATA_INDEX, or
@@ -1179,6 +1222,7 @@ typedef boolean_t bool;
 #define I915_GEM_HWS_INDEX		0x20
 #define I915_BREADCRUMB_INDEX		0x21
 
+extern int i915_wrap_ring(struct drm_device * dev);
 extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 #define INTEL_INFO(dev)	(((struct drm_i915_private *) (dev)->dev_private)->info)
