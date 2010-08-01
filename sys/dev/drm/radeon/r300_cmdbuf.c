@@ -483,9 +483,8 @@ static __inline__ int r300_emit_3d_load_vbpntr(drm_radeon_private_t *dev_priv,
 	u32 narrays;
 	RING_LOCALS;
 
-#if __linux__
 	count = (header & RADEON_CP_PACKET_COUNT_MASK) >> 16;
-#else
+#if 0
 	count = (header >> 16) & 0x3fff;
 #endif /* __linux__ */
 
@@ -551,9 +550,8 @@ static __inline__ int r300_emit_bitblt_multi(drm_radeon_private_t *dev_priv,
 	int count, ret;
 	RING_LOCALS;
 
-#ifdef __linux__
 	count = (*cmd & RADEON_CP_PACKET_COUNT_MASK) >> 16;
-#else
+#if 0
 	count=((*cmd) >> 16) & 0x3fff;
 #endif /* __linux__ */
 
@@ -601,9 +599,8 @@ static __inline__ int r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
 	int expected_count;
 	RING_LOCALS;
 
-#if __linux__
 	count = (*cmd & RADEON_CP_PACKET_COUNT_MASK) >> 16;
-#else
+#if 0
 	count = ((*cmd) >> 16) & 0x3fff;
 #endif /* __linux__ */
 
