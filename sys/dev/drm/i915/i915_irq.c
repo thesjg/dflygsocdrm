@@ -1,6 +1,6 @@
 /* i915_irq.c -- IRQ support for the I915 -*- linux-c -*-
  */
-/*-
+/*
  * Copyright 2003 Tungsten Graphics, Inc., Cedar Park, Texas.
  * All Rights Reserved.
  *
@@ -31,6 +31,8 @@
 #include "i915_drm.h"
 #include "i915_drv.h"
 
+#define DRM_NEWER_ICOUNTER 1
+
 #define MAX_NOPID ((u32)~0)
 
 /**
@@ -40,11 +42,33 @@
  * we leave them always unmasked in IMR and then control enabling them through
  * PIPESTAT alone.
  */
+
+#ifdef __linux__
+
+#define I915_INTERRUPT_ENABLE_FIX			\
+	(I915_ASLE_INTERRUPT |				\
+	 I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |		\
+	 I915_DISPLAY_PIPE_B_EVENT_INTERRUPT |		\
+	 I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT |	\
+	 I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT |	\
+	 I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT)
+
+#else /* __linux__ */
+
 #define I915_INTERRUPT_ENABLE_FIX	(I915_DISPLAY_PIPE_A_EVENT_INTERRUPT | \
 				   	 I915_DISPLAY_PIPE_B_EVENT_INTERRUPT)
+#endif /* __linux__ */
 
 /** Interrupts that we mask and unmask at runtime. */
 #define I915_INTERRUPT_ENABLE_VAR	(I915_USER_INTERRUPT)
+
+#ifdef __linux__
+#define I915_PIPE_VBLANK_STATUS	(PIPE_START_VBLANK_INTERRUPT_STATUS |\
+				 PIPE_VBLANK_INTERRUPT_STATUS)
+
+#define I915_PIPE_VBLANK_ENABLE	(PIPE_START_VBLANK_INTERRUPT_ENABLE |\
+				 PIPE_VBLANK_INTERRUPT_ENABLE)
+#endif /* __linux__ */
 
 /** These are all of the interrupts used by the driver */
 #define I915_INTERRUPT_ENABLE_MASK	(I915_INTERRUPT_ENABLE_FIX | \
@@ -56,7 +80,10 @@
 void
 i915_enable_irq(drm_i915_private_t *dev_priv, u32 mask)
 {
+
+#ifndef __linux__
 	mask &= I915_INTERRUPT_ENABLE_VAR;
+#endif /* !__linux__ */
 	if ((dev_priv->irq_mask_reg & mask) != 0) {
 		dev_priv->irq_mask_reg &= ~mask;
 		I915_WRITE(IMR, dev_priv->irq_mask_reg);
@@ -67,7 +94,9 @@ i915_enable_irq(drm_i915_private_t *dev_priv, u32 mask)
 static inline void
 i915_disable_irq(drm_i915_private_t *dev_priv, u32 mask)
 {
+#ifndef __linux__
 	mask &= I915_INTERRUPT_ENABLE_VAR;
+#endif /* !__linux__ */
 	if ((dev_priv->irq_mask_reg & mask) != mask) {
 		dev_priv->irq_mask_reg |= mask;
 		I915_WRITE(IMR, dev_priv->irq_mask_reg);
@@ -82,7 +111,11 @@ i915_pipestat(int pipe)
 	    return PIPEASTAT;
 	if (pipe == 1)
 	    return PIPEBSTAT;
+#ifdef __linux__
+	BUG();
+#else
 	return -EINVAL;
+#endif /* __linux__ */
 }
 
 void
@@ -145,7 +178,8 @@ u32 i915_get_vblank_counter(struct drm_device *dev, int pipe)
 	low_frame = pipe ? PIPEBFRAMEPIXEL : PIPEAFRAMEPIXEL;
 
 	if (!i915_pipe_enabled(dev, pipe)) {
-		DRM_DEBUG("trying to get vblank count for disabled pipe %d\n", pipe);
+		DRM_DEBUG_DRIVER("trying to get vblank count for disabled "
+				"pipe %d\n", pipe);
 		return 0;
 	}
 
@@ -174,7 +208,8 @@ u32 g45_get_vblank_counter(struct drm_device *dev, int pipe)
 	int reg = pipe ? PIPEB_FRMCOUNT_GM45 : PIPEA_FRMCOUNT_GM45;
 
 	if (!i915_pipe_enabled(dev, pipe)) {
-		DRM_DEBUG("trying to get vblank count for disabled pipe %d\n", pipe);
+		DRM_DEBUG_DRIVER("trying to get vblank count for disabled "
+					"pipe %d\n", pipe);
 		return 0;
 	}
 
@@ -278,7 +313,7 @@ static int i915_emit_irq(struct drm_device * dev)
 
 	i915_kernel_lost_context(dev);
 
-#ifdef __linux__
+#ifdef DRM_NEWER_ICOUNTER
 	dev_priv->counter++;
 	if (dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 1;
@@ -289,8 +324,6 @@ static int i915_emit_irq(struct drm_device * dev)
 
 	if (master_priv->sarea_priv)
 		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
-
-	DRM_DEBUG("emitting: %d\n", dev_priv->counter);
 
 	BEGIN_LP_RING(4);
 	OUT_RING(MI_STORE_DWORD_INDEX);
@@ -309,7 +342,6 @@ void i915_user_irq_get(struct drm_device *dev)
 	if (dev->irq_enabled == 0)
 		return;
 
-	DRM_DEBUG("\n");
 	DRM_SPINLOCK(&dev_priv->user_irq_lock);
 	if (++dev_priv->user_irq_refcount == 1)
 		i915_enable_irq(dev_priv, I915_USER_INTERRUPT);
@@ -511,6 +543,10 @@ void i915_driver_irq_preinstall(struct drm_device * dev)
 	(void) I915_READ(IER);
 }
 
+/*
+ * Must be called after intel_modeset_init or hotplug interrupts won't be
+ * enabled correctly.
+ */
 int i915_driver_irq_postinstall(struct drm_device *dev)
 {
 	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
@@ -523,7 +559,6 @@ int i915_driver_irq_postinstall(struct drm_device *dev)
 	/* Disable pipe interrupt enables, clear pending pipe status */
 	I915_WRITE(PIPEASTAT, I915_READ(PIPEASTAT) & 0x8000ffff);
 	I915_WRITE(PIPEBSTAT, I915_READ(PIPEBSTAT) & 0x8000ffff);
-
 	/* Clear pending interrupt status */
 	I915_WRITE(IIR, I915_READ(IIR));
 

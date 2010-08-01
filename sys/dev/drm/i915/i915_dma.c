@@ -32,6 +32,7 @@
 #include "i915_drv.h"
 
 #define DRM_NEWER_ICLIP 1
+#define DRM_NEWER_ICOUNTER 1
 
 /* Really want an OS-independent resettable timer.  Would like to have
  * this loop run for (eg) 3 sec, but have the timer reset every time
@@ -505,14 +506,14 @@ static void i915_emit_breadcrumb(struct drm_device *dev)
 	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
 	RING_LOCALS;
 
-#ifdef __linux__
+#ifdef DRM_NEWER_ICOUNTER
 	dev_priv->counter++;
 	if (dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
 #else
 	if (++dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
-#endif /* __linux__ */
+#endif
 	if (master_priv->sarea_priv)
 		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
 
@@ -676,17 +677,17 @@ static int i915_dispatch_flip(struct drm_device * dev)
 	OUT_RING(0);
 	ADVANCE_LP_RING();
 
-#ifndef __linux__
+#ifndef DRM_NEWER_ICOUNTER
 	if (++dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
 #endif
 
-#ifdef __linux__
+#ifdef DRM_NEWER_ICOUNTER
 	master_priv->sarea_priv->last_enqueue = dev_priv->counter++;
 #else
 	if (master_priv->sarea_priv)
 		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
-#endif /* __linux__ */
+#endif
 
 	BEGIN_LP_RING(4);
 	OUT_RING(MI_STORE_DWORD_INDEX);
