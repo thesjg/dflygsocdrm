@@ -32,8 +32,6 @@
 #ifndef __RADEON_DRV_H__
 #define __RADEON_DRV_H__
 
-#define DRM_NEWER_RCMD
-
 /* General customization:
  */
 
