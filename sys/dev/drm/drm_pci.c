@@ -28,7 +28,7 @@
  * \author Eric Anholt <anholt@FreeBSD.org>
  */
 
-#include "dev/drm/drmP.h"
+#include "drmP.h"
 
 /**********************************************************************/
 /** \name PCI memory */

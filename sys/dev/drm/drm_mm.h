@@ -42,8 +42,8 @@
 #include <linux/seq_file.h>
 #endif
 #else
-#include "dev/drm/porting/drm_porting_layer.h"
-#include "dev/drm/drm_linux_list.h"
+#include "porting/drm_porting_layer.h"
+#include "drm_linux_list.h"
 #endif
 
 struct drm_mm_node {

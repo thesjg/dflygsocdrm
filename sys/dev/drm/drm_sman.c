@@ -38,8 +38,8 @@
  * Thomas Hellström <thomas-at-tungstengraphics-dot-com>
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm_sman.h"
+#include "drmP.h"
+#include "drm_sman.h"
 
 struct drm_owner_item {
 	struct drm_hash_item owner_hash;

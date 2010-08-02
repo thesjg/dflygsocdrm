@@ -34,11 +34,11 @@
  * Thomas Hellström <thomas-at-tungstengraphics-dot-com>
  */
 
-#include "dev/drm/drmP.h"
-#include "dev/drm/drm_hashtab.h"
+#include "drmP.h"
+#include "drm_hashtab.h"
 
 #if defined(__DragonFly__)
-#include "dev/drm/porting/drm_porting_hash.h"
+#include "porting/drm_porting_hash.h"
 #else
 #include <sys/hash.h>
 #endif

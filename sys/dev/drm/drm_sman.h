@@ -45,9 +45,9 @@
 #include "drmP.h"
 #include "drm_hashtab.h"
 #else
-#include "dev/drm/drm_hashtab.h"
-#include "dev/drm/drm_linux_list.h"
-#include "dev/drm/drm_mm.h"
+#include "drm_hashtab.h"
+#include "drm_linux_list.h"
+#include "drm_mm.h"
 #endif
 
 /*

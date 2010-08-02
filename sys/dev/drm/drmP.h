@@ -113,10 +113,10 @@
 #include <asm/pgalloc.h>
 
 #else /* Other OS porting layer */
-#include "dev/drm/porting/drm_porting_layer.h"
+#include "porting/drm_porting_layer.h"
 #endif /* __linux__ */
 
-#include "dev/drm/drm.h"
+#include "drm.h"
 
 #ifdef __linux__
 #include <linux/idr.h>
@@ -134,12 +134,12 @@ struct drm_device;
 #ifdef __linux__
 #include "drm_os_linux.h"
 #else /* Other OS drm-related declarations */
-#include "dev/drm/porting/drm_porting_transition.h"  /* Legacy drm.h */
-#include "dev/drm/porting/drm_porting_other.h"  /* Legacy drmP.h */
+#include "porting/drm_porting_transition.h"  /* Legacy drm.h */
+#include "porting/drm_porting_other.h"  /* Legacy drmP.h */
 #endif /* __linux__ */
 
-#include "dev/drm/drm_hashtab.h"
-#include "dev/drm/drm_mm.h"
+#include "drm_hashtab.h"
+#include "drm_mm.h"
 
 #define DRM_UT_CORE 		0x01
 #define DRM_UT_DRIVER		0x02
@@ -806,7 +806,7 @@ struct drm_gem_object {
 #ifdef __linux__
 #include "drm_crtc.h"
 #else
-#include "dev/drm/drm_crtc.h"
+#include "drm_crtc.h"
 #endif
 
 /* per-master structure */
