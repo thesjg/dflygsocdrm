@@ -404,7 +404,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	}
 
 	error = vm_mmap(&vms->vm_map, &addr, size, prot, maxprot,
-			flags, handle, pos);
+			flags, OBJT_VNODE, handle, pos);
 	if (error == 0)
 		*res = (void *)(addr + pageoff);
 
@@ -1099,7 +1099,8 @@ sys_munlock(struct munlock_args *uap)
  */
 int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
-	vm_prot_t maxprot, int flags, void *handle, vm_ooffset_t foff)
+	vm_prot_t maxprot, int flags,
+	objtype_t handle_type, void *handle, vm_ooffset_t foff)
 {
 	boolean_t fitit;
 	vm_object_t object;

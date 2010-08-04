@@ -109,17 +109,6 @@ int rb_swblock_compare(struct swblock *, struct swblock *);
 RB_PROTOTYPE2(swblock_rb_tree, swblock, swb_entry, rb_swblock_compare,
 	      vm_pindex_t);
 
-enum obj_type { 
-	OBJT_DEFAULT,
-	OBJT_SWAP,   	/* object backed by swap blocks */
-	OBJT_VNODE, 	/* object backed by file pages (vnode) */
-	OBJT_DEVICE, 	/* object backed by device pages */
-	OBJT_PHYS,  	/* object backed by physical pages */
-	OBJT_DEAD,   	/* dead object */
-	OBJT_MARKER	/* marker object */
-};
-typedef u_char objtype_t;
-
 /*
  * vm_object_lock	A lock covering byte ranges within a VM object
  *
