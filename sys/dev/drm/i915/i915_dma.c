@@ -49,14 +49,22 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 	u32 last_head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
 	int i;
 
+#ifdef __linux__
+	trace_i915_ring_wait_begin (dev);
+#endif /* __linux__ */
+
 	for (i = 0; i < 100000; i++) {
 		ring->head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
 		acthd = I915_READ(acthd_reg);
 		ring->space = ring->head - (ring->tail + 8);
 		if (ring->space < 0)
 			ring->space += ring->Size;
-		if (ring->space >= n)
+		if (ring->space >= n) {
+#ifdef __linux__
+			trace_i915_ring_wait_end (dev);
+#endif /* __linux__ */
 			return 0;
+		}
 
 		if (dev->primary->master) {
 			struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
@@ -74,6 +82,9 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 		DRM_UDELAY(10 * 1000);
 	}
 
+#ifdef __linux__
+	trace_i915_ring_wait_end (dev);
+#endif /* __linux__ */
 	return -EBUSY;
 }
 
@@ -129,7 +140,7 @@ static int i915_init_phys_hws(struct drm_device *dev)
 	if (IS_I965G(dev))
 		dev_priv->dma_status_page |= (dev_priv->dma_status_page >> 28) &
 					     0xf0;
-#endif
+#endif /* __linux__ */
 
 	I915_WRITE(HWS_PGA, dev_priv->dma_status_page);
 	DRM_DEBUG("Enabled hardware status page\n");
@@ -394,12 +405,7 @@ static int validate_cmd(int cmd)
 	return ret;
 }
 
-#ifdef DRM_NEWER_ICLIP
 static int i915_emit_cmds(struct drm_device * dev, int *buffer, int dwords)
-#else
-static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
-			  int dwords)
-#endif
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	int i;
@@ -413,12 +419,7 @@ static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
 	for (i = 0; i < dwords;) {
 		int cmd, sz;
 
-#ifdef DRM_NEWER_ICLIP
 		cmd = buffer[i];
-#else
-		if (DRM_COPY_FROM_USER_UNCHECKED(&cmd, &buffer[i], sizeof(cmd)))
-			return -EINVAL;
-#endif
 
 		if ((sz = validate_cmd(cmd)) == 0 || i + sz > dwords)
 			return -EINVAL;
@@ -426,15 +427,7 @@ static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
 		OUT_RING(cmd);
 
 		while (++i, --sz) {
-#ifdef DRM_NEWER_ICLIP
 			OUT_RING(buffer[i]);
-#else
-			if (DRM_COPY_FROM_USER_UNCHECKED(&cmd, &buffer[i],
-							 sizeof(cmd))) {
-				return -EINVAL;
-			}
-			OUT_RING(cmd);
-#endif
 		}
 	}
 
@@ -448,26 +441,12 @@ static int i915_emit_cmds(struct drm_device *dev, int __user *buffer,
 
 int
 i915_emit_box(struct drm_device *dev,
-#ifdef DRM_NEWER_ICLIP
 	      struct drm_clip_rect *boxes,
-#else
-	      struct drm_clip_rect __user *boxes,
-#endif
 	      int i, int DR1, int DR4)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
-#ifdef DRM_NEWER_ICLIP
 	struct drm_clip_rect box = boxes[i];
-#else
-	struct drm_clip_rect box;
-#endif
 	RING_LOCALS;
-
-#ifndef DRM_NEWER_ICLIP
-	if (DRM_COPY_FROM_USER_UNCHECKED(&box, &boxes[i], sizeof(box))) {
-		return -EFAULT;
-	}
-#endif
 
 	if (box.y2 <= box.y1 || box.x2 <= box.x1 || box.y2 <= 0 || box.x2 <= 0) {
 		DRM_ERROR("Bad box %d,%d..%d,%d\n",
@@ -506,14 +485,9 @@ static void i915_emit_breadcrumb(struct drm_device *dev)
 	struct drm_i915_master_private *master_priv = dev->primary->master->driver_priv;
 	RING_LOCALS;
 
-#ifdef DRM_NEWER_ICOUNTER
 	dev_priv->counter++;
 	if (dev_priv->counter > 0x7FFFFFFFUL)
 		dev_priv->counter = 0;
-#else
-	if (++dev_priv->counter > 0x7FFFFFFFUL)
-		dev_priv->counter = 0;
-#endif
 	if (master_priv->sarea_priv)
 		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
 
@@ -525,15 +499,10 @@ static void i915_emit_breadcrumb(struct drm_device *dev)
 	ADVANCE_LP_RING();
 }
 
-#ifdef DRM_NEWER_ICLIP
 static int i915_dispatch_cmdbuffer(struct drm_device * dev,
 				   drm_i915_cmdbuffer_t *cmd,
 				   struct drm_clip_rect *cliprects,
 				   void *cmdbuf)
-#else
-static int i915_dispatch_cmdbuffer(struct drm_device * dev,
-				   drm_i915_cmdbuffer_t * cmd)
-#endif
 {
 	int nbox = cmd->num_cliprects;
 	int i = 0, count, ret;
@@ -549,22 +518,13 @@ static int i915_dispatch_cmdbuffer(struct drm_device * dev,
 
 	for (i = 0; i < count; i++) {
 		if (i < nbox) {
-#ifdef DRM_NEWER_ICLIP
 			ret = i915_emit_box(dev, cliprects, i,
 					    cmd->DR1, cmd->DR4);
-#else
-			ret = i915_emit_box(dev, cmd->cliprects, i,
-					    cmd->DR1, cmd->DR4);
-#endif
 			if (ret)
 				return ret;
 		}
 
-#ifdef DRM_NEWER_ICLIP
 		ret = i915_emit_cmds(dev, cmdbuf, cmd->sz / 4);
-#else
-		ret = i915_emit_cmds(dev, (int __user *)cmd->buf, cmd->sz / 4);
-#endif
 		if (ret)
 			return ret;
 	}
@@ -573,19 +533,11 @@ static int i915_dispatch_cmdbuffer(struct drm_device * dev,
 	return 0;
 }
 
-#ifdef DRM_NEWER_ICLIP
 static int i915_dispatch_batchbuffer(struct drm_device * dev,
 				     drm_i915_batchbuffer_t * batch,
 				     struct drm_clip_rect *cliprects)
-#else
-static int i915_dispatch_batchbuffer(struct drm_device * dev,
-				     drm_i915_batchbuffer_t * batch)
-#endif
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
-#ifndef DRM_NEWER_ICLIP
-	struct drm_clip_rect __user *boxes = batch->cliprects;
-#endif
 	int nbox = batch->num_cliprects;
 	int i = 0, count;
 	RING_LOCALS;
@@ -601,13 +553,8 @@ static int i915_dispatch_batchbuffer(struct drm_device * dev,
 
 	for (i = 0; i < count; i++) {
 		if (i < nbox) {
-#ifdef DRM_NEWER_ICLIP
 			int ret = i915_emit_box(dev, cliprects, i,
 						batch->DR1, batch->DR4);
-#else
-			int ret = i915_emit_box(dev, boxes, i,
-						batch->DR1, batch->DR4);
-#endif
 			if (ret)
 				return ret;
 		}
@@ -677,17 +624,7 @@ static int i915_dispatch_flip(struct drm_device * dev)
 	OUT_RING(0);
 	ADVANCE_LP_RING();
 
-#ifndef DRM_NEWER_ICOUNTER
-	if (++dev_priv->counter > 0x7FFFFFFFUL)
-		dev_priv->counter = 0;
-#endif
-
-#ifdef DRM_NEWER_ICOUNTER
 	master_priv->sarea_priv->last_enqueue = dev_priv->counter++;
-#else
-	if (master_priv->sarea_priv)
-		master_priv->sarea_priv->last_enqueue = dev_priv->counter;
-#endif
 
 	BEGIN_LP_RING(4);
 	OUT_RING(MI_STORE_DWORD_INDEX);
@@ -730,13 +667,8 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 	drm_i915_sarea_t *sarea_priv = (drm_i915_sarea_t *)
 	    master_priv->sarea_priv;
 	drm_i915_batchbuffer_t *batch = data;
-#ifndef DRM_NEWER_ICLIP
-	size_t cliplen;
-#endif
 	int ret;
-#ifdef DRM_NEWER_ICLIP
 	struct drm_clip_rect *cliprects = NULL;
-#endif
 
 	if (!dev_priv->allow_batchbuffer) {
 		DRM_ERROR("Batchbuffer ioctl disabled\n");
@@ -748,19 +680,10 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
-#ifdef DRM_NEWER_ICLIP
 	if (batch->num_cliprects < 0)
 		return -EINVAL;
-#else
-	cliplen = batch->num_cliprects * sizeof(struct drm_clip_rect);
-	if (batch->num_cliprects && DRM_VERIFYAREA_READ(batch->cliprects,
-	    cliplen)) {
-		return -EFAULT;
-	}
-#endif
 
 	if (batch->num_cliprects) {
-#ifdef DRM_NEWER_ICLIP
 		cliprects = malloc(batch->num_cliprects *
 				    sizeof(struct drm_clip_rect),
 				    DRM_MEM_DRAWABLE, M_WAITOK);
@@ -772,31 +695,17 @@ static int i915_batchbuffer(struct drm_device *dev, void *data,
 				     sizeof(struct drm_clip_rect));
 		if (ret != 0)
 			goto fail_free;
-#else
-		vslock((caddr_t)batch->cliprects, cliplen);
-#endif
 	}
 
 	mutex_lock(&dev->struct_mutex);
-#ifdef DRM_NEWER_ICLIP
 	ret = i915_dispatch_batchbuffer(dev, batch, cliprects);
-#else
-	ret = i915_dispatch_batchbuffer(dev, batch);
-#endif
 	mutex_unlock(&dev->struct_mutex);
-
-#ifndef DRM_NEWER_ICLIP
-	if (batch->num_cliprects)
-		vsunlock((caddr_t)batch->cliprects, cliplen);
-#endif
 
 	if (sarea_priv)
 		sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
 
-#ifdef DRM_NEWER_ICLIP
 fail_free:
 	free(cliprects, DRM_MEM_DRAWABLE);
-#endif
 
 	return ret;
 }
@@ -809,12 +718,8 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 	drm_i915_sarea_t *sarea_priv = (drm_i915_sarea_t *)
 	    master_priv->sarea_priv;
 	drm_i915_cmdbuffer_t *cmdbuf = data;
-#ifdef DRM_NEWER_ICLIP
 	struct drm_clip_rect *cliprects = NULL;
 	void *batch_data;
-#else
-	size_t cliplen;
-#endif
 	int ret;
 
 	DRM_DEBUG_DRIVER("i915 cmdbuffer, buf %p sz %d cliprects %d\n",
@@ -822,7 +727,6 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
-#ifdef DRM_NEWER_ICLIP
 	if (cmdbuf->num_cliprects < 0)
 		return -EINVAL;
 
@@ -833,17 +737,8 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 	ret = DRM_COPY_FROM_USER(batch_data, cmdbuf->buf, cmdbuf->sz);
 	if (ret != 0)
 		goto fail_batch_free;
-#else
-	cliplen = cmdbuf->num_cliprects * sizeof(struct drm_clip_rect);
-	if (cmdbuf->num_cliprects && DRM_VERIFYAREA_READ(cmdbuf->cliprects,
-	    cliplen)) {
-		DRM_ERROR("Fault accessing cliprects\n");
-		return -EFAULT;
-	}
-#endif
 
 	if (cmdbuf->num_cliprects) {
-#ifdef DRM_NEWER_ICLIP
 		cliprects = malloc(cmdbuf->num_cliprects *
 				   sizeof(struct drm_clip_rect),
 				   DRM_MEM_DRAWABLE, M_WAITOK);
@@ -857,49 +752,25 @@ static int i915_cmdbuffer(struct drm_device *dev, void *data,
 				     sizeof(struct drm_clip_rect));
 		if (ret != 0)
 			goto fail_clip_free;
-#else
-		vslock((caddr_t)cmdbuf->cliprects, cliplen);
-		vslock((caddr_t)cmdbuf->buf, cmdbuf->sz);
-#endif
 	}
 
 	mutex_lock(&dev->struct_mutex);
-#ifdef DRM_NEWER_ICLIP
 	ret = i915_dispatch_cmdbuffer(dev, cmdbuf, cliprects, batch_data);
-#else
-	ret = i915_dispatch_cmdbuffer(dev, cmdbuf);
-#endif
 	mutex_unlock(&dev->struct_mutex);
-
-#ifndef DRM_NEWER_ICLIP
-	if (cmdbuf->num_cliprects) {
-		vsunlock((caddr_t)cmdbuf->buf, cmdbuf->sz);
-		vsunlock((caddr_t)cmdbuf->cliprects, cliplen);
-	}
-#endif
-
 	if (ret) {
 		DRM_ERROR("i915_dispatch_cmdbuffer failed\n");
-#ifdef DRM_NEWER_ICLIP
 		goto fail_clip_free;
-#else
-		return ret;
-#endif
 	}
 
 	if (sarea_priv)
 		sarea_priv->last_dispatch = READ_BREADCRUMB(dev_priv);
 
-#ifdef DRM_NEWER_ICLIP
 fail_clip_free:
 	free(cliprects, DRM_MEM_DRAWABLE);
 fail_batch_free:
 	free(batch_data, DRM_MEM_DRAWABLE);
 
 	return ret;
-#else
-	return 0;
-#endif
 }
 
 static int i915_flip_bufs(struct drm_device *dev, void *data,
@@ -1219,10 +1090,6 @@ int i915_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 	file_priv->driver_priv = i915_file_priv;
 
 	INIT_LIST_HEAD(&i915_file_priv->mm.request_list);
-#if 0
-	i915_file_priv->mm.last_gem_seqno = 0;
-	i915_file_priv->mm.last_gem_throttle_seqno = 0;
-#endif
 
 	return 0;
 }
@@ -1257,7 +1124,11 @@ void i915_driver_lastclose(struct drm_device * dev)
 void i915_driver_preclose(struct drm_device * dev, struct drm_file *file_priv)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
-	i915_mem_release(dev, file_priv, dev_priv->agp_heap);
+#ifdef I915_HAVE_GEM
+	i915_gem_release(dev, file_priv);
+#endif
+	if (!drm_core_check_feature(dev, DRIVER_MODESET))
+		i915_mem_release(dev, file_priv, dev_priv->agp_heap);
 }
 
 void i915_driver_postclose(struct drm_device *dev, struct drm_file *file_priv)
@@ -1286,22 +1157,29 @@ struct drm_ioctl_desc i915_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_I915_VBLANK_SWAP, i915_vblank_swap, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_I915_HWS_ADDR, i915_set_status_page, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 #ifdef I915_HAVE_GEM
-	DRM_IOCTL_DEF(DRM_I915_GEM_INIT, i915_gem_init_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_I915_GEM_EXECBUFFER, i915_gem_execbuffer, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_I915_GEM_PIN, i915_gem_pin_ioctl, DRM_AUTH|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_I915_GEM_UNPIN, i915_gem_unpin_ioctl, DRM_AUTH|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_I915_GEM_BUSY, i915_gem_busy_ioctl, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_I915_GEM_THROTTLE, i915_gem_throttle_ioctl, DRM_AUTH),
-	DRM_IOCTL_DEF(DRM_I915_GEM_ENTERVT, i915_gem_entervt_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_I915_GEM_LEAVEVT, i915_gem_leavevt_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-	DRM_IOCTL_DEF(DRM_I915_GEM_CREATE, i915_gem_create_ioctl, 0),
-	DRM_IOCTL_DEF(DRM_I915_GEM_PREAD, i915_gem_pread_ioctl, 0),
-	DRM_IOCTL_DEF(DRM_I915_GEM_PWRITE, i915_gem_pwrite_ioctl, 0),
-	DRM_IOCTL_DEF(DRM_I915_GEM_MMAP, i915_gem_mmap_ioctl, 0),
-	DRM_IOCTL_DEF(DRM_I915_GEM_SET_DOMAIN, i915_gem_set_domain_ioctl, 0),
-	DRM_IOCTL_DEF(DRM_I915_GEM_SW_FINISH, i915_gem_sw_finish_ioctl, 0),
-	DRM_IOCTL_DEF(DRM_I915_GEM_SET_TILING, i915_gem_set_tiling, 0),
-	DRM_IOCTL_DEF(DRM_I915_GEM_GET_TILING, i915_gem_get_tiling, 0),
+	DRM_IOCTL_DEF(DRM_I915_GEM_INIT, i915_gem_init_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_EXECBUFFER, i915_gem_execbuffer, DRM_AUTH|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_EXECBUFFER2, i915_gem_execbuffer2, DRM_AUTH|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_PIN, i915_gem_pin_ioctl, DRM_AUTH|DRM_ROOT_ONLY|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_UNPIN, i915_gem_unpin_ioctl, DRM_AUTH|DRM_ROOT_ONLY|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_BUSY, i915_gem_busy_ioctl, DRM_AUTH|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_THROTTLE, i915_gem_throttle_ioctl, DRM_AUTH|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_ENTERVT, i915_gem_entervt_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_LEAVEVT, i915_gem_leavevt_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_CREATE, i915_gem_create_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_PREAD, i915_gem_pread_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_PWRITE, i915_gem_pwrite_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_MMAP, i915_gem_mmap_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_MMAP_GTT, i915_gem_mmap_gtt_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_SET_DOMAIN, i915_gem_set_domain_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_SW_FINISH, i915_gem_sw_finish_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_SET_TILING, i915_gem_set_tiling, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_GET_TILING, i915_gem_get_tiling, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_GET_APERTURE, i915_gem_get_aperture_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GET_PIPE_FROM_CRTC_ID, intel_get_pipe_from_crtc_id, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_GEM_MADVISE, i915_gem_madvise_ioctl, DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_OVERLAY_PUT_IMAGE, intel_overlay_put_image, DRM_MASTER|DRM_CONTROL_ALLOW|DRM_UNLOCKED),
+	DRM_IOCTL_DEF(DRM_I915_OVERLAY_ATTRS, intel_overlay_attrs, DRM_MASTER|DRM_CONTROL_ALLOW|DRM_UNLOCKED),
 #endif
 };
 
