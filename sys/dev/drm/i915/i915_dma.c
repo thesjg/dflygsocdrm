@@ -230,7 +230,7 @@ static int i915_initialize(struct drm_device * dev, drm_i915_init_t * init)
 		}
 
 		dev_priv->ring.Size = init->ring_size;
-#ifndef __linux__
+#if 0
 		dev_priv->ring.tail_mask = dev_priv->ring.Size - 1;
 #endif
 		dev_priv->ring.map.offset = init->ring_start;
