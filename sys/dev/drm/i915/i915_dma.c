@@ -28,8 +28,19 @@
 
 #include "drmP.h"
 #include "drm.h"
+#include "drm_crtc_helper.h"
+#include "drm_fb_helper.h"
+#include "intel_drv.h"
 #include "i915_drm.h"
 #include "i915_drv.h"
+#ifdef __linux__
+#include "i915_trace.h"
+#include <linux/vgaarb.h>
+#include <linux/acpi.h>
+#include <linux/pnp.h>
+#include <linux/vga_switcheroo.h>
+#include <linux/slab.h>
+#endif /* __linux__ */
 
 #define DRM_NEWER_ICLIP 1
 #define DRM_NEWER_ICOUNTER 1
