@@ -1218,7 +1218,7 @@ int i915_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 
 	file_priv->driver_priv = i915_file_priv;
 
-#ifdef __linux__
+#if 0
 	INIT_LIST_HEAD(&i915_file_priv->mm.request_list);
 #else
 	i915_file_priv->mm.last_gem_seqno = 0;

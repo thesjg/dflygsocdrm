@@ -806,12 +806,11 @@ struct drm_i915_gem_request {
 
 struct drm_i915_file_private {
 	struct {
-#ifndef __linux__
+#if 0
 		uint32_t last_gem_seqno;
 		uint32_t last_gem_throttle_seqno;
-#else
-		struct list_head request_list;
 #endif /* __linux__ */
+		struct list_head request_list;
 	} mm;
 };
 
