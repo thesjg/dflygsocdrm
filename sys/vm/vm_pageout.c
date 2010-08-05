@@ -509,6 +509,8 @@ vm_pageout_object_deactivate_pages(vm_map_t map, vm_object_t object,
 
 	if (object->type == OBJT_DEVICE || object->type == OBJT_PHYS)
 		return;
+	if (object->type == OBJT_DRM)
+		return;
 
 	while (object) {
 		if (pmap_resident_count(vm_map_pmap(map)) <= desired)

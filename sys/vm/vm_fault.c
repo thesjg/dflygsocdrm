@@ -1158,6 +1158,7 @@ readrest:
 			 *	 writes to barf.
 			 */
 			if ((fs->first_object->type != OBJT_DEVICE) &&
+			    (fs->first_object->type != OBJT_DRM) &&
 			    (behavior == MAP_ENTRY_BEHAV_SEQUENTIAL ||
                                 (behavior != MAP_ENTRY_BEHAV_RANDOM &&
 				 (fs->m->flags & PG_RAM)))
@@ -1574,7 +1575,8 @@ vm_fault_wire(vm_map_t map, vm_map_entry_t entry, boolean_t user_wire)
 	start = entry->start;
 	end = entry->end;
 	fictitious = entry->object.vm_object &&
-			(entry->object.vm_object->type == OBJT_DEVICE);
+			((entry->object.vm_object->type == OBJT_DEVICE) ||
+			(entry->object.vm_object->type == OBJT_DRM));
 
 	lwkt_gettoken(&vm_token);
 	vm_map_unlock(map);
@@ -1629,7 +1631,8 @@ vm_fault_unwire(vm_map_t map, vm_map_entry_t entry)
 	start = entry->start;
 	end = entry->end;
 	fictitious = entry->object.vm_object &&
-			(entry->object.vm_object->type == OBJT_DEVICE);
+			((entry->object.vm_object->type == OBJT_DEVICE) ||
+			(entry->object.vm_object->type == OBJT_DRM));
 
 	/*
 	 * Since the pages are wired down, we must be able to get their

@@ -143,6 +143,9 @@ case OBJT_SWAP:
 case OBJT_DEVICE:
 				type = "device";
 				break;
+case OBJT_DRM:
+				type = "drm";
+				break;
 			}
 			
 			flags = obj->flags;

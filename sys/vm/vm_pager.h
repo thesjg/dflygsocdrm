@@ -102,6 +102,7 @@ extern struct pagerops *pagertab[];
 
 vm_object_t default_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t dev_pager_alloc(void *, off_t, vm_prot_t, off_t);
+vm_object_t drm_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t phys_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t swap_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t vnode_pager_alloc (void *, off_t, vm_prot_t, off_t, int, int);
