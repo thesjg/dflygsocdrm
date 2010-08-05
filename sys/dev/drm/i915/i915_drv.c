@@ -546,7 +546,7 @@ static struct vm_operations_struct i915_gem_vm_ops = {
 };
 #endif /* __linux__ */
 
-static int i915_suspend(device_t kdev)
+static int i915_suspend_legacy(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 
@@ -555,30 +555,18 @@ static int i915_suspend(device_t kdev)
 		return -ENODEV;
 	}
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	DRM_DEBUG("starting suspend\n");
 	i915_save_state(dev);
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 
 	return (bus_generic_suspend(kdev));
 }
 
-static int i915_resume(device_t kdev)
+static int i915_resume_legacy(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	i915_restore_state(dev);
 	DRM_DEBUG("finished resume\n");
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 
 	return (bus_generic_resume(kdev));
 }
@@ -732,8 +720,8 @@ static device_method_t i915_methods[] = {
 	/* Device interface */
 	DEVMETHOD(device_probe,		i915_probe),
 	DEVMETHOD(device_attach,	i915_attach),
-	DEVMETHOD(device_suspend,	i915_suspend),
-	DEVMETHOD(device_resume,	i915_resume),
+	DEVMETHOD(device_suspend,	i915_suspend_legacy),
+	DEVMETHOD(device_resume,	i915_resume_legacy),
 	DEVMETHOD(device_detach,	i915_detach),
 
 	{ 0, 0 }
