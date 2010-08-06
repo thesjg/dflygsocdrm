@@ -583,9 +583,9 @@ typedef uint32_t gfp_t;
  */
 /* legacy drm drmP.h */
 
-typedef void			irqreturn_t;
-#define IRQ_HANDLED		/* nothing */
-#define IRQ_NONE		/* nothing */
+typedef int			irqreturn_t;
+#define IRQ_HANDLED		0x00
+#define IRQ_NONE		0x01
 
 #define DRM_IRQ_ARGS		void *arg
 
@@ -608,6 +608,18 @@ free_irq(
 	void *dev
 ) {
 	return 0;
+}
+
+/* file i915_irq.c, function i915_error_object_create() */
+static __inline__ void
+local_irq_save(unsigned long flags) {
+	;
+}
+
+/* file i915_irq.c, function i915_error_object_create() */
+static __inline__ void
+local_irq_restore(unsigned long flags) {
+	;
 }
 
 /* file ttm/ttm_bo.c, function ttm_bo_mem_space() */
@@ -1642,6 +1654,7 @@ pgprot_noncached(pgprot_t prot) {
 /* file ttm/ttm_tt.c, function ttm_tt_swapin() */
 #define KM_USER0 0x0001
 #define KM_USER1 0x0002
+#define KM_IRQ0  0x0004
 
 /* file ttm/ttm_bo_util.c, function ttm_io_prot() */
 #define PAGE_KERNEL 0x0001

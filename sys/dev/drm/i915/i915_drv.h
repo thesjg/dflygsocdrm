@@ -38,6 +38,8 @@
 #include <linux/io-mapping.h>
 #endif /* __linux__ */
 
+#define DRM_MCH_ID 5
+
 /* General customization:
  */
 
@@ -274,6 +276,7 @@ typedef struct drm_i915_private {
 	struct drm_gem_object *pwrctx;
 
 	struct resource mch_res;
+	int mch_id;
 
 	unsigned int cpp;
 	int back_offset;
@@ -682,7 +685,10 @@ typedef struct drm_i915_private {
 
 /** driver private structure attached to each drm_gem_object */
 struct drm_i915_gem_object {
+	struct drm_gem_object base;
+#if 0
 	struct drm_gem_object *obj;
+#endif
 
 	/** Current space allocated to this object in the GTT, if any. */
 	struct drm_mm_node *gtt_space;
