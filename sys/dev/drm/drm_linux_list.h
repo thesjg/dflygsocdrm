@@ -117,4 +117,14 @@ list_del_init(struct list_head *entry) {
 	    &pos->member != (head);					\
 	    pos = list_entry(pos->member.next, __typeof(*pos), member))
 
+/** list_move_tail - remove entry from one list and add to tail of another
+ * @entry:	entry to be removed from first list
+ * @toadd:	second list
+ */
+static __inline__ void
+list_move_tail(struct list_head *entry, struct list_head *toadd) {
+	list_del(entry);
+	list_add_tail(entry, toadd);
+}
+
 #endif /* _DRM_LINUX_LIST_H_ */
