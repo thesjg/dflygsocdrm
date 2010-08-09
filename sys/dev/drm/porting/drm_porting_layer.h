@@ -2748,8 +2748,11 @@ typedef struct DRM_AGP_KERN {
 	struct DRM_AGP_VERSION version;
 	unsigned long mode;
 	unsigned long aper_base;
+/* units of 1024 x 1024 bytes */
 	unsigned long aper_size;
+/* units of pages */
 	unsigned long max_memory;
+/* units of pages */
 	unsigned long current_memory;
 	struct DRM_AGP_DEVICE *device;
 } DRM_AGP_KERN;
@@ -2762,6 +2765,9 @@ typedef struct DRM_AGP_MEM {
 	unsigned long page_count;
 	bool is_flushed;
 	struct page **pages;
+	int key;
+	uint32_t physical;
+	device_t agdev;
 } DRM_AGP_MEM;
 
 /* file drm_agpsupport.c, function drm_agp_alloc() */
