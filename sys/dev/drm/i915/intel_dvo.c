@@ -290,7 +290,7 @@ static void intel_dvo_enc_destroy(struct drm_encoder *encoder)
 		if (dvo->dev_ops->destroy)
 			dvo->dev_ops->destroy(dvo);
 		if (dvo->panel_fixed_mode)
-			kfree(dvo->panel_fixed_mode);
+			free(dvo->panel_fixed_mode, DRM_MEM_DRIVER);
 	}
 	if (intel_encoder->i2c_bus)
 		intel_i2c_destroy(intel_encoder->i2c_bus);

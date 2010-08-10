@@ -1141,11 +1141,15 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 
 	offset = args->offset;
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 	down_write(&current->mm->mmap_sem);
 	addr = do_mmap(obj->filp, 0, args->size,
 		       PROT_READ | PROT_WRITE, MAP_SHARED,
 		       args->offset);
 	up_write(&current->mm->mmap_sem);
+#else
+	addr = 0;
+#endif
 	drm_gem_object_unreference_unlocked(obj);
 	if (IS_ERR((void *)addr))
 		return addr;
@@ -2436,10 +2440,12 @@ static void i915_write_fence_reg(struct drm_i915_fence_reg *reg)
 	pitch_val = ffs(pitch_val) - 1;
 
 	if (obj_priv->tiling_mode == I915_TILING_Y &&
-	    HAS_128_BYTE_Y_TILING(dev))
+	    HAS_128_BYTE_Y_TILING(dev)) {
 		WARN_ON(pitch_val > I830_FENCE_MAX_PITCH_VAL);
-	else
+	}
+	else {
 		WARN_ON(pitch_val > I915_FENCE_MAX_PITCH_VAL);
+	}
 
 	val = obj_priv->gtt_offset;
 	if (obj_priv->tiling_mode == I915_TILING_Y)
@@ -3573,7 +3579,12 @@ i915_gem_object_pin_and_relocate(struct drm_gem_object *obj,
 			  obj, (unsigned int) reloc->offset,
 			  readl(reloc_entry), reloc_val);
 #endif
+
+#ifdef __linux__
 		writel(reloc_val, reloc_entry);
+#else
+		writel(reloc_entry, reloc_val);
+#endif
 		io_mapping_unmap_atomic(reloc_page);
 
 		/* The updated presumed offset for this entry will be

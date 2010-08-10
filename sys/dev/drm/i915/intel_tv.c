@@ -1687,7 +1687,7 @@ intel_tv_init(struct drm_device *dev)
 	tv_priv->margin[TV_MARGIN_RIGHT] = 46;
 	tv_priv->margin[TV_MARGIN_BOTTOM] = 37;
 
-	tv_priv->tv_format = kstrdup(tv_modes[initial_mode].name, GFP_KERNEL);
+	tv_priv->tv_format = kstrdup(tv_modes[initial_mode].name, DRM_MEM_DRIVER);
 
 	drm_encoder_helper_add(&intel_encoder->enc, &intel_tv_helper_funcs);
 	drm_connector_helper_add(connector, &intel_tv_connector_helper_funcs);
@@ -1718,6 +1718,7 @@ intel_tv_init(struct drm_device *dev)
 				   dev->mode_config.tv_bottom_margin_property,
 				   tv_priv->margin[TV_MARGIN_BOTTOM]);
 out:
+	;
 #ifdef __linux__
 	drm_sysfs_connector_add(connector);
 #endif /* __linux__ */

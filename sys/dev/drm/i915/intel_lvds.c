@@ -738,13 +738,13 @@ static const struct drm_encoder_funcs intel_lvds_enc_funcs = {
 	.destroy = intel_lvds_enc_destroy,
 };
 
+#ifdef __linux__
 static int __init intel_no_lvds_dmi_callback(const struct dmi_system_id *id)
 {
 	DRM_DEBUG_KMS("Skipping LVDS initialization for %s\n", id->ident);
 	return 1;
 }
 
-#ifdef __linux__
 /* These systems claim to have LVDS, but really don't */
 static const struct dmi_system_id intel_no_lvds[] = {
 	{
@@ -1010,7 +1010,7 @@ void intel_lvds_init(struct drm_device *dev)
 	/* Set up the DDC bus. */
 	intel_encoder->ddc_bus = intel_i2c_create(dev, gpio, "LVDSDDC_C");
 	if (!intel_encoder->ddc_bus) {
-		device_printf(&dev->device, KERN_ERR "DDC bus registration "
+		device_printf(dev->device, KERN_ERR "DDC bus registration "
 			   "failed.\n");
 		goto failed;
 	}

@@ -491,7 +491,9 @@ intel_dp_i2c_init(struct intel_encoder *intel_encoder,
 	strncpy (dp_priv->adapter.name, name, sizeof(dp_priv->adapter.name) - 1);
 	dp_priv->adapter.name[sizeof(dp_priv->adapter.name) - 1] = '\0';
 	dp_priv->adapter.algo_data = &dp_priv->algo;
+#ifdef __linux__
 	dp_priv->adapter.dev.parent = &intel_connector->base.kdev;
+#endif
 
 	return i2c_dp_aux_add_bus(&dp_priv->adapter);
 }

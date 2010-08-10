@@ -1268,7 +1268,12 @@ intel_pin_and_fence_fb_obj(struct drm_device *dev, struct drm_gem_object *obj)
 		DRM_ERROR("Y tiled not allowed for scan out buffers\n");
 		return -EINVAL;
 	default:
+#ifdef __linux__
 		BUG();
+#else
+		DRM_ERROR("BUG default case\n");
+		return -EINVAL;
+#endif
 	}
 
 	ret = i915_gem_object_pin(obj, alignment);
@@ -4314,7 +4319,7 @@ struct drm_display_mode *intel_crtc_mode_get(struct drm_device *dev,
 #define GPU_IDLE_TIMEOUT 500 /* ms */
 
 /* When this timer fires, we've been idle for awhile */
-static void intel_gpu_idle_timer(unsigned long arg)
+static void intel_gpu_idle_timer(void *arg)
 {
 	struct drm_device *dev = (struct drm_device *)arg;
 	drm_i915_private_t *dev_priv = dev->dev_private;
@@ -4328,7 +4333,7 @@ static void intel_gpu_idle_timer(unsigned long arg)
 
 #define CRTC_IDLE_TIMEOUT 1000 /* ms */
 
-static void intel_crtc_idle_timer(unsigned long arg)
+static void intel_crtc_idle_timer(void *arg)
 {
 	struct intel_crtc *intel_crtc = (struct intel_crtc *)arg;
 	struct drm_crtc *crtc = &intel_crtc->base;
@@ -4762,7 +4767,7 @@ static void intel_crtc_init(struct drm_device *dev, int pipe)
 	intel_crtc->busy = false;
 
 	setup_timer(&intel_crtc->idle_timer, intel_crtc_idle_timer,
-		    (unsigned long)intel_crtc);
+		    (void *)intel_crtc);
 }
 
 int intel_get_pipe_from_crtc_id(struct drm_device *dev, void *data,
@@ -5362,7 +5367,7 @@ void intel_modeset_init(struct drm_device *dev)
 
 	INIT_WORK(&dev_priv->idle_work, intel_idle_update);
 	setup_timer(&dev_priv->idle_timer, intel_gpu_idle_timer,
-		    (unsigned long)dev);
+		    (void *)dev);
 
 	intel_setup_overlay(dev);
 }
@@ -5442,10 +5447,12 @@ struct drm_encoder *intel_attached_encoder (struct drm_connector *connector)
  */
 int intel_modeset_vga_set_state(struct drm_device *dev, bool state)
 {
+#ifdef __linux__
 	struct drm_i915_private *dev_priv = dev->dev_private;
+#endif
 	u16 gmch_ctrl;
 
-	gmch_ctrl = (u16)pci_read_config(dev->device, INTEL_GMCH_CTRL);
+	gmch_ctrl = (u16)pci_read_config(dev->device, INTEL_GMCH_CTRL, 2);
 	if (state)
 		gmch_ctrl &= ~INTEL_GMCH_VGA_DISABLE;
 	else

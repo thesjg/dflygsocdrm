@@ -149,6 +149,8 @@ struct opregion_asle {
 #define ACPI_DIGITAL_OUTPUT (3<<8)
 #define ACPI_LVDS_OUTPUT (4<<8)
 
+#ifdef CONFIG_ACPI
+
 static u32 asle_set_backlight(struct drm_device *dev, u32 bclp)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
@@ -167,7 +169,7 @@ static u32 asle_set_backlight(struct drm_device *dev, u32 bclp)
 	blc_pwm_ctl2 = I915_READ(BLC_PWM_CTL2);
 
 	if (IS_I965G(dev) && (blc_pwm_ctl2 & BLM_COMBINATION_MODE))
-		pci_write_config(dev->device, PCI_LBPC, bclp, 2);
+		pci_write_config(dev->device, PCI_LBPC, bclp, 4);
 	else {
 		if (IS_PINEVIEW(dev)) {
 			blc_pwm_ctl &= ~(BACKLIGHT_DUTY_CYCLE_MASK - 1);
@@ -412,7 +414,7 @@ static void intel_didl_outputs(struct drm_device *dev)
 
 	list_for_each_entry(acpi_cdev, &acpi_video_bus->children, node) {
 		if (i >= 8) {
-			device_printf(&dev->device, KERN_ERR
+			device_printf(dev->device, KERN_ERR
 				    "More than 8 outputs detected\n");
 			return;
 		}
@@ -438,7 +440,7 @@ blind_set:
 	list_for_each_entry(connector, &dev->mode_config.connector_list, head) {
 		int output_type = ACPI_OTHER_OUTPUT;
 		if (i >= 8) {
-			device_printf (&dev->device, KERN_ERR
+			device_printf (dev->device, KERN_ERR
 				    "More than 8 outputs detected\n");
 			return;
 		}
@@ -565,3 +567,5 @@ void intel_opregion_free(struct drm_device *dev, int suspend)
 
 	opregion->enabled = 0;
 }
+
+#endif /* CONFIG_ACPI */

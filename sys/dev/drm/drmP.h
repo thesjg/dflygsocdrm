@@ -1503,6 +1503,9 @@ extern int drm_getmagic(struct drm_device *dev, void *data,
 extern int drm_authmagic(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 
+/* Cache management (drm_cache.c) */
+void drm_clflush_pages(struct page *pages[], unsigned long num_pages);
+
 	/* Locking IOCTL support (drm_lock.h) */
 /* shared */
 /* Locking IOCTL support (drm_lock.c) */

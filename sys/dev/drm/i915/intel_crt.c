@@ -466,7 +466,7 @@ static int intel_crt_get_modes(struct drm_connector *connector)
 	ddc_bus = intel_i2c_create(connector->dev, GPIOD, "CRTDDC_D");
 
 	if (!ddc_bus) {
-		device_printf(&connector->dev->device, KERN_ERR
+		device_printf(connector->dev->device, KERN_ERR
 			   "DDC bus registration failed for CRTDDC_D.\n");
 		goto end;
 	}
@@ -564,7 +564,7 @@ void intel_crt_init(struct drm_device *dev)
 	}
 	intel_encoder->ddc_bus = intel_i2c_create(dev, i2c_reg, "CRTDDC_A");
 	if (!intel_encoder->ddc_bus) {
-		device_printf(&dev->device, KERN_ERR "DDC bus registration "
+		device_printf(dev->device, KERN_ERR "DDC bus registration "
 			   "failed.\n");
 		return;
 	}

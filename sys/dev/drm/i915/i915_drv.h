@@ -677,10 +677,8 @@ typedef struct drm_i915_private {
 
 	struct drm_mm_node *compressed_fb;
 	struct drm_mm_node *compressed_llb;
-#ifdef __linux__ /* struct intel_fbdev defined in intel_fb_.c */
 	/* list of fbdev register on this device */
 	struct intel_fbdev *fbdev;
-#endif /* __linux__ */
 } drm_i915_private_t;
 
 /** driver private structure attached to each drm_gem_object */
@@ -909,7 +907,6 @@ extern int i915_mem_destroy_heap(struct drm_device *dev, void *data,
 extern void i915_mem_takedown(struct mem_block **heap);
 extern void i915_mem_release(struct drm_device * dev,
 			     struct drm_file *file_priv, struct mem_block *heap);
-#ifdef I915_HAVE_GEM
 /* i915_gem.c */
 int i915_gem_init_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
@@ -1014,10 +1011,11 @@ void i915_verify_inactive(struct drm_device *dev, char *file, int line);
 #define i915_verify_inactive(dev, file, line)
 #endif
 void i915_gem_object_check_coherency(struct drm_gem_object *obj, int handle);
+#if 0 /* redundant declaration */
 void i915_gem_dump_object(struct drm_gem_object *obj, int len,
 			  const char *where, uint32_t mark);
+#endif
 void i915_dump_lru(struct drm_device *dev, const char *where);
-#endif /* I915_HAVE_GEM */
 
 /* i915_debugfs.c */
 int i915_debugfs_init(struct drm_minor *minor);

@@ -335,6 +335,13 @@ atomic_dec_and_test(atomic_t *refcount){
  **********************************************************/
 
 /*
+ * Errors
+ */
+
+/* file intel_dp.c, function intel_dp_i2c_aux_ch() */
+#define EREMOTEIO  EIO
+
+/*
  * Math
  */
 
@@ -390,11 +397,16 @@ free(void *addr, struct malloc_type *type)
 
 /* file drm_edid.c, function drm_mode_detailed() */
 #define KERN_WARNING "warning::"
-/* file drm_cache.c, function drm_clflush_pages() */
-#define WARN_ON_ONCE() /* UNIMPLEMENTED */
 
 /* file drm_crtc_helper, function drm_encoder_crtc_ok() */
 #define WARN(cond, ...) if (cond) kprintf(__VA_ARGS__)
+
+/* file i915_gem.c */
+#define WARN_ON(cond)  if (cond) DRM_ERROR("\n")
+
+/* file i915_gem.c */
+/* file drm_cache.c, function drm_clflush_pages() */
+#define WARN_ON_ONCE(cond) WARN_ON(cond)
 
 /* file ttm/ttm_page_alloc.h, function ttm_page_alloc_debugfs() */
 struct seq_file {
@@ -1091,7 +1103,8 @@ struct work {
 };
 
 struct work_struct {
-	int placeholder;
+	void (*function)(void *data);
+	void *data;
 };
 
 /* file ttm_memory.c, function ttm_mem_global_init() */
@@ -1105,9 +1118,10 @@ INIT_WORK(
 /* file intel_display.c, function intel_crtc_page_flip() */
 #define INIT_WORK(a, b) /* UNIMPLEMENTED */
 
-/* file drm_fb_helper.c, function drm_fb_helper.sysrq() */
+/* defined out: file drm_fb_helper.c, function drm_fb_helper.sysrq() */
+/* intel_display.c, function intel_finish_page_flip() */
 static __inline__ int
-schedule_work(struct work *work) {
+schedule_work(struct work_struct *work) {
 	return 0;
 }
 
@@ -1314,6 +1328,9 @@ unregister_shrinker(struct shrinker *shrink) {
 /* i915_gem.c, function slow_shmem_bit17_copy() */
 #define DRM_ALIGN(x, y)	roundup(x, y)
 
+/* i915_gem.c, function i915_gem_fault() */
+typedef unsigned long	pgoff_t;
+
 /* file ttm/ttm_memory.c, function ttm_mem_zone_show(),
  * Are zones the number of pages divided by 2^10?
  */
@@ -1404,7 +1421,7 @@ mark_page_accessed(struct page *to_page) {
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
-/* file i915_gem.c */
+/* file i915_gem.c, i915_gem_object_get_pages() */
 static __inline__ void
 page_cache_release(struct page *to_page) {
 	;
@@ -1457,6 +1474,22 @@ set_memory_wb(unsigned long ptr, unsigned long size) {
 /* Fourth argument NULL all calls in drm */
 static __inline__ struct page *
 read_mapping_page(struct address_space *swap_space, int i, void *ptr) {
+	return NULL;
+}
+
+/* file i915_gem.c, function i915_gem_object_get_pages() */
+static __inline__ int
+mapping_gfp_mask(struct address_space *mapping) {
+	return 0;
+}
+
+/* file i915_gem.c, function i915_gem_object_get_pages() */
+static __inline__ struct page *
+read_cache_page_gfp(
+	struct address_space *mapping,
+	int i,
+	int gfp_mask)
+{
 	return NULL;
 }
 
@@ -1810,21 +1843,12 @@ io_mapping_unmap_atomic(
 	;
 }
 
-/* file i915_gem.c, function fast_user_write() */
-static __inline__ unsigned long
-__copy_from_user_inatomic_nocache(
-	char *vaddr_atomic,
-	char __user *user_data,
-	int length
-) {
-	return 0;
-}
-
 /*
  * Kernel to / from user
  */
 
-#define VERIFY_WRITE 0x0002 /* UNIMPLEMENTED */
+#define VERIFY_READ  VM_PROT_READ
+#define VERIFY_WRITE VM_PROT_WRITE
 
 /* file drm_ioc32.c, function compat_drm_version() */
 /* Allocate on user stack? */
@@ -1835,8 +1859,8 @@ compat_alloc_user_space(size_t size) {
 
 /* file i915_gem.c, function i915_gem_gtt_pwrite_fast() */
 static __inline__ int
-access_ok(uint32_t flags, void *ptr, size_t size) {
-	return 0;
+access_ok(int flags, void *ptr, int size) {
+	return useracc(__DECONST(caddr_t, ptr), size, flags);
 }
 
 /* file drm_ioc32.c, function compat_drm_version() */
@@ -1894,9 +1918,29 @@ static __inline__ int
 __copy_to_user_inatomic(
 	void *uaddr,
 	void *kaddr,
-	size_t iosize
+	int iosize
 ) {
 	return copyout(kaddr, uaddr, iosize);
+}
+
+/* file i915_gem.c, function slow_kernel_write() */
+static __inline__ int
+__copy_from_user_inatomic_nocache(
+	void *kaddr,
+	void *uaddr,
+	int iosize
+) {
+	return copyin(uaddr, kaddr, iosize);
+}
+
+/* file i915_gem.c, function slow_kernel_write() */
+static __inline__ int
+__copy_from_user_inatomic(
+	void *kaddr,
+	void *uaddr,
+	int iosize
+) {
+	return copyin(uaddr, kaddr, iosize);
 }
 
 /* file drm_bufs.c, function drm_addbufs_agp() */
@@ -1984,10 +2028,15 @@ struct vm_area_struct {
 	const struct vm_operations_struct *vm_ops;
 };
 
+/* file i915_gem.c, function i915_gem_fault() */
+#define FAULT_FLAG_WRITE  0x0001
+
 /* file drm_vm.c, function drm_do_vm_fault() */
 struct vm_fault {
 	void *virtual_address;
 	struct page* page;
+/* file i915_gem.c, function i915_gem_fault() */
+	int flags;
 };
 
 /* file drm_vm.c, struct drm_vm_ops */
@@ -2001,6 +2050,16 @@ struct vm_operations_struct {
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
 static __inline__ int
 vm_insert_mixed(
+	struct vm_area_struct *vma,
+	unsigned long address,
+	unsigned long pfn
+) {
+	return 0;
+}
+
+/* file i915_gem.c, function i915_gem_fault() */
+static __inline__ int
+vm_insert_pfn(
 	struct vm_area_struct *vma,
 	unsigned long address,
 	unsigned long pfn
@@ -2154,6 +2213,12 @@ remap_pfn_range(
 /* file drm_fops.c, function drm_open() */
 struct inode {
 	struct address_space *i_mapping;
+	struct DRM_INODE_IOP *i_op;
+};
+
+/* file i915_gem.c, function i915_gem_object_truncate() */
+struct DRM_INODE_IOP {
+	int (*truncate)(struct inode *inode);
 };
 
 /* file drm_fops.c, function drm_open() */
@@ -2967,6 +3032,7 @@ struct fb_info {
 /* file intel_fb.c, function intelfb_create() */
 	void *screen_base;
 	unsigned long screen_size;
+	struct DRM_FB_PIXMAP pixmap;
 };
 
 /*file drm_fb_helper.h, function drm_fb_helper_setcmap() */
@@ -3056,7 +3122,12 @@ typedef unsigned long pm_message_t;
 
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 /* file radeon_i2c.c, function r500_hw_i2c_xfer() */
-#define I2C_M_RD 0x0001
+#define I2C_M_RD       0x0001
+/* file dvo_ivch.c */
+#define I2C_M_NOSTART  0x0002
+
+/* file intel_dp.c, function intel_dp_i2c_init() */
+#define I2C_CLASS_DDC  0x0001
 
 struct i2c_algorithm;
 
@@ -3082,6 +3153,12 @@ struct i2c_adapter {
 /* file drm_dp_i2c_helper.c, function i2c_dp_aux_prepare_bus() */
 	uint32_t retries;
 	const struct i2c_algorithm *algo;
+/* file dvo_ch7017.c */
+	char *name;
+/* file intel_dp.c, function intel_dp_i2c_init() */
+	int class;
+/* file intel_dp.c, function intel_dp_i2c_init() */
+	struct device dev;
 };
 
 /* file radeon_i2c.c, function pre_xfer() */
@@ -3261,6 +3338,8 @@ wait_event_interruptible_timeout(
  * ACPI                                                   *
  **********************************************************/
 
+#define CONFIG_ACPI 1
+
 /* file i915_opregion.c, function intel_opregion_video_event */
 #define NOTIFY_OK	0x000
 #define NOTIFY_DONE	0x001
@@ -3351,9 +3430,9 @@ acpi_lid_open(void) {
 }
 
 /* file intel_lvds.c, function intel_lvds_init() */
-static __inline__ void
+static __inline__ int
 acpi_lid_notifier_register(struct notifier_block *lid_notifier) {
-	;
+	return 0;
 }
 
 /* file intel_lvds.c, function intel_lid_notify() */
