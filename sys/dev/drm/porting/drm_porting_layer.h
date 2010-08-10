@@ -3338,8 +3338,6 @@ wait_event_interruptible_timeout(
  * ACPI                                                   *
  **********************************************************/
 
-#define CONFIG_ACPI 1
-
 /* file i915_opregion.c, function intel_opregion_video_event */
 #define NOTIFY_OK	0x000
 #define NOTIFY_DONE	0x001
