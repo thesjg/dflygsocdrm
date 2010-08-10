@@ -91,11 +91,7 @@ drm_gem_init(struct drm_device *dev)
 	atomic_set(&dev->gtt_count, 0);
 	atomic_set(&dev->gtt_memory, 0);
 
-#ifdef __linux__
-	mm = kzalloc(sizeof(struct drm_gem_mm), GFP_KERNEL);
-#else
-	mm = malloc(sizeof(struct drm_gem_mm), DRM_MEM_GEM, M_WAITOK|M_ZERO);
-#endif
+	mm = malloc(sizeof(struct drm_gem_mm), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!mm) {
 		DRM_ERROR("out of memory\n");
 		return -ENOMEM;
@@ -104,22 +100,14 @@ drm_gem_init(struct drm_device *dev)
 	dev->mm_private = mm;
 
 	if (drm_ht_create(&mm->offset_hash, 19)) {
-#ifdef __linux__
-		kfree(mm);
-#else
-		free(mm, DRM_MEM_GEM);
-#endif
+		free(mm, DRM_MEM_DRIVER);
 		return -ENOMEM;
 	}
 
 	if (drm_mm_init(&mm->offset_manager, DRM_FILE_PAGE_OFFSET_START,
 			DRM_FILE_PAGE_OFFSET_SIZE)) {
 		drm_ht_remove(&mm->offset_hash);
-#ifdef __linux__
-		kfree(mm);
-#else
-		free(mm, DRM_MEM_GEM);
-#endif
+		free(mm, DRM_MEM_DRIVER);
 		return -ENOMEM;
 	}
 
@@ -133,11 +121,7 @@ drm_gem_destroy(struct drm_device *dev)
 
 	drm_mm_takedown(&mm->offset_manager);
 	drm_ht_remove(&mm->offset_hash);
-#ifdef __linux__
-	kfree(mm);
-#else
-	free(mm, DRM_MEM_GEM);
-#endif
+	free(mm, DRM_MEM_DRIVER);
 	dev->mm_private = NULL;
 }
 
@@ -174,11 +158,7 @@ drm_gem_object_alloc(struct drm_device *dev, size_t size)
 {
 	struct drm_gem_object *obj;
 
-#ifdef __linux__
-	obj = kzalloc(sizeof(*obj), GFP_KERNEL);
-#else
-	obj = malloc(sizeof(*obj), DRM_MEM_GEM, M_WAITOK|M_ZERO);
-#endif
+	obj = malloc(sizeof(*obj), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!obj)
 		goto free;
 
@@ -196,11 +176,7 @@ fput:
 	atomic_sub(obj->size, &dev->object_memory);
 	fput(obj->filp);
 free:
-#ifdef __linux__
-	kfree(obj);
-#else
-	free(obj, DRM_MEM_GEM);
-#endif
+	free(obj, DRM_MEM_DRIVER);
 	return NULL;
 }
 EXPORT_SYMBOL(drm_gem_object_alloc);

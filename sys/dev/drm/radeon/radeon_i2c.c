@@ -874,7 +874,7 @@ struct radeon_i2c_chan *radeon_i2c_create(struct drm_device *dev,
 #ifdef __linux__
 	i2c = kzalloc(sizeof(struct radeon_i2c_chan), GFP_KERNEL);
 #else
-	i2c = malloc(sizeof(struct radeon_i2c_chan), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	i2c = malloc(sizeof(struct radeon_i2c_chan), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif /* __linux__ */
 	if (i2c == NULL)
 		return NULL;
@@ -923,7 +923,7 @@ out_free:
 #ifdef __linux__
 	kfree(i2c);
 #else
-	free(i2c, DRM_MEM_KMS);
+	free(i2c, DRM_MEM_DRIVER);
 #endif /* __linux__ */
 	return NULL;
 
@@ -936,7 +936,7 @@ struct radeon_i2c_chan *radeon_i2c_create_dp(struct drm_device *dev,
 	struct radeon_i2c_chan *i2c;
 	int ret;
 
-	i2c = kzalloc(sizeof(struct radeon_i2c_chan), GFP_KERNEL);
+	i2c = malloc(sizeof(struct radeon_i2c_chan), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (i2c == NULL)
 		return NULL;
 
@@ -958,7 +958,7 @@ out_free:
 #ifdef __linux__
 	kfree(i2c);
 #else
-	free(i2c, DRM_MEM_KMS);
+	free(i2c, DRM_MEM_DRIVER);
 #endif /* __linux__ */
 	return NULL;
 
@@ -972,7 +972,7 @@ void radeon_i2c_destroy(struct radeon_i2c_chan *i2c)
 #ifdef __linux__
 	kfree(i2c);
 #else
-	free(i2c, DRM_MEM_KMS);
+	free(i2c, DRM_MEM_DRIVER);
 #endif
 }
 

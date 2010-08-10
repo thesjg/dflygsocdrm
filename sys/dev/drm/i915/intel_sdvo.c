@@ -1566,7 +1566,7 @@ intel_sdvo_hdmi_sink_detect(struct drm_connector *connector)
 	} else
 		status = connector_status_disconnected;
 
-	free(edid, DRM_MEM_KMS);
+	free(edid, DRM_MEM_DRIVER);
 
 	return status;
 }
@@ -2771,7 +2771,7 @@ bool intel_sdvo_init(struct drm_device *dev, int sdvo_reg)
 	int i;
 	u32 i2c_reg, ddc_reg, analog_ddc_reg;
 
-	intel_encoder = malloc(sizeof(struct intel_encoder)+sizeof(struct intel_sdvo_priv) * 1, DRM_MEM_DRIVER, M_WAITOK);
+	intel_encoder = malloc((sizeof(struct intel_encoder)+sizeof(struct intel_sdvo_priv)) * 1, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!intel_encoder) {
 		return false;
 	}

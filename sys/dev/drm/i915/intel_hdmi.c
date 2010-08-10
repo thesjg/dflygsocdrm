@@ -152,7 +152,7 @@ intel_hdmi_detect(struct drm_connector *connector)
 			hdmi_priv->has_hdmi_sink = drm_detect_hdmi_monitor(edid);
 		}
 		connector->display_info.raw_edid = NULL;
-		free(edid, DRM_MEM_KMS);
+		free(edid, DRM_MEM_DRIVER);
 	}
 
 	return status;
@@ -222,8 +222,8 @@ void intel_hdmi_init(struct drm_device *dev, int sdvox_reg)
 	struct intel_connector *intel_connector;
 	struct intel_hdmi_priv *hdmi_priv;
 
-	intel_encoder = malloc(sizeof(struct intel_encoder) +
-			       sizeof(struct intel_hdmi_priv), DRM_MEM_DRIVER, M_WAITOK);
+	intel_encoder = malloc((sizeof(struct intel_encoder) +
+			       sizeof(struct intel_hdmi_priv)) * 1, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!intel_encoder)
 		return;
 

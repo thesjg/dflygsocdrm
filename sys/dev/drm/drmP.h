@@ -1891,5 +1891,8 @@ static __inline__ void drm_core_dropmap(struct drm_map *map)
 {
 }
 
-#endif /* __KERNEL__ */
-#endif /* _DRM_P_H_ */
+#include "drm_mem_util.h"
+/*@}*/
+
+#endif				/* __KERNEL__ */
+#endif

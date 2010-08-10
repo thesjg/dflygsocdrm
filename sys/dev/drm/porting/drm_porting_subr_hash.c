@@ -70,10 +70,10 @@ drm_hashinit_flags(int elements, struct malloc_type *type, u_long *hashmask,
 
 	if (flags & HASH_NOWAIT)
 		hashtbl = malloc((u_long)hashsize * sizeof(*hashtbl),
-		    type, M_NOWAIT);
+		    type, M_WAITOK | M_ZERO);
 	else
 		hashtbl = malloc((u_long)hashsize * sizeof(*hashtbl),
-		    type, M_WAITOK);
+		    type, M_WAITOK | M_ZERO);
 
 	if (hashtbl != NULL) {
 		for (i = 0; i < hashsize; i++)

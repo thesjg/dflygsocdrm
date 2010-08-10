@@ -1379,8 +1379,8 @@ intel_dp_init(struct drm_device *dev, int output_reg)
 	struct intel_dp_priv *dp_priv;
 	const char *name = NULL;
 
-	intel_encoder = malloc(sizeof(struct intel_encoder) +
-			       sizeof(struct intel_dp_priv) * 1, DRM_MEM_DRIVER, M_WAITOK);
+	intel_encoder = malloc((sizeof(struct intel_encoder) +
+			       sizeof(struct intel_dp_priv)) * 1, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!intel_encoder)
 		return;
 

@@ -334,7 +334,7 @@ void ttm_tt_destroy(struct ttm_tt *ttm)
 	    ttm->swap_storage)
 		fput(ttm->swap_storage);
 
-	kfree(ttm);
+	free(ttm, DRM_MEM_DRIVER);
 }
 
 int ttm_tt_set_user(struct ttm_tt *ttm,
@@ -385,7 +385,7 @@ struct ttm_tt *ttm_tt_create(struct ttm_bo_device *bdev, unsigned long size,
 	if (!bo_driver)
 		return NULL;
 
-	ttm = kzalloc(sizeof(*ttm), GFP_KERNEL);
+	ttm = malloc(sizeof(*ttm), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!ttm)
 		return NULL;
 

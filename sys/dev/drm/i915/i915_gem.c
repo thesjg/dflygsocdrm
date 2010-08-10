@@ -3853,7 +3853,7 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 
 	if (args->num_cliprects != 0) {
 		cliprects = malloc(args->num_cliprects * sizeof(*cliprects),
-				    DRM_MEM_DRAWABLE, M_WAITOK);
+				    DRM_MEM_DRAWABLE, M_WAITOK | M_ZERO);
 		if (cliprects == NULL) {
 			ret = -ENOMEM;
 			goto pre_mutex_err;

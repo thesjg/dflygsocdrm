@@ -31,7 +31,6 @@
 #include <linux/vmalloc.h>
 #else
 #include "porting/drm_porting_layer.h"
-#include "porting/drm_porting_memory.h"
 #endif
 
 static __inline__ void *drm_calloc_large(size_t nmemb, size_t size)
@@ -42,7 +41,7 @@ static __inline__ void *drm_calloc_large(size_t nmemb, size_t size)
 #ifdef __linux__
 	if (size * nmemb <= PAGE_SIZE)
 #endif
-	    return kcalloc(nmemb, size, GFP_KERNEL);
+	    return malloc(nmemb * size, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 
 #ifdef __linux__
 	return __vmalloc(size * nmemb,
@@ -59,7 +58,7 @@ static __inline__ void *drm_malloc_ab(size_t nmemb, size_t size)
 #ifdef __linux__
 	if (size * nmemb <= PAGE_SIZE)
 #endif
-	    return kmalloc(nmemb * size, GFP_KERNEL);
+	    return malloc(nmemb * size, DRM_MEM_DRIVER, M_WAITOK);
 
 #ifdef __linux__
 	return __vmalloc(size * nmemb,
@@ -73,7 +72,7 @@ static __inline void drm_free_large(void *ptr)
 #ifdef __linux__
 	if (!is_vmalloc_addr(ptr))
 #endif
-		return kfree(ptr);
+		return free(ptr, DRM_MEM_DRIVER);
 
 #ifdef __linux__
 	vfree(ptr);
