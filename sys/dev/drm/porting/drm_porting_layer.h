@@ -118,7 +118,7 @@ module_exit(void (*func)(void)) {
 #define BUG_ON(cond) KKASSERT(!(cond))
 
 /* file ttm/ttm_bo.c, function ttm_bo_ref_bug() */
-#define BUG() /* UNIMPLEMENTED */
+#define BUG()  /* UNIMPLEMENTED */
 
 /*
  * Annotations
@@ -270,6 +270,31 @@ typedef boolean_t bool;
 /* file drm_bufs.c, function drm_get_resource_start() */
 typedef unsigned long resource_size_t;
 
+/* file i915_gem.c, function i915_gem_object_save_bit_17_swizzle() */
+
+#define BITS_PER_LONG	(sizeof(long) * 8)
+
+#define BITS_TO_LONGS(b) (((b) + BITS_PER_LONG - 1) / BITS_PER_LONG)
+
+static __inline__ void
+__set_bit(int bit, volatile void *bytes) {
+	set_bit(bit, bytes);
+}
+
+static __inline__ void
+__clear_bit(int bit, volatile void *bytes) {
+	clear_bit(bit, bytes);
+}
+
+/* file intel_display.c, function ironlake_compute_m_n() */
+static __inline__ uint32_t
+div_u64(uint64_t temp, uint32_t link_clock) {
+	return (uint32_t)(temp / link_clock);
+}
+
+/* file intel_display.c, function ironlake_update_wm() */
+#define DIV_ROUND_UP(x, y)  ((x) + (y) - 1) / (y)
+
 /**********************************************************
  * Atomic instructions                                    *
  **********************************************************/
@@ -308,6 +333,13 @@ atomic_dec_and_test(atomic_t *refcount){
 /**********************************************************
  * C standard library equivalents                         *
  **********************************************************/
+
+/*
+ * Errors
+ */
+
+/* file intel_dp.c, function intel_dp_i2c_aux_ch() */
+#define EREMOTEIO  EIO
 
 /*
  * Math
@@ -365,11 +397,16 @@ free(void *addr, struct malloc_type *type)
 
 /* file drm_edid.c, function drm_mode_detailed() */
 #define KERN_WARNING "warning::"
-/* file drm_cache.c, function drm_clflush_pages() */
-#define WARN_ON_ONCE() /* UNIMPLEMENTED */
 
 /* file drm_crtc_helper, function drm_encoder_crtc_ok() */
 #define WARN(cond, ...) if (cond) kprintf(__VA_ARGS__)
+
+/* file i915_gem.c */
+#define WARN_ON(cond)  if (cond) DRM_ERROR("\n")
+
+/* file i915_gem.c */
+/* file drm_cache.c, function drm_clflush_pages() */
+#define WARN_ON_ONCE(cond) WARN_ON(cond)
 
 /* file ttm/ttm_page_alloc.h, function ttm_page_alloc_debugfs() */
 struct seq_file {
@@ -396,6 +433,9 @@ struct seq_file {
 /*
  * Lists
  */
+
+/* file i915_gem.c */
+#define DRM_LIST_HEAD(arg)  struct list_head arg
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_pool_free() */
 #define __list_del(entry, list) /* UNIMPLEMENTED */
@@ -434,16 +474,6 @@ list_cut_position(struct list_head *pages, struct list_head *list, struct list_h
 	list->next->prev = p;
 	pages->prev = p;
 	p->next = list->next;
-}
-
-/* file drm_irq.c, function drm_handle_vblank_events() */
-static __inline__ void
-list_move_tail(struct list_head *link, struct list_head *list) {
-	list->prev = link->prev;
-	link->prev->next = list->next;
-	list->prev->next = link->next;
-	link->next->prev = list->prev;
-	list_empty(link);
 }
 
 /* file drm_modes.c, function drm_mode_sort() */
@@ -583,9 +613,9 @@ typedef uint32_t gfp_t;
  */
 /* legacy drm drmP.h */
 
-typedef void			irqreturn_t;
-#define IRQ_HANDLED		/* nothing */
-#define IRQ_NONE		/* nothing */
+typedef int			irqreturn_t;
+#define IRQ_HANDLED		0x00
+#define IRQ_NONE		0x01
 
 #define DRM_IRQ_ARGS		void *arg
 
@@ -608,6 +638,18 @@ free_irq(
 	void *dev
 ) {
 	return 0;
+}
+
+/* file i915_irq.c, function i915_error_object_create() */
+static __inline__ void
+local_irq_save(unsigned long flags) {
+	;
+}
+
+/* file i915_irq.c, function i915_error_object_create() */
+static __inline__ void
+local_irq_restore(unsigned long flags) {
+	;
 }
 
 /* file ttm/ttm_bo.c, function ttm_bo_mem_space() */
@@ -666,6 +708,13 @@ preempt_enable(void) {
 #define DRM_UNLOCK()		DRM_SPINUNLOCK(&dev->dev_lock)
 #define DRM_SYSCTL_HANDLER_ARGS	(SYSCTL_HANDLER_ARGS)
 
+/* file i915_gem.c */
+#define DEFINE_SPINLOCK(l)	struct lock l = { \
+	.lk_spinlock = {0}, \
+	.lk_flags = LK_CANRECURSE & LK_EXTFLG_MASK, \
+	.lk_wmesg = "gem", \
+	.lk_timo = 0}
+
 /* Locking replacements for Linux drm functions */
 
 #define spinlock_t	struct lock
@@ -698,6 +747,7 @@ preempt_enable(void) {
 /* file ttm/ttm_global.c, function ttm_global_item_ref() */
 #define mutex_init(l)      lockinit(l, "linux_mutex", 0, LK_CANRECURSE)
 #define mutex_lock(l)      lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
+#define mutex_trylock(l)  !lockmgr(l, LK_EXCLUSIVE | LK_NOWAIT | LK_CANRECURSE)
 #define mutex_unlock(u)    lockmgr(u, LK_RELEASE)
 
 /* file drm_gem.c, function drm_gem_object_free() */
@@ -1017,13 +1067,44 @@ wake_up_interruptible_all(wait_queue_head_t *wqh) {
 	;
 }
 
+/* file i915_gem.c, function i915_gem_wait_for_pending_flip() */
+
+#define TASK_RUNNABLE		0x01
+#define TASK_INTERRUPTIBLE	0x02
+
+struct DRM_WAIT_STRUCT {
+	int placeholder;
+};
+
+typedef struct DRM_WAIT_STRUCT	DRM_WAIT_T;
+
+#define DEFINE_WAIT(wait)	struct DRM_WAIT_STRUCT wait = {0};
+
+static __inline__ void
+prepare_to_wait(
+	wait_queue_head_t *queue,
+	DRM_WAIT_T *wait,
+	int flags
+) {
+	;
+}
+
+static __inline__ void
+finish_wait(
+	wait_queue_head_t *queue,
+	DRM_WAIT_T *wait
+) {
+	;
+}
+
 /* file ttm_memory.c, function ttm_mem_global_init() */
 struct work {
 	int placeholder;
 };
 
 struct work_struct {
-	int placeholder;
+	void (*function)(void *data);
+	void *data;
 };
 
 /* file ttm_memory.c, function ttm_mem_global_init() */
@@ -1034,11 +1115,13 @@ INIT_WORK(
     void (*func)( struct work_struct *work)
 );
 #endif
+/* file intel_display.c, function intel_crtc_page_flip() */
 #define INIT_WORK(a, b) /* UNIMPLEMENTED */
 
-/* file drm_fb_helper.c, function drm_fb_helper.sysrq() */
+/* defined out: file drm_fb_helper.c, function drm_fb_helper.sysrq() */
+/* intel_display.c, function intel_finish_page_flip() */
 static __inline__ int
-schedule_work(struct work *work) {
+schedule_work(struct work_struct *work) {
 	return 0;
 }
 
@@ -1058,6 +1141,7 @@ create_singlethread_workqueue(const char *name) {
 }
 
 /* file ttm_memory.c, function ttm_check_swapping() */
+/* file intel_display.c, function intel_gpu_idle_timer() */
 static __inline__ int
 queue_work(struct workqueue_struct *swap_queue, struct work_struct *work) {
 	return 0;
@@ -1114,6 +1198,7 @@ cancel_delayed_work(struct delayed_work *wq) {
 }
 
 /* file ttm_bo_c, function ttm_bo_lock_delayed_workqueue() */
+/* file i915_gem.c */
 static __inline__ int
 cancel_delayed_work_sync(struct delayed_work *wq) {
 	return 0;
@@ -1206,6 +1291,7 @@ unregister_sysrq_key(char v, struct sysrq_key_op *op) {
 }
 
 /* file ttm/ttm_page_alloc.c, function ttm_pool_manager() */
+/* file i915/i915_gem.c, function i915_gem_shrinker_init() */
 struct shrinker {
 	int (*shrink)(int shrink_pages, gfp_t gfp_mask);
 	unsigned long seeks;
@@ -1222,6 +1308,8 @@ unregister_shrinker(struct shrinker *shrink) {
 	;
 }
 
+#define DEFAULT_SEEKS  0x0001
+
 /**********************************************************
  * VIRTUAL MEMORY                                         *
  **********************************************************/
@@ -1236,6 +1324,12 @@ unregister_shrinker(struct shrinker *shrink) {
  */
 
 #define PAGE_ALIGN(addr) round_page(addr)
+
+/* i915_gem.c, function slow_shmem_bit17_copy() */
+#define DRM_ALIGN(x, y)	roundup(x, y)
+
+/* i915_gem.c, function i915_gem_fault() */
+typedef unsigned long	pgoff_t;
 
 /* file ttm/ttm_memory.c, function ttm_mem_zone_show(),
  * Are zones the number of pages divided by 2^10?
@@ -1327,12 +1421,14 @@ mark_page_accessed(struct page *to_page) {
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+/* file i915_gem.c, i915_gem_object_get_pages() */
 static __inline__ void
 page_cache_release(struct page *to_page) {
 	;
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
+/* file i915/i915_gem_tiling.c, function i915_gem_object_do_bit_17_swizzle() */
 static __inline__ void
 set_page_dirty(struct page *to_page) {
 	;
@@ -1381,6 +1477,22 @@ read_mapping_page(struct address_space *swap_space, int i, void *ptr) {
 	return NULL;
 }
 
+/* file i915_gem.c, function i915_gem_object_get_pages() */
+static __inline__ int
+mapping_gfp_mask(struct address_space *mapping) {
+	return 0;
+}
+
+/* file i915_gem.c, function i915_gem_object_get_pages() */
+static __inline__ struct page *
+read_cache_page_gfp(
+	struct address_space *mapping,
+	int i,
+	int gfp_mask)
+{
+	return NULL;
+}
+
 /* file ttm/ttm_bo.c, function ttm_bo_unmap_virtual() */
 static __inline__ void
 unmap_mapping_range(
@@ -1402,6 +1514,24 @@ struct task_struct {
 	struct mm_struct *mm;
 };
 
+/* file i915_gem.c */
+static __inline__ struct mm_struct *
+DRM_GET_CURRENT_MM(void) {
+	return NULL;
+}
+
+static __inline__ struct task_struct *
+DRM_GET_CURRENT(void) {
+	return NULL;
+}
+
+/* file i915_gem.c, function i915_gem_wait_for_pending_flip() */
+static __inline__ int
+signal_pending(struct task_struct *currenttask) {
+	return 0;
+}
+
+/* file i915_gem.c */
 static __inline__ int
 get_user_pages(
 	struct task_struct * tsk,
@@ -1415,6 +1545,13 @@ get_user_pages(
 ) {
 	return 1;
 }
+
+/* file i915_gem.c, function slow_shmem_bit17_copy() */
+static __inline__ int
+page_to_phys(struct page *gpu_page) {
+	return 0;
+}
+
 /*
  * sysinfo
  */
@@ -1448,32 +1585,41 @@ schedule(void) {
 }
 
 /* file drm_fops.c, function drm_reclaim_locked_buffers() */
+/* file intel_crt.c, function intel_crt_detect_hotplug() */
 static __inline__ int
-time_after_eq(unsigned long jiffies, unsigned long _end) {
-	return 0;
+time_after_eq(unsigned long timeout, unsigned long _end) {
+	return (((long)_end - (long)timeout) >= 0);
 }
 
 /* file radeon_fence.c, function radeon_fence_poll_locked() */
+/* file intel_crt.c, function intel_crt_detect_hotplug() */
 static __inline__ int
-time_after(unsigned long jiffies, unsigned long _end) {
-	return 0;
+time_after(unsigned long timeout, unsigned long _end) {
+	return (((long)timeout - (long)_end) < 0);
 }
 
 /* file drm_irq., function drm_handle_vblank_events() */
-/* On DragonFly include sys/time.h */
-/* man gettimeofday, but how.tv_sec and how.tv_usec are long? */
-static __inline__ int
+static __inline__ void
 do_gettimeofday(struct timeval *now) {
-#if 0
-	return gettimeofday(now, NULL);
-#endif
-	return 0;
+	microtime(now);
 }
 
 /* file radeon_i2c.c, function r500_hw_i2c_xfer() */
 static __inline__ void
 udelay(int delay) {
 	DELAY(delay);
+}
+
+/* file intel_sdvo.c, function intel_sdvo_read_response() */
+static __inline__ void
+mdelay(int delay) {
+	DELAY(1000 * delay);
+}
+
+/* file intel_display.c, function intel_wait_for_vblank() */
+static __inline__ void
+msleep(int millis) {
+	DELAY(1000 * millis);
 }
 
 /**********************************************************
@@ -1607,9 +1753,7 @@ MALLOC_DECLARE(DRM_MEM_HASHTAB);
 MALLOC_DECLARE(DRM_MEM_DEFAULT);
 MALLOC_DECLARE(DRM_MEM_STUB);
 MALLOC_DECLARE(DRM_MEM_IDR);
-MALLOC_DECLARE(DRM_MEM_GEM);
 MALLOC_DECLARE(DRM_MEM_TTM);
-MALLOC_DECLARE(DRM_MEM_KMS);
 MALLOC_DECLARE(DRM_MEM_FENCE);
 
 /**********************************************************
@@ -1642,6 +1786,7 @@ pgprot_noncached(pgprot_t prot) {
 /* file ttm/ttm_tt.c, function ttm_tt_swapin() */
 #define KM_USER0 0x0001
 #define KM_USER1 0x0002
+#define KM_IRQ0  0x0004
 
 /* file ttm/ttm_bo_util.c, function ttm_io_prot() */
 #define PAGE_KERNEL 0x0001
@@ -1675,11 +1820,35 @@ kunmap_atomic(void *dst, uint32_t flag) {
 	;
 }
 
+/* file i915_gem.c, function fast_user_write() */
+struct io_mapping {
+	int placeholder;
+};
+
+/* file i915_gem.c, function fast_user_write() */
+/* file intel_overlay.c, function intel_overlay_map_regs_atomic() */
+static __inline__ char *
+io_mapping_map_atomic_wc(
+	struct io_mapping *mapping,
+	loff_t page_base
+) {
+	return NULL;
+}
+
+/* file i915_gem.c, function fast_user_write() */
+static __inline__ void
+io_mapping_unmap_atomic(
+	char *vaddr_atomic
+) {
+	;
+}
+
 /*
  * Kernel to / from user
  */
 
-#define VERIFY_WRITE 0x0002 /* UNIMPLEMENTED */
+#define VERIFY_READ  VM_PROT_READ
+#define VERIFY_WRITE VM_PROT_WRITE
 
 /* file drm_ioc32.c, function compat_drm_version() */
 /* Allocate on user stack? */
@@ -1688,9 +1857,10 @@ compat_alloc_user_space(size_t size) {
 	return NULL;
 }
 
+/* file i915_gem.c, function i915_gem_gtt_pwrite_fast() */
 static __inline__ int
-access_ok(uint32_t flags, void *ptr, size_t size) {
-	return 0;
+access_ok(int flags, void *ptr, int size) {
+	return useracc(__DECONST(caddr_t, ptr), size, flags);
 }
 
 /* file drm_ioc32.c, function compat_drm_version() */
@@ -1741,6 +1911,36 @@ copy_to_user(
 	size_t iosize
 ) {
 	return copyout(kaddr, uaddr, iosize);
+}
+
+/* file i915_gem.c, function fast_shmem_read() */
+static __inline__ int
+__copy_to_user_inatomic(
+	void *uaddr,
+	void *kaddr,
+	int iosize
+) {
+	return copyout(kaddr, uaddr, iosize);
+}
+
+/* file i915_gem.c, function slow_kernel_write() */
+static __inline__ int
+__copy_from_user_inatomic_nocache(
+	void *kaddr,
+	void *uaddr,
+	int iosize
+) {
+	return copyin(uaddr, kaddr, iosize);
+}
+
+/* file i915_gem.c, function slow_kernel_write() */
+static __inline__ int
+__copy_from_user_inatomic(
+	void *kaddr,
+	void *uaddr,
+	int iosize
+) {
+	return copyin(uaddr, kaddr, iosize);
 }
 
 /* file drm_bufs.c, function drm_addbufs_agp() */
@@ -1804,6 +2004,9 @@ memcpy_toio(void *dst, void *src, unsigned long value) {
 #define VM_NORESERVE    0x0400
 #define VM_PFNMAP       0x0800
 
+/* file i915_gem.c, function i915_gem_shrink() */
+extern int sysctl_vfs_cache_pressure;
+
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
 struct vm_area_struct {
 /* file drm_vm.c, function drm_mmap_locked() */
@@ -1825,10 +2028,15 @@ struct vm_area_struct {
 	const struct vm_operations_struct *vm_ops;
 };
 
+/* file i915_gem.c, function i915_gem_fault() */
+#define FAULT_FLAG_WRITE  0x0001
+
 /* file drm_vm.c, function drm_do_vm_fault() */
 struct vm_fault {
 	void *virtual_address;
 	struct page* page;
+/* file i915_gem.c, function i915_gem_fault() */
+	int flags;
 };
 
 /* file drm_vm.c, struct drm_vm_ops */
@@ -1842,6 +2050,16 @@ struct vm_operations_struct {
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
 static __inline__ int
 vm_insert_mixed(
+	struct vm_area_struct *vma,
+	unsigned long address,
+	unsigned long pfn
+) {
+	return 0;
+}
+
+/* file i915_gem.c, function i915_gem_fault() */
+static __inline__ int
+vm_insert_pfn(
 	struct vm_area_struct *vma,
 	unsigned long address,
 	unsigned long pfn
@@ -1995,6 +2213,12 @@ remap_pfn_range(
 /* file drm_fops.c, function drm_open() */
 struct inode {
 	struct address_space *i_mapping;
+	struct DRM_INODE_IOP *i_op;
+};
+
+/* file i915_gem.c, function i915_gem_object_truncate() */
+struct DRM_INODE_IOP {
+	int (*truncate)(struct inode *inode);
 };
 
 /* file drm_fops.c, function drm_open() */
@@ -2179,6 +2403,7 @@ struct device {
 	struct kobject kobj;
 	struct device_type *type;
 	void (*release)(struct device *dev);
+	struct device *parent;
 };
 
 /* file drm_edid.c, function do_get_edid() */
@@ -2410,6 +2635,24 @@ pci_name(struct pci_dev *pdev) {
 /* file radeon_gart.c, function radeon_gart_unbind() */
 #define PCI_DMA_BIDIRECTIONAL 0x0001
 
+/* file intel_bios.c, function intel_init_bios() */
+static __inline__ u8 __iomem*
+pci_map_rom(
+	struct pci_dev *pdev,
+	size_t *psize
+) {
+	return NULL;
+}
+
+/* file intel_bios.c, function intel_init_bios() */
+static __inline__ void
+pci_unmap_rom(
+	struct pci_dev *pdev,
+	u8 *bios
+) {
+	;
+}
+
 /* file ati_pcigart.c, function drm_ati_pcigart_init() */
 /* file radeon_gart.c, function radeon_gart_bind() */
 static __inline__ dma_addr_t
@@ -2568,8 +2811,11 @@ typedef struct DRM_AGP_KERN {
 	struct DRM_AGP_VERSION version;
 	unsigned long mode;
 	unsigned long aper_base;
+/* units of 1024 x 1024 bytes */
 	unsigned long aper_size;
+/* units of pages */
 	unsigned long max_memory;
+/* units of pages */
 	unsigned long current_memory;
 	struct DRM_AGP_DEVICE *device;
 } DRM_AGP_KERN;
@@ -2582,6 +2828,9 @@ typedef struct DRM_AGP_MEM {
 	unsigned long page_count;
 	bool is_flushed;
 	struct page **pages;
+	int key;
+	uint32_t physical;
+	device_t agdev;
 } DRM_AGP_MEM;
 
 /* file drm_agpsupport.c, function drm_agp_alloc() */
@@ -2650,6 +2899,17 @@ vga_switcheroo_process_delayed_switch(void) {
 	return 0;
 }
 
+struct fb_info;
+
+/* file intel_fb.c, function intelfb_create() */
+static __inline__ void
+vga_switcheroo_client_fb_set(
+	struct pci_dev *pdev,
+	struct fb_info *info
+) {
+	;
+}
+
 /**********************************************************
  * FRAMEBUFFER                                            *
  **********************************************************/
@@ -2674,6 +2934,9 @@ vga_switcheroo_process_delayed_switch(void) {
 
 /* file radeon_fb.c, function radeonfb_create() */
 #define FBINFO_DEFAULT          0x0400
+
+/* file intelfb.c, function intelfb_create() */
+#define FB_PIXMAP_SYSTEM	0x0800
 
 /* file drm_mode.c, function drm_mode_equal() */
 #define KHZ2PICOS(clock) (clock) /* UNIMPLEMENTED */
@@ -2748,8 +3011,13 @@ struct fb_var_screeninfo {
 };
 
 /* file radeon_fb.c, function radeonfb_create() */
+/* file intel_fb.c, function intelfb_create() */
 struct DRM_FB_PIXMAP {
-	int placeholder;
+	unsigned long size;
+	uint32_t buf_align;
+	uint32_t access_align;
+	uint32_t flags;
+	uint32_t scan_align;
 };
 
 /*file drm_fb_helper.h, function drm_fb_helper_blank() */
@@ -2761,6 +3029,10 @@ struct fb_info {
 	uint32_t node;
 /* file radeon_fb.c, function radeonfb_create() */
 	uint32_t flags;
+/* file intel_fb.c, function intelfb_create() */
+	void *screen_base;
+	unsigned long screen_size;
+	struct DRM_FB_PIXMAP pixmap;
 };
 
 /*file drm_fb_helper.h, function drm_fb_helper_setcmap() */
@@ -2786,15 +3058,17 @@ register_framebuffer(struct fb_info *info) {
 }
 
 /* file radeon/radeon_fb.c */
+/* file i915/intel_fb.c */
 static __inline__ int
 unregister_framebuffer(struct fb_info *info) {
 	return 0;
 }
 
 /* file radeon_fb.c, function radeonfb_create() */
+/* file intel_fb.c, function intelfb_create() */
 static __inline__ struct fb_info *
 framebuffer_alloc(unsigned long isZero, struct device *device) {
-	return NULL;
+	return malloc(sizeof(struct fb_info), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 }
 
 /*
@@ -2848,7 +3122,12 @@ typedef unsigned long pm_message_t;
 
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 /* file radeon_i2c.c, function r500_hw_i2c_xfer() */
-#define I2C_M_RD 0x0001
+#define I2C_M_RD       0x0001
+/* file dvo_ivch.c */
+#define I2C_M_NOSTART  0x0002
+
+/* file intel_dp.c, function intel_dp_i2c_init() */
+#define I2C_CLASS_DDC  0x0001
 
 struct i2c_algorithm;
 
@@ -2874,6 +3153,12 @@ struct i2c_adapter {
 /* file drm_dp_i2c_helper.c, function i2c_dp_aux_prepare_bus() */
 	uint32_t retries;
 	const struct i2c_algorithm *algo;
+/* file dvo_ch7017.c */
+	char *name;
+/* file intel_dp.c, function intel_dp_i2c_init() */
+	int class;
+/* file intel_dp.c, function intel_dp_i2c_init() */
+	struct device dev;
 };
 
 /* file radeon_i2c.c, function pre_xfer() */
@@ -2883,6 +3168,7 @@ i2c_get_adapdata(struct i2c_adapter *i2c_adap) {
 }
 
 /* file radeon_i2c.c, function radeon_i2c_create() */
+/* file intel_i2c.c, function intel_i2c_create() */
 static __inline__ void
 i2c_set_adapdata(struct i2c_adapter *i2c_adap, void *data) {
 	i2c_adap->algo_data = data;
@@ -2896,6 +3182,7 @@ struct i2c_algorithm {
 };
 
 /* file radeon_i2c.c, function radeon_i2c_create() */
+/* file intel_i2c.c, function intel_i2c_create() */
 struct i2c_algo_bit_data {
 	int (*pre_xfer)(struct i2c_adapter *i2c_adap);
 	int (*post_xfer)(struct i2c_adapter *i2c_adap);
@@ -2909,6 +3196,7 @@ struct i2c_algo_bit_data {
 };
 
 /* file radeon_i2c.c, function radeon_i2c_create() */
+/* file intel_i2c.c, function intel_i2c_create() */
 static __inline__ int
 i2c_bit_add_bus(struct i2c_adapter *adapter) {
 	return 0;
@@ -2964,6 +3252,12 @@ i2c_add_adapter(struct i2c_adapter *adapter) {
 	return 0;
 }
 
+/* file intel_i2c.c, function intel_i2c_destroy() */
+static __inline__ void
+i2c_del_adapter(struct i2c_adapter *adapter) {
+	;
+}
+
 /* file drm_encoder_slave.h, function drm_i2c_encoder_unregister() */
 static __inline__ int
 i2c_del_driver(struct i2c_driver *driver) {
@@ -3017,9 +3311,16 @@ wait_event_timeout(
 }
 
 /* file radeon_pm.c, function radeon_sync_with_vblank() */
+/* file intel_display.c */
 static __inline__ unsigned long
 msecs_to_jiffies(unsigned long msecs) {
-	return 0;
+	return DIV_ROUND_UP(msecs, (1000 / hz));
+}
+
+static __inline__ unsigned long
+usecs_to_jiffies(unsigned long usecs) {
+	unsigned long msecs = DIV_ROUND_UP(usecs, 1000);
+	return DIV_ROUND_UP(msecs, (1000 / hz));
 }
 
 /* file radeon_pm.c, function radeon_pm_set_clocks() */
@@ -3037,8 +3338,13 @@ wait_event_interruptible_timeout(
  * ACPI                                                   *
  **********************************************************/
 
+/* file i915_opregion.c, function intel_opregion_video_event */
+#define NOTIFY_OK	0x000
+#define NOTIFY_DONE	0x001
+
 /* drm_fb_helper.c, struct block_paniced */
 /* radeon_pm.c, function radeon_pm_init() */
+/* file i915_opregion.c, function intel_opregion_video_event */
 struct notifier_block {
 	int (*notifier_call)(struct notifier_block *nb, unsigned long val, void *data);
 };
@@ -3053,6 +3359,93 @@ static __inline__ int
 unregister_acpi_notifier(struct notifier_block *nb) {
 	return 0;
 }
+
+/* file i915_opregion.c, function intel_didl_outputs */
+typedef unsigned long	acpi_handle;
+typedef unsigned long	acpi_status;
+
+static __inline__ int
+ACPI_FAILURE(acpi_status status) {
+	return 1;
+}
+
+static __inline__ int
+ACPI_SUCCESS(acpi_status status) {
+	return 1;
+}
+
+struct acpi_device {
+	struct list_head children;
+	struct list_head node;
+	acpi_handle handle;
+};
+
+static __inline__ acpi_handle
+DEVICE_ACPI_HANDLE(struct device *dev) {
+	return 0;
+}
+
+/* file i915_opregion.c, function intel_opregion_init */
+static __inline__ void
+acpi_video_register(void) {
+	;
+}
+
+/* file i915_opregion.c, function intel_opregion_free */
+static __inline__ void
+acpi_video_unregister(void) {
+	;
+}
+
+/* file i915_opregion.c, function intel_didl_outputs */
+static __inline__ acpi_status
+acpi_bus_get_device(
+	acpi_handle handle,
+	struct acpi_device **pacpi_dev
+) {
+	return 1;
+}
+
+static __inline__ int
+acpi_video_device(struct acpi_device *acpi_dev) {
+	return 0;
+}
+
+static __inline__ acpi_status
+acpi_evaluate_integer(
+	acpi_handle handle,
+	const char *suffix,
+	void *isZero,
+	unsigned long long *device_id
+) {
+	return 0;
+}
+
+/* file intel_lvds.c, function intel_lid_notify() */
+static __inline__ int
+acpi_lid_open(void) {
+	return 1;
+}
+
+/* file intel_lvds.c, function intel_lvds_init() */
+static __inline__ int
+acpi_lid_notifier_register(struct notifier_block *lid_notifier) {
+	return 0;
+}
+
+/* file intel_lvds.c, function intel_lid_notify() */
+static __inline__ void
+acpi_lid_notifier_unregister(struct notifier_block *lid_notifier) {
+	;
+}
+
+/* file i915_opregion.c, function intel_didl_outputs */
+
+#define ACPI_VGA_OUTPUT		0x0001
+#define ACPI_TV_OUTPUT		0x0002
+#define ACPI_DIGITAL_OUTPUT	0x0004
+#define ACPI_LVDS_OUTPUT	0x0008
+#define ACPI_OTHER_OUTPUT	0x0010
 
 #endif /* __KERNEL__ */
 #endif

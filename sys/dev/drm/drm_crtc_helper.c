@@ -483,7 +483,7 @@ int drm_crtc_helper_set_config(struct drm_mode_set *set)
 			     sizeof(struct drm_crtc), GFP_KERNEL);
 #else
 	save_crtcs = malloc(dev->mode_config.num_crtc *
-			     sizeof(struct drm_crtc), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+			     sizeof(struct drm_crtc), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif /* __linux__ */
 	if (!save_crtcs)
 		return -ENOMEM;
@@ -493,13 +493,13 @@ int drm_crtc_helper_set_config(struct drm_mode_set *set)
 				sizeof(struct drm_encoder), GFP_KERNEL);
 #else
 	save_encoders = malloc(dev->mode_config.num_encoder *
-				sizeof(struct drm_encoder), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+				sizeof(struct drm_encoder), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif /* __linux__ */
 	if (!save_encoders) {
 #ifdef __linux__
 		kfree(save_crtcs);
 #else
-		free(save_crtcs, DRM_MEM_KMS);
+		free(save_crtcs, DRM_MEM_DRIVER);
 #endif /* __linux__ */
 		return -ENOMEM;
 	}
@@ -509,15 +509,15 @@ int drm_crtc_helper_set_config(struct drm_mode_set *set)
 				sizeof(struct drm_connector), GFP_KERNEL);
 #else
 	save_connectors = malloc(dev->mode_config.num_connector *
-				sizeof(struct drm_connector), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+				sizeof(struct drm_connector), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif /* __linux__ */
 	if (!save_connectors) {
 #ifdef __linux__
 		kfree(save_crtcs);
 		kfree(save_encoders);
 #else
-		free(save_crtcs, DRM_MEM_KMS);
-		free(save_encoders, DRM_MEM_KMS);
+		free(save_crtcs, DRM_MEM_DRIVER);
+		free(save_encoders, DRM_MEM_DRIVER);
 #endif /* __linux__ */
 		return -ENOMEM;
 	}
@@ -669,9 +669,9 @@ int drm_crtc_helper_set_config(struct drm_mode_set *set)
 	kfree(save_encoders);
 	kfree(save_crtcs);
 #else
-	free(save_connectors, DRM_MEM_KMS);
-	free(save_encoders, DRM_MEM_KMS);
-	free(save_crtcs, DRM_MEM_KMS);
+	free(save_connectors, DRM_MEM_DRIVER);
+	free(save_encoders, DRM_MEM_DRIVER);
+	free(save_crtcs, DRM_MEM_DRIVER);
 #endif /* __linux__ */
 	return 0;
 
@@ -697,9 +697,9 @@ fail:
 	kfree(save_encoders);
 	kfree(save_crtcs);
 #else
-	free(save_connectors, DRM_MEM_KMS);
-	free(save_encoders, DRM_MEM_KMS);
-	free(save_crtcs, DRM_MEM_KMS);
+	free(save_connectors, DRM_MEM_DRIVER);
+	free(save_encoders, DRM_MEM_DRIVER);
+	free(save_crtcs, DRM_MEM_DRIVER);
 #endif /* __linux__ */
 	return ret;
 }

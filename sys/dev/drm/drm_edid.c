@@ -247,7 +247,7 @@ drm_do_get_edid(struct drm_connector *connector, struct i2c_adapter *adapter)
 #ifdef __linux__
 	if ((block = kmalloc(EDID_LENGTH, GFP_KERNEL)) == NULL)
 #else
-	if ((block = malloc(EDID_LENGTH, DRM_MEM_KMS, M_WAITOK)) == NULL)
+	if ((block = malloc(EDID_LENGTH, DRM_MEM_DRIVER, M_WAITOK)) == NULL)
 #endif
 		return NULL;
 
@@ -268,7 +268,7 @@ drm_do_get_edid(struct drm_connector *connector, struct i2c_adapter *adapter)
 #ifdef __linux__
 	new = krealloc(block, (block[0x7e] + 1) * EDID_LENGTH, GFP_KERNEL);
 #else
-	new = krealloc(block, (block[0x7e] + 1) * EDID_LENGTH, DRM_MEM_KMS, M_WAITOK);
+	new = krealloc(block, (block[0x7e] + 1) * EDID_LENGTH, DRM_MEM_DRIVER, M_WAITOK);
 #endif
 	if (!new)
 		goto out;
@@ -296,7 +296,7 @@ out:
 #ifdef __linux__
 	kfree(block);
 #else
-	free(block, DRM_MEM_KMS);
+	free(block, DRM_MEM_DRIVER);
 #endif
 	return NULL;
 }
@@ -902,7 +902,7 @@ drm_mode_std(struct drm_connector *connector, struct edid *edid,
 #ifdef __linux__
 			kfree(mode);
 #else
-			free(mode, DRM_MEM_KMS);
+			free(mode, DRM_MEM_DRIVER);
 #endif
 			mode = drm_gtf_mode_complex(dev, hsize, vsize,
 						    vrefresh_rate, 0, 0,

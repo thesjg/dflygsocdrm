@@ -46,11 +46,7 @@ void radeon_gem_object_free(struct drm_gem_object *gobj)
 	}
 
 	drm_gem_object_release(gobj);
-#ifdef __linux__
-	kfree(gobj);
-#else
-	free(gobj, DRM_MEM_GEM);
-#endif /* __linux__ */
+	free(gobj, DRM_MEM_DRIVER);
 }
 
 int radeon_gem_object_create(struct radeon_device *rdev, int size,

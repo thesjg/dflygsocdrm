@@ -1,4 +1,12 @@
-/*-
+/**
+ * \file drm_agpsupport.c
+ * DRM support for AGP/GART backend
+ *
+ * \author Rickard E. (Rik) Faith <faith@valinux.com>
+ * \author Gareth Hughes <gareth@valinux.com>
+ */
+
+/*
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
@@ -21,16 +29,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- *
- * Author:
- *    Rickard E. (Rik) Faith <faith@valinux.com>
- *    Gareth Hughes <gareth@valinux.com>
- *
- */
-
-/** @file drm_agpsupport.c
- * Support code for tying the kernel AGP support to DRM drivers and
- * the DRM's AGP ioctls.
  */
 
 #include "drmP.h"
@@ -123,7 +121,7 @@ int drm_agp_info_ioctl(struct drm_device *dev, void *data,
  * Verifies the AGP device hasn't been acquired before and calls
  * \c agp_backend_acquire.
  */
-int drm_agp_acquire(struct drm_device *dev)
+int drm_agp_acquire(struct drm_device * dev)
 {
 	int retcode;
 
@@ -177,7 +175,6 @@ int drm_agp_release(struct drm_device * dev)
 int drm_agp_release_ioctl(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv)
 {
-
 	return drm_agp_release(dev);
 }
 
@@ -191,7 +188,7 @@ int drm_agp_release_ioctl(struct drm_device *dev, void *data,
  * Verifies the AGP device has been acquired but not enabled, and calls
  * \c agp_enable.
  */
-int drm_agp_enable(struct drm_device *dev, struct drm_agp_mode mode)
+int drm_agp_enable(struct drm_device * dev, struct drm_agp_mode mode)
 {
 	if (!dev->agp || !dev->agp->acquired)
 		return EINVAL;
@@ -243,14 +240,8 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	pages = (request->size + PAGE_SIZE - 1) / PAGE_SIZE;
 	type = (u32) request->type;
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 	memory = drm_agp_allocate_memory((struct agp_bridge_data*)NULL, pages,
 		type);
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	if (memory == NULL) {
 		free(entry, DRM_MEM_AGPLISTS);
 		return ENOMEM;
@@ -279,13 +270,7 @@ int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_buffer *) data;
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	retcode = drm_agp_alloc(dev, &request);
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 
 	*(struct drm_agp_buffer *) data = request;
 
@@ -335,18 +320,9 @@ int drm_agp_unbind(struct drm_device *dev, struct drm_agp_binding *request)
 	entry = drm_agp_lookup_entry(dev, request->handle);
 	if (entry == NULL || !entry->bound)
 		return EINVAL;
-
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 	retcode = drm_agp_unbind_memory(entry->memory);
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
-
 	if (retcode == 0)
 		entry->bound = 0;
-
 	return retcode;
 }
 
@@ -358,13 +334,7 @@ int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_binding *) data;
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	retcode = drm_agp_unbind(dev, &request);
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 
 	return retcode;
 }
@@ -385,27 +355,18 @@ int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
 int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request)
 {
 	struct drm_agp_mem *entry;
-	int               retcode;
-	int               page;
+	int retcode;
+	int page;
 	
 	if (!dev->agp || !dev->agp->acquired)
 		return EINVAL;
-
-	DRM_DEBUG("agp_bind, page_size=%x\n", PAGE_SIZE);
-
 	entry = drm_agp_lookup_entry(dev, request->handle);
 	if (entry == NULL || entry->bound)
 		return EINVAL;
 
 	page = (request->offset + PAGE_SIZE - 1) / PAGE_SIZE;
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 	retcode = drm_agp_bind_memory(entry->memory, page);
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	if (retcode == 0)
 		entry->bound = dev->agp->base + (page << PAGE_SHIFT);
 
@@ -420,13 +381,7 @@ int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_binding *) data;
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	retcode = drm_agp_bind(dev, &request);
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 
 	return retcode;
 }
@@ -458,15 +413,9 @@ int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 
 	list_del(&entry->head);
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 	if (entry->bound)
 		drm_agp_unbind_memory(entry->memory);
 	drm_agp_free_memory(entry->memory);
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 
 	free(entry, DRM_MEM_AGPLISTS);
 	return 0;
@@ -480,13 +429,7 @@ int drm_agp_free_ioctl(struct drm_device *dev, void *data,
 
 	request = *(struct drm_agp_buffer *) data;
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 	retcode = drm_agp_free(dev, &request);
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 
 	return retcode;
 }
@@ -536,8 +479,8 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data * bridge,
 				     size_t pages, u32 type)
 {
-	DRM_AGP_MEM *handle = malloc(sizeof(DRM_AGP_MEM), DRM_MEM_AGPLISTS,
-		M_WAITOK);
+	DRM_AGP_MEM *handle = malloc(sizeof(DRM_AGP_MEM),
+		DRM_MEM_AGPLISTS, M_WAITOK | M_ZERO);
 	if (handle == NULL)
 		return NULL;
 
@@ -556,11 +499,14 @@ DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data * bridge,
 	handle->pages = NULL;
 #endif /* __linux__ */
 
+/* QUESTION: Should one use PAGE_SHIFT or AGP_PAGE_SHIFT? */
+/* On DragonFly AGP_PAGE_SHIFT is defined to be 12 */
 	handle->memory = agp_alloc_memory(agpdev, type, pages << AGP_PAGE_SHIFT);
 	return handle;
 }
 
-int drm_agp_free_memory(DRM_AGP_MEM *handle)
+/** Calls agp_free_memory() */
+int drm_agp_free_memory(DRM_AGP_MEM * handle)
 {
 	device_t agpdev;
 
@@ -578,7 +524,8 @@ int drm_agp_free_memory(DRM_AGP_MEM *handle)
 	return 1;
 }
 
-int drm_agp_bind_memory(DRM_AGP_MEM *handle, off_t start)
+/** Calls agp_bind_memory() */
+int drm_agp_bind_memory(DRM_AGP_MEM * handle, off_t start)
 {
 	device_t agpdev;
 
@@ -589,7 +536,8 @@ int drm_agp_bind_memory(DRM_AGP_MEM *handle, off_t start)
 	return agp_bind_memory(agpdev, handle->memory, start * PAGE_SIZE);
 }
 
-int drm_agp_unbind_memory(DRM_AGP_MEM *handle)
+/** Calls agp_unbind_memory() */
+int drm_agp_unbind_memory(DRM_AGP_MEM * handle)
 {
 	device_t agpdev;
 

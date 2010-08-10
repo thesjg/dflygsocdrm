@@ -390,7 +390,7 @@ void drm_crtc_cleanup(struct drm_crtc *crtc)
 #ifdef __linux__
 		kfree(crtc->gamma_store);
 #else
-		free(crtc->gamma_store, DRM_MEM_KMS);
+		free(crtc->gamma_store, DRM_MEM_DRIVER);
 #endif
 		crtc->gamma_store = NULL;
 	}
@@ -435,7 +435,7 @@ void drm_mode_remove(struct drm_connector *connector,
 #ifdef __linux__
 	kfree(mode);
 #else
-	free(mode, DRM_MEM_KMS);
+	free(mode, DRM_MEM_DRIVER);
 #endif
 }
 EXPORT_SYMBOL(drm_mode_remove);
@@ -563,7 +563,7 @@ struct drm_display_mode *drm_mode_create(struct drm_device *dev)
 #ifdef __linux__
 	nmode = kzalloc(sizeof(struct drm_display_mode), GFP_KERNEL);
 #else
-	nmode = malloc(sizeof(struct drm_display_mode), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	nmode = malloc(sizeof(struct drm_display_mode), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 	if (!nmode)
 		return NULL;
@@ -590,7 +590,7 @@ void drm_mode_destroy(struct drm_device *dev, struct drm_display_mode *mode)
 #ifdef __linux__
 	kfree(mode);
 #else
-	free(mode, DRM_MEM_KMS);
+	free(mode, DRM_MEM_DRIVER);
 #endif
 }
 EXPORT_SYMBOL(drm_mode_destroy);
@@ -911,7 +911,7 @@ int drm_mode_group_init(struct drm_device *dev, struct drm_mode_group *group)
 #ifdef __linux__
 	group->id_list = kzalloc(total_objects * sizeof(uint32_t), GFP_KERNEL);
 #else
-	group->id_list = malloc(total_objects * sizeof(uint32_t), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	group->id_list = malloc(total_objects * sizeof(uint32_t), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 	if (!group->id_list)
 		return -ENOMEM;
@@ -1576,7 +1576,7 @@ int drm_mode_setcrtc(struct drm_device *dev, void *data,
 #else
 		connector_set = malloc(crtc_req->count_connectors *
 					sizeof(struct drm_connector *),
-					DRM_MEM_KMS, M_WAITOK | M_ZERO);
+					DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 		if (!connector_set) {
 			ret = -ENOMEM;
@@ -1620,7 +1620,7 @@ out:
 #ifdef __linux__
 	kfree(connector_set);
 #else
-	free(connector_set, DRM_MEM_KMS);
+	free(connector_set, DRM_MEM_DRIVER);
 #endif
 	mutex_unlock(&dev->mode_config.mutex);
 	return ret;
@@ -2101,7 +2101,7 @@ struct drm_property *drm_property_create(struct drm_device *dev, int flags,
 #ifdef __linux__
 	property = kzalloc(sizeof(struct drm_property), GFP_KERNEL);
 #else
-	property = malloc(sizeof(struct drm_property), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	property = malloc(sizeof(struct drm_property), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 	if (!property)
 		return NULL;
@@ -2110,7 +2110,7 @@ struct drm_property *drm_property_create(struct drm_device *dev, int flags,
 #ifdef __linux__
 		property->values = kzalloc(sizeof(uint64_t)*num_values, GFP_KERNEL);
 #else
-		property->values = malloc(sizeof(uint64_t)*num_values, DRM_MEM_KMS, M_WAITOK | M_ZERO);
+		property->values = malloc(sizeof(uint64_t)*num_values, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 		if (!property->values)
 			goto fail;
@@ -2130,7 +2130,7 @@ fail:
 #ifdef __linux__
 	kfree(property);
 #else
-	free(property, DRM_MEM_KMS);
+	free(property, DRM_MEM_DRIVER);
 #endif
 	return NULL;
 }
@@ -2157,7 +2157,7 @@ int drm_property_add_enum(struct drm_property *property, int index,
 #ifdef __linux__
 	prop_enum = kzalloc(sizeof(struct drm_property_enum), GFP_KERNEL);
 #else
-	prop_enum = malloc(sizeof(struct drm_property_enum), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	prop_enum = malloc(sizeof(struct drm_property_enum), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 	if (!prop_enum)
 		return -ENOMEM;
@@ -2181,7 +2181,7 @@ void drm_property_destroy(struct drm_device *dev, struct drm_property *property)
 #ifdef __linux__
 		kfree(prop_enum);
 #else
-		free(prop_enum, DRM_MEM_KMS);
+		free(prop_enum, DRM_MEM_DRIVER);
 #endif
 	}
 
@@ -2189,14 +2189,14 @@ void drm_property_destroy(struct drm_device *dev, struct drm_property *property)
 #ifdef __linux__
 		kfree(property->values);
 #else
-		free(property->values, DRM_MEM_KMS);
+		free(property->values, DRM_MEM_DRIVER);
 #endif
 	drm_mode_object_put(dev, &property->base);
 	list_del(&property->head);
 #ifdef __linux__
 	kfree(property);
 #else
-	free(property, DRM_MEM_KMS);
+	free(property, DRM_MEM_DRIVER);
 #endif
 }
 EXPORT_SYMBOL(drm_property_destroy);
@@ -2367,7 +2367,7 @@ static struct drm_property_blob *drm_property_create_blob(struct drm_device *dev
 #ifdef __linux__
 	blob = kzalloc(sizeof(struct drm_property_blob)+length, GFP_KERNEL);
 #else
-	blob = malloc(sizeof(struct drm_property_blob)+length, DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	blob = malloc(sizeof(struct drm_property_blob)+length, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 	if (!blob)
 		return NULL;
@@ -2391,7 +2391,7 @@ static void drm_property_destroy_blob(struct drm_device *dev,
 #ifdef __linux__
 	kfree(blob);
 #else
-	free(blob, DRM_MEM_KMS);
+	free(blob, DRM_MEM_DRIVER);
 #endif
 }
 
@@ -2563,7 +2563,7 @@ bool drm_mode_crtc_set_gamma_size(struct drm_crtc *crtc,
 #ifdef __linux__
 	crtc->gamma_store = kzalloc(gamma_size * sizeof(uint16_t) * 3, GFP_KERNEL);
 #else
-	crtc->gamma_store = malloc(gamma_size * sizeof(uint16_t) * 3, DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	crtc->gamma_store = malloc(gamma_size * sizeof(uint16_t) * 3, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 	if (!crtc->gamma_store) {
 		crtc->gamma_size = 0;
@@ -2732,7 +2732,7 @@ int drm_mode_page_flip_ioctl(struct drm_device *dev,
 #ifdef __linux__
 		e = kzalloc(sizeof *e, GFP_KERNEL);
 #else
-		e = malloc(sizeof *e, DRM_MEM_KMS, M_WAITOK | M_ZERO);
+		e = malloc(sizeof *e, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 		if (e == NULL) {
 			spin_lock_irqsave(&dev->event_lock, flags);
@@ -2758,7 +2758,7 @@ int drm_mode_page_flip_ioctl(struct drm_device *dev,
 #ifdef __linux__
 		kfree(e);
 #else
-		free(e, DRM_MEM_KMS);
+		free(e, DRM_MEM_DRIVER);
 #endif
 	}
 

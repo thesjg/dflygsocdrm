@@ -45,19 +45,11 @@ int radeon_cs_parser_relocs(struct radeon_cs_parser *p)
 	chunk = &p->chunks[p->chunk_relocs_idx];
 	/* FIXME: we assume that each relocs use 4 dwords */
 	p->nrelocs = chunk->length_dw / 4;
-#ifdef __linux__
-	p->relocs_ptr = kcalloc(p->nrelocs, sizeof(void *), GFP_KERNEL);
-#else
 	p->relocs_ptr = drm_calloc(p->nrelocs, sizeof(void *), DRM_MEM_DRIVER);
-#endif /* __linux__ */
 	if (p->relocs_ptr == NULL) {
 		return -ENOMEM;
 	}
-#ifdef __linux__
-	p->relocs = kcalloc(p->nrelocs, sizeof(struct radeon_cs_reloc), GFP_KERNEL);
-#else
 	p->relocs = drm_calloc(p->nrelocs, sizeof(struct radeon_cs_reloc), DRM_MEM_DRIVER);
-#endif /* __linux__ */
 	if (p->relocs == NULL) {
 		return -ENOMEM;
 	}
@@ -111,11 +103,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 	p->idx = 0;
 	p->chunk_ib_idx = -1;
 	p->chunk_relocs_idx = -1;
-#ifdef __linux__
-	p->chunks_array = kcalloc(cs->num_chunks, sizeof(uint64_t), GFP_KERNEL);
-#else
 	p->chunks_array = drm_calloc(cs->num_chunks, sizeof(uint64_t), DRM_MEM_DRIVER);
-#endif /* __linux__ */
 	if (p->chunks_array == NULL) {
 		return -ENOMEM;
 	}
@@ -125,11 +113,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 		return -EFAULT;
 	}
 	p->nchunks = cs->num_chunks;
-#ifdef __linux__
-	p->chunks = kcalloc(p->nchunks, sizeof(struct radeon_cs_chunk), GFP_KERNEL);
-#else
 	p->chunks = drm_calloc(p->nchunks, sizeof(struct radeon_cs_chunk), DRM_MEM_DRIVER);
-#endif /* __linux__ */
 	if (p->chunks == NULL) {
 		return -ENOMEM;
 	}
@@ -163,11 +147,7 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 		cdata = (uint32_t *)(unsigned long)user_chunk.chunk_data;
 		if (p->chunks[i].chunk_id != RADEON_CHUNK_ID_IB) {
 			size = p->chunks[i].length_dw * sizeof(uint32_t);
-#ifdef __linux__
-			p->chunks[i].kdata = kmalloc(size, GFP_KERNEL);
-#else
 			p->chunks[i].kdata = malloc(size, DRM_MEM_DRIVER, M_WAITOK);
-#endif /* __linux__ */
 			if (p->chunks[i].kdata == NULL) {
 				return -ENOMEM;
 			}
@@ -176,21 +156,11 @@ int radeon_cs_parser_init(struct radeon_cs_parser *p, void *data)
 				return -EFAULT;
 			}
 		} else {
-#ifdef __linux__
-			p->chunks[i].kpage[0] = kmalloc(PAGE_SIZE, GFP_KERNEL);
-			p->chunks[i].kpage[1] = kmalloc(PAGE_SIZE, GFP_KERNEL);
-#else
 			p->chunks[i].kpage[0] = malloc(PAGE_SIZE, DRM_MEM_DRIVER, M_WAITOK);
 			p->chunks[i].kpage[1] = malloc(PAGE_SIZE, DRM_MEM_DRIVER, M_WAITOK);
-#endif /* __linux__ */
 			if (p->chunks[i].kpage[0] == NULL || p->chunks[i].kpage[1] == NULL) {
-#ifdef __linux__
-				kfree(p->chunks[i].kpage[0]);
-				kfree(p->chunks[i].kpage[1]);
-#else
 				free(p->chunks[i].kpage[0], DRM_MEM_DRIVER);
 				free(p->chunks[i].kpage[1], DRM_MEM_DRIVER);
-#endif /* __linux__ */
 				return -ENOMEM;
 			}
 			p->chunks[i].kpage_idx[0] = -1;
@@ -229,18 +199,6 @@ static void radeon_cs_parser_fini(struct radeon_cs_parser *parser, int error)
 				drm_gem_object_unreference_unlocked(parser->relocs[i].gobj);
 		}
 	}
-#ifdef __linux__
-	kfree(parser->track);
-	kfree(parser->relocs);
-	kfree(parser->relocs_ptr);
-	for (i = 0; i < parser->nchunks; i++) {
-		kfree(parser->chunks[i].kdata);
-		kfree(parser->chunks[i].kpage[0]);
-		kfree(parser->chunks[i].kpage[1]);
-	}
-	kfree(parser->chunks);
-	kfree(parser->chunks_array);
-#else
 	free(parser->track, DRM_MEM_DRIVER);
 	free(parser->relocs, DRM_MEM_DRIVER);
 	free(parser->relocs_ptr);
@@ -251,7 +209,6 @@ static void radeon_cs_parser_fini(struct radeon_cs_parser *parser, int error)
 	}
 	free(parser->chunks, DRM_MEM_DRIVER);
 	free(parser->chunks_array, DRM_MEM_DRIVER);
-#endif /* __linux__ */
 	radeon_ib_free(parser->rdev, &parser->ib);
 }
 

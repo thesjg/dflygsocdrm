@@ -46,7 +46,7 @@ int radeon_driver_unload_kms(struct drm_device *dev)
 #ifdef __linux__
 	kfree(rdev);
 #else
-	free(rdev, DRM_MEM_KMS);
+	free(rdev, DRM_MEM_DRIVER);
 #endif /* __linux__ */
 	dev->dev_private = NULL;
 	return 0;
@@ -60,7 +60,7 @@ int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags)
 #ifdef __linux__
 	rdev = kzalloc(sizeof(struct radeon_device), GFP_KERNEL);
 #else
-	rdev = malloc(sizeof(struct radeon_device), DRM_MEM_KMS, M_WAITOK | M_ZERO);
+	rdev = malloc(sizeof(struct radeon_device), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif /* __linux__ */
 	if (rdev == NULL) {
 		return -ENOMEM;
