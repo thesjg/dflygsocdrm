@@ -36,10 +36,6 @@
  *
  */
 
-/** @file drm_bufs.c
- * Implementation of the ioctls for setup of DRM mappings and DMA buffers.
- */
-
 #ifdef __linux__
 #include <linux/vmalloc.h>
 #include <linux/slab.h>
@@ -135,18 +131,15 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 	int use_hashed_handle, shift;
 	unsigned long add;
 
-#ifdef __linux__
-/* #if (BITS_PER_LONG == 64) */
-	use_hashed_handle = ((user_token & 0xFFFFFFFF00000000UL) || hashed_handle);
-/* #elif (BITS_PER_LONG == 32) */
-	use_hashed_handle = hashed_handle;
-/* #else */
-/* #error Unsupported long size. Neither 64 nor 32 bits. */
-/* #endif */
-#else /* __linux__ */
+#ifdef DRM_NEWER_BUFSYNC
+	if (sizeof(long) == 8)
+		use_hashed_handle = ((user_token & 0xFFFFFFFF00000000UL) || hashed_handle);
+	else
+		use_hashed_handle = hashed_handle;
+#else
 /* sizeof(int) == 4 all supported platforms for DragonFly BSD */
 	use_hashed_handle = hashed_handle;
-#endif /* __linux__ */
+#endif
 
 	if (!use_hashed_handle) {
 		int ret;
@@ -188,7 +181,6 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 					 user_token, 32 - PAGE_SHIFT - 3,
 					 shift, add);
 }
-/* end newer */
 
 /**
  * Core function to create a range of memory available for mapping by a
@@ -263,39 +255,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 #endif /* __linux__ */
 	map->handle = NULL;
 
-#ifndef DRM_NEWER_BUFS
-	/* Check if this is just another version of a kernel-allocated map, and
-	 * just hand that back if so.
-	 */
-	if (type == _DRM_REGISTERS || type == _DRM_FRAME_BUFFER || type == _DRM_SHM) {
-		list_for_each_entry(list_entry, &dev->maplist, head) {
-			map_entry = list_entry->map;
-			if (!map_entry ||
-				map->type != map_entry->type ||
-				list_entry->master != dev->primary->master)
-			continue;
-
-			if (map->type == map_entry->type && (map->offset == map_entry->offset ||
-			(map_entry->type == _DRM_SHM && map_entry->flags == _DRM_CONTAINS_LOCK))) {
-				map_entry->size = map->size;
-				list = list_entry;
-				map_free = map;
-				map = map_entry;
-				DRM_DEBUG("Found kernel map %d\n", type);
-				free(map_free, DRM_MEM_MAPS);
-				goto done;
-			}
-			else if ((map->type == _DRM_REGISTERS || map->type == _DRM_FRAME_BUFFER) &&
-				(map->type == map_entry->type) &&
-				(map->offset == map_entry->offset)) {
-				DRM_ERROR("drm_addmap(): type %d more than one offset\n", map->type);
-			}
-		}
-	}
-#endif /* DRM_NEWER_BUFS */
-
 	switch (map->type) {
-#ifdef DRM_NEWER_BUFS
 	case _DRM_REGISTERS:
 	case _DRM_FRAME_BUFFER:
 		/* Some drivers preinitialize some maps, without the X Server
@@ -332,20 +292,8 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		}
 
 		break;
-#else /* DRM_NEWER_BUFS */
-	case _DRM_REGISTERS:
-		map->handle = drm_ioremap(dev, map);
-		if (!(map->flags & _DRM_WRITE_COMBINING))
-			break;
-		/* FALLTHROUGH */
-	case _DRM_FRAME_BUFFER:
-		if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
-			map->mtrr = 1;
-		break;
-#endif /* DRM_NEWER_BUFS */
 
 	case _DRM_SHM:
-#ifdef DRM_NEWER_BUFS
 		list = drm_find_matching_map(dev, map);
 		if (list != NULL) {
 			if(list->map->size != map->size) {
@@ -359,12 +307,11 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			*maplist = list;
 			return 0;
 		}
-#endif /* DRM_NEWER_BUFS */
 
 #ifdef __linux__
 		map->handle = vmalloc_user(map->size);
-#else
-		map->handle = malloc(map->size, DRM_MEM_MAPS, M_WAITOK);
+#else /* UNIMPLEMENTED for mapping to user space */
+		map->handle = malloc(map->size, DRM_MEM_MAPS, M_WAITOK | M_ZERO);
 #endif /* __linux__ */
 		DRM_DEBUG("%lu %d %p\n",
 			  map->size, drm_order(map->size), map->handle);
@@ -555,9 +502,11 @@ int drm_addmap(struct drm_device * dev, resource_size_t offset,
 	struct drm_map_list *list;
 	int rc;
 
+#ifndef __linux__
 	if (size > 0x100000000UL) {
 		DRM_ERROR("drm_addmap() size (%16lx) > max_int\n", size);
 	}
+#endif /* __linux__ */
 
 	rc = drm_addmap_core(dev, offset, size, type, flags, &list);
 	if (!rc)
@@ -896,7 +845,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 
 	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER)
 		return -EINVAL;
-#ifdef DRM_NEWER_QUEUE
+#ifdef DRM_NEWER_BUFSYNC
 	if (dev->queue_count)
 		return -EBUSY;	/* Not while in use */
 #endif
@@ -1059,9 +1008,6 @@ int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 	if (!DRM_SUSER(DRM_CURPROC))
 		return -EPERM;
 
-	if (request->count < 0 || request->count > 4096)
-		return EINVAL;
-
 	count = request->count;
 	order = drm_order(request->size);
 	size = 1 << order;
@@ -1072,18 +1018,20 @@ int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER)
 		return -EINVAL;
 
-#ifdef __linux__
+#ifdef DRM_NEWER_BUFSYNC
 	if (dev->queue_count)
 		return -EBUSY;	/* Not while in use */
-#endif /* __linux__ */
+#endif
 
 	alignment = (request->flags & _DRM_PAGE_ALIGN)
 	    ? PAGE_ALIGN(size) : size;
 
+#ifndef __linux__
 	if (alignment != 0x1000) {
 		DRM_ERROR("drm_addbufs_pci(): alignment (%x) != (%x)\n",
 			alignment, 0x1000);
 	}
+#endif /* !__linux__ */
 
 	page_order = order - PAGE_SHIFT > 0 ? order - PAGE_SHIFT : 0;
 	total = PAGE_SIZE << page_order;
@@ -1151,11 +1099,11 @@ int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
 	page_count = 0;
 
 	while (entry->buf_count < count) {
-#ifdef __linux__
+#ifdef DRM_NEWER_BUFSYNC
 		dmah = drm_pci_alloc(dev, PAGE_SIZE << page_order, 0x1000);
 #else
 		dmah = drm_pci_alloc(dev, size, alignment);
-#endif /* __linux__ */
+#endif
 
 		if (!dmah) {
 			/* Set count correctly so we free the proper amount. */
@@ -1284,9 +1232,6 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 	if (!DRM_SUSER(DRM_CURPROC))
 		return -EPERM;
 
-	if (request->count < 0 || request->count > 4096)
-		return EINVAL;
-
 	count = request->count;
 	order = drm_order(request->size);
 	size = 1 << order;
@@ -1309,10 +1254,10 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 
 	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER)
 		return -EINVAL;
-#ifdef __linux__
+#ifdef DRM_NEWER_BUFSYNC
 	if (dev->queue_count)
 		return -EBUSY;	/* Not while in use */
-#endif /* __linux__ */
+#endif
 
 	spin_lock(&dev->count_lock);
 	if (dev->buf_use) {
@@ -1568,8 +1513,10 @@ static int drm_addbufs_fb(struct drm_device * dev, struct drm_buf_desc * request
 	}
 
 	dma->buf_count += entry->buf_count;
+#ifdef __linux__
 	dma->seg_count += entry->seg_count;
 	dma->page_count += byte_count >> PAGE_SHIFT;
+#endif /* __linux__ */
 	dma->byte_count += byte_count;
 
 	DRM_DEBUG("dma->buf_count : %d\n", dma->buf_count);

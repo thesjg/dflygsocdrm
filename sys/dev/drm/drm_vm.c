@@ -499,7 +499,11 @@ static int drm_do_vm_sg_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		return VM_FAULT_SIGBUS;	/* Nothing allocated */
 
 	offset = (unsigned long)vmf->virtual_address - vma->vm_start;
+#ifdef __linux__
 	map_offset = map->offset - (unsigned long)dev->sg->virtual;
+#else
+	map_offset = map->offset - dev->sg->handle;
+#endif
 	page_offset = (offset >> PAGE_SHIFT) + (map_offset >> PAGE_SHIFT);
 	page = entry->pagelist[page_offset];
 	get_page(page);
