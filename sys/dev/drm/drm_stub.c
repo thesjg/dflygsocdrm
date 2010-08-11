@@ -274,7 +274,8 @@ int drm_dropmaster_ioctl(struct drm_device *dev, void *data,
 }
 
 static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
-			DRM_PCI_DEVICE_ID *idlist)
+			   DRM_PCI_DEVICE_ID *idlist,
+			   struct drm_driver *driver)
 {
 	int i;
 	DRM_PCI_DEVICE_ID *id_entry;
@@ -376,10 +377,9 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 		goto error_out_unreg;
 	}
 
-#ifdef __linux__
 	if (driver->driver_features & DRIVER_GEM) {
 		retcode = drm_gem_init(dev);
-#else /* inserted just to compile */
+#if 0
 	if (dev->driver->driver_features & DRIVER_GEM) {
 		retcode = 0;
 #endif
@@ -550,7 +550,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 		dev->irq = (int) rman_get_start(dev->irqr);
 	}
 
-	if ((ret = drm_fill_in_dev(dev, kdev, idlist))) {
+	if ((ret = drm_fill_in_dev(dev, kdev, idlist, dev->driver))) {
 		printk(KERN_ERR "DRM: Fill_in_dev failed.\n");
 		goto err_g2;
 	}
@@ -565,14 +565,8 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 		goto err_g3;
 
 	if (dev->driver->load) {
-#ifndef DRM_NEWER_LOCK
-//		DRM_LOCK();
-#endif
 		/* Shared code returns -errno. */
 		ret = -dev->driver->load(dev, dev->id_entry->driver_data);
-#ifndef DRM_NEWER_LOCK
-//		DRM_UNLOCK();
-#endif
 		if (ret)
 			goto err_g4;
 	}
@@ -711,17 +705,9 @@ void drm_put_dev(struct drm_device *dev)
 
 	drm_vblank_cleanup(dev);
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
-
 	list_for_each_entry_safe(r_list, list_temp, &dev->maplist, head)
 		drm_rmmap(dev, r_list->map);
 	drm_ht_remove(&dev->map_hash);
-
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 
 	drm_ctxbitmap_cleanup(dev);
 

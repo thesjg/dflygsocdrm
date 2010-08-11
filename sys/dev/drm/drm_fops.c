@@ -612,7 +612,6 @@ int drm_close_legacy(struct dev_close_args *ap)
 	funsetown(dev->buf_sigio);
 #endif /* !__linux__ */
 
-#ifdef __linux__
 	drm_events_release(file_priv);
 
 	if (dev->driver->driver_features & DRIVER_GEM)
@@ -620,7 +619,6 @@ int drm_close_legacy(struct dev_close_args *ap)
 
 	if (dev->driver->driver_features & DRIVER_MODESET)
 		drm_fb_release(file_priv);
-#endif /* __linux__ */
 
 	mutex_lock(&dev->ctxlist_mutex);
 	if (!list_empty(&dev->ctxlist)) {
