@@ -600,3 +600,10 @@ nullclose(struct dev_close_args *ap)
 	return (0);
 }
 
+
+int
+nommap_single(struct dev_mmap_args *ap)
+{
+	return (ENODEV);
+}
+
