@@ -584,6 +584,12 @@ nodump(struct dev_dump_args *ap)
 	return (ENODEV);
 }
 
+int
+nommap_single(struct dev_mmap_args *ap)
+{
+	return (ENODEV);
+}
+
 /*
  * XXX this is probably bogus.  Any device that uses it isn't checking the
  * minor number.
@@ -598,12 +604,5 @@ int
 nullclose(struct dev_close_args *ap)
 {
 	return (0);
-}
-
-
-int
-nommap_single(struct dev_mmap_args *ap)
-{
-	return (ENODEV);
 }
 

@@ -165,6 +165,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	vm_size_t size, pageoff;
 	vm_prot_t prot, maxprot;
 	void *handle;
+	objtype_t handle_type;
 	int flags, error;
 	off_t pos;
 	vm_object_t obj;
@@ -264,6 +265,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 		 * Mapping blank space is trivial.
 		 */
 		handle = NULL;
+		handle_type = OBJT_DEFAULT;
 		maxprot = VM_PROT_ALL;
 	} else {
 		/*
@@ -327,6 +329,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 		 */
 		if (vp->v_type == VCHR && iszerodev(vp->v_rdev)) {
 			handle = NULL;
+			handle_type = OBJT_DEFAULT;
 			maxprot = VM_PROT_ALL;
 			flags |= MAP_ANON;
 			pos = 0;
@@ -385,6 +388,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 				maxprot |= VM_PROT_WRITE;
 			}
 			handle = (void *)vp;
+			handle_type = OBJT_VNODE;
 		}
 	}
 
@@ -404,7 +408,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	}
 
 	error = vm_mmap(&vms->vm_map, &addr, size, prot, maxprot,
-			flags, OBJT_VNODE, handle, pos);
+			flags, handle_type, handle, pos);
 	if (error == 0)
 		*res = (void *)(addr + pageoff);
 

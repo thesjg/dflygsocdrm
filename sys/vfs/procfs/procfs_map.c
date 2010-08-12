@@ -140,11 +140,9 @@ case OBJT_VNODE:
 case OBJT_SWAP:
 				type = "swap";
 				break;
+case OBJT_DRM:
 case OBJT_DEVICE:
 				type = "device";
-				break;
-case OBJT_DRM:
-				type = "drm";
 				break;
 			}
 			
