@@ -251,6 +251,7 @@ struct dev_ops {
 	d_psize_t	*d_psize;
 	d_kqfilter_t	*d_kqfilter;
 	d_clone_t	*d_clone;	/* clone from base dev_ops */
+	d_mmap_single_t	*d_mmap_single;
 	d_revoke_t	*d_revoke;
 #define dev_ops_last_field	d_revoke
 };
