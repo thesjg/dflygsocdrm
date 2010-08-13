@@ -750,6 +750,9 @@ struct drm_gem_object {
 	/** File representing the shmem storage */
 	struct file *filp;
 
+	/** vm_object representating the backing store */
+	vm_object_t object;
+
 	/* Mapping info for this object */
 	struct drm_map_list map_list;
 

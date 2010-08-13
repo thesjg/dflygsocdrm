@@ -1339,3 +1339,184 @@ out:
 		return (EINVAL);
 	}
 }
+
+/*
+ * Internal version of mmap.
+ * Currently used by mmap, exec, and sys5 shared memory.
+ * Handle is either a vnode pointer or NULL for MAP_ANON.
+ *
+ * No requirements; kern_mmap path holds the vm_token
+ */
+int
+drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
+	vm_prot_t maxprot, int flags,
+	objtype_t handle_type, void *handle, vm_ooffset_t foff,
+	vm_object_t *pobject)
+{
+	boolean_t fitit;
+	vm_object_t object;
+	vm_offset_t eaddr;
+	vm_size_t   esize;
+	struct proc *p;
+	int rv = KERN_SUCCESS;
+	off_t objsize;
+	int docow;
+
+	if (size == 0)
+		return (0);
+
+	objsize = round_page(size);
+	if (objsize < size)
+		return (EINVAL);
+	size = objsize;
+
+	lwkt_gettoken(&vm_token);
+
+	/*
+	 * XXX messy code, fixme
+	 *
+	 * NOTE: Overflow checks require discrete statements or GCC4
+	 * will optimize it out.
+	 */
+	if ((p = curproc) != NULL && map == &p->p_vmspace->vm_map) {
+		esize = map->size + size;	/* workaround gcc4 opt */
+		if (esize < map->size ||
+		    esize > p->p_rlimit[RLIMIT_VMEM].rlim_cur) {
+			lwkt_reltoken(&vm_token);
+			return(ENOMEM);
+		}
+	}
+
+	/*
+	 * We currently can only deal with page aligned file offsets.
+	 * The check is here rather than in the syscall because the
+	 * kernel calls this function internally for other mmaping
+	 * operations (such as in exec) and non-aligned offsets will
+	 * cause pmap inconsistencies...so we want to be sure to
+	 * disallow this in all cases.
+	 *
+	 * NOTE: Overflow checks require discrete statements or GCC4
+	 * will optimize it out.
+	 */
+	if (foff & PAGE_MASK) {
+		lwkt_reltoken(&vm_token);
+		return (EINVAL);
+	}
+
+	if ((flags & (MAP_FIXED | MAP_TRYFIXED)) == 0) {
+		fitit = TRUE;
+		*addr = round_page(*addr);
+	} else {
+		if (*addr != trunc_page(*addr)) {
+			lwkt_reltoken(&vm_token);
+			return (EINVAL);
+		}
+		eaddr = *addr + size;
+		if (eaddr < *addr) {
+			lwkt_reltoken(&vm_token);
+			return (EINVAL);
+		}
+		fitit = FALSE;
+		if ((flags & MAP_TRYFIXED) == 0)
+			vm_map_remove(map, *addr, *addr + size);
+	}
+
+	/*
+	 * Lookup/allocate object.
+	 */
+			/*
+			 * Device mappings (device size unknown?).
+			 * Force them to be shared.
+			 */
+			object = drm_pager_alloc(handle, objsize, prot, foff);
+			*pobject = object;
+			if (object == NULL) {
+				lwkt_reltoken(&vm_token);
+				return(EINVAL);
+			}
+			docow = MAP_PREFAULT_PARTIAL;
+			flags &= ~(MAP_PRIVATE|MAP_COPY);
+			flags |= MAP_SHARED;
+
+	/*
+	 * Deal with the adjusted flags
+	 */
+	if ((flags & (MAP_ANON|MAP_SHARED)) == 0)
+		docow |= MAP_COPY_ON_WRITE;
+	if (flags & MAP_NOSYNC)
+		docow |= MAP_DISABLE_SYNCER;
+	if (flags & MAP_NOCORE)
+		docow |= MAP_DISABLE_COREDUMP;
+
+#if defined(VM_PROT_READ_IS_EXEC)
+	if (prot & VM_PROT_READ)
+		prot |= VM_PROT_EXECUTE;
+
+	if (maxprot & VM_PROT_READ)
+		maxprot |= VM_PROT_EXECUTE;
+#endif
+
+	/*
+	 * This may place the area in its own page directory if (size) is
+	 * large enough, otherwise it typically returns its argument.
+	 */
+	if (fitit) {
+		*addr = pmap_addr_hint(object, *addr, size);
+	}
+
+	/*
+	 * Stack mappings need special attention.
+	 *
+	 * Mappings that use virtual page tables will default to storing
+	 * the page table at offset 0.
+	 */
+	if (flags & MAP_STACK) {
+		rv = vm_map_stack(map, *addr, size, flags,
+				  prot, maxprot, docow);
+	} else if (flags & MAP_VPAGETABLE) {
+		rv = vm_map_find(map, object, foff, addr, size, PAGE_SIZE,
+				 fitit, VM_MAPTYPE_VPAGETABLE,
+				 prot, maxprot, docow);
+	} else {
+		rv = vm_map_find(map, object, foff, addr, size, PAGE_SIZE,
+				 fitit, VM_MAPTYPE_NORMAL,
+				 prot, maxprot, docow);
+	}
+
+	if (rv != KERN_SUCCESS) {
+		/*
+		 * Lose the object reference. Will destroy the
+		 * object if it's an unnamed anonymous mapping
+		 * or named anonymous without other references.
+		 */
+		vm_object_deallocate(object);
+		*pobject = NULL;
+		goto out;
+	}
+
+	/*
+	 * Shared memory is also shared with children.
+	 */
+	if (flags & (MAP_SHARED|MAP_INHERIT)) {
+		rv = vm_map_inherit(map, *addr, *addr + size, VM_INHERIT_SHARE);
+		if (rv != KERN_SUCCESS) {
+			vm_map_remove(map, *addr, *addr + size);
+			goto out;
+		}
+	}
+
+out:
+	lwkt_reltoken(&vm_token);
+
+	switch (rv) {
+	case KERN_SUCCESS:
+		return (0);
+	case KERN_INVALID_ADDRESS:
+	case KERN_NO_SPACE:
+		return (ENOMEM);
+	case KERN_PROTECTION_FAILURE:
+		return (EACCES);
+	default:
+		return (EINVAL);
+	}
+}

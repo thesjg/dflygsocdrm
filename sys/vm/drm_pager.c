@@ -88,15 +88,7 @@ static struct mtx dev_pager_mtx = MTX_INITIALIZER;
 vm_object_t
 drm_pager_alloc(void *handle, off_t size, vm_prot_t prot, off_t foff)
 {
-	cdev_t dev;
 	vm_object_t object;
-	unsigned int npages;
-	vm_offset_t off;
-
-	/*
-	 * Make sure this device can be mapped.
-	 */
-	dev = handle;
 
 	/*
 	 * Offset should be page aligned.
@@ -107,23 +99,9 @@ drm_pager_alloc(void *handle, off_t size, vm_prot_t prot, off_t foff)
 	size = round_page64(size);
 
 	/*
-	 * Check that the specified range of the device allows the desired
-	 * protection.
-	 *
-	 * XXX assumes VM_PROT_* == PROT_*
-	 */
-	npages = OFF_TO_IDX(size);
-	for (off = foff; npages--; off += PAGE_SIZE) {
-		if (dev_dmmap(dev, off, (int)prot) == -1)
-			return (NULL);
-	}
-
-	/*
 	 * Look up pager, creating as necessary.
 	 */
 	mtx_lock(&dev_pager_mtx);
-	object = dev->si_object;
-	if (object == NULL) {
 		/*
 		 * Allocate object and associate it with the pager.
 		 */
@@ -131,15 +109,6 @@ drm_pager_alloc(void *handle, off_t size, vm_prot_t prot, off_t foff)
 					    OFF_TO_IDX(foff + size));
 		object->handle = handle;
 		TAILQ_INIT(&object->un_pager.devp.devp_pglist);
-		dev->si_object = object;
-	} else {
-		/*
-		 * Gain a reference to the object.
-		 */
-		vm_object_reference(object);
-		if (OFF_TO_IDX(foff + size) > object->size)
-			object->size = OFF_TO_IDX(foff + size);
-	}
 	mtx_unlock(&dev_pager_mtx);
 
 	return (object);
