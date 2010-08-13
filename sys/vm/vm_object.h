@@ -170,7 +170,7 @@ struct vm_object {
 	RB_HEAD(swblock_rb_tree, swblock) swblock_root;
 	int	swblock_count;
 	/* for drm drivers to specify own fault handlers */
-	int (*pgo_getpage)(vm_object_t obj, vm_page_t *page, int seq);
+	int (*pgo_getpage)(vm_object_t object, vm_page_t *mpp, int seqaccess);
 };
 
 /*
