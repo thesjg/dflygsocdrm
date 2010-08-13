@@ -124,6 +124,8 @@ struct vm_object_lock {
 #define VMOBJ_LOCK_SHARED	1
 #define VMOBJ_LOCK_EXCL		2
 
+struct pagerops;
+
 /*
  * vm_object		A VM object which represents an arbitrarily sized
  *			data store.
@@ -167,6 +169,8 @@ struct vm_object {
 	 */
 	RB_HEAD(swblock_rb_tree, swblock) swblock_root;
 	int	swblock_count;
+	/* for drm drivers to specify own fault handlers */
+	int (*pgo_getpage)(vm_object_t obj, vm_page_t *page, int seq);
 };
 
 /*
