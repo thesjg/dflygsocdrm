@@ -1153,7 +1153,9 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * NOTE: Overflow checks require discrete statements or GCC4
 	 * will optimize it out.
 	 */
-	if (foff & PAGE_MASK) {
+
+/* drm allows for artificial handles that are not page aligned? */
+	if ((foff & PAGE_MASK) && (handle_type != OBJT_DEVICE)) {
 		lwkt_reltoken(&vm_token);
 		return (EINVAL);
 	}
@@ -1180,6 +1182,10 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * Lookup/allocate object.
 	 */
 	if (flags & MAP_ANON) {
+		if (foff & PAGE_MASK) {
+			lwkt_reltoken(&vm_token);
+			return (EINVAL);
+		}
 		/*
 		 * Unnamed anonymous regions always start at 0.
 		 */
@@ -1212,6 +1218,24 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			 * Force them to be shared.
 			 */
 			handle = (void *)(intptr_t)vp->v_rdev;
+
+/* Equivalent of dev_dmmap() from kern_device.c */
+			cdev_t dev = handle;
+			if (dev->si_ops->d_mmap_single == NULL)
+				goto normal_alloc;
+			struct dev_mmap_single_args ap;
+			ap.a_head.a_desc = &dev_mmap_single_desc;
+			ap.a_head.a_dev = dev;
+			ap.a_offset = foff;
+			ap.a_size = objsize;
+			ap.a_nprot = prot;
+			if (!dev->si_ops->d_mmap_single(&ap)) {
+				object = ap.a_object;
+				docow = MAP_PREFAULT_PARTIAL;
+				goto after_alloc;
+			}
+
+normal_alloc:
 			object = dev_pager_alloc(handle, objsize, prot, foff);
 			if (object == NULL) {
 				lwkt_reltoken(&vm_token);
@@ -1253,6 +1277,7 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		}
 	}
 
+after_alloc:
 	/*
 	 * Deal with the adjusted flags
 	 */

@@ -71,6 +71,7 @@ DEVOP_DESC_INIT(dump);
 DEVOP_DESC_INIT(psize);
 DEVOP_DESC_INIT(poll);
 DEVOP_DESC_INIT(mmap);
+DEVOP_DESC_INIT(mmap_single);
 DEVOP_DESC_INIT(strategy);
 DEVOP_DESC_INIT(kqfilter);
 DEVOP_DESC_INIT(revoke);
@@ -585,7 +586,7 @@ nodump(struct dev_dump_args *ap)
 }
 
 int
-nommap_single(struct dev_mmap_args *ap)
+nommap_single(struct dev_mmap_single_args *ap)
 {
 	return (ENODEV);
 }

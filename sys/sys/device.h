@@ -219,7 +219,7 @@ typedef int d_dump_t (struct dev_dump_args *ap);
 typedef int d_psize_t (struct dev_psize_args *ap);
 typedef int d_kqfilter_t (struct dev_kqfilter_args *ap);
 typedef int d_clone_t (struct dev_clone_args *ap);
-typedef int d_mmap_single_t (struct dev_mmap_args *ap);
+typedef int d_mmap_single_t (struct dev_mmap_single_args *ap);
 typedef int d_revoke_t (struct dev_revoke_args *ap);
 
 /*
