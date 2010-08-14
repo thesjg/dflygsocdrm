@@ -132,10 +132,17 @@ drm_gem_destroy(struct drm_device *dev)
 int drm_gem_object_init(struct drm_device *dev,
 			struct drm_gem_object *obj, size_t size)
 {
+	vm_object_t object;
 	BUG_ON((size & (PAGE_SIZE - 1)) != 0);
 
 	obj->dev = dev;
+#ifdef __linux__
 	obj->filp = shmem_file_setup("drm mm object", size, VM_NORESERVE);
+#else
+	drm_vm_mmap_alloc(size, &object);
+#endif
+	vm_object_reference(object);
+	obj->object = object;
 	if (IS_ERR(obj->filp))
 		return -ENOMEM;
 
@@ -174,7 +181,9 @@ fput:
 	/* Object_init mangles the global counters - readjust them. */
 	atomic_dec(&dev->object_count);
 	atomic_sub(obj->size, &dev->object_memory);
+#ifdef __linux__
 	fput(obj->filp);
+#endif
 free:
 	free(obj, DRM_MEM_DRIVER);
 	return NULL;
@@ -428,7 +437,11 @@ void
 drm_gem_object_release(struct drm_gem_object *obj)
 {
 	struct drm_device *dev = obj->dev;
+#ifdef __linux__
 	fput(obj->filp);
+#else
+	vm_object_deallocate(obj->object);
+#endif
 	atomic_dec(&dev->object_count);
 	atomic_sub(obj->size, &dev->object_memory);
 }
@@ -514,6 +527,7 @@ drm_gem_object_handle_free(struct kref *kref)
 }
 EXPORT_SYMBOL(drm_gem_object_handle_free);
 
+/* UNIMPLEMENTED */
 void drm_gem_vm_open(struct vm_area_struct *vma)
 {
 	struct drm_gem_object *obj = vma->vm_private_data;
@@ -522,6 +536,7 @@ void drm_gem_vm_open(struct vm_area_struct *vma)
 }
 EXPORT_SYMBOL(drm_gem_vm_open);
 
+/* UNIMPLEMENTED */
 void drm_gem_vm_close(struct vm_area_struct *vma)
 {
 	struct drm_gem_object *obj = vma->vm_private_data;

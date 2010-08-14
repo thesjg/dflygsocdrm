@@ -1131,6 +1131,9 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 	struct drm_gem_object *obj;
 	loff_t offset;
 	unsigned long addr;
+	int retcode;
+	struct vmspace *vms = DRM_CURPROC->td_proc->p_vmspace;
+	vm_offset_t vaddr;
 
 	if (!(dev->driver->driver_features & DRIVER_GEM))
 		return -ENODEV;
@@ -1148,11 +1151,15 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 		       args->offset);
 	up_write(&current->mm->mmap_sem);
 #else
-	addr = 0;
+	retcode = drm_vm_mmap(&vms->vm_map, &vaddr, args->size,
+		PROT_READ | PROT_WRITE, VM_PROT_ALL, MAP_SHARED | MAP_NOSYNC,
+		OBJT_DRM, obj, (vm_ooffset_t)args->offset,
+		&obj->object);
+	addr = (unsigned long)vaddr;
 #endif
 	drm_gem_object_unreference_unlocked(obj);
-	if (IS_ERR((void *)addr))
-		return addr;
+	if (retcode)
+		return retcode;
 
 	args->addr_ptr = (uint64_t) addr;
 

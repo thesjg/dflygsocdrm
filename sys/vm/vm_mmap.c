@@ -1428,8 +1428,7 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			 * Device mappings (device size unknown?).
 			 * Force them to be shared.
 			 */
-			object = drm_pager_alloc(handle, objsize, prot, foff);
-			*pobject = object;
+			object = *pobject;
 			if (object == NULL) {
 				lwkt_reltoken(&vm_token);
 				return(EINVAL);
@@ -1519,4 +1518,43 @@ out:
 	default:
 		return (EINVAL);
 	}
+}
+
+/*
+ * Allocate a new vm object and its pages for backing store
+ * but do not mmap to any address.
+ *
+ * No requirements; kern_mmap path holds the vm_token
+ */
+int
+drm_vm_mmap_alloc(vm_size_t size, vm_object_t *pobject)
+{
+	vm_object_t object;
+	off_t objsize;
+
+	if (size == 0)
+		return (0);
+
+	objsize = round_page(size);
+	if (objsize < size)
+		return (EINVAL);
+	size = objsize;
+
+	lwkt_gettoken(&vm_token);
+
+	/*
+	 * Lookup/allocate object.
+	 */
+			/*
+			 * Device mappings (device size unknown?).
+			 * Force them to be shared.
+			 */
+			object = drm_pager_alloc(NULL, objsize, 0, 0);
+			*pobject = object;
+			if (object == NULL) {
+				lwkt_reltoken(&vm_token);
+				return(EINVAL);
+			}
+	lwkt_reltoken(&vm_token);
+	return (0);
 }
