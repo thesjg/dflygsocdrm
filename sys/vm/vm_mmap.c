@@ -1236,6 +1236,11 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			}
 
 normal_alloc:
+			if (foff & PAGE_MASK) {
+				lwkt_reltoken(&vm_token);
+				return (EINVAL);
+			}
+
 			object = dev_pager_alloc(handle, objsize, prot, foff);
 			if (object == NULL) {
 				lwkt_reltoken(&vm_token);
@@ -1245,6 +1250,10 @@ normal_alloc:
 			flags &= ~(MAP_PRIVATE|MAP_COPY);
 			flags |= MAP_SHARED;
 		} else {
+			if (foff & PAGE_MASK) {
+				lwkt_reltoken(&vm_token);
+				return (EINVAL);
+			}
 			/*
 			 * Regular file mapping (typically).  The attribute
 			 * check is for the link count test only.  Mmapble
