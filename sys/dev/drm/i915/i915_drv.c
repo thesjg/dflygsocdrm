@@ -808,6 +808,7 @@ static int i915_handler(module_t mod, int what, void *arg) {
 
 DRIVER_MODULE(i915, vgapci, i915_driver, drm_devclass, i915_handler, 0);
 MODULE_DEPEND(i915, drm, 1, 1, 1);
+MODULE_DEPEND(i915, i915_iic, 1, 1, 1);
 #ifdef __linux__
 module_init(i915_init);
 module_exit(i915_exit);
