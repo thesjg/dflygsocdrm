@@ -337,7 +337,7 @@ static int i915_get_clock(device_t dev)
 	return ((val & GPIO_CLOCK_VAL_IN) != 0);
 }
 
-static int get_data(device_t dev)
+static int i915_get_data(device_t dev)
 {
 	struct intel_i2c_chan *chan;
 	/* Get the device data */
