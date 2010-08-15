@@ -89,6 +89,7 @@ struct intel_i2c_chan {
 	u32 reg; /* GPIO reg */
 	struct i2c_adapter adapter;
 	struct i2c_algo_bit_data algo;
+	device_t iicbb;
 };
 
 struct intel_framebuffer {
