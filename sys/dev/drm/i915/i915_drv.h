@@ -785,6 +785,7 @@ struct drm_i915_gem_object {
 	caddr_t user_data_ptr;
 	caddr_t pages_vaddr;
 	int num_pages;
+	drm_page_t *pages_legacy;
 };
 
 #define to_intel_bo(x) container_of(x, struct drm_i915_gem_object, base)

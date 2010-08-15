@@ -36,6 +36,7 @@
 #include <dev/agp/agpreg.h>
 #include <dev/agp/agppriv.h>
 #include <bus/pci/pcireg.h>
+MALLOC_DECLARE(M_AGP);
 
 /* Returns 1 if AGP or 0 if not. */
 static int
@@ -567,7 +568,7 @@ drm_agp_bind_object(struct drm_device *dev,
 	int ret;
 	device_t agpdev = DRM_AGP_FIND_DEVICE();
 
-	struct agp_memory *memory = malloc(sizeof(struct agp_memory), DRM_MEM_AGPLISTS, M_WAITOK | M_ZERO);
+	struct agp_memory *memory = malloc(sizeof(struct agp_memory), M_AGP, M_WAITOK | M_ZERO);
 	if (!memory) {
 		DRM_ERROR("Failed to allocate memory for %ld pages\n",
 			  num_pages);
@@ -586,7 +587,7 @@ drm_agp_bind_object(struct drm_device *dev,
 	if (mem == NULL) {
 		DRM_ERROR("Failed to allocate memory for %ld pages\n",
 			  num_pages);
-		free(memory, DRM_MEM_AGPLISTS);
+		free(memory, M_AGP);
 		return NULL;
 	}
 
@@ -597,7 +598,7 @@ drm_agp_bind_object(struct drm_device *dev,
 	ret = agp_bind_memory(agpdev, memory, gtt_offset);
 	if (ret != 0) {
 		DRM_ERROR("Failed to bind AGP memory: %d\n", ret);
-		free(memory, DRM_MEM_AGPLISTS);
+		free(memory, M_AGP);
 		drm_agp_free_memory(mem);
 		return NULL;
 	}

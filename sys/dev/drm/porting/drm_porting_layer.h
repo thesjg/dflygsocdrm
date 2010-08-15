@@ -1340,6 +1340,8 @@ struct page {
 	struct list_head lru;
 };
 
+typedef vm_page_t	drm_page_t;
+
 /* file ttm/ttm_tt.c, function ttm_tt_swapin() */
 struct address_space {
 	int placeholder;
@@ -1427,11 +1429,21 @@ page_cache_release(struct page *to_page) {
 	;
 }
 
+static __inline__ void
+drm_page_cache_release(drm_page_t page) {
+	vm_page_unhold(page);
+}
+
 /* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 /* file i915/i915_gem_tiling.c, function i915_gem_object_do_bit_17_swizzle() */
 static __inline__ void
 set_page_dirty(struct page *to_page) {
 	;
+}
+
+static __inline__ void
+drm_set_page_dirty(drm_page_t page) {
+	vm_page_dirty(page);
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_free_user_pages() */
@@ -1544,6 +1556,49 @@ get_user_pages(
 	void * isNULL
 ) {
 	return 1;
+}
+
+static __inline__ int
+drm_get_user_pages(
+	unsigned long start,
+	unsigned long num_pages,
+	uint32_t vmprot,
+	drm_page_t *pages
+) {
+/* For DragonFly BSD see xio_init_ubuf() in kern_xio.c */
+	vm_offset_t addr = trunc_page((vm_offset_t)start);
+	vm_page_t m = NULL;
+	int error;
+	int i;
+	int pinned_pages = 0;
+	for (i = 0; i < num_pages; i++) {
+		m = vm_fault_page_quick(addr, vmprot, &error);
+		if (m == NULL) {
+			return pinned_pages;
+		}
+		pages[i] = m;
+		addr += PAGE_SIZE;
+		pinned_pages++;
+	}
+	return pinned_pages;
+}
+
+typedef struct lwbuf *	drm_lwbuf_t;
+
+static __inline__ char *
+drm_kmap_atomic(drm_page_t page, drm_lwbuf_t *plwb) {
+	*plwb = lwbuf_alloc(page);
+	return (char *)lwbuf_kva(*plwb);
+}
+
+static __inline__ void
+drm_kunmap_atomic(vm_offset_t vaddr, drm_lwbuf_t lwb) {
+	lwbuf_free(lwb);
+}
+
+static __inline__ vm_paddr_t
+drm_page_to_phys(drm_page_t page) {
+	return page->phys_addr;
 }
 
 /* file i915_gem.c, function slow_shmem_bit17_copy() */
