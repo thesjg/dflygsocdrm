@@ -34,6 +34,9 @@ SRCS    = \
 SRCS   += device_if.h bus_if.h pci_if.h opt_drm.h
 CFLAGS += ${DEBUG_FLAGS} -I. -I.. -I@/dev/drm -I@/dev/drm/i915
 
+SUBDIR =
+SUBDIR += i915_iic
+
 .if defined(DRM_DEBUG)
 DRM_DEBUG_OPT= "\#define DRM_DEBUG 1"
 .endif
