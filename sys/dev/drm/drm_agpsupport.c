@@ -34,6 +34,7 @@
 #include "drmP.h"
 
 #include <dev/agp/agpreg.h>
+#include <dev/agp/agppriv.h>
 #include <bus/pci/pcireg.h>
 
 /* Returns 1 if AGP or 0 if not. */
@@ -548,9 +549,61 @@ int drm_agp_unbind_memory(DRM_AGP_MEM * handle)
 	return agp_unbind_memory(agpdev, handle->memory);
 }
 
-/* UNIMPLEMENTED
- * how to bind specific pages
+/**
+ * Binds pages from a vm_object into AGP memory at the given offset, returning
+ * the drm AGP memory structure containing them.
+ *
+ * No reference is held on the pages during this time -- it is up to the
+ * caller to handle that.
  */
+DRM_AGP_MEM *
+drm_agp_bind_object(struct drm_device *dev,
+		   vm_object_t object,
+		   unsigned long num_pages,
+		   uint32_t gtt_offset,
+		   u32 type)
+{
+	DRM_AGP_MEM *mem;
+	int ret;
+	device_t agpdev = DRM_AGP_FIND_DEVICE();
+
+	struct agp_memory *memory = malloc(sizeof(struct agp_memory), DRM_MEM_AGPLISTS, M_WAITOK | M_ZERO);
+	if (!memory) {
+		DRM_ERROR("Failed to allocate memory for %ld pages\n",
+			  num_pages);
+		return NULL;
+	}
+	memory->am_size = num_pages << PAGE_SHIFT;
+	memory->am_type = type;
+	memory->am_obj = object;
+	memory->am_offset = gtt_offset;
+	memory->am_is_bound = 0;
+
+	DRM_DEBUG("\n");
+
+	mem = drm_agp_allocate_memory(dev->agp->bridge, num_pages,
+				      type);
+	if (mem == NULL) {
+		DRM_ERROR("Failed to allocate memory for %ld pages\n",
+			  num_pages);
+		free(memory, DRM_MEM_AGPLISTS);
+		return NULL;
+	}
+
+	mem->page_count = num_pages;
+
+	mem->is_flushed = true;
+	mem->memory = memory;
+	ret = agp_bind_memory(agpdev, memory, gtt_offset);
+	if (ret != 0) {
+		DRM_ERROR("Failed to bind AGP memory: %d\n", ret);
+		free(memory, DRM_MEM_AGPLISTS);
+		drm_agp_free_memory(mem);
+		return NULL;
+	}
+	return mem;
+}
+
 /**
  * Binds a collection of pages into AGP memory at the given offset, returning
  * the AGP memory structure containing them.

@@ -780,6 +780,11 @@ struct drm_i915_gem_object {
 	 * reaches 0, dev_priv->pending_flip_queue will be woken up.
 	 */
 	atomic_t pending_flip;
+
+/* legacy members */
+	caddr_t user_data_ptr;
+	caddr_t pages_vaddr;
+	int num_pages;
 };
 
 #define to_intel_bo(x) container_of(x, struct drm_i915_gem_object, base)

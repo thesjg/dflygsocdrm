@@ -204,6 +204,19 @@ slow_shmem_copy(struct page *dst_page,
 }
 
 static inline int
+slow_shmem_copy_legacy(char *dst_vaddr,
+		int dst_offset,
+		char *src_vaddr,
+		int src_offset,
+		int length)
+{
+
+	memcpy(dst_vaddr + dst_offset, src_vaddr + src_offset, length);
+
+	return 0;
+}
+
+static inline int
 slow_shmem_bit17_copy(struct page *gpu_page,
 		      int gpu_offset,
 		      struct page *cpu_page,
@@ -384,6 +397,7 @@ i915_gem_shmem_pread_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	last_data_page = (data_ptr + args->size - 1) / PAGE_SIZE;
 	num_pages = last_data_page - first_data_page + 1;
 
+#ifdef __linux__
 	user_pages = drm_calloc_large(num_pages, sizeof(struct page *));
 	if (user_pages == NULL)
 		return -ENOMEM;
@@ -396,6 +410,20 @@ i915_gem_shmem_pread_slow(struct drm_device *dev, struct drm_gem_object *obj,
 		ret = -EFAULT;
 		goto fail_put_user_pages;
 	}
+#else
+	size_t total_size = num_pages * PAGE_SIZE;
+	caddr_t trunc_data_ptr = (caddr_t)trunc_page((uintptr_t)args->data_ptr);
+	caddr_t from_user = malloc(total_size, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+	if (!from_user) {
+		return -ENOMEM;
+	}
+	vslock((void *)(uintptr_t)args->data_ptr, args->size);
+	ret = DRM_COPY_FROM_USER(from_user, trunc_data_ptr, total_size);
+	vsunlock((void *)(uintptr_t)args->data_ptr, args->size);
+	if (ret) {
+		return -ret;
+	}
+#endif
 
 	do_bit17_swizzling = i915_gem_object_needs_bit17_swizzle(obj);
 
@@ -859,6 +887,7 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	last_data_page = (data_ptr + args->size - 1) / PAGE_SIZE;
 	num_pages = last_data_page - first_data_page + 1;
 
+#ifdef __linux__
 	user_pages = drm_calloc_large(num_pages, sizeof(struct page *));
 	if (user_pages == NULL)
 		return -ENOMEM;
@@ -871,6 +900,9 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 		ret = -EFAULT;
 		goto fail_put_user_pages;
 	}
+#else
+	obj_priv->user_data_ptr = args->data_ptr;
+#endif
 
 	do_bit17_swizzling = i915_gem_object_needs_bit17_swizzle(obj);
 
@@ -2330,6 +2362,7 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 {
 	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
 	int page_count, i;
+#ifdef __linux__
 	struct address_space *mapping;
 	struct inode *inode;
 	struct page *page;
@@ -2360,12 +2393,29 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 
 		obj_priv->pages[i] = page;
 	}
+#else
+	if (obj_priv->pages_refcount++ != 0)
+		return 0;
+
+	/* Get the list of pages out of our struct file.  They'll be pinned
+	 * at this point until we release them.
+	 */
+	page_count = obj->size / PAGE_SIZE;
+
+	obj_priv->pages_vaddr = malloc(page_count * PAGE_SIZE, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+	if (!obj_priv->pages_vaddr) {
+		obj_priv->pages_refcount--;
+		return -ENOMEM;
+	}
+	i = page_count;
+#endif
 
 	if (obj_priv->tiling_mode != I915_TILING_NONE)
 		i915_gem_object_do_bit_17_swizzle(obj);
 
 	return 0;
 
+#ifdef __linux__
 err_pages:
 	while (i--)
 		page_cache_release(obj_priv->pages[i]);
@@ -2374,6 +2424,7 @@ err_pages:
 	obj_priv->pages = NULL;
 	obj_priv->pages_refcount--;
 	return PTR_ERR(page);
+#endif
 }
 
 static void sandybridge_write_fence_reg(struct drm_i915_fence_reg *reg)
@@ -2792,8 +2843,8 @@ i915_gem_object_bind_to_gtt(struct drm_gem_object *obj, unsigned alignment)
 	/* Create an AGP memory structure pointing at our pages, and bind it
 	 * into the GTT.
 	 */
-	obj_priv->agp_mem = drm_agp_bind_pages(dev,
-					       obj_priv->pages,
+	obj_priv->agp_mem = drm_agp_bind_object(dev,
+					       obj->object,
 					       obj->size >> PAGE_SHIFT,
 					       obj_priv->gtt_offset,
 					       obj_priv->agp_type);

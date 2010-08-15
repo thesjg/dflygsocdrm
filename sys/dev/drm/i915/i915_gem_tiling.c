@@ -336,8 +336,13 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 			i915_gem_release_mmap(obj);
 
 		if (ret != 0) {
+#ifdef __linux__
 			WARN(ret != -ERESTARTSYS,
 			     "failed to reset object for tiling switch");
+#else
+			WARN(ret != 0,
+			     "failed to reset object for tiling switch");
+#endif
 			args->tiling_mode = obj_priv->tiling_mode;
 			args->stride = obj_priv->stride;
 			goto err;
@@ -426,6 +431,29 @@ i915_gem_swizzle_page(struct page *page)
 	return 0;
 }
 
+/**
+ * Swap every 64 bytes of this page around, to account for it having a new
+ * bit 17 of its physical address and therefore being interpreted differently
+ * by the GPU.
+ */
+static int
+i915_gem_swizzle_page_legacy(caddr_t vaddr)
+{
+	int i;
+	char temp[64];
+
+	if (vaddr == NULL)
+		return -ENOMEM;
+
+	for (i = 0; i < PAGE_SIZE; i += 128) {
+		memcpy(temp, &vaddr[i], 64);
+		memcpy(&vaddr[i], &vaddr[i + 64], 64);
+		memcpy(&vaddr[i + 64], temp, 64);
+	}
+
+	return 0;
+}
+
 void
 i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 {
@@ -441,6 +469,7 @@ i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 	if (obj_priv->bit_17 == NULL)
 		return;
 
+#ifdef __linux__
 	for (i = 0; i < page_count; i++) {
 		char new_bit_17 = page_to_phys(obj_priv->pages[i]) >> 17;
 		if ((new_bit_17 & 0x1) !=
@@ -453,6 +482,27 @@ i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 			set_page_dirty(obj_priv->pages[i]);
 		}
 	}
+#else
+	vm_object_t object = obj->object;
+	vm_page_t p;
+	int k;
+	for (k = 0; k < obj->size; k += PAGE_SIZE) {
+		p = vm_page_lookup(object, OFF_TO_IDX(k));
+		char new_bit_17 = p->phys_addr >> 17;
+		i = (int)p->pindex;
+		if ((new_bit_17 & 0x1) !=
+		    (test_bit(i, obj_priv->bit_17) != 0)) {
+			struct lwbuf *lwb = lwbuf_alloc(p);
+			caddr_t vaddr = lwbuf_kva(lwb);
+			int ret = i915_gem_swizzle_page_legacy(vaddr);
+			if (ret != 0) {
+				DRM_ERROR("Failed to swizzle page\n");
+				return;
+			}
+			lwbuf_free(lwb);
+		}
+	}
+#endif
 }
 
 void
@@ -469,7 +519,7 @@ i915_gem_object_save_bit_17_swizzle(struct drm_gem_object *obj)
 
 	if (obj_priv->bit_17 == NULL) {
 		obj_priv->bit_17 = malloc(BITS_TO_LONGS(page_count) *
-				sizeof(long), DRM_MEM_DRIVER, M_WAITOK);
+				sizeof(long), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 		if (obj_priv->bit_17 == NULL) {
 			DRM_ERROR("Failed to allocate memory for bit 17 "
 				  "record\n");
@@ -477,10 +527,24 @@ i915_gem_object_save_bit_17_swizzle(struct drm_gem_object *obj)
 		}
 	}
 
+#ifdef __linux__
 	for (i = 0; i < page_count; i++) {
 		if (page_to_phys(obj_priv->pages[i]) & (1 << 17))
 			__set_bit(i, obj_priv->bit_17);
 		else
 			__clear_bit(i, obj_priv->bit_17);
 	}
+#else
+	vm_object_t object = obj->object;
+	vm_page_t p;
+	int k;
+	for (k = 0; k < obj->size; k += PAGE_SIZE) {
+		p = vm_page_lookup(object, OFF_TO_IDX(k));
+		i = (int)p->pindex;
+		if (p->phys_addr & (1 << 17))
+			__set_bit(i, obj_priv->bit_17);
+		else
+			__clear_bit(i, obj_priv->bit_17);
+	}
+#endif
 }

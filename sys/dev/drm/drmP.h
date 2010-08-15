@@ -1414,6 +1414,11 @@ extern DRM_AGP_MEM *drm_agp_bind_pages(struct drm_device *dev,
 				       unsigned long num_pages,
 				       uint32_t gtt_offset,
 				       uint32_t type);
+extern DRM_AGP_MEM *drm_agp_bind_object(struct drm_device *dev,
+				       vm_object_t object,
+				       unsigned long num_pages,
+				       uint32_t gtt_offset,
+				       uint32_t type);
 extern int drm_unbind_agp(DRM_AGP_MEM * handle);
 
 /* Memory management support (drm_memory.c) */

@@ -127,5 +127,10 @@
 #include <sys/kern_syscall.h>
 #endif
 
+/* for lwbuf_alloc */
+#ifdef __DragonFly__
+#include <cpu/lwbuf.h>
+#endif
+
 #endif /* __KERNEL__ */
 #endif
