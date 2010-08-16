@@ -126,7 +126,11 @@
 #define __OS_HAS_AGP	1
 #endif /* __linux__ */
 
+#ifdef DRM_NEWER_MTRR
+#define __OS_HAS_MTRR 1
+#else
 #define __OS_HAS_MTRR (defined(CONFIG_MTRR))
+#endif
 
 struct drm_file;
 struct drm_device;
@@ -1322,7 +1326,15 @@ static inline int drm_mtrr_del(int handle, unsigned long offset,
 #else
 
 /* CONFIG_MTRR does not seem to be defined on DragonFly */
+
+#ifdef DRM_NEWER_MTRR
+static inline int drm_core_has_MTRR(struct drm_device *dev)
+{
+	return drm_core_check_feature(dev, DRIVER_USE_MTRR);
+}
+#else /* DRM_NEWER_MTRR */
 #define drm_core_has_MTRR(dev) (0)
+#endif /* DRM_NEWER_MTRR */
 
 #ifdef __linux__
 

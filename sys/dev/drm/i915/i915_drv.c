@@ -615,7 +615,7 @@ static struct drm_driver driver = {
 	    DRIVER_USE_AGP | DRIVER_REQUIRE_AGP | /* DRIVER_USE_MTRR |*/
 	    DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED | DRIVER_GEM,
 #else
-	    DRIVER_USE_AGP | DRIVER_REQUIRE_AGP | /* DRIVER_USE_MTRR |*/
+	    DRIVER_USE_AGP | DRIVER_REQUIRE_AGP | DRIVER_USE_MTRR |
 	    DRIVER_HAVE_IRQ | DRIVER_GEM,
 #endif /* __linux__ */
 	.load = i915_driver_load,

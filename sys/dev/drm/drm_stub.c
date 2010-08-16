@@ -363,11 +363,21 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 					     1024 * 1024, MTRR_TYPE_WRCOMB, 1);
 		}
 #else
+#ifdef DRM_NEWER_MTRR
+		if (drm_core_has_MTRR(dev)) {
+			if (dev->agp) {
+				if (drm_mtrr_add(dev->agp->info.ai_aperture_base,
+				    dev->agp->info.ai_aperture_size, DRM_MTRR_WC) == 0)
+					dev->agp->mtrr = 1;
+			}
+		}
+#else
 		if (dev->agp != NULL) {
 			if (drm_mtrr_add(dev->agp->info.ai_aperture_base,
 			    dev->agp->info.ai_aperture_size, DRM_MTRR_WC) == 0)
 				dev->agp->mtrr = 1;
 		}
+#endif
 #endif /* __linux__ */
 	}
 
@@ -678,24 +688,30 @@ void drm_put_dev(struct drm_device *dev)
 				  dev->agp->agp_info.aper_size * 1024 * 1024);
 		DRM_DEBUG("mtrr_del=%d\n", retval);
 	}
+#else /* __linux__ */
+#ifdef DRM_NEWER_MTRR
+	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
+	    dev->agp && dev->agp->agp_mtrr > 0) {
+		int retval;
+		retval = drm_mtrr_del(0,
+			dev->agp->info.ai_aperture_base,
+			dev->agp->info.ai_aperture_size, DRM_MTRR_WC);
+		DRM_DEBUG("mtrr_del=%d\n", retval);
+	}
 #else
 	if (dev->agp && dev->agp->mtrr) {
 		int __unused retcode;
 
-		retcode = drm_mtrr_del(0, dev->agp->info.ai_aperture_base,
-		    dev->agp->info.ai_aperture_size, DRM_MTRR_WC);
+		retcode = drm_mtrr_del(0,
+			dev->agp->info.ai_aperture_base,
+			dev->agp->info.ai_aperture_size, DRM_MTRR_WC);
 		DRM_DEBUG("mtrr_del = %d", retcode);
 	}
+#endif
 #endif /* __linux__ */
 
 	if (dev->driver->unload) {
-#ifndef DRM_NEWER_LOCK
-//		DRM_LOCK();
-#endif
 		dev->driver->unload(dev);
-#ifndef DRM_NEWER_LOCK
-//		DRM_UNLOCK();
-#endif
 	}
 
 	if (drm_core_has_AGP(dev) && dev->agp) {

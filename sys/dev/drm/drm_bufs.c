@@ -252,6 +252,8 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 
 #ifdef __linux__ /* legacy later test for map->mtrr == 0 */
 	map->mtrr = -1;
+#else
+	map->mtrr = 0;
 #endif /* __linux__ */
 	map->handle = NULL;
 
@@ -277,6 +279,16 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			return 0;
 		}
 
+#ifdef DRM_NEWER_MTRR
+		if (drm_core_has_MTRR(dev)) {
+			if (map->type == _DRM_FRAME_BUFFER ||
+			    (map->flags & _DRM_WRITE_COMBINING)) {
+				if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
+					map->mtrr = 1;
+			}
+		}
+#endif
+
 		if (map->type == _DRM_REGISTERS) {
 			map->handle = drm_ioremap(dev, map);
 			if (!map->handle) {
@@ -285,11 +297,13 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			}
 		}
 
+#ifndef DRM_NEWER_MTRR
 		if (map->type == _DRM_FRAME_BUFFER ||
 		    (map->flags & _DRM_WRITE_COMBINING)) {
 			if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
 				map->mtrr = 1;
 		}
+#endif
 
 		break;
 
