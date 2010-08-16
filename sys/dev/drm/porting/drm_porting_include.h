@@ -57,9 +57,7 @@
 #include <sys/poll.h>
 #include <sys/tree.h>
 
-#ifndef __DragonFly__ /* Appears superfluous */
 #include <sys/taskqueue.h>
-#endif
 
 #include <vm/vm.h>
 #include <vm/pmap.h>

@@ -1442,9 +1442,11 @@ i915_gem_release_mmap(struct drm_gem_object *obj)
 	struct drm_device *dev = obj->dev;
 	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
 
+#if __linux__ /* UNIMPLEMENTED */
 	if (dev->dev_mapping)
 		unmap_mapping_range(dev->dev_mapping,
 				    obj_priv->mmap_offset, obj->size, 1);
+#endif
 }
 
 static void
@@ -1655,11 +1657,13 @@ static void
 i915_gem_object_truncate(struct drm_gem_object *obj)
 {
 	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
+#ifdef __linux__
 	struct inode *inode;
 
 	inode = obj->filp->f_path.dentry->d_inode;
 	if (inode->i_op->truncate)
 		inode->i_op->truncate (inode);
+#endif
 
 	obj_priv->madv = __I915_MADV_PURGED;
 }

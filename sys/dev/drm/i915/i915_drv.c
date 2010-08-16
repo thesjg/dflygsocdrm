@@ -597,6 +597,11 @@ static void i915_configure(struct drm_device *dev)
 	dev->driver->minor		= DRIVER_MINOR;
 	dev->driver->patchlevel		= DRIVER_PATCHLEVEL;
 
+#ifdef DRM_NEWER_IGEM
+	dev->driver->gem_init_object = i915_gem_init_object,
+	dev->driver->gem_free_object = i915_gem_free_object,
+#endif
+
 /* newer */
 	dev->driver->num_ioctls = i915_max_ioctl;
 }

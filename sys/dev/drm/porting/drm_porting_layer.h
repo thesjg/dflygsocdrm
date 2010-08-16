@@ -1045,26 +1045,26 @@ wait_event_interruptible(wait_queue_head_t wqh, int condition) {
 /* file drm_context.c, function drm_context_switch_complete() */
 static __inline__ void
 wake_up(wait_queue_head_t *wqh) {
-	;
+	wakeup(wqh);
 }
 
 /* file ttm/ttm_lock.c, function ttm_read_unlock() */
 /* file radeon_fence.c, function radeon_fence_process() */
 static __inline__ void
 wake_up_all(wait_queue_head_t *wqh) {
-	;
+	wakeup(wqh);
 }
 
 /* file drm_fops.c, function drm_release() */
 static __inline__ void
 wake_up_interruptible(wait_queue_head_t *wqh) {
-	;
+	wakeup(wqh);
 }
 
 /* file drm_fops.c, function drm_release() */
 static __inline__ void
 wake_up_interruptible_all(wait_queue_head_t *wqh) {
-	;
+	wakeup(wqh);
 }
 
 /* file i915_gem.c, function i915_gem_wait_for_pending_flip() */
