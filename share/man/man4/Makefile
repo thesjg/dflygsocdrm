@@ -68,8 +68,10 @@ MAN=	aac.4 \
 	devctl.4 \
 	disc.4 \
 	divert.4 \
+	dm.4 \
 	dpt.4 \
 	drm.4 \
+	dsched.4 \
 	dummynet.4 \
 	ecc.4 \
 	ed.4 \
@@ -118,6 +120,10 @@ MAN=	aac.4 \
 	isp.4 \
 	ispfw.4 \
 	it.4 \
+	iwi.4 \
+	iwifw.4 \
+	iwn.4 \
+	iwnfw.4 \
 	jme.4 \
 	joy.4 \
 	kate.4 \
@@ -348,7 +354,6 @@ MAN=	aac.4 \
 # XXX re-add when adjusted to the new 802.11 framework
 #MAN+=	acx.4 \
 #	bwi.4 \
-#	iwi.4 \
 #	iwl.4 \
 #	rtw.4 \
 #	rum.4 \
@@ -367,6 +372,7 @@ MLINKS+=drm.4 i915drm.4 \
 	drm.4 sisdrm.4 \
 	drm.4 tdfxdrm.4
 #	drm.4 viadrm.4
+MLINKS+=dsched.4 dsched_fq.4
 MLINKS+=fd.4 stderr.4 \
 	fd.4 stdin.4 \
 	fd.4 stdout.4

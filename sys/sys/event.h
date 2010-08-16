@@ -33,6 +33,12 @@
 #ifndef _SYS_TYPES_H_
 #include <sys/types.h>
 #endif
+#ifndef _NET_NETISR_H_
+#include <net/netisr.h>			/* struct notifymsglist */
+#endif
+#if defined(_KERNEL) || defined(_KERNEL_STRUCTURES)
+#include <sys/queue.h>
+#endif
 
 #define EVFILT_READ		(-1)
 #define EVFILT_WRITE		(-2)
@@ -41,8 +47,11 @@
 #define EVFILT_PROC		(-5)	/* attached to struct proc */
 #define EVFILT_SIGNAL		(-6)	/* attached to struct proc */
 #define EVFILT_TIMER		(-7)	/* timers */
+#define EVFILT_EXCEPT		(-8)	/* exceptional conditions */
 
-#define EVFILT_SYSCOUNT		7
+#define EVFILT_MARKER		0xF	/* placemarker for tailq */
+
+#define EVFILT_SYSCOUNT		8
 
 #define EV_SET(kevp_, a, b, c, d, e, f) do {	\
 	struct kevent *kevp = (kevp_);		\
@@ -86,6 +95,12 @@ struct kevent {
 #define NOTE_LOWAT	0x0001			/* low water mark */
 
 /*
+ * data/hint flags for EVFILT_EXCEPT, shared with userspace and with
+ * EVFILT_{READ|WRITE}
+ */
+#define NOTE_OOB	0x0002			/* OOB data on a socket */
+
+/*
  * data/hint flags for EVFILT_VNODE, shared with userspace
  */
 #define	NOTE_DELETE	0x0001			/* vnode was removed */
@@ -110,15 +125,28 @@ struct kevent {
 #define	NOTE_TRACKERR	0x00000002		/* could not track child */
 #define	NOTE_CHILD	0x00000004		/* am a child process */
 
-/*
- * This is currently visible to userland to work around broken
- * programs which pull in <sys/proc.h> or <sys/select.h>.
- */
-#include <sys/queue.h> 
+#if defined(_KERNEL) || defined(_KERNEL_STRUCTURES)
+
 struct knote;
 SLIST_HEAD(klist, knote);
 
+/*
+ * Used to maintain information about processes that wish to be
+ * notified when I/O becomes possible.
+ */
+struct kqinfo {
+	struct	klist ki_note;		/* kernel note list */
+	struct	notifymsglist ki_mlist;	/* list of pending predicate messages */
+};
+
+#endif
+
 #ifdef _KERNEL
+
+/*
+ * Global token for kqueue subsystem
+ */
+extern struct lwkt_token kq_token;
 
 #ifdef MALLOC_DECLARE
 MALLOC_DECLARE(M_KQUEUE);
@@ -132,17 +160,24 @@ MALLOC_DECLARE(M_KQUEUE);
  */
 #define NOTE_SIGNAL	0x08000000
 
+#define FILTEROP_ISFD	0x0001		/* if ident == filedescriptor */
+#define FILTEROP_MPSAFE	0x0002
+
 struct filterops {
-	int	f_isfd;		/* true if ident == filedescriptor */
+	u_short	f_flags;
+
+	/* f_attach returns 0 on success or valid error code on failure */
 	int	(*f_attach)	(struct knote *kn);
 	void	(*f_detach)	(struct knote *kn);
+
+        /* f_event returns boolean truth */
 	int	(*f_event)	(struct knote *kn, long hint);
 };
 
 struct knote {
 	SLIST_ENTRY(knote)	kn_link;	/* for fd */
 	TAILQ_ENTRY(knote)	kn_kqlink;	/* for kq_knlist */
-	SLIST_ENTRY(knote)	kn_selnext;	/* for struct selinfo */
+	SLIST_ENTRY(knote)	kn_next;	/* for struct kqinfo */
 	TAILQ_ENTRY(knote)	kn_tqe;		/* for kq_head */
 	struct			kqueue *kn_kq;	/* which queue we are on */
 	struct 			kevent kn_kevent;
@@ -173,14 +208,18 @@ struct thread;
 struct filedesc;
 struct kevent_args;
 
-typedef int	(*k_copyout_fn)(void *arg, struct kevent *kevp, int count);
-typedef int	(*k_copyin_fn)(void *arg, struct kevent *kevp, int count);
-int kern_kevent(int fd, int nchanges, int nevents, struct kevent_args *uap,
+typedef int	(*k_copyout_fn)(void *arg, struct kevent *kevp, int count,
+    int *res);
+typedef int	(*k_copyin_fn)(void *arg, struct kevent *kevp, int max,
+    int *events);
+int kern_kevent(struct kqueue *kq, int nevents, int *res, void *uap,
     k_copyin_fn kevent_copyin, k_copyout_fn kevent_copyout,
     struct timespec *tsp);
 
 extern void	knote(struct klist *list, long hint);
-extern void	knote_remove(struct klist *list);
+extern void	knote_insert(struct klist *klist, struct knote *kn);
+extern void	knote_remove(struct klist *klist, struct knote *kn);
+extern void	knote_empty(struct klist *list);
 extern void	knote_fdclose(struct file *fp, struct filedesc *fdp, int fd);
 extern void	kqueue_init(struct kqueue *kq, struct filedesc *fdp);
 extern void	kqueue_terminate(struct kqueue *kq);

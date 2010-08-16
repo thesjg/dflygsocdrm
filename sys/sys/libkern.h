@@ -84,6 +84,9 @@ static __inline int64_t i64min(int64_t a, int64_t b) { return (a < b ? a : b); }
 static __inline size_t szmax(size_t a, size_t b) { return (a > b ? a : b); }
 static __inline size_t szmin(size_t a, size_t b) { return (a < b ? a : b); }
 
+static __inline int abs(int a) { return (a < 0 ? -a : a); }
+static __inline long labs(long a) { return (a < 0 ? -a : a); }
+static __inline quad_t qabs(quad_t a) { return (a < 0 ? -a : a); }
 
 /* Prototypes for non-quad routines. */
 u_int32_t karc4random (void);
@@ -110,7 +113,6 @@ int	 scanc (u_int, const u_char *, const u_char *, int);
 int	 skpc (int, int, char *);
 void	 skrandom (u_long);
 char	*strcat (char * __restrict, const char * __restrict);
-char	*strchr(const char *, int);
 int	 strcmp (const char *, const char *);
 int	 strcasecmp (const char *, const char *);
 char	*strcpy (char * __restrict, const char * __restrict);
@@ -140,6 +142,18 @@ static __inline int
 memcmp(const void *b1, const void *b2, size_t len)
 {
 	return (bcmp(b1, b2, len));
+}
+
+static __inline char *
+strchr(const char *p, int ch)
+{
+	return (index(p, ch));
+}
+
+static __inline char *
+strrchr(const char *p, int ch)
+{
+	return (rindex(p, ch));
 }
 
 /* kfnmatch() return values. */

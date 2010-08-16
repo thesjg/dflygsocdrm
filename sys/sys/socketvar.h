@@ -44,8 +44,8 @@
 #ifndef _SYS_QUEUE_H_
 #include <sys/queue.h>			/* for TAILQ macros */
 #endif
-#ifndef _SYS_SELINFO_H_
-#include <sys/selinfo.h>		/* for struct selinfo */
+#ifndef _SYS_EVENT_H_
+#include <sys/event.h>			/* for struct kqinfo */
 #endif
 #ifndef _SYS_SOCKBUF_H_
 #include <sys/sockbuf.h>
@@ -61,7 +61,7 @@ struct accept_filter;
  */
 struct signalsockbuf {
 	struct sockbuf sb;
-	struct selinfo ssb_sel;	/* process selecting read/write */
+	struct kqinfo ssb_kq;	/* process selecting read/write */
 	short	ssb_flags;	/* flags, see below */
 	short	ssb_timeo;	/* timeout for read/write */
 	long	ssb_lowat;	/* low water mark */
@@ -76,7 +76,6 @@ struct signalsockbuf {
 #define	SSB_LOCK	0x01		/* lock on data queue */
 #define	SSB_WANT	0x02		/* someone is waiting to lock */
 #define	SSB_WAIT	0x04		/* someone is waiting for data/space */
-#define	SSB_SEL		0x08		/* someone is selecting */
 #define	SSB_ASYNC	0x10		/* ASYNC I/O, need signals */
 #define	SSB_UPCALL	0x20		/* someone wants an upcall */
 #define	SSB_NOINTR	0x40		/* operations not interruptible */
@@ -215,7 +214,7 @@ struct	xsocket {
  */
 #define	ssb_notify(ssb)					\
 	(((ssb)->ssb_flags &				\
-	(SSB_WAIT | SSB_SEL | SSB_ASYNC | SSB_UPCALL |	\
+	(SSB_WAIT | SSB_ASYNC | SSB_UPCALL |		\
 	SSB_AIO | SSB_KNOTE | SSB_MEVENT)))
 
 /* do we have to send all at once on a socket? */
@@ -263,14 +262,18 @@ ssb_space(struct signalsockbuf *ssb)
 	((ssb_space(ssb) <= 0) ? 0 : sbappendcontrol(&(ssb)->sb, m, control))
 
 #define ssb_insert_knote(ssb, kn) {					\
-        SLIST_INSERT_HEAD(&(ssb)->ssb_sel.si_note, kn, kn_selnext);	\
+	lwkt_gettoken(&kq_token);					\
+        SLIST_INSERT_HEAD(&(ssb)->ssb_kq.ki_note, kn, kn_next);		\
+	lwkt_reltoken(&kq_token);					\
 	(ssb)->ssb_flags |= SSB_KNOTE;					\
 }
 
 #define ssb_remove_knote(ssb, kn) {					\
-        SLIST_REMOVE(&(ssb)->ssb_sel.si_note, kn, knote, kn_selnext);	\
-	if (SLIST_EMPTY(&(ssb)->ssb_sel.si_note))			\
+	lwkt_gettoken(&kq_token);					\
+        SLIST_REMOVE(&(ssb)->ssb_kq.ki_note, kn, knote, kn_next);	\
+	if (SLIST_EMPTY(&(ssb)->ssb_kq.ki_note))			\
 		(ssb)->ssb_flags &= ~SSB_KNOTE;				\
+	lwkt_reltoken(&kq_token);					\
 }
 
 #define	sorwakeup(so)	do { \
@@ -342,7 +345,6 @@ int	soo_close (struct file *fp);
 int	soo_shutdown (struct file *fp, int how);
 int	soo_ioctl (struct file *fp, u_long cmd, caddr_t data,
 			struct ucred *cred, struct sysmsg *msg);
-int	soo_poll (struct file *fp, int events, struct ucred *cred);
 int	soo_stat (struct file *fp, struct stat *ub, struct ucred *cred);
 int	sokqfilter (struct file *fp, struct knote *kn);
 
@@ -367,6 +369,7 @@ struct	socket *soalloc (int waitok);
 int	sobind (struct socket *so, struct sockaddr *nam, struct thread *td);
 void	socantrcvmore (struct socket *so);
 void	socantsendmore (struct socket *so);
+int	socket_wait (struct socket *so, struct timespec *ts, int *res);
 int	soclose (struct socket *so, int fflags);
 int	soconnect (struct socket *so, struct sockaddr *nam, struct thread *td);
 int	soconnect2 (struct socket *so1, struct socket *so2);
@@ -381,6 +384,8 @@ void	soisconnected (struct socket *so);
 void	soisconnecting (struct socket *so);
 void	soisdisconnected (struct socket *so);
 void	soisdisconnecting (struct socket *so);
+void	soisreconnected (struct socket *so);
+void	soisreconnecting (struct socket *so);
 void	sosetport (struct socket *so, struct lwkt_port *port);
 int	solisten (struct socket *so, int backlog, struct thread *td);
 struct socket *sonewconn (struct socket *head, int connstatus);
@@ -398,8 +403,6 @@ void	soopt_to_mbuf (struct sockopt *sopt, struct mbuf *m);
 int	soopt_mcopyout (struct sockopt *sopt, struct mbuf *m);
 int	soopt_from_mbuf (struct sockopt *sopt, struct mbuf *m);
 
-int	sopoll (struct socket *so, int events, struct ucred *cred,
-		    struct thread *td);
 int	soreceive (struct socket *so, struct sockaddr **paddr,
 		       struct uio *uio, struct sockbuf *sio,
 		       struct mbuf **controlp, int *flagsp);

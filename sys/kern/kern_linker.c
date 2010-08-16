@@ -665,7 +665,7 @@ linker_file_lookup_symbol(linker_file_t file, const char* name, int deps, caddr_
 #ifdef _KERNEL_VIRTUAL
     *raddr = dlsym(RTLD_NEXT, name);
     if (*raddr != NULL) {
-	KLD_DPF(SYM, ("linker_file_lookup_symbol: found dlsym=%x\n", *raddr));
+	KLD_DPF(SYM, ("linker_file_lookup_symbol: found dlsym=%p\n", *raddr));
 	return 0;
     }
 #endif
@@ -1091,8 +1091,10 @@ linker_reference_module(const char *modname, struct mod_depend *verinfo,
         return (0);
     }
 
-    error = linker_load_module(NULL, modname, NULL, verinfo, result);
     lockmgr(&lock, LK_RELEASE);
+    get_mplock();
+    error = linker_load_module(NULL, modname, NULL, verinfo, result);
+    rel_mplock();
     return (error);
 }
 
@@ -1116,8 +1118,10 @@ linker_release_module(const char *modname, struct mod_depend *verinfo,
     } else
         KASSERT(modname == NULL && verinfo == NULL,
             ("linker_release_module: both file and name"));
-    error = linker_file_unload(lf);
     lockmgr(&lock, LK_RELEASE);
+    get_mplock();
+    error = linker_file_unload(lf);
+    rel_mplock();
     return (error);
 }
 
@@ -1463,11 +1467,15 @@ linker_load_module(const char *kldname, const char *modname,
 	if (modlist_lookup2(modname, verinfo) != NULL)
 	    return (EEXIST);
 	if (kldname != NULL)
+	{
 	    pathname = linker_strdup(kldname);
+	}
 	else if (rootvnode == NULL)
 	    pathname = NULL;
 	else
+	{
 	    pathname = linker_search_path(modname);
+	}
 #if 0
 	/*
 	 * Need to find a KLD with required module

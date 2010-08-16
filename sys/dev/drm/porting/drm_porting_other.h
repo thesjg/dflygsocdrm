@@ -227,7 +227,6 @@ d_ioctl_t drm_ioctl_legacy;
 d_open_t drm_open_legacy;
 d_close_t drm_close_legacy;
 d_read_t drm_read_legacy;
-d_poll_t drm_poll_legacy;
 d_mmap_t drm_mmap_legacy;
 
 /* Inline replacements for drm_alloc and friends */

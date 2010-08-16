@@ -141,19 +141,21 @@ chn_wakeup(struct pcm_channel *c)
 	CHN_LOCKASSERT(c);
 	if (SLIST_EMPTY(&c->children)) {
 		/*if (SEL_WAITING(sndbuf_getsel(bs)) && chn_polltrigger(c))*/
-		if (sndbuf_getsel(bs)->si_pid && chn_polltrigger(c)) {
+		if (SLIST_FIRST(&sndbuf_getkq(bs)->ki_note) && chn_polltrigger(c)) {
 			/*
-			 * We would call selwakeup() here, but as we
+			 * XXX
+			 *
+			 * We would call KNOTE() here, but as we
 			 * are in interrupt context, we'd have to
 			 * acquire the MP lock before.
 			 * Instead, we'll queue a task in a software
 			 * interrupt, which will run with the MP lock
 			 * held.
 			 *
-			 * buffer.c:sndbuf_seltask will then call
-			 * selwakeup() from safer context.
+			 * buffer.c:sndbuf_kqtask will then call
+			 * KNOTE() from safer context.
 			 */
-			taskqueue_enqueue(taskqueue_swi, &bs->seltask);
+			taskqueue_enqueue(taskqueue_swi, &bs->kqtask);
 		}
 	} else {
 		SLIST_FOREACH(pce, &c->children, link) {
@@ -646,7 +648,6 @@ chn_sync(struct pcm_channel *c, int threshold)
 int
 chn_poll(struct pcm_channel *c, int ev, struct thread *td)
 {
-	struct snd_dbuf *bs = c->bufsoft;
 	int ret;
 
 	CHN_LOCKASSERT(c);
@@ -655,8 +656,6 @@ chn_poll(struct pcm_channel *c, int ev, struct thread *td)
 	ret = 0;
 	if (chn_polltrigger(c) && chn_pollreset(c))
 		ret = ev;
-	else
-		selrecord(td, sndbuf_getsel(bs));
 	return ret;
 }
 

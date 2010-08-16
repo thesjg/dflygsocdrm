@@ -69,8 +69,7 @@
 #include <sys/proc.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/poll.h>
-#include <sys/select.h>
+#include <sys/event.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
 #include <sys/sysctl.h>
@@ -147,15 +146,18 @@ d_open_t  usbopen;
 d_close_t usbclose;
 d_read_t usbread;
 d_ioctl_t usbioctl;
-d_poll_t usbpoll;
+d_kqfilter_t usbkqfilter;
+
+static void usbfilt_detach(struct knote *);
+static int usbfilt(struct knote *, long);
 
 struct dev_ops usb_ops = {
-	{ "usb", USB_CDEV_MAJOR, 0 },
+	{ "usb", USB_CDEV_MAJOR, D_KQFILTER },
 	.d_open =	usbopen,
 	.d_close =	usbclose,
 	.d_read =	usbread,
 	.d_ioctl =	usbioctl,
-	.d_poll =	usbpoll,
+	.d_kqfilter = 	usbkqfilter
 };
 
 static void	usb_discover(device_t);
@@ -178,7 +180,7 @@ struct usb_event_q {
 static TAILQ_HEAD(, usb_event_q) usb_events =
 	TAILQ_HEAD_INITIALIZER(usb_events);
 static int usb_nevents = 0;
-static struct selinfo usb_selevent;
+static struct kqinfo usb_kqevent;
 static struct proc *usb_async_proc;  /* process that wants USB SIGIO */
 static int usb_dev_open = 0;
 static void usb_add_event(int, struct usb_event *);
@@ -693,29 +695,58 @@ usbioctl(struct dev_ioctl_args *ap)
 	return (0);
 }
 
+static struct filterops usbfiltops =
+	{ FILTEROP_ISFD, NULL, usbfilt_detach, usbfilt };
+
 int
-usbpoll(struct dev_poll_args *ap)
+usbkqfilter(struct dev_kqfilter_args *ap)
 {
 	cdev_t dev = ap->a_head.a_dev;
-	int revents, mask;
+	struct knote *kn = ap->a_kn;
+	struct klist *klist;
+
+	ap->a_result = 0;
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &usbfiltops;
+		kn->kn_hook = (caddr_t)dev;
+		break;
+	default:
+		ap->a_result = EOPNOTSUPP;
+		return (0);
+	}
+
+	klist = &usb_kqevent.ki_note;
+	knote_insert(klist, kn);
+
+	return (0);
+}
+
+static void
+usbfilt_detach(struct knote *kn)
+{
+	struct klist *klist;
+
+	klist = &usb_kqevent.ki_note;
+	knote_remove(klist, kn);
+}
+
+static int
+usbfilt(struct knote *kn, long hint)
+{
+	cdev_t dev = (cdev_t)kn->kn_hook;
 	int unit = USBUNIT(dev);
+	int ready = 0;
 
 	if (unit == USB_DEV_MINOR) {
-		revents = 0;
-		mask = POLLIN | POLLRDNORM;
-
 		crit_enter();
-		if (ap->a_events & mask && usb_nevents > 0)
-			revents |= ap->a_events & mask;
-		if (revents == 0 && ap->a_events & mask)
-			selrecord(curthread, &usb_selevent);
+		if (usb_nevents > 0)
+			ready = 1;
 		crit_exit();
-		ap->a_events = revents;
-		return (0);
-	} else {
-		ap->a_events = 0;
-		return (0);	/* select/poll never wakes up - back compat */
 	}
+
+	return (ready);
 }
 
 /* Explore device tree from the root. */
@@ -834,7 +865,7 @@ usb_add_event(int type, struct usb_event *uep)
 	TAILQ_INSERT_TAIL(&usb_events, ueq, next);
 	usb_nevents++;
 	wakeup(&usb_events);
-	selwakeup(&usb_selevent);
+	KNOTE(&usb_kqevent.ki_note, 0);
 	if (usb_async_proc != NULL) {
 		ksignal(usb_async_proc, SIGIO);
 	}

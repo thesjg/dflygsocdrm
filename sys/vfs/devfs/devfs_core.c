@@ -186,7 +186,7 @@ devfs_allocp(devfs_nodetype devfsnodetype, char *name,
 	node = objcache_get(devfs_node_cache, M_WAITOK);
 	bzero(node, sizeof(*node));
 
-	atomic_add_long(&(DEVFS_MNTDATA(mp)->leak_count), 1);
+	atomic_add_long(&DEVFS_MNTDATA(mp)->leak_count, 1);
 
 	node->d_dev = NULL;
 	node->nchildren = 1;
@@ -278,7 +278,7 @@ devfs_allocp(devfs_nodetype devfsnodetype, char *name,
 		++mp->mnt_namecache_gen;
 	}
 
-	++DEVFS_MNTDATA(mp)->file_count;
+	atomic_add_long(&DEVFS_MNTDATA(mp)->file_count, 1);
 
 	return node;
 }
@@ -379,18 +379,55 @@ devfs_allocvp(struct mount *mp, struct vnode **vpp, devfs_nodetype devfsnodetype
  * and device.
  *
  * The cdev_t itself remains intact.
+ *
+ * The core lock is not necessarily held on call and must be temporarily
+ * released if it is to avoid a deadlock.
  */
 int
 devfs_freep(struct devfs_node *node)
 {
 	struct vnode *vp;
+	int relock;
 
 	KKASSERT(node);
 	KKASSERT(((node->flags & DEVFS_NODE_LINKED) == 0) ||
 		 (node->node_type == Proot));
-	KKASSERT((node->flags & DEVFS_DESTROYED) == 0);
 
-	atomic_subtract_long(&(DEVFS_MNTDATA(node->mp)->leak_count), 1);
+	/*
+	 * Protect against double frees
+	 */
+	KKASSERT((node->flags & DEVFS_DESTROYED) == 0);
+	node->flags |= DEVFS_DESTROYED;
+
+	/*
+	 * Avoid deadlocks between devfs_lock and the vnode lock when
+	 * disassociating the vnode (stress2 pty vs ls -la /dev/pts).
+	 *
+	 * This also prevents the vnode reclaim code from double-freeing
+	 * the node.  The vget() is required to safely modified the vp
+	 * and cycle the refs to terminate an inactive vp.
+	 */
+	if (lockstatus(&devfs_lock, curthread) == LK_EXCLUSIVE) {
+		lockmgr(&devfs_lock, LK_RELEASE);
+		relock = 1;
+	} else {
+		relock = 0;
+	}
+
+	while ((vp = node->v_node) != NULL) {
+		if (vget(vp, LK_EXCLUSIVE | LK_RETRY) != 0)
+			break;
+		v_release_rdev(vp);
+		vp->v_data = NULL;
+		node->v_node = NULL;
+		cache_inval_vp(vp, CINV_DESTROY);
+		vput(vp);
+	}
+
+	/*
+	 * Remaining cleanup
+	 */
+	atomic_subtract_long(&DEVFS_MNTDATA(node->mp)->leak_count, 1);
 	if (node->symlink_name)	{
 		kfree(node->symlink_name, M_DEVFS);
 		node->symlink_name = NULL;
@@ -402,32 +439,15 @@ devfs_freep(struct devfs_node *node)
 	if (node->flags & DEVFS_ORPHANED)
 		devfs_tracer_del_orphan(node);
 
-	/*
-	 * Disassociate the vnode from the node.  This also prevents the
-	 * vnode's reclaim code from double-freeing the node.
-	 *
-	 * The vget is needed to safely modify the vp.  It also serves
-	 * to cycle the refs and terminate the vnode if it happens to
-	 * be inactive, otherwise namecache references may not get cleared.
-	 */
-	while ((vp = node->v_node) != NULL) {
-		if (vget(vp, LK_EXCLUSIVE | LK_RETRY) != 0)
-			break;
-		v_release_rdev(vp);
-		vp->v_data = NULL;
-		node->v_node = NULL;
-		cache_inval_vp(vp, CINV_DESTROY);
-		vput(vp);
-	}
 	if (node->d_dir.d_name) {
 		kfree(node->d_dir.d_name, M_DEVFS);
 		node->d_dir.d_name = NULL;
 	}
-	node->flags |= DEVFS_DESTROYED;
-
-	--DEVFS_MNTDATA(node->mp)->file_count;
-
+	atomic_subtract_long(&DEVFS_MNTDATA(node->mp)->file_count, 1);
 	objcache_put(devfs_node_cache, node);
+
+	if (relock)
+		lockmgr(&devfs_lock, LK_EXCLUSIVE);
 
 	return 0;
 }
@@ -2289,14 +2309,21 @@ devfs_release_ops(struct dev_ops *ops)
 	}
 }
 
+/*
+ * Wait for asynchronous messages to complete in the devfs helper
+ * thread, then return.  Do nothing if the helper thread is dead
+ * or we are being indirectly called from the helper thread itself.
+ */
 void
 devfs_config(void)
 {
 	devfs_msg_t msg;
 
-	msg = devfs_msg_get();
-	msg = devfs_msg_send_sync(DEVFS_SYNC, msg);
-	devfs_msg_put(msg);
+	if (devfs_run && curthread != td_core) {
+		msg = devfs_msg_get();
+		msg = devfs_msg_send_sync(DEVFS_SYNC, msg);
+		devfs_msg_put(msg);
+	}
 }
 
 /*
@@ -2339,7 +2366,8 @@ devfs_init(void)
 	lwkt_create(devfs_msg_core, /*args*/NULL, &td_core, NULL,
 		    0, 0, "devfs_msg_core");
 
-	tsleep(td_core/*devfs_id*/, 0, "devfsc", 0);
+	while (devfs_run == 0)
+		tsleep(td_core, 0, "devfsc", 0);
 
 	devfs_debug(DEVFS_DEBUG_DEBUG, "devfs_init finished\n");
 }
@@ -2354,9 +2382,9 @@ devfs_uninit(void)
 	devfs_debug(DEVFS_DEBUG_DEBUG, "devfs_uninit() called\n");
 
 	devfs_msg_send(DEVFS_TERMINATE_CORE, NULL);
-
-	tsleep(td_core/*devfs_id*/, 0, "devfsc", 0);
-	tsleep(td_core/*devfs_id*/, 0, "devfsc", 10000);
+	while (devfs_run)
+		tsleep(td_core, 0, "devfsc", hz*10);
+	tsleep(td_core, 0, "devfsc", hz);
 
 	devfs_clone_bitmap_uninit(&DEVFS_CLONE_BITMAP(ops_id));
 

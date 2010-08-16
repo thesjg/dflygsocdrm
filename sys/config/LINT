@@ -1255,9 +1255,8 @@ device		amr		# AMI MegaRAID
 # 3ware ATA RAID
 #
 device		twe		# 3ware ATA RAID
-device		twa		# 3ware SATA RAID
+device		twa		# 3ware 9000 series PATA/SATA RAID
 options 	TWA_DEBUG=10	# enable debug messages
-options 	TWA_FLASH_FIRMWARE
 
 #
 # Promise Supertrack SX6000
@@ -1449,7 +1448,8 @@ options		ATH_DIAGAPI	# diagnostic interface to the HAL
 options		ATH_RXBUF=80	# number of RX buffers to allocate
 options		ATH_TXBUF=400	# number of TX buffers to allocate
 #device		iwl		# Intel PRO/Wireless 2100
-#device		iwi		# Intel PRO/Wireless 2200BG/2915ABG
+device		iwi		# Intel PRO/Wireless 2200BG/2915ABG
+device		iwn		# Intel WiFi Link 4965/1000/5000/5150/5300/6000/6050
 device		wi		# WaveLAN/IEEE, PRISM-II, Spectrum24 802.11DS
 #device		rtw		# RealTek 8180
 #device		acx		# TI ACX100/ACX111.
@@ -1457,6 +1457,18 @@ device wl0 at isa? port 0x300	# T1 speed ISA/radio lan
 device		xe		# Xircom PCMCIA
 device		ral		# Ralink Technology 802.11 wireless NIC
 device		wpi
+
+# IEEE 802.11 adapter firmware modules
+
+# iwifw:	Intel PRO/Wireless 2200BG/2225BG/2915ABG firmware
+# iwnfw:	Intel WiFi Link 4965/1000/5000/5150/5300/6000/6050
+# ralfw:	Ralink Technology RT25xx and RT26xx firmware
+# wpifw:	Intel 3945ABG Wireless LAN Controller firmware
+
+device		iwifw
+device		iwnfw
+device		ralfw
+device		wpifw
 
 #
 # ATM related options
@@ -1985,6 +1997,7 @@ device		emx		# Intel Pro/1000 (8257{1,2,3,4})
 device		ig_hal		# Intel Pro/1000 hardware abstraction layer
 device		et		# Agere ET1310 10/100/1000 Ethernet
 device		lge		# Level 1 LXT1001 (``Mercury'')
+device		mxge		# Myricom Myri-10G 10GbE NIC
 device		nfe		# nVidia nForce2/3 MCP04/51/55 CK804
 device		nge		# NatSemi DP83820 and DP83821
 device		sk		# SysKonnect GEnesis, LinkSys EG1023, D-Link

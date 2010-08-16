@@ -29,7 +29,7 @@
 .\" OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
 .\" SUCH DAMAGE.
 .\"
-.Dd September 7, 2009
+.Dd August 13, 2010
 .Os
 .Dt MAKE_AUTOCLONE_DEV 9
 .Sh NAME
@@ -40,7 +40,6 @@
 .Nm devfs_clone_bitmap_fff ,
 .Nm devfs_clone_bitmap_chk ,
 .Nm devfs_clone_bitmap_set ,
-.Nm devfs_clone_bitmap_rst ,
 .Nm devfs_clone_bitmap_get ,
 .Nm devfs_clone_bitmap_put ,
 .Nm DEVFS_DECLARE_CLONE_BITMAP ,
@@ -51,7 +50,7 @@
 .In sys/conf.h
 .In sys/devfs.h
 .Ft cdev_t
-.Fn make_autoclone_dev "struct dev_ops *ops" "struct devfs_bitmap *bitmap" "d_clone_t *nhandler" "uid_t uid" "gid_t gid" "int perms" "const char *fmt" ...
+.Fn make_autoclone_dev "struct dev_ops *ops" "struct devfs_bitmap *bitmap" "d_clone_t *nhandler" "uid_t uid" "gid_t gid" "int perms" "const char *fmt" "..."
 .Ft void
 .Fn destroy_autoclone_dev "cdev_t dev" "struct devfs_bitmap *bitmap"
 .Ft void
@@ -61,15 +60,13 @@
 .Ft void
 .Fn devfs_clone_bitmap_fff "struct devfs_bitmap *bitmap"
 .Ft int
-.Fn devfs_clone_bitmap_chk "struct devfs_bitmap *bitmap, int unit"
+.Fn devfs_clone_bitmap_chk "struct devfs_bitmap *bitmap" "int unit"
 .Ft void
-.Fn devfs_clone_bitmap_set "struct devfs_bitmap *bitmap, int unit"
-.Ft void
-.Fn devfs_clone_bitmap_rst "struct devfs_bitmap *bitmap, int unit"
+.Fn devfs_clone_bitmap_set "struct devfs_bitmap *bitmap" "int unit"
 .Ft int
-.Fn devfs_clone_bitmap_get "struct devfs_bitmap *bitmap, int limit"
+.Fn devfs_clone_bitmap_get "struct devfs_bitmap *bitmap" "int limit"
 .Ft void
-.Fn devfs_clone_bitmap_put "struct devfs_bitmap *bitmap, int unit"
+.Fn devfs_clone_bitmap_put "struct devfs_bitmap *bitmap" "int unit"
 .Fn DEVFS_DECLARE_CLONE_BITMAP "name"
 .Fn DEVFS_CLONE_BITMAP "name"
 .Sh DESCRIPTION
@@ -204,7 +201,7 @@ calling
 .Fn devfs_clone_bitmap_set
 on them.
 .Pp
-.Fn devfs_clone_bitmap_rst
+.Fn devfs_clone_bitmap_put
 marks
 .Fa unit
 in the
@@ -214,9 +211,6 @@ as unused so further calls to
 or
 .Fn devfs_clone_bitmap_get
 can retrieve it again.
-.Fn devfs_clone_bitmap_put
-is an alias for
-.Fn devfs_clone_bitmap_rst .
 .Pp
 .Fn devfs_clone_bitmap_get
 is a shortcut to

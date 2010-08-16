@@ -993,10 +993,6 @@ lwpsignal(struct proc *p, struct lwp *lp, int sig)
 
 	KKASSERT(lp == NULL || lp->lwp_proc == p);
 
-	crit_enter();
-	KNOTE(&p->p_klist, NOTE_SIGNAL | sig);
-	crit_exit();
-
 	prop = sigprop(sig);
 
 	/*
@@ -1822,6 +1818,8 @@ postsig(int sig)
 
 	KASSERT(sig != 0, ("postsig"));
 
+	KNOTE(&p->p_klist, NOTE_SIGNAL | sig);
+
 	/*
 	 * If we are a virtual kernel running an emulated user process
 	 * context, switch back to the virtual kernel context before
@@ -2200,7 +2198,7 @@ filt_sigattach(struct knote *kn)
 	kn->kn_flags |= EV_CLEAR;		/* automatically set */
 
 	/* XXX lock the proc here while adding to the list? */
-	SLIST_INSERT_HEAD(&p->p_klist, kn, kn_selnext);
+	knote_insert(&p->p_klist, kn);
 
 	return (0);
 }
@@ -2210,7 +2208,7 @@ filt_sigdetach(struct knote *kn)
 {
 	struct proc *p = kn->kn_ptr.p_proc;
 
-	SLIST_REMOVE(&p->p_klist, kn, knote, kn_selnext);
+	knote_remove(&p->p_klist, kn);
 }
 
 /*

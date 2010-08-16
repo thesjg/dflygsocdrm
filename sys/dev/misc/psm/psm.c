@@ -71,11 +71,10 @@
 #include <sys/bus.h>
 #include <sys/conf.h>
 #include <sys/device.h>
-#include <sys/poll.h>
+#include <sys/event.h>
 #include <sys/syslog.h>
 #include <sys/malloc.h>
 #include <sys/rman.h>
-#include <sys/selinfo.h>
 #include <sys/thread2.h>
 #include <sys/time.h>
 #include <sys/uio.h>
@@ -152,7 +151,7 @@ typedef struct ringbuf {
 /* driver control block */
 struct psm_softc {		/* Driver status information */
     int		  unit;
-    struct selinfo rsel;	/* Process selecting for Input */
+    struct kqinfo rkq;		/* Processes with registered kevents */
     unsigned char state;	/* Mouse driver state */
     int           config;	/* driver configuration flags */
     int           flags;	/* other flags */
@@ -241,7 +240,7 @@ static d_open_t psmopen;
 static d_close_t psmclose;
 static d_read_t psmread;
 static d_ioctl_t psmioctl;
-static d_poll_t psmpoll;
+static d_kqfilter_t psmkqfilter;
 
 static int enable_aux_dev (KBDC);
 static int disable_aux_dev (KBDC);
@@ -261,6 +260,8 @@ static int reinitialize (struct psm_softc *, int);
 static char *model_name (int);
 static void psmintr (void *);
 static void psmtimeout (void *);
+static void psmfilter_detach(struct knote *);
+static int psmfilter(struct knote *, long);
 
 /* vendor specific features */
 typedef int probefunc_t (struct psm_softc *);
@@ -342,12 +343,12 @@ static struct isa_pnp_id psm_ids[] = {
 #define CDEV_MAJOR        21
 
 static struct dev_ops psm_ops = {
-	{ PSM_DRIVER_NAME, CDEV_MAJOR, 0 },
+	{ PSM_DRIVER_NAME, CDEV_MAJOR, D_KQFILTER },
 	.d_open =	psmopen,
 	.d_close =	psmclose,
 	.d_read =	psmread,
 	.d_ioctl =	psmioctl,
-	.d_poll =	psmpoll,
+	.d_kqfilter =	psmkqfilter
 };
 
 /* debug message level */
@@ -1308,8 +1309,6 @@ psmopen(struct dev_open_args *ap)
 #endif
 
     /* Initialize state */
-    sc->rsel.si_flags = 0;
-    sc->rsel.si_pid = 0;
     sc->mode.level = sc->dflt_mode.level;
     sc->mode.protocol = sc->dflt_mode.protocol;
     sc->watchdog = FALSE;
@@ -2375,28 +2374,61 @@ psmintr(void *arg)
             sc->state &= ~PSM_ASLP;
             wakeup((caddr_t) sc);
     	}
-        selwakeup(&sc->rsel);
+	KNOTE(&sc->rkq.ki_note, 0);
     }
 }
 
-static int
-psmpoll(struct dev_poll_args *ap)
-{
-    cdev_t dev = ap->a_head.a_dev;
-    struct psm_softc *sc = PSM_SOFTC(PSM_UNIT(dev));
-    int revents = 0;
+static struct filterops psmfiltops =
+	{ FILTEROP_ISFD, NULL, psmfilter_detach, psmfilter };
 
-    /* Return true if a mouse event available */
-    crit_enter();
-    if (ap->a_events & (POLLIN | POLLRDNORM)) {
+static int
+psmkqfilter(struct dev_kqfilter_args *ap)
+{
+	cdev_t dev = ap->a_head.a_dev;
+	struct psm_softc *sc = PSM_SOFTC(PSM_UNIT(dev));
+	struct knote *kn = ap->a_kn;
+	struct klist *klist;
+
+	ap->a_result = 0;
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &psmfiltops;
+		kn->kn_hook = (caddr_t)sc;
+		break;
+	default:
+		ap->a_result = EOPNOTSUPP;
+		return (0);
+	}
+
+	klist = &sc->rkq.ki_note;
+	knote_insert(klist, kn);
+
+	return (0);
+}
+
+static void
+psmfilter_detach(struct knote *kn)
+{
+	struct psm_softc *sc = (struct psm_softc *)kn->kn_hook;
+	struct klist *klist;
+
+	klist = &sc->rkq.ki_note;
+	knote_remove(klist, kn);
+}
+
+static int
+psmfilter(struct knote *kn, long hint)
+{
+	struct psm_softc *sc = (struct psm_softc *)kn->kn_hook;
+	int ready = 0;
+
+	crit_enter();
 	if (sc->queue.count > 0)
-	    revents |= ap->a_events & (POLLIN | POLLRDNORM);
-	else
-	    selrecord(curthread, &sc->rsel);
-    }
-    crit_exit();
-    ap->a_events = revents;
-    return (0);
+		ready = 1;
+	crit_exit();
+
+	return (ready);
 }
 
 /* vendor/model specific routines */

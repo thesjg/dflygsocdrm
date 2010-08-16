@@ -31,9 +31,8 @@
 .\"
 .\"	@(#)hier.7	8.1 (Berkeley) 6/5/93
 .\" $FreeBSD: src/share/man/man7/hier.7,v 1.29.2.17 2003/01/13 21:43:50 ceri Exp $
-.\" $DragonFly: src/share/man/man7/hier.7,v 1.26 2008/09/06 14:24:44 swildner Exp $
 .\"
-.Dd August 6, 2009
+.Dd July 25, 2010
 .Dt HIER 7
 .Os
 .Sh NAME
@@ -83,10 +82,10 @@ see
 .It Pa dma/
 .Xr dma 8
 configuration files
-.It Pa firmware/
-Firmware image files;
-see
-.Xr firmware 9
+.\".It Pa firmware/
+.\"Firmware image files;
+.\"see
+.\".Xr firmware 9
 .It Pa isdn/
 isdn4bsd configuration files;
 see
@@ -187,8 +186,6 @@ Include Files for various emulation layers
 SMB/CIFS filesystem
 .El
 .Pp
-.It Pa isc/
-ISC utility library libisc include files
 .It Pa isofs/
 .Pp
 .Bl -tag -width ".Pa cd9660/" -compact
@@ -199,6 +196,8 @@ iso9660 filesystem
 .It Pa libmilter/
 C include files for libmilter,
 the sendmail mail filter API
+.It Pa libprop/
+C include files for libprop
 .It Pa machine/
 machine-specific C include files
 .It Pa msdosfs/
@@ -243,8 +242,6 @@ see
 .Xr pcap 3
 .It Pa pccard/
 PC-CARD controllers
-.It Pa prop/
-C include files for libprop
 .It Pa protocols/
 C include files for Berkeley service protocols
 .It Pa readline/
@@ -316,8 +313,6 @@ fonts used by doscmd
 various prebuilt lint libraries;
 see
 .Xr lint 1
-.It Pa msdosfs/
-Character set conversion tables
 .It Pa stallion/
 holds the download firmware images
 .El
@@ -431,6 +426,13 @@ common words
 reference databases;
 see
 .Xr refer 1
+.El
+.Pp
+.It Pa doc/
+miscellaneous documentation
+.Bl -tag -width ".Pa legal/" -compact
+.It Pa legal/
+License files for vendor supplied firmwares
 .El
 .Pp
 .It Pa examples/

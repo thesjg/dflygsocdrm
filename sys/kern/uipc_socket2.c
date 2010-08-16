@@ -217,6 +217,21 @@ soisdisconnected(struct socket *so)
 	sorwakeup(so);
 }
 
+void
+soisreconnecting(struct socket *so)
+{
+        so->so_state &= ~(SS_ISDISCONNECTING|SS_ISDISCONNECTED|SS_CANTRCVMORE|
+			SS_CANTSENDMORE);
+	so->so_state |= SS_ISCONNECTING;
+}
+
+void
+soisreconnected(struct socket *so)
+{
+	so->so_state &= ~(SS_ISDISCONNECTED|SS_CANTRCVMORE|SS_CANTSENDMORE);
+	soisconnected(so);
+}
+
 /*
  * Set or change the message port a socket receives commands on.
  *
@@ -334,10 +349,8 @@ socantrcvmore(struct socket *so)
 void
 sowakeup(struct socket *so, struct signalsockbuf *ssb)
 {
-	struct selinfo *selinfo = &ssb->ssb_sel;
+	struct kqinfo *kqinfo = &ssb->ssb_kq;
 
-	selwakeup(selinfo);
-	ssb->ssb_flags &= ~SSB_SEL;
 	if (ssb->ssb_flags & SSB_WAIT) {
 		if ((ssb == &so->so_snd && ssb_space(ssb) >= ssb->ssb_lowat) ||
 		    (ssb == &so->so_rcv && ssb->ssb_cc >= ssb->ssb_lowat) ||
@@ -354,18 +367,18 @@ sowakeup(struct socket *so, struct signalsockbuf *ssb)
 		(*so->so_upcall)(so, so->so_upcallarg, MB_DONTWAIT);
 	if (ssb->ssb_flags & SSB_AIO)
 		aio_swake(so, ssb);
-	KNOTE(&selinfo->si_note, 0);
+	KNOTE(&kqinfo->ki_note, 0);
 	if (ssb->ssb_flags & SSB_MEVENT) {
 		struct netmsg_so_notify *msg, *nmsg;
 
-		TAILQ_FOREACH_MUTABLE(msg, &selinfo->si_mlist, nm_list, nmsg) {
+		TAILQ_FOREACH_MUTABLE(msg, &kqinfo->ki_mlist, nm_list, nmsg) {
 			if (msg->nm_predicate(&msg->nm_netmsg)) {
-				TAILQ_REMOVE(&selinfo->si_mlist, msg, nm_list);
+				TAILQ_REMOVE(&kqinfo->ki_mlist, msg, nm_list);
 				lwkt_replymsg(&msg->nm_netmsg.nm_lmsg, 
 					      msg->nm_netmsg.nm_lmsg.ms_error);
 			}
 		}
-		if (TAILQ_EMPTY(&ssb->ssb_sel.si_mlist))
+		if (TAILQ_EMPTY(&ssb->ssb_kq.ki_mlist))
 			ssb->ssb_flags &= ~SSB_MEVENT;
 	}
 }
@@ -376,8 +389,8 @@ sowakeup(struct socket *so, struct signalsockbuf *ssb)
  * Each socket contains two socket buffers: one for sending data and
  * one for receiving data.  Each buffer contains a queue of mbufs,
  * information about the number of mbufs and amount of data in the
- * queue, and other fields allowing select() statements and notification
- * on data availability to be implemented.
+ * queue, and other fields allowing kevent()/select()/poll() statements
+ * and notification on data availability to be implemented.
  *
  * Data stored in a socket buffer is maintained as a list of records.
  * Each record is a list of mbufs chained together with the m_next
@@ -592,13 +605,6 @@ int
 pru_soreceive_notsupp(struct socket *so, struct sockaddr **paddr,
 		      struct uio *uio, struct sockbuf *sio,
 		      struct mbuf **controlp, int *flagsp)
-{
-	return (EOPNOTSUPP);
-}
-
-int
-pru_sopoll_notsupp(struct socket *so, int events,
-		   struct ucred *cred, struct thread *td)
 {
 	return (EOPNOTSUPP);
 }

@@ -180,18 +180,6 @@ struct clockinfo {
 
 #ifdef _KERNEL
 
-/*
- * For krateprintf()
- */
-struct krate {
-	int freq;
-	int ticks;
-	int count;
-};
-
-#endif
-
-#ifdef _KERNEL
 extern time_t	time_second;
 extern int64_t	ntp_tick_permanent;
 extern int64_t	ntp_tick_acc;

@@ -81,7 +81,6 @@
 #include <sys/kernel.h>
 #include <sys/malloc.h>
 #include <sys/event.h>
-#include <sys/poll.h>
 #include <sys/proc.h>
 #include <sys/protosw.h>
 #include <sys/socket.h>
@@ -111,11 +110,13 @@ static int	filt_sowrite(struct knote *kn, long hint);
 static int	filt_solisten(struct knote *kn, long hint);
 
 static struct filterops solisten_filtops = 
-	{ 1, NULL, filt_sordetach, filt_solisten };
+	{ FILTEROP_ISFD, NULL, filt_sordetach, filt_solisten };
 static struct filterops soread_filtops =
-	{ 1, NULL, filt_sordetach, filt_soread };
+	{ FILTEROP_ISFD, NULL, filt_sordetach, filt_soread };
 static struct filterops sowrite_filtops = 
-	{ 1, NULL, filt_sowdetach, filt_sowrite };
+	{ FILTEROP_ISFD, NULL, filt_sowdetach, filt_sowrite };
+static struct filterops soexcept_filtops =
+	{ FILTEROP_ISFD, NULL, filt_sordetach, filt_soread };
 
 MALLOC_DEFINE(M_SOCKET, "socket", "socket struct");
 MALLOC_DEFINE(M_SONAME, "soname", "socket name");
@@ -151,8 +152,8 @@ soalloc(int waitok)
 	if (so) {
 		/* XXX race condition for reentrant kernel */
 		TAILQ_INIT(&so->so_aiojobq);
-		TAILQ_INIT(&so->so_rcv.ssb_sel.si_mlist);
-		TAILQ_INIT(&so->so_snd.ssb_sel.si_mlist);
+		TAILQ_INIT(&so->so_rcv.ssb_kq.ki_mlist);
+		TAILQ_INIT(&so->so_snd.ssb_kq.ki_mlist);
 	}
 	return so;
 }
@@ -1186,7 +1187,7 @@ sorflush(struct socket *so)
 	asb = *ssb;
 	bzero((caddr_t)ssb, sizeof (*ssb));
 	if (asb.ssb_flags & SSB_KNOTE) {
-		ssb->ssb_sel.si_note = asb.ssb_sel.si_note;
+		ssb->ssb_kq.ki_note = asb.ssb_kq.ki_note;
 		ssb->ssb_flags = SSB_KNOTE;
 	}
 	crit_exit();
@@ -1697,49 +1698,7 @@ sohasoutofband(struct socket *so)
 {
 	if (so->so_sigio != NULL)
 		pgsigio(so->so_sigio, SIGURG, 0);
-	selwakeup(&so->so_rcv.ssb_sel);
-}
-
-int
-sopoll(struct socket *so, int events, struct ucred *cred, struct thread *td)
-{
-	int revents = 0;
-
-	crit_enter();
-
-	if (events & (POLLIN | POLLRDNORM))
-		if (soreadable(so))
-			revents |= events & (POLLIN | POLLRDNORM);
-
-	if (events & POLLINIGNEOF)
-		if (so->so_rcv.ssb_cc >= so->so_rcv.ssb_lowat ||
-			!TAILQ_EMPTY(&so->so_comp) || so->so_error)
-			revents |= POLLINIGNEOF;
-
-	if (events & (POLLOUT | POLLWRNORM))
-		if (sowriteable(so))
-			revents |= events & (POLLOUT | POLLWRNORM);
-
-	if (events & (POLLPRI | POLLRDBAND))
-		if (so->so_oobmark || (so->so_state & SS_RCVATMARK))
-			revents |= events & (POLLPRI | POLLRDBAND);
-
-	if (revents == 0) {
-		if (events &
-			(POLLIN | POLLINIGNEOF | POLLPRI | POLLRDNORM |
-			 POLLRDBAND)) {
-			selrecord(td, &so->so_rcv.ssb_sel);
-			so->so_rcv.ssb_flags |= SSB_SEL;
-		}
-
-		if (events & (POLLOUT | POLLWRNORM)) {
-			selrecord(td, &so->so_snd.ssb_sel);
-			so->so_snd.ssb_flags |= SSB_SEL;
-		}
-	}
-
-	crit_exit();
-	return (revents);
+	KNOTE(&so->so_rcv.ssb_kq.ki_note, NOTE_OOB);
 }
 
 int
@@ -1760,14 +1719,16 @@ sokqfilter(struct file *fp, struct knote *kn)
 		kn->kn_fop = &sowrite_filtops;
 		ssb = &so->so_snd;
 		break;
+	case EVFILT_EXCEPT:
+		kn->kn_fop = &soexcept_filtops;
+		ssb = &so->so_rcv;
+		break;
 	default:
-		return (1);
+		return (EOPNOTSUPP);
 	}
 
-	crit_enter();
-	SLIST_INSERT_HEAD(&ssb->ssb_sel.si_note, kn, kn_selnext);
+	knote_insert(&ssb->ssb_kq.ki_note, kn);
 	ssb->ssb_flags |= SSB_KNOTE;
-	crit_exit();
 	return (0);
 }
 
@@ -1776,11 +1737,9 @@ filt_sordetach(struct knote *kn)
 {
 	struct socket *so = (struct socket *)kn->kn_fp->f_data;
 
-	crit_enter();
-	SLIST_REMOVE(&so->so_rcv.ssb_sel.si_note, kn, knote, kn_selnext);
-	if (SLIST_EMPTY(&so->so_rcv.ssb_sel.si_note))
+	knote_remove(&so->so_rcv.ssb_kq.ki_note, kn);
+	if (SLIST_EMPTY(&so->so_rcv.ssb_kq.ki_note))
 		so->so_rcv.ssb_flags &= ~SSB_KNOTE;
-	crit_exit();
 }
 
 /*ARGSUSED*/
@@ -1789,8 +1748,19 @@ filt_soread(struct knote *kn, long hint)
 {
 	struct socket *so = (struct socket *)kn->kn_fp->f_data;
 
+	if (kn->kn_sfflags & NOTE_OOB) {
+		if ((so->so_oobmark || (so->so_state & SS_RCVATMARK))) {
+			kn->kn_fflags |= NOTE_OOB;
+			return (1);
+		}
+		return (0);
+	}
 	kn->kn_data = so->so_rcv.ssb_cc;
-	if (so->so_state & SS_CANTRCVMORE) {
+
+	/*
+	 * Only set EOF if all data has been exhausted.
+	 */
+	if ((so->so_state & SS_CANTRCVMORE) && kn->kn_data == 0) {
 		kn->kn_flags |= EV_EOF; 
 		kn->kn_fflags = so->so_error;
 		return (1);
@@ -1799,7 +1769,8 @@ filt_soread(struct knote *kn, long hint)
 		return (1);
 	if (kn->kn_sfflags & NOTE_LOWAT)
 		return (kn->kn_data >= kn->kn_sdata);
-	return (kn->kn_data >= so->so_rcv.ssb_lowat);
+	return ((kn->kn_data >= so->so_rcv.ssb_lowat) ||
+	    !TAILQ_EMPTY(&so->so_comp));
 }
 
 static void
@@ -1807,11 +1778,9 @@ filt_sowdetach(struct knote *kn)
 {
 	struct socket *so = (struct socket *)kn->kn_fp->f_data;
 
-	crit_enter();
-	SLIST_REMOVE(&so->so_snd.ssb_sel.si_note, kn, knote, kn_selnext);
-	if (SLIST_EMPTY(&so->so_snd.ssb_sel.si_note))
+	knote_remove(&so->so_snd.ssb_kq.ki_note, kn);
+	if (SLIST_EMPTY(&so->so_snd.ssb_kq.ki_note))
 		so->so_snd.ssb_flags &= ~SSB_KNOTE;
-	crit_exit();
 }
 
 /*ARGSUSED*/

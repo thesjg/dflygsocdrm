@@ -363,22 +363,6 @@ so_pru_sockaddr(struct socket *so, struct sockaddr **nam)
 }
 
 int
-so_pru_sopoll(struct socket *so, int events, struct ucred *cred)
-{
-	int error;
-	struct netmsg_pru_sopoll msg;
-
-	netmsg_init(&msg.nm_netmsg, so, &curthread->td_msgport,
-		    0, netmsg_pru_sopoll);
-	msg.nm_prufn = so->so_proto->pr_usrreqs->pru_sopoll;
-	msg.nm_events = events;
-	msg.nm_cred = cred;
-	msg.nm_td = curthread;
-	error = lwkt_domsg(so->so_port, &msg.nm_netmsg.nm_lmsg, 0);
-	return (error);
-}
-
-int
 so_pru_ctloutput(struct socket *so, struct sockopt *sopt)
 {
 	struct netmsg_pru_ctloutput msg;
@@ -591,16 +575,6 @@ netmsg_pru_sockaddr(netmsg_t msg)
 }
 
 void
-netmsg_pru_sopoll(netmsg_t msg)
-{
-	struct netmsg_pru_sopoll *nm = (void *)msg;
-	int error;
-
-	error = nm->nm_prufn(msg->nm_so, nm->nm_events, nm->nm_cred, nm->nm_td);
-	lwkt_replymsg(&msg->nm_lmsg, error);
-}
-
-void
 netmsg_pru_ctloutput(netmsg_t msg)
 {
 	struct netmsg_pru_ctloutput *nm = (void *)msg;
@@ -647,7 +621,9 @@ netmsg_so_notify(netmsg_t netmsg)
 		lwkt_replymsg(&msg->nm_netmsg.nm_lmsg,
 			      msg->nm_netmsg.nm_lmsg.ms_error);
 	} else {
-		TAILQ_INSERT_TAIL(&ssb->ssb_sel.si_mlist, msg, nm_list);
+		lwkt_gettoken(&kq_token);
+		TAILQ_INSERT_TAIL(&ssb->ssb_kq.ki_mlist, msg, nm_list);
+		lwkt_reltoken(&kq_token);
 		ssb->ssb_flags |= SSB_MEVENT;
 	}
 }
@@ -709,7 +685,9 @@ netmsg_so_notify_abort(netmsg_t netmsg)
 		ssb = (msg->nm_etype & NM_REVENT) ?
 				&msg->nm_so->so_rcv :
 				&msg->nm_so->so_snd;
-		TAILQ_REMOVE(&ssb->ssb_sel.si_mlist, msg, nm_list);
+		lwkt_gettoken(&kq_token);
+		TAILQ_REMOVE(&ssb->ssb_kq.ki_mlist, msg, nm_list);
+		lwkt_reltoken(&kq_token);
 		lwkt_replymsg(&msg->nm_netmsg.nm_lmsg, EINTR);
 	}
 

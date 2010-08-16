@@ -83,7 +83,6 @@
 #include <sys/spinlock2.h>
 #include <bus/pci/pcivar.h>
 #include <bus/pci/pcireg.h>
-#include <sys/selinfo.h>
 #include <sys/bus.h>
 
 /* For struct mtx, mtx_init, mtx_lock, mtx_unlock */

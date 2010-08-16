@@ -54,6 +54,18 @@ options 	AHC_REG_PRETTY_PRINT	# Print register bitfields in debug
 					# output.  Adds ~128k to driver.
 options 	AHD_REG_PRETTY_PRINT	# Print register bitfields in debug
 					# output.  Adds ~215k to driver.
+options		DSCHED_FQ               # Fair-queuing disk scheduler
+
+# ALTQ
+options         ALTQ            #alternate queueing
+options         ALTQ_CBQ        #class based queueing
+options         ALTQ_RED        #random early detection
+options         ALTQ_RIO        #triple red for diffserv (needs RED)
+options         ALTQ_HFSC       #hierarchical fair service curve
+options         ALTQ_PRIQ       #priority queue
+options         ALTQ_FAIRQ      #fair queueing
+#options        ALTQ_NOPCC      #don't use processor cycle counter
+#options        ALTQ_DEBUG      #for debugging
 
 # To make an SMP kernel both SMP and APIC_IO are usually
 # specified.  SMP boxes with severely broken BIOSes which
@@ -160,7 +172,7 @@ device		ips		# IBM ServeRAID
 device		amr		# AMI MegaRAID
 device		mlx		# Mylex DAC960 family
 device		twe		# 3ware Escalade 7000/8000's
-device		twa		# 3ware Escalade 9000's
+device		twa		# 3ware 9000 series PATA/SATA RAID
 device		pst		# Promise Supertrack
 
 # atkbdc0 controls both the keyboard and the PS/2 mouse
@@ -277,6 +289,7 @@ device		wlan_tkip	# 802.11 TKIP support
 device		wlan_wep	# 802.11 WEP support
 #device		wlan_amrr	# AMRR
 
+# All wireless NICs require wlan and wlan_amrr
 # Aironet 4500/4800 802.11 wireless NICs.  Note: the declaration below will
 # work for PCMCIA and PCI cards, as well as ISA cards set to ISA PnP
 # mode (the factory default). If you set the switches on your ISA

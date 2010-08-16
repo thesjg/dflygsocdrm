@@ -46,8 +46,7 @@
 #include <sys/buf.h>
 #include <sys/malloc.h>
 #include <sys/kernel.h>
-#include <sys/poll.h>
-#include <sys/selinfo.h>
+#include <sys/event.h>
 #include <sys/uio.h>
 #include <sys/thread2.h>
 #include <sys/bus.h>
@@ -155,7 +154,7 @@ struct asc_unit {
   int     btime;          /* timeout of buffer in seconds/hz */
   struct  _sbuf sbuf;
   long	  icnt;		/* interrupt count XXX for debugging */
-  struct selinfo selp;
+  struct  kqinfo kqp;
   int     height;         /* height, for pnm modes */
   size_t  bcount;         /* bytes to read, for pnm modes */
 };
@@ -185,17 +184,20 @@ static d_open_t		ascopen;
 static d_close_t	ascclose;
 static d_read_t		ascread;
 static d_ioctl_t	ascioctl;
-static d_poll_t		ascpoll;
+static d_kqfilter_t	asckqfilter;
+
+static void ascfilter_detach(struct knote *kn);
+static int ascfilter(struct knote *kn, long hint);
 
 #define CDEV_MAJOR 71
 
 static struct dev_ops asc_ops = {
-	{ "asc", CDEV_MAJOR, 0 },
+	{ "asc", CDEV_MAJOR, D_KQFILTER },
 	.d_open =	ascopen,
 	.d_close =	ascclose,
 	.d_read =	ascread,
 	.d_ioctl =	ascioctl,
-	.d_poll =	ascpoll,
+	.d_kqfilter =	asckqfilter
 };
 
 #define STATIC static
@@ -468,8 +470,6 @@ ascattach(struct isa_device *isdp)
 /*  lprintf("asc%d.attach: ok\n", unit); */
   scu->flags &= ~FLAG_DEBUG;
 
-    scu->selp.si_flags=0;
-    scu->selp.si_pid=(pid_t)0;
 #define ASC_UID 0
 #define ASC_GID 13
   make_dev(&asc_ops, unit<<6, ASC_UID, ASC_GID, 0666, "asc%d", unit);
@@ -517,11 +517,7 @@ ascintr(void *arg)
 	if (scu->sbuf.size - scu->sbuf.count >= scu->linesize) {
 	    dma_restart(scu);
 	}
-	if (scu->selp.si_pid) {
-	    selwakeup(&scu->selp);
-	    scu->selp.si_pid=(pid_t)0;
-	    scu->selp.si_flags = 0;
-	}
+	KNOTE(&scu->kqp.ki_note, 0);
     }
 }
 
@@ -846,27 +842,60 @@ ascioctl(struct dev_ioctl_args *ap)
   return SUCCESS;
 }
 
+static struct filterops ascfiltops =
+    { FILTEROP_ISFD, NULL, ascfilter_detach, ascfilter };
+
 STATIC int
-ascpoll(struct dev_poll_args *ap)
+asckqfilter(struct dev_kqfilter_args *ap)
 {
     cdev_t dev = ap->a_head.a_dev;
     int unit = UNIT(minor(dev));
     struct asc_unit *scu = unittab + unit;
-    int revents = 0;
+    struct knote *kn = ap->a_kn;
+    struct klist *klist;
+
+    ap->a_result = 0;
+
+    switch (kn->kn_filter) {
+    case EVFILT_READ:
+        kn->kn_fop = &ascfiltops;
+        kn->kn_hook = (caddr_t)scu;
+        break;
+    default:
+        ap->a_result = EOPNOTSUPP;
+        return (0);
+    }
+
+    klist = &scu->kqp.ki_note;
+    knote_insert(klist, kn);
+
+    return (0);
+}
+
+STATIC void
+ascfilter_detach(struct knote *kn)
+{
+    struct asc_unit *scu = (struct asc_unit *)kn->kn_hook;
+    struct klist *klist;
+
+    klist = &scu->kqp.ki_note;
+    knote_remove(klist, kn);
+}
+
+STATIC int
+ascfilter(struct knote *kn, long hint)
+{
+    struct asc_unit *scu = (struct asc_unit *)kn->kn_hook;
+    int ready = 0;
 
     crit_enter();
-
-    if (ap->a_events & (POLLIN | POLLRDNORM)) {
-	if (scu->sbuf.count >0)
-	    revents |= ap->a_events & (POLLIN | POLLRDNORM);
-	else {
-	    if (!(scu->flags & DMA_ACTIVE))
-		dma_restart(scu);
-
-	    selrecord(curthread, &scu->selp);
-	}
+    if (scu->sbuf.count >0)
+        ready = 1;
+    else {
+        if (!(scu->flags & DMA_ACTIVE))
+            dma_restart(scu);
     }
     crit_exit();
-    ap->a_events = revents;
-    return (0);
+
+    return (ready);
 }

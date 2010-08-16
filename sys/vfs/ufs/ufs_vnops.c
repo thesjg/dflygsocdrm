@@ -132,7 +132,7 @@ union _qcvt {
 	(q) = tmp.qcvt; \
 }
 #define VN_KNOTE(vp, b) \
-	KNOTE(&vp->v_pollinfo.vpi_selinfo.si_note, (b))
+	KNOTE(&vp->v_pollinfo.vpi_kqinfo.ki_note, (b))
 
 #define OFSFMT(vp)		((vp)->v_mount->mnt_maxsymlinklen <= 0)
 
@@ -2119,11 +2119,11 @@ ufs_missingop(struct vop_generic_args *ap)
 }
 
 static struct filterops ufsread_filtops = 
-	{ 1, NULL, filt_ufsdetach, filt_ufsread };
+	{ FILTEROP_ISFD, NULL, filt_ufsdetach, filt_ufsread };
 static struct filterops ufswrite_filtops = 
-	{ 1, NULL, filt_ufsdetach, filt_ufswrite };
+	{ FILTEROP_ISFD, NULL, filt_ufsdetach, filt_ufswrite };
 static struct filterops ufsvnode_filtops = 
-	{ 1, NULL, filt_ufsdetach, filt_ufsvnode };
+	{ FILTEROP_ISFD, NULL, filt_ufsdetach, filt_ufsvnode };
 
 /*
  * ufs_kqfilter(struct vnode *a_vp, struct knote *a_kn)
@@ -2145,13 +2145,14 @@ ufs_kqfilter(struct vop_kqfilter_args *ap)
 		kn->kn_fop = &ufsvnode_filtops;
 		break;
 	default:
-		return (1);
+		return (EOPNOTSUPP);
 	}
 
 	kn->kn_hook = (caddr_t)vp;
 
+	/* XXX: kq token actually protects the list */
 	lwkt_gettoken(&vp->v_token);
-	SLIST_INSERT_HEAD(&vp->v_pollinfo.vpi_selinfo.si_note, kn, kn_selnext);
+	knote_insert(&vp->v_pollinfo.vpi_kqinfo.ki_note, kn);
 	lwkt_reltoken(&vp->v_token);
 
 	return (0);
@@ -2163,8 +2164,7 @@ filt_ufsdetach(struct knote *kn)
 	struct vnode *vp = (struct vnode *)kn->kn_hook;
 
 	lwkt_gettoken(&vp->v_token);
-	SLIST_REMOVE(&vp->v_pollinfo.vpi_selinfo.si_note,
-	    kn, knote, kn_selnext);
+	knote_remove(&vp->v_pollinfo.vpi_kqinfo.ki_note, kn);
 	lwkt_reltoken(&vp->v_token);
 }
 
@@ -2236,7 +2236,6 @@ static struct vop_ops ufs_vnode_vops = {
 	.vop_mmap =		ufs_mmap,
 	.vop_open =		vop_stdopen,
 	.vop_pathconf =		vop_stdpathconf,
-	.vop_poll =		vop_stdpoll,
 	.vop_kqfilter =		ufs_kqfilter,
 	.vop_print =		ufs_print,
 	.vop_readdir =		ufs_readdir,

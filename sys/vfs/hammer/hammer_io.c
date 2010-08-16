@@ -76,6 +76,53 @@ hammer_io_init(hammer_io_t io, hammer_volume_t volume, enum hammer_io_type type)
 }
 
 /*
+ * Determine if an io can be clustered for the storage cdev.  We have to
+ * be careful to avoid creating overlapping buffers.
+ *
+ * (1) Any clustering is limited to within a largeblock, since going into
+ *     an adjacent largeblock will change the zone.
+ *
+ * (2) The large-data zone can contain mixed buffer sizes.  Other zones
+ *     contain only HAMMER_BUFSIZE sized buffer sizes (16K).
+ */
+static int
+hammer_io_clusterable(hammer_io_t io, hammer_off_t *limitp)
+{
+	hammer_buffer_t buffer;
+	hammer_off_t eoz;
+
+	/*
+	 * Can't cluster non hammer_buffer_t's
+	 */
+	if (io->type != HAMMER_STRUCTURE_DATA_BUFFER &&
+	    io->type != HAMMER_STRUCTURE_META_BUFFER &&
+	    io->type != HAMMER_STRUCTURE_UNDO_BUFFER) {
+		return(0);
+	}
+
+	/*
+	 * We cannot cluster the large-data zone.  This primarily targets
+	 * the reblocker.  The normal file handling code will still cluster
+	 * file reads via file vnodes.
+	 */
+	buffer = (void *)io;
+	if ((buffer->zoneX_offset & HAMMER_OFF_ZONE_MASK) ==
+	    HAMMER_ZONE_LARGE_DATA) {
+		return(0);
+	}
+
+	/*
+	 * Do not allow the cluster operation to cross a largeblock
+	 * boundary.
+	 */
+	eoz = (io->offset + HAMMER_LARGEBLOCK_SIZE64 - 1) &
+		~HAMMER_LARGEBLOCK_MASK64;
+	if (*limitp > eoz)
+		*limitp = eoz;
+	return(1);
+}
+
+/*
  * Helper routine to disassociate a buffer cache buffer from an I/O
  * structure.  The buffer is unlocked and marked appropriate for reclamation.
  *
@@ -234,9 +281,9 @@ hammer_io_notmeta(hammer_buffer_t buffer)
  * speaking HAMMER assumes some locality of reference and will cluster 
  * a 64K read.
  *
- * Note that clustering occurs at the device layer, not the logical layer.
- * If the buffers do not apply to the current operation they may apply to
- * some other.
+ * Note that the clustering which occurs here is clustering within the
+ * block device... typically meta-data and small-file data.  Regular
+ * file clustering is different and handled in hammer_vnops.c
  */
 int
 hammer_io_read(struct vnode *devvp, struct hammer_io *io, hammer_off_t limit)
@@ -246,11 +293,13 @@ hammer_io_read(struct vnode *devvp, struct hammer_io *io, hammer_off_t limit)
 
 	if ((bp = io->bp) == NULL) {
 		hammer_count_io_running_read += io->bytes;
-		if (hammer_cluster_enable) {
+		if (hammer_cluster_enable &&
+		    hammer_io_clusterable(io, &limit)) {
 			error = cluster_read(devvp, limit,
 					     io->offset, io->bytes,
 					     HAMMER_CLUSTER_SIZE,
-					     HAMMER_CLUSTER_BUFS, &io->bp);
+					     HAMMER_CLUSTER_SIZE,
+					     &io->bp);
 		} else {
 			error = bread(devvp, io->offset, io->bytes, &io->bp);
 		}
@@ -897,6 +946,7 @@ static void
 hammer_io_complete(struct buf *bp)
 {
 	union hammer_io_structure *iou = (void *)LIST_FIRST(&bp->b_dep);
+	struct hammer_mount *hmp = iou->io.hmp;
 	struct hammer_io *ionext;
 
 	KKASSERT(iou->io.released == 1);
@@ -919,7 +969,7 @@ hammer_io_complete(struct buf *bp)
 		 * away.
 		 */
 		if (bp->b_flags & B_ERROR) {
-			hammer_critical_error(iou->io.hmp, NULL, bp->b_error,
+			hammer_critical_error(hmp, NULL, bp->b_error,
 					      "while flushing meta-data");
 			switch(iou->io.type) {
 			case HAMMER_STRUCTURE_UNDO_BUFFER:
@@ -940,19 +990,24 @@ hammer_io_complete(struct buf *bp)
 		}
 		hammer_stats_disk_write += iou->io.bytes;
 		hammer_count_io_running_write -= iou->io.bytes;
-		iou->io.hmp->io_running_space -= iou->io.bytes;
-		KKASSERT(iou->io.hmp->io_running_space >= 0);
+		hmp->io_running_space -= iou->io.bytes;
+		if (hmp->io_running_wakeup &&
+		    hmp->io_running_space < hammer_limit_running_io / 2) {
+		    hmp->io_running_wakeup = 0;
+		    wakeup(&hmp->io_running_wakeup);
+		}
+		KKASSERT(hmp->io_running_space >= 0);
 		iou->io.running = 0;
 
 		/*
 		 * Remove from iorun list and wakeup any multi-io waiter(s).
 		 */
-		if (TAILQ_FIRST(&iou->io.hmp->iorun_list) == &iou->io) {
+		if (TAILQ_FIRST(&hmp->iorun_list) == &iou->io) {
 			ionext = TAILQ_NEXT(&iou->io, iorun_entry);
 			if (ionext && ionext->type == HAMMER_STRUCTURE_DUMMY)
 				wakeup(ionext);
 		}
-		TAILQ_REMOVE(&iou->io.hmp->iorun_list, &iou->io, iorun_entry);
+		TAILQ_REMOVE(&hmp->iorun_list, &iou->io, iorun_entry);
 	} else {
 		hammer_stats_disk_read += iou->io.bytes;
 	}
@@ -1575,4 +1630,16 @@ hammer_io_flush_sync(hammer_mount_t hmp)
 		biowait(&bp->b_bio1, "hmrFLS");
 		relpbuf(bp, NULL);
 	}
+}
+
+/*
+ * Limit the amount of backlog which we allow to build up
+ */
+void
+hammer_io_limit_backlog(hammer_mount_t hmp)
+{
+        while (hmp->io_running_space > hammer_limit_running_io) {
+                hmp->io_running_wakeup = 1;
+                tsleep(&hmp->io_running_wakeup, 0, "hmiolm", hz / 10);
+        }
 }

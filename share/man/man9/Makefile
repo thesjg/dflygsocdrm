@@ -116,6 +116,7 @@ MAN=	accept_filter.9 \
 	module.9 \
 	MODULE_DEPEND.9 \
 	MODULE_VERSION.9 \
+	mpipe.9 \
 	mutex.9 \
 	nlookup.9 \
 	objcache.9 \
@@ -410,7 +411,6 @@ MLINKS+=EVENTHANDLER.9 EVENTHANDLER_DECLARE.9 \
 	EVENTHANDLER.9 EVENTHANDLER_REGISTER.9 \
 	EVENTHANDLER.9 eventhandler_register.9
 MLINKS+=fetch.9 fubyte.9 \
-	fetch.9 casuword.9 \
 	fetch.9 fusword.9 \
 	fetch.9 fuword.9
 MLINKS+=firmware.9 firmware_get.9 \
@@ -547,7 +547,8 @@ MLINKS+=lock.9 lockcount.9 \
 	lock.9 lockinit.9 \
 	lock.9 lockmgr.9 \
 	lock.9 lockmgr_printinfo.9 \
-	lock.9 lockstatus.9
+	lock.9 lockstatus.9 \
+	lock.9 lockuninit.9
 MLINKS+=lwbuf.9 lwbuf_alloc.9 \
 	lwbuf.9 lwbuf_free.9 \
 	lwbuf.9 lwbuf_kva.9 \
@@ -560,7 +561,6 @@ MLINKS+=make_autoclone_dev.9 destroy_autoclone_dev.9 \
 	make_autoclone_dev.9 devfs_clone_bitmap_get.9 \
 	make_autoclone_dev.9 devfs_clone_bitmap_init.9 \
 	make_autoclone_dev.9 devfs_clone_bitmap_put.9 \
-	make_autoclone_dev.9 devfs_clone_bitmap_rst.9 \
 	make_autoclone_dev.9 devfs_clone_bitmap_set.9 \
 	make_autoclone_dev.9 devfs_clone_bitmap_uninit.9 \
 	make_autoclone_dev.9 DEVFS_DECLARE_CLONE_BITMAP.9
@@ -583,6 +583,11 @@ MLINKS+=microtime.9 getmicrotime.9 \
 MLINKS+=microuptime.9 getmicrouptime.9 \
 	microuptime.9 getnanouptime.9 \
 	microuptime.9 nanouptime.9
+MLINKS+=mpipe.9 mpipe_alloc_nowait.9 \
+	mpipe.9 mpipe_alloc_waitok.9 \
+	mpipe.9 mpipe_done.9 \
+	mpipe.9 mpipe_free.9 \
+	mpipe.9 mpipe_init.9
 MLINKS+=mutex.9 mtx_downgrade.9 \
 	mutex.9 mtx_drop.9 \
 	mutex.9 mtx_hold.9 \
@@ -610,7 +615,9 @@ MLINKS+=mutex.9 mtx_downgrade.9 \
 MLINKS+=nlookup.9 naccess.9 \
 	nlookup.9 naccess_va.9 \
 	nlookup.9 nlookup_done.9 \
+	nlookup.9 nlookup_done_at.9 \
 	nlookup.9 nlookup_init.9 \
+	nlookup.9 nlookup_init_at.9 \
 	nlookup.9 nlookup_init_raw.9 \
 	nlookup.9 nlookup_init_root.9 \
 	nlookup.9 nlookup_mp.9 \
@@ -741,9 +748,11 @@ MLINKS+=spinlock.9 spin_init.9 \
 	spinlock.9 spin_unlock_rd_quick.9 \
 	spinlock.9 spin_unlock_wr.9 \
 	spinlock.9 spin_unlock_wr_quick.9
-MLINKS+=store.9 subyte.9 \
+MLINKS+=store.9 casuword.9 \
+	store.9 subyte.9 \
 	store.9 susword.9 \
 	store.9 suword.9
+MLINKS+=syscall.9 syscalls.master.5
 MLINKS+=sysctl.9 SYSCTL_DECL.9 \
 	sysctl.9 SYSCTL_INT.9 \
 	sysctl.9 SYSCTL_LONG.9 \

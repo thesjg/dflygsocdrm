@@ -293,7 +293,7 @@ struct buf {
 #define	B_HASHED 	0x00000040 	/* Indexed via v_rbhash_tree */
 #define	B_DELWRI	0x00000080	/* Delay I/O until buffer reused. */
 #define	B_BNOCLIP	0x00000100	/* EOF clipping b_bcount not allowed */
-#define	B_UNUSED9	0x00000200
+#define	B_HASBOGUS	0x00000200	/* Contains bogus pages */
 #define	B_EINTR		0x00000400	/* I/O was interrupted */
 #define	B_ERROR		0x00000800	/* I/O error occurred. */
 #define	B_UNUSED12	0x00001000	/* Unused */
@@ -415,6 +415,7 @@ void	brelse (struct buf *);
 void	bqrelse (struct buf *);
 int	vfs_bio_awrite (struct buf *);
 struct buf *getpbuf (int *);
+struct buf *getpbuf_kva (int *);
 int	inmem (struct vnode *, off_t);
 struct buf *findblk (struct vnode *, off_t, int);
 struct buf *getblk (struct vnode *, off_t, int, int, int);
@@ -431,7 +432,7 @@ void	biodone_sync (struct bio *);
 
 void	cluster_append(struct bio *, struct buf *);
 int	cluster_read (struct vnode *, off_t, off_t, int,
-	    size_t, int, struct buf **);
+	    size_t, size_t, struct buf **);
 int	cluster_wbuild (struct vnode *, int, off_t, int);
 void	cluster_write (struct buf *, off_t, int, int);
 int	physread (struct dev_read_args *);
@@ -443,16 +444,20 @@ int	vmapbuf (struct buf *, caddr_t, int);
 void	vunmapbuf (struct buf *);
 void	relpbuf (struct buf *, int *);
 void	brelvp (struct buf *);
-int	bgetvp (struct vnode *, struct buf *);
+int	bgetvp (struct vnode *, struct buf *, int);
 int	allocbuf (struct buf *bp, int size);
 int	scan_all_buffers (int (*)(struct buf *, void *), void *);
 void	reassignbuf (struct buf *);
 struct	buf *trypbuf (int *);
+struct	buf *trypbuf_kva (int *);
 void	bio_ops_sync(struct mount *mp);
 void	vm_hold_free_pages(struct buf *bp, vm_offset_t from, vm_offset_t to);
 void	vm_hold_load_pages(struct buf *bp, vm_offset_t from, vm_offset_t to);
 void	nestiobuf_done(struct bio *mbio, int donebytes, int error);
-void	nestiobuf_setup(struct bio *bio, struct buf *bp, int offset, size_t size);
+void	nestiobuf_init(struct bio *mbio);
+void	nestiobuf_add(struct bio *mbio, struct buf *bp, int off, size_t size);
+void	nestiobuf_start(struct bio *mbio);
+void	nestiobuf_error(struct bio *mbio, int error);
 #endif	/* _KERNEL */
 #endif	/* _KERNEL || _KERNEL_STRUCTURES */
 #endif	/* !_SYS_BUF_H_ */

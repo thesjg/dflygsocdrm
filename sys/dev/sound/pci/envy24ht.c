@@ -2213,7 +2213,7 @@ envy24ht_putcfg(struct sc_info *sc)
 		kprintf("reserved\n");
 		break;
 	default:
-		kprintf("illeagal system setting\n");
+		kprintf("illegal system setting\n");
 	}
 	kprintf("  MPU-401 UART(s) #: ");
 	if (sc->cfg->scfg & ENVY24HT_CCSM_SCFG_MPU)
@@ -2221,7 +2221,8 @@ envy24ht_putcfg(struct sc_info *sc)
 	else
 		kprintf("not implemented\n");
         switch (sc->adcn) {
-        case 0x01 || 0x02:
+	case 0x01:
+	case 0x02:
                 kprintf("  ADC #: ");
                 kprintf("%d\n", sc->adcn);
                 break;

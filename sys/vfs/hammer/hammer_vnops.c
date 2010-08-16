@@ -163,7 +163,7 @@ void
 hammer_knote(struct vnode *vp, int flags)
 {
 	if (flags)
-		KNOTE(&vp->v_pollinfo.vpi_selinfo.si_note, flags);
+		KNOTE(&vp->v_pollinfo.vpi_kqinfo.ki_note, flags);
 }
 
 #ifdef DEBUG_TRUNCATE
@@ -407,8 +407,8 @@ hammer_vop_read(struct vop_read_args *ap)
 			}
 			error = cluster_read(ap->a_vp,
 					     file_limit, base_offset,
-					     blksize, MAXPHYS,
-					     seqcount, &bp);
+					     blksize, uio->uio_resid,
+					     seqcount * BKVASIZE, &bp);
 		} else {
 			error = bread(ap->a_vp, base_offset, blksize, &bp);
 		}
@@ -3348,11 +3348,11 @@ static int filt_hammerwrite(struct knote *kn, long hint);
 static int filt_hammervnode(struct knote *kn, long hint);
 
 static struct filterops hammerread_filtops =
-	{ 1, NULL, filt_hammerdetach, filt_hammerread };
+	{ FILTEROP_ISFD, NULL, filt_hammerdetach, filt_hammerread };
 static struct filterops hammerwrite_filtops =
-	{ 1, NULL, filt_hammerdetach, filt_hammerwrite };
+	{ FILTEROP_ISFD, NULL, filt_hammerdetach, filt_hammerwrite };
 static struct filterops hammervnode_filtops =
-	{ 1, NULL, filt_hammerdetach, filt_hammervnode };
+	{ FILTEROP_ISFD, NULL, filt_hammerdetach, filt_hammervnode };
 
 static
 int
@@ -3372,13 +3372,14 @@ hammer_vop_kqfilter(struct vop_kqfilter_args *ap)
 		kn->kn_fop = &hammervnode_filtops;
 		break;
 	default:
-		return (1);
+		return (EOPNOTSUPP);
 	}
 
 	kn->kn_hook = (caddr_t)vp;
 
+	/* XXX: kq token actually protects the list */
 	lwkt_gettoken(&vp->v_token);
-	SLIST_INSERT_HEAD(&vp->v_pollinfo.vpi_selinfo.si_note, kn, kn_selnext);
+	knote_insert(&vp->v_pollinfo.vpi_kqinfo.ki_note, kn);
 	lwkt_reltoken(&vp->v_token);
 
 	return(0);
@@ -3390,8 +3391,7 @@ filt_hammerdetach(struct knote *kn)
 	struct vnode *vp = (void *)kn->kn_hook;
 
 	lwkt_gettoken(&vp->v_token);
-	SLIST_REMOVE(&vp->v_pollinfo.vpi_selinfo.si_note,
-		     kn, knote, kn_selnext);
+	knote_remove(&vp->v_pollinfo.vpi_kqinfo.ki_note, kn);
 	lwkt_reltoken(&vp->v_token);
 }
 

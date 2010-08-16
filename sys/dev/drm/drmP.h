@@ -120,7 +120,6 @@
 
 #ifdef __linux__
 #include <linux/idr.h>
-
 #define __OS_HAS_AGP (defined(CONFIG_AGP) || (defined(CONFIG_AGP_MODULE) && defined(MODULE)))
 #else
 #define __OS_HAS_AGP	1
@@ -1386,6 +1385,8 @@ extern ssize_t drm_read(struct file *filp, char __user *buffer,
 extern int drm_release(struct inode *inode, struct file *filp);
 
 /* other os file operations helpers (drm_fops.c) */
+d_kqfilter_t drm_kqfilter;
+
 extern struct drm_file	*drm_find_file_by_proc(struct drm_device *dev,
 					DRM_STRUCTPROC *p);
 

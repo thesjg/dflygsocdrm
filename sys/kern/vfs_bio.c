@@ -790,6 +790,7 @@ bfreekva(struct buf *bp)
 		vm_map_unlock(&buffer_map);
 		vm_map_entry_release(count);
 		bp->b_kvasize = 0;
+		bp->b_kvabase = NULL;
 		bufspacewakeup();
 		rel_mplock();
 	}
@@ -1399,6 +1400,7 @@ brelse(struct buf *bp)
 						bp->b_xio.xio_pages[j] = mtmp;
 					}
 				}
+				bp->b_flags &= ~B_HASBOGUS;
 
 				if ((bp->b_flags & B_INVAL) == 0) {
 					pmap_qenter(trunc_page((vm_offset_t)bp->b_data),
@@ -2949,7 +2951,7 @@ loop:
 		bp->b_bio2.bio_offset = NOOFFSET;
 		/* bp->b_bio2.bio_next = NULL; */
 
-		if (bgetvp(vp, bp)) {
+		if (bgetvp(vp, bp, size)) {
 			bp->b_flags |= B_INVAL;
 			brelse(bp);
 			goto loop;
@@ -3704,6 +3706,7 @@ bpdone(struct buf *bp, int elseit)
 			foff = (foff + PAGE_SIZE) & ~(off_t)PAGE_MASK;
 			iosize -= resid;
 		}
+		bp->b_flags &= ~B_HASBOGUS;
 		if (obj)
 			vm_object_pip_wakeupn(obj, 0);
 		rel_mplock();
@@ -3839,6 +3842,7 @@ vfs_unbusy_pages(struct buf *bp)
 			vm_page_flag_clear(m, PG_ZERO);
 			vm_page_io_finish(m);
 		}
+		bp->b_flags &= ~B_HASBOGUS;
 		vm_object_pip_wakeupn(obj, 0);
 	}
 }
@@ -3962,6 +3966,7 @@ retry:
 				 * this also covers the dirty case.
 				 */
 				bp->b_xio.xio_pages[i] = bogus_page;
+				bp->b_flags |= B_HASBOGUS;
 				bogus++;
 			} else if (m->valid & m->dirty) {
 				/*
@@ -4409,6 +4414,7 @@ vmapbuf(struct buf *bp, caddr_t udata, int bytes)
 	 */
 	KKASSERT(bp->b_cmd != BUF_CMD_DONE);
 	KKASSERT(bp->b_flags & B_PAGING);
+	KKASSERT(bp->b_kvabase);
 
 	if (bytes < 0)
 		return (-1);
@@ -4547,28 +4553,81 @@ nestiobuf_done(struct bio *mbio, int donebytes, int error)
 
 	mbp = mbio->bio_buf;	
 
-	/* If this buf didn't do anything, we are done. */
-	if (donebytes == 0)
-		return;
+	KKASSERT((int)(intptr_t)mbio->bio_driver_info > 0);
 
-	KKASSERT(mbp->b_resid >= donebytes);
-
-	/* If an error occured, propagate it to the master buffer */
-	if (error)
+	/*
+	 * If an error occured, propagate it to the master buffer.
+	 *
+	 * Several biodone()s may wind up running concurrently so
+	 * use an atomic op to adjust b_flags.
+	 */
+	if (error) {
 		mbp->b_error = error;
+		atomic_set_int(&mbp->b_flags, B_ERROR);
+	}
 
 	/*
 	 * Decrement the master buf b_resid according to our donebytes, and
 	 * also check if this is the last missing bit for the whole nestio
 	 * mess to complete. If so, call biodone() on the master buf mbp.
 	 */
-	if (atomic_fetchadd_int(&mbp->b_resid, -donebytes) == donebytes) {
+	if (atomic_fetchadd_int((int *)&mbio->bio_driver_info, -1) == 1) {
+		mbp->b_resid = 0;
 		biodone(mbio);
 	}
 }
 
 /*
- * nestiobuf_setup: setup a "nested" buffer.
+ * Initialize a nestiobuf for use.  Set an initial count of 1 to prevent
+ * the mbio from being biodone()'d while we are still adding sub-bios to
+ * it.
+ */
+void
+nestiobuf_init(struct bio *bio)
+{
+	bio->bio_driver_info = (void *)1;
+}
+
+/*
+ * The BIOs added to the nestedio have already been started, remove the
+ * count that placeheld our mbio and biodone() it if the count would
+ * transition to 0.
+ */
+void
+nestiobuf_start(struct bio *mbio)
+{
+	struct buf *mbp = mbio->bio_buf;
+
+	/*
+	 * Decrement the master buf b_resid according to our donebytes, and
+	 * also check if this is the last missing bit for the whole nestio
+	 * mess to complete. If so, call biodone() on the master buf mbp.
+	 */
+	if (atomic_fetchadd_int((int *)&mbio->bio_driver_info, -1) == 1) {
+		if (mbp->b_flags & B_ERROR)
+			mbp->b_resid = mbp->b_bcount;
+		else
+			mbp->b_resid = 0;
+		biodone(mbio);
+	}
+}
+
+/*
+ * Set an intermediate error prior to calling nestiobuf_start()
+ */
+void
+nestiobuf_error(struct bio *mbio, int error)
+{
+	struct buf *mbp = mbio->bio_buf;
+
+	if (error) {
+		mbp->b_error = error;
+		atomic_set_int(&mbp->b_flags, B_ERROR);
+	}
+}
+
+/*
+ * nestiobuf_add: setup a "nested" buffer.
  *
  * => 'mbp' is a "master" buffer which is being divided into sub pieces.
  * => 'bp' should be a buffer allocated by getiobuf.
@@ -4576,12 +4635,14 @@ nestiobuf_done(struct bio *mbio, int donebytes, int error)
  * => 'size' is a size in bytes of this nested buffer.
  */
 void
-nestiobuf_setup(struct bio *bio, struct buf *bp, int offset, size_t size)
+nestiobuf_add(struct bio *mbio, struct buf *bp, int offset, size_t size)
 {
-	struct buf *mbp = bio->bio_buf;
+	struct buf *mbp = mbio->bio_buf;
 	struct vnode *vp = mbp->b_vp;
 
 	KKASSERT(mbp->b_bcount >= offset + size);
+
+	atomic_add_int((int *)&mbio->bio_driver_info, 1);
 
 	/* kernel needs to own the lock for it to be released in biodone */
 	BUF_KERNPROC(bp);
@@ -4593,7 +4654,7 @@ nestiobuf_setup(struct bio *bio, struct buf *bp, int offset, size_t size)
 	bp->b_bufsize = bp->b_bcount;
 
 	bp->b_bio1.bio_track = NULL;
-	bp->b_bio1.bio_caller_info1.ptr = bio;
+	bp->b_bio1.bio_caller_info1.ptr = mbio;
 }
 
 /*

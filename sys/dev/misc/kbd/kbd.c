@@ -44,7 +44,7 @@
 #include <sys/conf.h>
 #include <sys/proc.h>
 #include <sys/tty.h>
-#include <sys/poll.h>
+#include <sys/event.h>
 #include <sys/vnode.h>
 #include <sys/uio.h>
 #include <sys/thread.h>
@@ -62,7 +62,7 @@
 struct genkbd_softc {
 	int		gkb_flags;	/* flag/status bits */
 #define KB_ASLEEP	(1 << 0)
-	struct selinfo	gkb_rsel;
+	struct kqinfo	gkb_rkq;
 	char		gkb_q[KB_QSIZE];		/* input queue */
 	unsigned int	gkb_q_start;
 	unsigned int	gkb_q_length;
@@ -494,18 +494,21 @@ static d_close_t	genkbdclose;
 static d_read_t		genkbdread;
 static d_write_t	genkbdwrite;
 static d_ioctl_t	genkbdioctl;
-static d_poll_t		genkbdpoll;
+static d_kqfilter_t	genkbdkqfilter;
+
+static void genkbdfiltdetach(struct knote *);
+static int genkbdfilter(struct knote *, long);
 
 #define CDEV_MAJOR	112
 
 static struct dev_ops kbd_ops = {
-	{ "kbd", CDEV_MAJOR, 0 },
+	{ "kbd", CDEV_MAJOR, D_KQFILTER },
 	.d_open =	genkbdopen,
 	.d_close =	genkbdclose,
 	.d_read =	genkbdread,
 	.d_write =	genkbdwrite,
 	.d_ioctl =	genkbdioctl,
-	.d_poll =	genkbdpoll,
+	.d_kqfilter =	genkbdkqfilter
 };
 
 /*
@@ -742,29 +745,69 @@ genkbdioctl(struct dev_ioctl_args *ap)
 	return error;
 }
 
+static struct filterops genkbdfiltops =
+	{ FILTEROP_ISFD, NULL, genkbdfiltdetach, genkbdfilter };
+
 static int
-genkbdpoll(struct dev_poll_args *ap)
+genkbdkqfilter(struct dev_kqfilter_args *ap)
 {
 	cdev_t dev = ap->a_head.a_dev;
+	struct knote *kn = ap->a_kn;
+	genkbd_softc_t sc;
+	struct klist *klist;
+
+	ap->a_result = 0;
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &genkbdfiltops;
+		kn->kn_hook = (caddr_t)dev;
+		break;
+	default:
+		ap->a_result = EOPNOTSUPP;
+		return (0);
+	}
+
+	sc = dev->si_drv1;
+	klist = &sc->gkb_rkq.ki_note;
+	knote_insert(klist, kn);
+
+	return (0);
+}
+
+static void
+genkbdfiltdetach(struct knote *kn)
+{
+	cdev_t dev = (cdev_t)kn->kn_hook;
+	genkbd_softc_t sc;
+	struct klist *klist;
+
+	sc = dev->si_drv1;
+	klist = &sc->gkb_rkq.ki_note;
+	knote_remove(klist, kn);
+}
+
+static int
+genkbdfilter(struct knote *kn, long hint)
+{
+	cdev_t dev = (cdev_t)kn->kn_hook;
 	keyboard_t *kbd;
 	genkbd_softc_t sc;
-	int revents;
+	int ready = 0;
 
-	revents = 0;
 	crit_enter();
 	sc = dev->si_drv1;
-	kbd = kbd_get_keyboard(KBD_INDEX(dev));
+        kbd = kbd_get_keyboard(KBD_INDEX(dev));
 	if ((sc == NULL) || (kbd == NULL) || !KBD_IS_VALID(kbd)) {
-		revents =  POLLHUP;	/* the keyboard has gone */
-	} else if (ap->a_events & (POLLIN | POLLRDNORM)) {
+		kn->kn_flags |= EV_EOF;	/* the keyboard has gone */
+		ready = 1;
+	} else {
 		if (sc->gkb_q_length > 0)
-			revents = ap->a_events & (POLLIN | POLLRDNORM);
-		else
-			selrecord(curthread, &sc->gkb_rsel);
-	}
+                        ready = 1;
+        }
 	crit_exit();
-	ap->a_events = revents;
-	return (0);
+
+	return (ready);
 }
 
 static int
@@ -789,7 +832,7 @@ genkbd_event(keyboard_t *kbd, int event, void *arg)
 			sc->gkb_flags &= ~KB_ASLEEP;
 			wakeup((caddr_t)sc);
 		}
-		selwakeup(&sc->gkb_rsel);
+		KNOTE(&sc->gkb_rkq.ki_note, 0);
 		return 0;
 	default:
 		return EINVAL;
@@ -859,7 +902,7 @@ genkbd_event(keyboard_t *kbd, int event, void *arg)
 			sc->gkb_flags &= ~KB_ASLEEP;
 			wakeup((caddr_t)sc);
 		}
-		selwakeup(&sc->gkb_rsel);
+		KNOTE(&sc->gkb_rkq.ki_note, 0);
 	}
 
 	return 0;

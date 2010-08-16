@@ -52,7 +52,6 @@
 #include <sys/tty.h>
 #include <sys/conf.h>
 #include <sys/fcntl.h>
-#include <sys/poll.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
@@ -71,6 +70,10 @@ static void ptsstart (struct tty *tp);
 static void ptsstop (struct tty *tp, int rw);
 static void ptcwakeup (struct tty *tp, int flag);
 static void ptyinit (int n);
+static int  filt_ptcread (struct knote *kn, long hint);
+static void filt_ptcrdetach (struct knote *kn);
+static int  filt_ptcwrite (struct knote *kn, long hint);
+static void filt_ptcwdetach (struct knote *kn);
 
 static	d_open_t	ptsopen;
 static	d_close_t	ptsclose;
@@ -81,7 +84,7 @@ static	d_open_t	ptcopen;
 static	d_close_t	ptcclose;
 static	d_read_t	ptcread;
 static	d_write_t	ptcwrite;
-static	d_poll_t	ptcpoll;
+static	d_kqfilter_t	ptckqfilter;
 
 #ifdef UNIX98_PTYS
 DEVFS_DECLARE_CLONE_BITMAP(pty);
@@ -97,7 +100,6 @@ static struct dev_ops pts98_ops = {
 	.d_read =	ptsread,
 	.d_write =	ptswrite,
 	.d_ioctl =	ptyioctl,
-	.d_poll =	ttypoll,
 	.d_kqfilter =	ttykqfilter,
 	.d_revoke =	ttyrevoke
 };
@@ -109,8 +111,7 @@ static struct dev_ops ptc98_ops = {
 	.d_read =	ptcread,
 	.d_write =	ptcwrite,
 	.d_ioctl =	ptyioctl,
-	.d_poll =	ptcpoll,
-	.d_kqfilter =	ttykqfilter,
+	.d_kqfilter =	ptckqfilter,
 	.d_revoke =	ttyrevoke
 };
 #endif
@@ -123,7 +124,6 @@ static struct dev_ops pts_ops = {
 	.d_read =	ptsread,
 	.d_write =	ptswrite,
 	.d_ioctl =	ptyioctl,
-	.d_poll =	ttypoll,
 	.d_kqfilter =	ttykqfilter,
 	.d_revoke =	ttyrevoke
 };
@@ -136,8 +136,7 @@ static struct dev_ops ptc_ops = {
 	.d_read =	ptcread,
 	.d_write =	ptcwrite,
 	.d_ioctl =	ptyioctl,
-	.d_poll =	ptcpoll,
-	.d_kqfilter =	ttykqfilter,
+	.d_kqfilter =	ptckqfilter,
 	.d_revoke =	ttyrevoke
 };
 
@@ -146,7 +145,9 @@ static struct dev_ops ptc_ops = {
 struct	pt_ioctl {
 	int	pt_flags;
 	int	pt_flags2;
-	struct	selinfo pt_selr, pt_selw;
+	int	pt_refs;	/* Structural references interlock S/MOPEN */
+	int	pt_uminor;
+	struct	kqinfo pt_kqr, pt_kqw;
 	u_char	pt_send;
 	u_char	pt_ucntl;
 	struct tty pt_tty;
@@ -163,6 +164,7 @@ struct	pt_ioctl {
 #define	PF_UNIX98	0x01
 #define	PF_SOPEN	0x02
 #define	PF_MOPEN	0x04
+#define PF_TERMINATED	0x08
 
 static int
 ptydebug(int level, char *fmt, ...)
@@ -208,6 +210,7 @@ ptyinit(int n)
 	devs->si_flags |= SI_OVERRIDE;	/* uid, gid, perms from dev */
 	devc->si_flags |= SI_OVERRIDE;	/* uid, gid, perms from dev */
 	pt->pt_tty.t_dev = devs;
+	pt->pt_uminor = n;
 	ttyregister(&pt->pt_tty);
 }
 
@@ -234,10 +237,13 @@ ptyclone(struct dev_clone_args *ap)
 
 	pt = kmalloc(sizeof(*pt), M_PTY, M_WAITOK | M_ZERO);
 
-	pt->devc = ap->a_dev = make_only_dev(&ptc98_ops, unit, ap->a_cred->cr_ruid,
-	    0, 0600, "ptm/%d", unit);
-	pt->devs = make_dev(&pts98_ops, unit, ap->a_cred->cr_ruid, GID_TTY, 0620,
-	    "pts/%d", unit);
+	pt->devc = make_only_dev(&ptc98_ops, unit,
+				 ap->a_cred->cr_ruid,
+				 0, 0600, "ptm/%d", unit);
+	pt->devs = make_dev(&pts98_ops, unit,
+			    ap->a_cred->cr_ruid,
+			    GID_TTY, 0620, "pts/%d", unit);
+	ap->a_dev = pt->devc;
 
 	pt->devs->si_flags |= SI_OVERRIDE;	/* uid, gid, perms from dev */
 	pt->devc->si_flags |= SI_OVERRIDE;	/* uid, gid, perms from dev */
@@ -246,12 +252,79 @@ ptyclone(struct dev_clone_args *ap)
 	pt->devs->si_tty = pt->devc->si_tty = &pt->pt_tty;
 	pt->pt_tty.t_dev = pt->devs;
 	pt->pt_flags2 |= PF_UNIX98;
+	pt->pt_uminor = unit;
 
 	ttyregister(&pt->pt_tty);
 
 	return 0;
 }
 #endif
+
+/*
+ * pti_hold() prevents the pti from being destroyed due to a termination
+ * while a pt*open() is blocked.
+ *
+ * This function returns non-zero if we cannot hold due to a termination
+ * interlock.
+ */
+static int
+pti_hold(struct pt_ioctl *pti)
+{
+	if (pti->pt_flags2 & PF_TERMINATED)
+		return(ENXIO);
+	++pti->pt_refs;
+	return(0);
+}
+
+/*
+ * pti_done() releases the reference and checks to see if both sides have
+ * been closed on a unix98 pty, allowing us to destroy the device and
+ * release resources.
+ *
+ * We do not release resources on non-unix98 ptys.  Those are left
+ * statically allocated.
+ */
+static void
+pti_done(struct pt_ioctl *pti)
+{
+	if (--pti->pt_refs == 0) {
+#ifdef UNIX98_PTYS
+		cdev_t dev;
+		int uminor_no;
+
+		/*
+		 * Only unix09 ptys are freed up
+		 */
+		if ((pti->pt_flags2 & PF_UNIX98) == 0)
+			return;
+
+		/*
+		 * Interlock open attempts against termination by setting
+		 * PF_TERMINATED.  This allows us to block while cleaning
+		 * out the device infrastructure.
+		 */
+		if ((pti->pt_flags2 & (PF_SOPEN|PF_MOPEN)) == 0) {
+			pti->pt_flags2 |= PF_TERMINATED;
+			uminor_no = pti->pt_uminor;
+
+			if ((dev = pti->devs) != NULL) {
+				dev->si_drv1 = NULL;
+				pti->devs = NULL;
+				destroy_dev(dev);
+			}
+			if ((dev = pti->devc) != NULL) {
+				dev->si_drv1 = NULL;
+				pti->devc = NULL;
+				destroy_dev(dev);
+			}
+			ttyunregister(&pti->pt_tty);
+			devfs_clone_bitmap_put(&DEVFS_CLONE_BITMAP(pty),
+					       uminor_no);
+			kfree(pti, M_PTY);
+		}
+#endif
+	}
+}
 
 /*ARGSUSED*/
 static	int
@@ -262,11 +335,16 @@ ptsopen(struct dev_open_args *ap)
 	int error;
 	struct pt_ioctl *pti;
 
-	if (!dev->si_drv1)
-		ptyinit(minor(dev));
-	if (!dev->si_drv1)
+	/*
+	 * The pti will already be assigned by the clone code or
+	 * pre-created if a non-unix 98 pty.  If si_drv1 is NULL
+	 * we are somehow racing a unix98 termination.
+	 */
+	if (dev->si_drv1 == NULL)
 		return(ENXIO);
 	pti = dev->si_drv1;
+	if (pti_hold(pti))
+		return(ENXIO);
 	tp = dev->si_tty;
 	if ((tp->t_state & TS_ISOPEN) == 0) {
 		ttychars(tp);		/* Set up default chars */
@@ -276,8 +354,10 @@ ptsopen(struct dev_open_args *ap)
 		tp->t_cflag = TTYDEF_CFLAG;
 		tp->t_ispeed = tp->t_ospeed = TTYDEF_SPEED;
 	} else if ((tp->t_state & TS_XCLUDE) && priv_check_cred(ap->a_cred, PRIV_ROOT, 0)) {
+		pti_done(pti);
 		return (EBUSY);
 	} else if (pti->pt_prison != ap->a_cred->cr_prison) {
+		pti_done(pti);
 		return (EBUSY);
 	}
 	if (tp->t_oproc)			/* Ctrlr still around. */
@@ -286,9 +366,12 @@ ptsopen(struct dev_open_args *ap)
 		if (ap->a_oflags & FNONBLOCK)
 			break;
 		error = ttysleep(tp, TSA_CARR_ON(tp), PCATCH, "ptsopn", 0);
-		if (error)
+		if (error) {
+			pti_done(pti);
 			return (error);
+		}
 	}
+	tp->t_state &= ~TS_ZOMBIE;
 	error = (*linesw[tp->t_line].l_open)(dev, tp);
 	if (error == 0)
 		ptcwakeup(tp, FREAD|FWRITE);
@@ -302,10 +385,11 @@ ptsopen(struct dev_open_args *ap)
 	ptydebug(1, "ptsopen=%s | unix98? %s\n", dev->si_name,
 	    (pti->pt_flags2 & PF_UNIX98)?"yes":"no");
 
-	if ((!error) && (pti->pt_flags2 & PF_UNIX98)) {
+	if (error == 0 && (pti->pt_flags2 & PF_UNIX98)) {
 		pti->pt_flags2 |= PF_SOPEN;
 	}
 #endif
+	pti_done(pti);
 
 	return (error);
 }
@@ -318,10 +402,13 @@ ptsclose(struct dev_close_args *ap)
 	struct pt_ioctl *pti = dev->si_drv1;
 	int err;
 
+	if (pti_hold(pti))
+		panic("ptsclose on terminated pti");
 	tp = dev->si_tty;
 	err = (*linesw[tp->t_line].l_close)(tp, ap->a_fflag);
 	ptsstop(tp, FREAD|FWRITE);
-	(void) ttyclose(tp);
+	(void) ttyclose(tp); /* clears t_state */
+	tp->t_state |= TS_ZOMBIE;
 
 #ifdef UNIX98_PTYS
 	/*
@@ -337,14 +424,9 @@ ptsclose(struct dev_close_args *ap)
 		KKASSERT((pti->pt_flags2 & PF_SOPEN) == 0);
 		ptydebug(1, "master open? %s\n",
 		    (pti->pt_flags2 & PF_MOPEN)?"yes":"no");
-
-		if (!(pti->pt_flags2 & PF_SOPEN) && !(pti->pt_flags2 & PF_MOPEN)) {
-			devfs_clone_bitmap_put(&DEVFS_CLONE_BITMAP(pty), dev->si_uminor);
-			destroy_dev(dev);
-		}
 	}
 #endif
-
+	pti_done(pti);
 	return (err);
 }
 
@@ -426,9 +508,11 @@ ptsstart(struct tty *tp)
 
 	if (tp->t_state & TS_TTSTOP)
 		return;
-	if (pti->pt_flags & PF_STOPPED) {
-		pti->pt_flags &= ~PF_STOPPED;
-		pti->pt_send = TIOCPKT_START;
+	if (pti) {
+		if (pti->pt_flags & PF_STOPPED) {
+			pti->pt_flags &= ~PF_STOPPED;
+			pti->pt_send = TIOCPKT_START;
+		}
 	}
 	ptcwakeup(tp, FREAD);
 }
@@ -436,15 +520,13 @@ ptsstart(struct tty *tp)
 static void
 ptcwakeup(struct tty *tp, int flag)
 {
-	struct pt_ioctl *pti = tp->t_dev->si_drv1;
-
 	if (flag & FREAD) {
-		selwakeup(&pti->pt_selr);
 		wakeup(TSA_PTC_READ(tp));
+		KNOTE(&tp->t_rkq.ki_note, 0);
 	}
 	if (flag & FWRITE) {
-		selwakeup(&pti->pt_selw);
 		wakeup(TSA_PTC_WRITE(tp));
+		KNOTE(&tp->t_wkq.ki_note, 0);
 	}
 }
 
@@ -455,16 +537,25 @@ ptcopen(struct dev_open_args *ap)
 	struct tty *tp;
 	struct pt_ioctl *pti;
 
-	if (!dev->si_drv1)
-		ptyinit(minor(dev));
-	if (!dev->si_drv1)
+	/*
+	 * The pti will already be assigned by the clone code or
+	 * pre-created if a non-unix 98 pty.  If si_drv1 is NULL
+	 * we are somehow racing a unix98 termination.
+	 */
+	if (dev->si_drv1 == NULL)
 		return(ENXIO);	
 	pti = dev->si_drv1;
-	if (pti->pt_prison && pti->pt_prison != ap->a_cred->cr_prison)
+	if (pti_hold(pti))
+		return(ENXIO);
+	if (pti->pt_prison && pti->pt_prison != ap->a_cred->cr_prison) {
+		pti_done(pti);
 		return(EBUSY);
+	}
 	tp = dev->si_tty;
-	if (tp->t_oproc)
+	if (tp->t_oproc) {
+		pti_done(pti);
 		return (EIO);
+	}
 	tp->t_oproc = ptsstart;
 	tp->t_stop = ptsstop;
 	(void)(*linesw[tp->t_line].l_modem)(tp, 1);
@@ -494,6 +585,7 @@ ptcopen(struct dev_open_args *ap)
 		pti->pt_flags2 |= PF_MOPEN;
 	}
 #endif
+	pti_done(pti);
 
 	return (0);
 }
@@ -505,17 +597,11 @@ ptcclose(struct dev_close_args *ap)
 	struct tty *tp;
 	struct pt_ioctl *pti = dev->si_drv1;
 
+	if (pti_hold(pti))
+		panic("ptcclose on terminated pti");
+
 	tp = dev->si_tty;
 	(void)(*linesw[tp->t_line].l_modem)(tp, 0);
-
-#ifdef UNIX98_PTYS
-	/*
-	 * Unix98 pty stuff.
-	 * On close of the master, we unset the corresponding flag in the common
-	 * struct asap.
-	 */
-	pti->pt_flags2 &= ~PF_MOPEN;
-#endif
 
 	/*
 	 * XXX MDMBUF makes no sense for ptys but would inhibit the above
@@ -532,7 +618,15 @@ ptcclose(struct dev_close_args *ap)
 	}
 	tp->t_oproc = 0;		/* mark closed */
 
-	pti = dev->si_drv1;
+#ifdef UNIX98_PTYS
+	/*
+	 * Unix98 pty stuff.
+	 * On close of the master, we unset the corresponding flag in the common
+	 * struct asap.
+	 */
+	pti->pt_flags2 &= ~PF_MOPEN;
+#endif
+
 	pti->pt_prison = NULL;
 	pti->devs->si_uid = 0;
 	pti->devs->si_gid = 0;
@@ -541,27 +635,7 @@ ptcclose(struct dev_close_args *ap)
 	pti->devc->si_gid = 0;
 	pti->devc->si_perms = 0666;
 
-#ifdef UNIX98_PTYS
-	/*
-	 * Unix98 pty stuff.
-	 * On close of the master, we destroy the master and, if no slaves are open,
-	 * we destroy the slave device and unset the unit.
-	 */
-	ptydebug(1, "ptcclose=%s (master) | unix98? %s\n", dev->si_name,
-	    (pti->pt_flags2 & PF_UNIX98)?"yes":"no");
-	if (pti->pt_flags2 & PF_UNIX98) {
-		KKASSERT((pti->pt_flags2 & PF_MOPEN) == 0);
-		destroy_dev(dev);
-		pti->devc = NULL;
-
-		if (!(pti->pt_flags2 & PF_SOPEN)) {
-			ptydebug(1, "ptcclose: slaves are not open\n");
-			destroy_dev(pti->devs);
-			devfs_clone_bitmap_put(&DEVFS_CLONE_BITMAP(pty), dev->si_uminor);
-		}
-	}
-#endif
-
+	pti_done(pti);
 	return (0);
 }
 
@@ -633,13 +707,16 @@ ptsstop(struct tty *tp, int flush)
 	int flag;
 
 	/* note: FLUSHREAD and FLUSHWRITE already ok */
-	if (flush == 0) {
-		flush = TIOCPKT_STOP;
-		pti->pt_flags |= PF_STOPPED;
-	} else
-		pti->pt_flags &= ~PF_STOPPED;
-	pti->pt_send |= flush;
-	/* change of perspective */
+	if (pti) {
+		if (flush == 0) {
+			flush = TIOCPKT_STOP;
+			pti->pt_flags |= PF_STOPPED;
+		} else {
+			pti->pt_flags &= ~PF_STOPPED;
+		}
+		pti->pt_send |= flush;
+		/* change of perspective */
+	}
 	flag = 0;
 	if (flush & FREAD)
 		flag |= FWRITE;
@@ -648,56 +725,106 @@ ptsstop(struct tty *tp, int flush)
 	ptcwakeup(tp, flag);
 }
 
+/*
+ * kqueue ops for pseudo-terminals.
+ */
+static struct filterops ptcread_filtops =
+	{ FILTEROP_ISFD, NULL, filt_ptcrdetach, filt_ptcread };
+static struct filterops ptcwrite_filtops =
+	{ FILTEROP_ISFD, NULL, filt_ptcwdetach, filt_ptcwrite };
+
 static	int
-ptcpoll(struct dev_poll_args *ap)
+ptckqfilter(struct dev_kqfilter_args *ap)
 {
 	cdev_t dev = ap->a_head.a_dev;
+	struct knote *kn = ap->a_kn;
 	struct tty *tp = dev->si_tty;
-	struct pt_ioctl *pti = dev->si_drv1;
-	int revents = 0;
+	struct klist *klist;
 
-	if ((tp->t_state & TS_CONNECTED) == 0) {
-		ap->a_events = seltrue(dev, ap->a_events) | POLLHUP;
-		return(0);
+	ap->a_result = 0;
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		klist = &tp->t_rkq.ki_note;
+		kn->kn_fop = &ptcread_filtops;
+		break;
+	case EVFILT_WRITE:
+		klist = &tp->t_wkq.ki_note;
+		kn->kn_fop = &ptcwrite_filtops;
+		break;
+	default:
+		ap->a_result = EOPNOTSUPP;
+		return (0);
 	}
 
-	/*
-	 * Need to block timeouts (ttrstart).
-	 */
-	crit_enter();
-
-	if (ap->a_events & (POLLIN | POLLRDNORM))
-		if ((tp->t_state & TS_ISOPEN) &&
-		    ((tp->t_outq.c_cc && (tp->t_state & TS_TTSTOP) == 0) ||
-		     ((pti->pt_flags & PF_PKT) && pti->pt_send) ||
-		     ((pti->pt_flags & PF_UCNTL) && pti->pt_ucntl)))
-			revents |= ap->a_events & (POLLIN | POLLRDNORM);
-
-	if (ap->a_events & (POLLOUT | POLLWRNORM))
-		if (tp->t_state & TS_ISOPEN &&
-		    ((pti->pt_flags & PF_REMOTE) ?
-		     (tp->t_canq.c_cc == 0) : 
-		     ((tp->t_rawq.c_cc + tp->t_canq.c_cc < TTYHOG - 2) ||
-		      (tp->t_canq.c_cc == 0 && (tp->t_lflag & ICANON)))))
-			revents |= ap->a_events & (POLLOUT | POLLWRNORM);
-
-	if (ap->a_events & POLLHUP)
-		if ((tp->t_state & TS_CARR_ON) == 0)
-			revents |= POLLHUP;
-
-	if (revents == 0) {
-		if (ap->a_events & (POLLIN | POLLRDNORM))
-			selrecord(curthread, &pti->pt_selr);
-
-		if (ap->a_events & (POLLOUT | POLLWRNORM)) 
-			selrecord(curthread, &pti->pt_selw);
-	}
-	crit_exit();
-
-	ap->a_events = revents;
+	kn->kn_hook = (caddr_t)dev;
+	knote_insert(klist, kn);
 	return (0);
 }
 
+static int
+filt_ptcread (struct knote *kn, long hint)
+{
+	struct tty *tp = ((cdev_t)kn->kn_hook)->si_tty;
+	struct pt_ioctl *pti = ((cdev_t)kn->kn_hook)->si_drv1;
+
+	if (tp->t_state & TS_ZOMBIE) {
+		kn->kn_flags |= EV_EOF;
+		return (1);
+	}
+
+	if ((tp->t_state & TS_ISOPEN) &&
+	    ((tp->t_outq.c_cc && (tp->t_state & TS_TTSTOP) == 0) ||
+	     ((pti->pt_flags & PF_PKT) && pti->pt_send) ||
+	     ((pti->pt_flags & PF_UCNTL) && pti->pt_ucntl))) {
+		kn->kn_data = tp->t_outq.c_cc;
+		return(1);
+	} else {
+		return(0);
+	}
+}
+
+static int
+filt_ptcwrite (struct knote *kn, long hint)
+{
+	struct tty *tp = ((cdev_t)kn->kn_hook)->si_tty;
+	struct pt_ioctl *pti = ((cdev_t)kn->kn_hook)->si_drv1;
+
+	if (tp->t_state & TS_ZOMBIE) {
+		kn->kn_flags |= EV_EOF;
+		return (1);
+	}
+
+	if (tp->t_state & TS_ISOPEN &&
+	    ((pti->pt_flags & PF_REMOTE) ?
+	     (tp->t_canq.c_cc == 0) :
+	     ((tp->t_rawq.c_cc + tp->t_canq.c_cc < TTYHOG - 2) ||
+	      (tp->t_canq.c_cc == 0 && (tp->t_lflag & ICANON))))) {
+		kn->kn_data = tp->t_canq.c_cc + tp->t_rawq.c_cc;
+		return(1);
+	} else {
+		return(0);
+	}
+}
+
+static void
+filt_ptcrdetach (struct knote *kn)
+{
+	struct tty *tp = ((cdev_t)kn->kn_hook)->si_tty;
+
+	knote_remove(&tp->t_rkq.ki_note, kn);
+}
+
+static void
+filt_ptcwdetach (struct knote *kn)
+{
+	struct tty *tp = ((cdev_t)kn->kn_hook)->si_tty;
+
+	knote_remove(&tp->t_wkq.ki_note, kn);
+}
+
+/*
+ * I/O ops
+ */
 static	int
 ptcwrite(struct dev_write_args *ap)
 {

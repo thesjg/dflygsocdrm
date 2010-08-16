@@ -36,8 +36,6 @@
 #include <sys/filio.h>
 #include <sys/ttycom.h>
 #include <sys/stat.h>
-#include <sys/poll.h>
-#include <sys/select.h>
 #include <sys/signalvar.h>
 #include <sys/sysproto.h>
 #include <sys/pipe.h>
@@ -76,7 +74,6 @@ static int pipe_write (struct file *fp, struct uio *uio,
 		struct ucred *cred, int flags);
 static int pipe_close (struct file *fp);
 static int pipe_shutdown (struct file *fp, int how);
-static int pipe_poll (struct file *fp, int events, struct ucred *cred);
 static int pipe_kqfilter (struct file *fp, struct knote *kn);
 static int pipe_stat (struct file *fp, struct stat *sb, struct ucred *cred);
 static int pipe_ioctl (struct file *fp, u_long cmd, caddr_t data,
@@ -86,7 +83,6 @@ static struct fileops pipeops = {
 	.fo_read = pipe_read, 
 	.fo_write = pipe_write,
 	.fo_ioctl = pipe_ioctl,
-	.fo_poll = pipe_poll,
 	.fo_kqfilter = pipe_kqfilter,
 	.fo_stat = pipe_stat,
 	.fo_close = pipe_close,
@@ -98,9 +94,9 @@ static int	filt_piperead(struct knote *kn, long hint);
 static int	filt_pipewrite(struct knote *kn, long hint);
 
 static struct filterops pipe_rfiltops =
-	{ 1, NULL, filt_pipedetach, filt_piperead };
+	{ FILTEROP_ISFD, NULL, filt_pipedetach, filt_piperead };
 static struct filterops pipe_wfiltops =
-	{ 1, NULL, filt_pipedetach, filt_pipewrite };
+	{ FILTEROP_ISFD, NULL, filt_pipedetach, filt_pipewrite };
 
 MALLOC_DEFINE(M_PIPE, "pipe", "pipe structures");
 
@@ -159,36 +155,17 @@ SYSCTL_INT(_kern_pipe, OID_AUTO, bkmem_alloc,
 static void pipeclose (struct pipe *cpipe);
 static void pipe_free_kmem (struct pipe *cpipe);
 static int pipe_create (struct pipe **cpipep);
-static __inline void pipeselwakeup (struct pipe *cpipe);
 static int pipespace (struct pipe *cpipe, int size);
 
-static __inline int
-pipeseltest(struct pipe *cpipe)
-{
-	return ((cpipe->pipe_state & PIPE_SEL) ||
-		((cpipe->pipe_state & PIPE_ASYNC) && cpipe->pipe_sigio) ||
-		SLIST_FIRST(&cpipe->pipe_sel.si_note));
-}
-
 static __inline void
-pipeselwakeup(struct pipe *cpipe)
+pipewakeup(struct pipe *cpipe, int dosigio)
 {
-	if (cpipe->pipe_state & PIPE_SEL) {
-		get_mplock();
-		cpipe->pipe_state &= ~PIPE_SEL;
-		selwakeup(&cpipe->pipe_sel);
-		rel_mplock();
-	}
-	if ((cpipe->pipe_state & PIPE_ASYNC) && cpipe->pipe_sigio) {
+	if (dosigio && (cpipe->pipe_state & PIPE_ASYNC) && cpipe->pipe_sigio) {
 		get_mplock();
 		pgsigio(cpipe->pipe_sigio, SIGIO, 0);
 		rel_mplock();
 	}
-	if (SLIST_FIRST(&cpipe->pipe_sel.si_note)) {
-		get_mplock();
-		KNOTE(&cpipe->pipe_sel.si_note, 0);
-		rel_mplock();
-	}
+	KNOTE(&cpipe->pipe_kq.ki_note, 0);
 }
 
 /*
@@ -416,6 +393,7 @@ static int
 pipe_read(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 {
 	struct pipe *rpipe;
+	struct pipe *wpipe;
 	int error;
 	size_t nread = 0;
 	int nbio;
@@ -435,6 +413,7 @@ pipe_read(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 	 */
 	pipe_get_mplock(&mpsave);
 	rpipe = (struct pipe *)fp->f_data;
+	wpipe = rpipe->pipe_peer;
 	lwkt_gettoken(&rpipe->pipe_rlock);
 
 	if (fflags & O_FBLOCKING)
@@ -447,7 +426,7 @@ pipe_read(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 		nbio = 0;
 
 	/*
-	 * Reads are serialized.  Note howeverthat pipe_buffer.buffer and
+	 * Reads are serialized.  Note however that pipe_buffer.buffer and
 	 * pipe_buffer.size can change out from under us when the number
 	 * of bytes in the buffer are zero due to the write-side doing a
 	 * pipespace().
@@ -524,7 +503,6 @@ pipe_read(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 		if (rpipe->pipe_state & PIPE_WANTW) {
 			lwkt_gettoken(&rpipe->pipe_wlock);
 			if (rpipe->pipe_state & PIPE_WANTW) {
-				notify_writer = 0;
 				rpipe->pipe_state &= ~PIPE_WANTW;
 				lwkt_reltoken(&rpipe->pipe_wlock);
 				wakeup(rpipe);
@@ -658,6 +636,9 @@ pipe_read(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 	 * while holding just rlock.
 	 */
 	if (notify_writer) {
+		/*
+		 * Synchronous blocking is done on the pipe involved
+		 */
 		if (rpipe->pipe_state & PIPE_WANTW) {
 			lwkt_gettoken(&rpipe->pipe_wlock);
 			if (rpipe->pipe_state & PIPE_WANTW) {
@@ -668,11 +649,16 @@ pipe_read(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 				lwkt_reltoken(&rpipe->pipe_wlock);
 			}
 		}
-		if (pipeseltest(rpipe)) {
-			lwkt_gettoken(&rpipe->pipe_wlock);
-			pipeselwakeup(rpipe);
-			lwkt_reltoken(&rpipe->pipe_wlock);
-		}
+
+		/*
+		 * But we may also have to deal with a kqueue which is
+		 * stored on the same pipe as its descriptor, so a
+		 * EVFILT_WRITE event waiting for our side to drain will
+		 * be on the other side.
+		 */
+		lwkt_gettoken(&wpipe->pipe_wlock);
+		pipewakeup(wpipe, 0);
+		lwkt_reltoken(&wpipe->pipe_wlock);
 	}
 	/*size = rpipe->pipe_buffer.windex - rpipe->pipe_buffer.rindex;*/
 	lwkt_reltoken(&rpipe->pipe_rlock);
@@ -690,7 +676,8 @@ pipe_write(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 	int error;
 	int orig_resid;
 	int nbio;
-	struct pipe *wpipe, *rpipe;
+	struct pipe *wpipe;
+	struct pipe *rpipe;
 	u_int windex;
 	u_int space;
 	u_int wcount;
@@ -920,12 +907,12 @@ pipe_write(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 
 		/*
 		 * We have no more space and have something to offer,
-		 * wake up select/poll.
+		 * wake up select/poll/kq.
 		 */
 		if (space == 0) {
 			wpipe->pipe_state |= PIPE_WANTW;
 			++wpipe->pipe_wantwcnt;
-			pipeselwakeup(wpipe);
+			pipewakeup(wpipe, 1);
 			if (wpipe->pipe_state & PIPE_WANTW)
 				error = tsleep(wpipe, PCATCH, "pipewr", 0);
 			++pipe_wblocked_count;
@@ -962,11 +949,9 @@ pipe_write(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 				lwkt_reltoken(&wpipe->pipe_rlock);
 			}
 		}
-		if (pipeseltest(wpipe)) {
-			lwkt_gettoken(&wpipe->pipe_rlock);
-			pipeselwakeup(wpipe);
-			lwkt_reltoken(&wpipe->pipe_rlock);
-		}
+		lwkt_gettoken(&wpipe->pipe_rlock);
+		pipewakeup(wpipe, 1);
+		lwkt_reltoken(&wpipe->pipe_rlock);
 	}
 
 	/*
@@ -983,7 +968,7 @@ pipe_write(struct file *fp, struct uio *uio, struct ucred *cred, int fflags)
 
 	/*
 	 * We have something to offer,
-	 * wake up select/poll.
+	 * wake up select/poll/kq.
 	 */
 	/*space = wpipe->pipe_buffer.windex - wpipe->pipe_buffer.rindex;*/
 	lwkt_reltoken(&wpipe->pipe_wlock);
@@ -1054,94 +1039,6 @@ pipe_ioctl(struct file *fp, u_long cmd, caddr_t data,
 	pipe_rel_mplock(&mpsave);
 
 	return (error);
-}
-
-/*
- * MPALMOSTSAFE - acquires mplock
- *
- * poll for events (helper)
- */
-static int
-pipe_poll_events(struct pipe *rpipe, struct pipe *wpipe, int events)
-{
-	int revents = 0;
-	u_int space;
-
-	if (events & (POLLIN | POLLRDNORM)) {
-		if ((rpipe->pipe_buffer.windex != rpipe->pipe_buffer.rindex) ||
-		    (rpipe->pipe_state & PIPE_REOF)) {
-			revents |= events & (POLLIN | POLLRDNORM);
-		}
-	}
-
-	if (events & (POLLOUT | POLLWRNORM)) {
-		if (wpipe == NULL || (wpipe->pipe_state & PIPE_WEOF)) {
-			revents |= events & (POLLOUT | POLLWRNORM);
-		} else {
-			space = wpipe->pipe_buffer.windex -
-				wpipe->pipe_buffer.rindex;
-			space = wpipe->pipe_buffer.size - space;
-			if (space >= PIPE_BUF)
-				revents |= events & (POLLOUT | POLLWRNORM);
-		}
-	}
-
-	if ((rpipe->pipe_state & PIPE_REOF) ||
-	    (wpipe == NULL) ||
-	    (wpipe->pipe_state & PIPE_WEOF)) {
-		revents |= POLLHUP;
-	}
-	return (revents);
-}
-
-/*
- * Poll for events from file pointer.
- */
-int
-pipe_poll(struct file *fp, int events, struct ucred *cred)
-{
-	struct pipe *rpipe;
-	struct pipe *wpipe;
-	int revents = 0;
-	int mpsave;
-
-	pipe_get_mplock(&mpsave);
-	rpipe = (struct pipe *)fp->f_data;
-	wpipe = rpipe->pipe_peer;
-
-	revents = pipe_poll_events(rpipe, wpipe, events);
-	if (revents == 0) {
-		if (events & (POLLIN | POLLRDNORM)) {
-			lwkt_gettoken(&rpipe->pipe_rlock);
-			lwkt_gettoken(&rpipe->pipe_wlock);
-		}
-		if (events & (POLLOUT | POLLWRNORM)) {
-			lwkt_gettoken(&wpipe->pipe_rlock);
-			lwkt_gettoken(&wpipe->pipe_wlock);
-		}
-		revents = pipe_poll_events(rpipe, wpipe, events);
-		if (revents == 0) {
-			if (events & (POLLIN | POLLRDNORM)) {
-				selrecord(curthread, &rpipe->pipe_sel);
-				rpipe->pipe_state |= PIPE_SEL;
-			}
-
-			if (events & (POLLOUT | POLLWRNORM)) {
-				selrecord(curthread, &wpipe->pipe_sel);
-				wpipe->pipe_state |= PIPE_SEL;
-			}
-		}
-		if (events & (POLLOUT | POLLWRNORM)) {
-			lwkt_reltoken(&wpipe->pipe_wlock);
-			lwkt_reltoken(&wpipe->pipe_rlock);
-		}
-		if (events & (POLLIN | POLLRDNORM)) {
-			lwkt_reltoken(&rpipe->pipe_wlock);
-			lwkt_reltoken(&rpipe->pipe_rlock);
-		}
-	}
-	pipe_rel_mplock(&mpsave);
-	return (revents);
 }
 
 /*
@@ -1248,8 +1145,8 @@ pipe_shutdown(struct file *fp, int how)
 		error = 0;
 		break;
 	}
-	pipeselwakeup(rpipe);
-	pipeselwakeup(wpipe);
+	pipewakeup(rpipe, 1);
+	pipewakeup(wpipe, 1);
 
 	lwkt_reltoken(&wpipe->pipe_wlock);
 	lwkt_reltoken(&wpipe->pipe_rlock);
@@ -1299,11 +1196,11 @@ pipeclose(struct pipe *cpipe)
 	lwkt_gettoken(&cpipe->pipe_wlock);
 
 	/*
-	 * Set our state, wakeup anyone waiting in select, and
+	 * Set our state, wakeup anyone waiting in select/poll/kq, and
 	 * wakeup anyone blocked on our pipe.
 	 */
 	cpipe->pipe_state |= PIPE_CLOSED | PIPE_REOF | PIPE_WEOF;
-	pipeselwakeup(cpipe);
+	pipewakeup(cpipe, 1);
 	if (cpipe->pipe_state & (PIPE_WANTR | PIPE_WANTW)) {
 		cpipe->pipe_state &= ~(PIPE_WANTR | PIPE_WANTW);
 		wakeup(cpipe);
@@ -1316,16 +1213,13 @@ pipeclose(struct pipe *cpipe)
 		lwkt_gettoken(&ppipe->pipe_rlock);
 		lwkt_gettoken(&ppipe->pipe_wlock);
 		ppipe->pipe_state |= PIPE_REOF | PIPE_WEOF;
-		pipeselwakeup(ppipe);
+		pipewakeup(ppipe, 1);
 		if (ppipe->pipe_state & (PIPE_WANTR | PIPE_WANTW)) {
 			ppipe->pipe_state &= ~(PIPE_WANTR | PIPE_WANTW);
 			wakeup(ppipe);
 		}
-		if (SLIST_FIRST(&ppipe->pipe_sel.si_note)) {
-			get_mplock();
-			KNOTE(&ppipe->pipe_sel.si_note, 0);
-			rel_mplock();
-		}
+		if (SLIST_FIRST(&ppipe->pipe_kq.ki_note))
+			KNOTE(&ppipe->pipe_kq.ki_note, 0);
 		lwkt_reltoken(&ppipe->pipe_wlock);
 		lwkt_reltoken(&ppipe->pipe_rlock);
 	}
@@ -1379,7 +1273,6 @@ pipe_kqfilter(struct file *fp, struct knote *kn)
 {
 	struct pipe *cpipe;
 
-	get_mplock();
 	cpipe = (struct pipe *)kn->kn_fp->f_data;
 
 	switch (kn->kn_filter) {
@@ -1388,20 +1281,18 @@ pipe_kqfilter(struct file *fp, struct knote *kn)
 		break;
 	case EVFILT_WRITE:
 		kn->kn_fop = &pipe_wfiltops;
-		cpipe = cpipe->pipe_peer;
-		if (cpipe == NULL) {
+		if (cpipe->pipe_peer == NULL) {
 			/* other end of pipe has been closed */
-			rel_mplock();
 			return (EPIPE);
 		}
 		break;
 	default:
-		return (1);
+		return (EOPNOTSUPP);
 	}
 	kn->kn_hook = (caddr_t)cpipe;
 
-	SLIST_INSERT_HEAD(&cpipe->pipe_sel.si_note, kn, kn_selnext);
-	rel_mplock();
+	knote_insert(&cpipe->pipe_kq.ki_note, kn);
+
 	return (0);
 }
 
@@ -1410,7 +1301,7 @@ filt_pipedetach(struct knote *kn)
 {
 	struct pipe *cpipe = (struct pipe *)kn->kn_hook;
 
-	SLIST_REMOVE(&cpipe->pipe_sel.si_note, kn, knote, kn_selnext);
+	knote_remove(&cpipe->pipe_kq.ki_note, kn);
 }
 
 /*ARGSUSED*/
@@ -1418,15 +1309,28 @@ static int
 filt_piperead(struct knote *kn, long hint)
 {
 	struct pipe *rpipe = (struct pipe *)kn->kn_fp->f_data;
+	int ready = 0;
+
+	lwkt_gettoken(&rpipe->pipe_rlock);
+	lwkt_gettoken(&rpipe->pipe_wlock);
 
 	kn->kn_data = rpipe->pipe_buffer.windex - rpipe->pipe_buffer.rindex;
 
-	/* XXX RACE */
-	if (rpipe->pipe_state & PIPE_REOF) {
+	/*
+	 * Only set EOF if all data has been exhausted
+	 */
+	if ((rpipe->pipe_state & PIPE_REOF) && kn->kn_data == 0) {
 		kn->kn_flags |= EV_EOF; 
-		return (1);
+		ready = 1;
 	}
-	return (kn->kn_data > 0);
+
+	lwkt_reltoken(&rpipe->pipe_wlock);
+	lwkt_reltoken(&rpipe->pipe_rlock);
+
+	if (!ready)
+		ready = kn->kn_data > 0;
+
+	return (ready);
 }
 
 /*ARGSUSED*/
@@ -1435,17 +1339,32 @@ filt_pipewrite(struct knote *kn, long hint)
 {
 	struct pipe *rpipe = (struct pipe *)kn->kn_fp->f_data;
 	struct pipe *wpipe = rpipe->pipe_peer;
-	u_int32_t space;
+	int ready = 0;
 
-	/* XXX RACE */
-	if ((wpipe == NULL) || (wpipe->pipe_state & PIPE_WEOF)) {
-		kn->kn_data = 0;
-		kn->kn_flags |= EV_EOF; 
+	kn->kn_data = 0;
+	if (wpipe == NULL) {
+		kn->kn_flags |= EV_EOF;
 		return (1);
 	}
-	space = wpipe->pipe_buffer.windex -
-		wpipe->pipe_buffer.rindex;
-	space = wpipe->pipe_buffer.size - space;
-	kn->kn_data = space;
-	return (kn->kn_data >= PIPE_BUF);
+
+	lwkt_gettoken(&wpipe->pipe_rlock);
+	lwkt_gettoken(&wpipe->pipe_wlock);
+
+	if (wpipe->pipe_state & PIPE_WEOF) {
+		kn->kn_flags |= EV_EOF; 
+		ready = 1;
+	}
+
+	if (!ready)
+		kn->kn_data = wpipe->pipe_buffer.size -
+			      (wpipe->pipe_buffer.windex -
+			       wpipe->pipe_buffer.rindex);
+
+	lwkt_reltoken(&wpipe->pipe_wlock);
+	lwkt_reltoken(&wpipe->pipe_rlock);
+
+	if (!ready)
+		ready = kn->kn_data >= PIPE_BUF;
+
+	return (ready);
 }

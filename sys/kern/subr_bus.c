@@ -43,10 +43,9 @@
 #include <sys/device.h>
 #include <sys/lock.h>
 #include <sys/conf.h>
-#include <sys/selinfo.h>
 #include <sys/uio.h>
 #include <sys/filio.h>
-#include <sys/poll.h>
+#include <sys/event.h>
 #include <sys/signalvar.h>
 
 #include <machine/stdarg.h>	/* for device_printf() */
@@ -142,7 +141,7 @@ static d_open_t		devopen;
 static d_close_t	devclose;
 static d_read_t		devread;
 static d_ioctl_t	devioctl;
-static d_poll_t		devpoll;
+static d_kqfilter_t	devkqfilter;
 
 static struct dev_ops devctl_ops = {
 	{ "devctl", CDEV_MAJOR, 0 },
@@ -150,7 +149,7 @@ static struct dev_ops devctl_ops = {
 	.d_close =	devclose,
 	.d_read =	devread,
 	.d_ioctl =	devioctl,
-	.d_poll =	devpoll,
+	.d_kqfilter =	devkqfilter
 };
 
 struct dev_event_info
@@ -166,7 +165,7 @@ static struct dev_softc
 	int	inuse;
 	int	nonblock;
 	struct lock lock;
-	struct selinfo sel;
+	struct kqinfo kq;
 	struct devq devq;
 	struct proc *async_proc;
 } devsoftc;
@@ -274,23 +273,63 @@ devioctl(struct dev_ioctl_args *ap)
 	return (ENOTTY);
 }
 
-static	int
-devpoll(struct dev_poll_args *ap)
-{
-	int	revents = 0;
+static void dev_filter_detach(struct knote *);
+static int dev_filter_read(struct knote *, long);
 
+static struct filterops dev_filtops =
+	{ FILTEROP_ISFD, NULL, dev_filter_detach, dev_filter_read };
+
+static int
+devkqfilter(struct dev_kqfilter_args *ap)
+{
+	struct knote *kn = ap->a_kn;
+	struct klist *klist;
+
+	ap->a_result = 0;
 	lockmgr(&devsoftc.lock, LK_EXCLUSIVE);
-	if (ap->a_events & (POLLIN | POLLRDNORM)) {
-		if (!TAILQ_EMPTY(&devsoftc.devq))
-			revents = ap->a_events & (POLLIN | POLLRDNORM);
-		else
-			selrecord(curthread, &devsoftc.sel);
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &dev_filtops;
+		break;
+	default:
+		ap->a_result = EOPNOTSUPP;
+		lockmgr(&devsoftc.lock, LK_RELEASE);
+		return (0);
 	}
+
+	klist = &devsoftc.kq.ki_note;
+	knote_insert(klist, kn);
+
 	lockmgr(&devsoftc.lock, LK_RELEASE);
 
-	ap->a_events = revents;
 	return (0);
 }
+
+static void
+dev_filter_detach(struct knote *kn)
+{
+	struct klist *klist;
+
+	lockmgr(&devsoftc.lock, LK_EXCLUSIVE);
+	klist = &devsoftc.kq.ki_note;
+	knote_remove(klist, kn);
+	lockmgr(&devsoftc.lock, LK_RELEASE);
+}
+
+static int
+dev_filter_read(struct knote *kn, long hint)
+{
+	int ready = 0;
+
+	lockmgr(&devsoftc.lock, LK_EXCLUSIVE);
+	if (!TAILQ_EMPTY(&devsoftc.devq))
+		ready = 1;
+	lockmgr(&devsoftc.lock, LK_RELEASE);
+
+	return (ready);
+}
+
 
 /**
  * @brief Return whether the userland process is running
@@ -323,7 +362,7 @@ devctl_queue_data(char *data)
 	wakeup(&devsoftc);
 	lockmgr(&devsoftc.lock, LK_RELEASE);
 	get_mplock();	/* XXX */
-	selwakeup(&devsoftc.sel);
+	KNOTE(&devsoftc.kq.ki_note, 0);
 	rel_mplock();	/* XXX */
 	p = devsoftc.async_proc;
 	if (p != NULL)

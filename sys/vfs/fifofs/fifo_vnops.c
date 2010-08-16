@@ -48,7 +48,6 @@
 #include <sys/fcntl.h>
 #include <sys/file.h>
 #include <sys/event.h>
-#include <sys/poll.h>
 #include <sys/un.h>
 
 #include <sys/thread2.h>
@@ -74,7 +73,6 @@ static int	fifo_close (struct vop_close_args *);
 static int	fifo_read (struct vop_read_args *);
 static int	fifo_write (struct vop_write_args *);
 static int	fifo_ioctl (struct vop_ioctl_args *);
-static int	fifo_poll (struct vop_poll_args *);
 static int	fifo_kqfilter (struct vop_kqfilter_args *);
 static int	fifo_inactive (struct  vop_inactive_args *);
 static int	fifo_bmap (struct vop_bmap_args *);
@@ -87,9 +85,9 @@ static void	filt_fifowdetach(struct knote *kn);
 static int	filt_fifowrite(struct knote *kn, long hint);
 
 static struct filterops fiforead_filtops =
-	{ 1, NULL, filt_fifordetach, filt_fiforead };
+	{ FILTEROP_ISFD, NULL, filt_fifordetach, filt_fiforead };
 static struct filterops fifowrite_filtops =
-	{ 1, NULL, filt_fifowdetach, filt_fifowrite };
+	{ FILTEROP_ISFD, NULL, filt_fifowdetach, filt_fifowrite };
   
 struct vop_ops fifo_vnode_vops = {
 	.vop_default =		vop_defaultop,
@@ -108,7 +106,6 @@ struct vop_ops fifo_vnode_vops = {
 	.vop_old_mknod =	(void *)fifo_badop,
 	.vop_open =		fifo_open,
 	.vop_pathconf =		fifo_pathconf,
-	.vop_poll =		fifo_poll,
 	.vop_print =		fifo_print,
 	.vop_read =		fifo_read,
 	.vop_readdir =		(void *)fifo_badop,
@@ -201,7 +198,7 @@ fifo_open(struct vop_open_args *ap)
 	if (ap->a_mode & FREAD) {
 		fip->fi_readers++;
 		if (fip->fi_readers == 1) {
-			fip->fi_writesock->so_state &= ~SS_CANTSENDMORE;
+			soisreconnected(fip->fi_writesock);
 			if (fip->fi_writers > 0) {
 				wakeup((caddr_t)&fip->fi_writers);
 				sowwakeup(fip->fi_writesock);
@@ -211,7 +208,7 @@ fifo_open(struct vop_open_args *ap)
 	if (ap->a_mode & FWRITE) {
 		fip->fi_writers++;
 		if (fip->fi_writers == 1) {
-			fip->fi_readsock->so_state &= ~SS_CANTRCVMORE;
+			soisreconnected(fip->fi_readsock);
 			if (fip->fi_readers > 0) {
 				wakeup((caddr_t)&fip->fi_readers);
 				sorwakeup(fip->fi_writesock);
@@ -396,7 +393,7 @@ fifo_kqfilter(struct vop_kqfilter_args *ap)
 		break;
 	default:
 		lwkt_reltoken(&vp->v_token);
-		return (1);
+		return (EOPNOTSUPP);
 	}
 
 	ap->a_kn->kn_hook = (caddr_t)vp;
@@ -425,7 +422,7 @@ filt_fiforead(struct knote *kn, long hint)
 
 	lwkt_gettoken(&vp->v_token);
 	kn->kn_data = so->so_rcv.ssb_cc;
-	if (so->so_state & SS_CANTRCVMORE) {
+	if ((so->so_state & SS_ISDISCONNECTED) && kn->kn_data == 0) {
 		kn->kn_flags |= EV_EOF;
 		lwkt_reltoken(&vp->v_token);
 		return (1);
@@ -454,7 +451,7 @@ filt_fifowrite(struct knote *kn, long hint)
 
 	lwkt_gettoken(&vp->v_token);
 	kn->kn_data = ssb_space(&so->so_snd);
-	if (so->so_state & SS_CANTSENDMORE) {
+	if (so->so_state & SS_ISDISCONNECTED) {
 		kn->kn_flags |= EV_EOF;
 		lwkt_reltoken(&vp->v_token);
 		return (1);
@@ -462,55 +459,6 @@ filt_fifowrite(struct knote *kn, long hint)
 	kn->kn_flags &= ~EV_EOF;
 	lwkt_reltoken(&vp->v_token);
 	return (kn->kn_data >= so->so_snd.ssb_lowat);
-}
-
-/*
- * fifo_poll(struct vnode *a_vp, int a_events, struct ucred *a_cred)
- */
-/* ARGSUSED */
-static int
-fifo_poll(struct vop_poll_args *ap)
-{
-	struct vnode *vp = ap->a_vp;
-	struct file filetmp;
-	int events, revents = 0;
-
-	lwkt_gettoken(&vp->v_token);
-	events = ap->a_events &
-		(POLLIN | POLLINIGNEOF | POLLPRI | POLLRDNORM | POLLRDBAND);
-	if (events) {
-		/*
-		 * If POLLIN or POLLRDNORM is requested and POLLINIGNEOF is
-		 * not, then convert the first two to the last one.  This
-		 * tells the socket poll function to ignore EOF so that we
-		 * block if there is no writer (and no data).  Callers can
-		 * set POLLINIGNEOF to get non-blocking behavior.
-		 */
-		if (events & (POLLIN | POLLRDNORM) &&
-			!(events & POLLINIGNEOF)) {
-			events &= ~(POLLIN | POLLRDNORM);
-			events |= POLLINIGNEOF;
-		}
-		
-		filetmp.f_data = vp->v_fifoinfo->fi_readsock;
-		if (filetmp.f_data)
-			revents |= soo_poll(&filetmp, events, ap->a_cred);
-
-		/* Reverse the above conversion. */
-		if ((revents & POLLINIGNEOF) &&
-			!(ap->a_events & POLLINIGNEOF)) {
-			revents |= (ap->a_events & (POLLIN | POLLRDNORM));
-			revents &= ~POLLINIGNEOF;
-		}
-	}
-	events = ap->a_events & (POLLOUT | POLLWRNORM | POLLWRBAND);
-	if (events) {
-		filetmp.f_data = vp->v_fifoinfo->fi_writesock;
-		if (filetmp.f_data)
-			revents |= soo_poll(&filetmp, events, ap->a_cred);
-	}
-	lwkt_reltoken(&vp->v_token);
-	return (revents);
 }
 
 /*
@@ -558,12 +506,12 @@ fifo_close(struct vop_close_args *ap)
 	if (ap->a_fflag & FREAD) {
 		fip->fi_readers--;
 		if (fip->fi_readers == 0)
-			socantsendmore(fip->fi_writesock);
+			soisdisconnected(fip->fi_writesock);
 	}
 	if (ap->a_fflag & FWRITE) {
 		fip->fi_writers--;
 		if (fip->fi_writers == 0)
-			socantrcvmore(fip->fi_readsock);
+			soisdisconnected(fip->fi_readsock);
 	}
 	if (vp->v_sysref.refcnt > 1) {
 		vop_stdclose(ap);

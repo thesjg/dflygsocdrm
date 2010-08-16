@@ -37,6 +37,7 @@
 #include <sys/kernel.h>
 
 #include <sys/socket.h>
+#include <sys/thread.h>
 
 #include <net/if.h>
 #include <net/if_dl.h>
@@ -114,6 +115,9 @@ static const struct ieee80211_rateset ieee80211_rateset_11b =
 static const struct ieee80211_rateset ieee80211_rateset_11g =
 	{ 12, { B(2), B(4), B(11), B(22), 12, 18, 24, 36, 48, 72, 96, 108 } };
 #undef B
+
+/* Global token used for wlan layer and wireless NIC driver layer */
+lwkt_token wlan_token;
 
 /*
  * Fill in 802.11 available channel set, mark
@@ -383,7 +387,7 @@ ieee80211_vap_setup(struct ieee80211com *ic, struct ieee80211vap *vap,
 {
 	struct ifnet *ifp;
 
-	ifp = if_alloc(IFT_IEEE80211);
+	ifp = if_alloc(IFT_ETHER);
 	if (ifp == NULL) {
 		if_printf(ic->ic_ifp, "%s: unable to allocate ifnet\n",
 		    __func__);

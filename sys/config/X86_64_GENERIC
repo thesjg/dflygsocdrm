@@ -46,6 +46,19 @@ options 	AHC_REG_PRETTY_PRINT	# Print register bitfields in debug
 					# output.  Adds ~128k to driver.
 options 	AHD_REG_PRETTY_PRINT	# Print register bitfields in debug
 					# output.  Adds ~215k to driver.
+options         DSCHED_FQ               # Fair-queuing disk scheduler
+
+# ALTQ
+options		ALTQ		#alternate queueing
+options		ALTQ_CBQ	#class based queueing
+options		ALTQ_RED	#random early detection
+options		ALTQ_RIO	#triple red for diffserv (needs RED)
+options		ALTQ_HFSC	#hierarchical fair service curve
+options		ALTQ_PRIQ	#priority queue
+options		ALTQ_FAIRQ	#fair queueing
+#options	ALTQ_NOPCC	#don't use processor cycle counter
+#options	ALTQ_DEBUG	#for debugging
+
 
 # To make an SMP kernel both SMP and APIC_IO are usually
 # specified.  SMP boxes with severely broken BIOSes which
@@ -142,7 +155,7 @@ device		ips		# IBM ServeRAID
 device		amr		# AMI MegaRAID
 device		mlx		# Mylex DAC960 family
 device		twe		# 3ware Escalade 7000/8000's
-device		twa		# 3ware Escalade 9000's
+device		twa		# 3ware 9000 series PATA/SATA RAID
 
 # atkbdc0 controls both the keyboard and the PS/2 mouse
 device		atkbdc0	at isa? port IO_KBD

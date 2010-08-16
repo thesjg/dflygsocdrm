@@ -315,11 +315,9 @@ __BEGIN_DECLS
 /* 1003.1-1990 */
 void	 _exit(int) __dead2;
 int	 access(const char *, int);
-int	 faccessat(int, const char *, int, int);
 unsigned int	 alarm(unsigned int);
 int	 chdir(const char *);
 int	 chown(const char *, uid_t, gid_t);
-int	 fchownat(int, const char *, uid_t, gid_t, int);
 int	 close(int);
 int	 dup(int);
 int	 dup2(int, int);
@@ -361,9 +359,8 @@ long	 sysconf(int);
 pid_t	 tcgetpgrp(int);
 int	 tcsetpgrp(int, pid_t);
 char	*ttyname(int);
-int	ttyname_r(int, char *, size_t);
+int	 ttyname_r(int, char *, size_t);
 int	 unlink(const char *);
-int	 unlinkat(int, const char *, int);
 ssize_t	 write(int, const void *, size_t);
 
 /* 1003.2-1992 */
@@ -423,18 +420,17 @@ int	 truncate(const char *, off_t);
 #endif
 #endif /* __POSIX_VISIBLE >= 200809 || __XSI_VISIBLE */
 
-/* XXX */
-#if 0
 #if __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE
 int	faccessat(int, const char *, int, int);
 int	fchownat(int, const char *, uid_t, gid_t, int);
+#if 0
 int	fexecve(int, char *const [], char *const []);
 int	linkat(int, const char *, int, const char *, int);
+#endif
 ssize_t	readlinkat(int, const char * __restrict, char * __restrict, size_t);
 int	symlinkat(const char *, int, const char *);
 int	unlinkat(int, const char *, int);
 #endif /* __POSIX_VISIBLE >= 200809 || __BSD_VISIBLE */
-#endif
 
 /*
  * symlink() was originally in POSIX.1a, which was withdrawn after

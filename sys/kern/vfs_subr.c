@@ -117,6 +117,9 @@ SYSCTL_INT(_vfs, OID_AUTO, reassignbufsortbad, CTLFLAG_RW,
 static int reassignbufmethod = 1;
 SYSCTL_INT(_vfs, OID_AUTO, reassignbufmethod, CTLFLAG_RW,
 		&reassignbufmethod, 0, "");
+static int check_buf_overlap = 2;	/* invasive check */
+SYSCTL_INT(_vfs, OID_AUTO, check_buf_overlap, CTLFLAG_RW,
+		&check_buf_overlap, 0, "");
 
 int	nfs_mount_type = -1;
 static struct lwkt_token spechash_token;
@@ -824,7 +827,7 @@ vfsync_bp(struct buf *bp, void *data)
  * MPSAFE
  */
 int
-bgetvp(struct vnode *vp, struct buf *bp)
+bgetvp(struct vnode *vp, struct buf *bp, int testsize)
 {
 	KASSERT(bp->b_vp == NULL, ("bgetvp: not free"));
 	KKASSERT((bp->b_flags & (B_HASHED|B_DELWRI|B_VNCLEAN|B_VNDIRTY)) == 0);
@@ -836,6 +839,40 @@ bgetvp(struct vnode *vp, struct buf *bp)
 	if (buf_rb_hash_RB_INSERT(&vp->v_rbhash_tree, bp)) {
 		lwkt_reltoken(&vp->v_token);
 		return (EEXIST);
+	}
+
+	/*
+	 * Diagnostics (mainly for HAMMER debugging).  Check for
+	 * overlapping buffers.
+	 */
+	if (check_buf_overlap) {
+		struct buf *bx;
+		bx = buf_rb_hash_RB_PREV(bp);
+		if (bx) {
+			if (bx->b_loffset + bx->b_bufsize > bp->b_loffset) {
+				kprintf("bgetvp: overlapl %016jx/%d %016jx "
+					"bx %p bp %p\n",
+					(intmax_t)bx->b_loffset,
+					bx->b_bufsize,
+					(intmax_t)bp->b_loffset,
+					bx, bp);
+				if (check_buf_overlap > 1)
+					panic("bgetvp - overlapping buffer");
+			}
+		}
+		bx = buf_rb_hash_RB_NEXT(bp);
+		if (bx) {
+			if (bp->b_loffset + testsize > bx->b_loffset) {
+				kprintf("bgetvp: overlapr %016jx/%d %016jx "
+					"bp %p bx %p\n",
+					(intmax_t)bp->b_loffset,
+					testsize,
+					(intmax_t)bx->b_loffset,
+					bp, bx);
+				if (check_buf_overlap > 1)
+					panic("bgetvp - overlapping buffer");
+			}
+		}
 	}
 	bp->b_vp = vp;
 	bp->b_flags |= B_HASHED;
@@ -1169,7 +1206,7 @@ vclean_vxlocked(struct vnode *vp, int flags)
 	 * Done with purge, notify sleepers of the grim news.
 	 */
 	vp->v_ops = &dead_vnode_vops_p;
-	vn_pollgone(vp);
+	vn_gone(vp);
 	vp->v_tag = VT_NON;
 
 	/*
@@ -2115,81 +2152,13 @@ vfs_msync_scan2(struct mount *mp, struct vnode *vp, void *data)
 }
 
 /*
- * Record a process's interest in events which might happen to
- * a vnode.  Because poll uses the historic select-style interface
- * internally, this routine serves as both the ``check for any
- * pending events'' and the ``record my interest in future events''
- * functions.  (These are done together, while the lock is held,
- * to avoid race conditions.)
- */
-int
-vn_pollrecord(struct vnode *vp, int events)
-{
-	KKASSERT(curthread->td_proc != NULL);
-
-	lwkt_gettoken(&vp->v_token);
-	if (vp->v_pollinfo.vpi_revents & events) {
-		/*
-		 * This leaves events we are not interested
-		 * in available for the other process which
-		 * which presumably had requested them
-		 * (otherwise they would never have been
-		 * recorded).
-		 */
-		events &= vp->v_pollinfo.vpi_revents;
-		vp->v_pollinfo.vpi_revents &= ~events;
-
-		lwkt_reltoken(&vp->v_token);
-		return events;
-	}
-	vp->v_pollinfo.vpi_events |= events;
-	selrecord(curthread, &vp->v_pollinfo.vpi_selinfo);
-	lwkt_reltoken(&vp->v_token);
-	return 0;
-}
-
-/*
- * Note the occurrence of an event.  If the VN_POLLEVENT macro is used,
- * it is possible for us to miss an event due to race conditions, but
- * that condition is expected to be rare, so for the moment it is the
- * preferred interface.
+ * Wake up anyone interested in vp because it is being revoked.
  */
 void
-vn_pollevent(struct vnode *vp, int events)
+vn_gone(struct vnode *vp)
 {
 	lwkt_gettoken(&vp->v_token);
-	if (vp->v_pollinfo.vpi_events & events) {
-		/*
-		 * We clear vpi_events so that we don't
-		 * call selwakeup() twice if two events are
-		 * posted before the polling process(es) is
-		 * awakened.  This also ensures that we take at
-		 * most one selwakeup() if the polling process
-		 * is no longer interested.  However, it does
-		 * mean that only one event can be noticed at
-		 * a time.  (Perhaps we should only clear those
-		 * event bits which we note?) XXX
-		 */
-		vp->v_pollinfo.vpi_events = 0;	/* &= ~events ??? */
-		vp->v_pollinfo.vpi_revents |= events;
-		selwakeup(&vp->v_pollinfo.vpi_selinfo);
-	}
-	lwkt_reltoken(&vp->v_token);
-}
-
-/*
- * Wake up anyone polling on vp because it is being revoked.
- * This depends on dead_poll() returning POLLHUP for correct
- * behavior.
- */
-void
-vn_pollgone(struct vnode *vp)
-{
-	lwkt_gettoken(&vp->v_token);
-	if (vp->v_pollinfo.vpi_events) {
-		vp->v_pollinfo.vpi_events = 0;
-		selwakeup(&vp->v_pollinfo.vpi_selinfo);
-	}
+	KNOTE(&vp->v_pollinfo.vpi_kqinfo.ki_note, NOTE_REVOKE);
 	lwkt_reltoken(&vp->v_token);
 }
 

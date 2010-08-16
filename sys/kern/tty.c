@@ -86,7 +86,6 @@
 #include <sys/fcntl.h>
 #include <sys/conf.h>
 #include <sys/dkstat.h>
-#include <sys/poll.h>
 #include <sys/kernel.h>
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
@@ -211,7 +210,7 @@ uint64_t tk_rawcc;
 /*
  * list of struct tty where pstat(8) can pick it up with sysctl
  */
-static SLIST_HEAD(, tty) tty_list;
+static TAILQ_HEAD(, tty) tty_list = TAILQ_HEAD_INITIALIZER(tty_list);
 
 /*
  * Initial open of tty, or (re)entry to standard tty line discipline.
@@ -258,7 +257,7 @@ ttyclose(struct tty *tp)
 	tp->t_gen++;
 	tp->t_line = TTYDISC;
 	ttyclearsession(tp);
-	tp->t_state = 0;
+	tp->t_state &= TS_REGISTERED;	/* clear all bits except */
 	crit_exit();
 	return (0);
 }
@@ -1157,46 +1156,10 @@ ttioctl(struct tty *tp, u_long cmd, void *data, int flag)
 	return (0);
 }
 
-int
-ttypoll(struct dev_poll_args *ap)
-{
-	cdev_t dev = ap->a_head.a_dev;
-	int events = ap->a_events;
-	int revents = 0;
-	struct tty *tp;
-
-	tp = dev->si_tty;
-	/* XXX used to return ENXIO, but that means true! */
-	if (tp == NULL) {
-		ap->a_events = (events & (POLLIN | POLLOUT | POLLRDNORM |
-				POLLWRNORM)) | POLLHUP;
-		return(0);
-	}
-
-	crit_enter();
-	if (events & (POLLIN | POLLRDNORM)) {
-		if (ttnread(tp) > 0 || ISSET(tp->t_state, TS_ZOMBIE))
-			revents |= events & (POLLIN | POLLRDNORM);
-		else
-			selrecord(curthread, &tp->t_rsel);
-	}
-	if (events & (POLLOUT | POLLWRNORM)) {
-		if ((tp->t_outq.c_cc <= tp->t_olowat &&
-		     ISSET(tp->t_state, TS_CONNECTED))
-		    || ISSET(tp->t_state, TS_ZOMBIE))
-			revents |= events & (POLLOUT | POLLWRNORM);
-		else
-			selrecord(curthread, &tp->t_wsel);
-	}
-	crit_exit();
-	ap->a_events = revents;
-	return (0);
-}
-
 static struct filterops ttyread_filtops =
-	{ 1, NULL, filt_ttyrdetach, filt_ttyread };
+	{ FILTEROP_ISFD, NULL, filt_ttyrdetach, filt_ttyread };
 static struct filterops ttywrite_filtops =
-	{ 1, NULL, filt_ttywdetach, filt_ttywrite };
+	{ FILTEROP_ISFD, NULL, filt_ttywdetach, filt_ttywrite };
 
 int
 ttykqfilter(struct dev_kqfilter_args *ap)
@@ -1209,23 +1172,20 @@ ttykqfilter(struct dev_kqfilter_args *ap)
 	ap->a_result = 0;
 	switch (kn->kn_filter) {
 	case EVFILT_READ:
-		klist = &tp->t_rsel.si_note;
+		klist = &tp->t_rkq.ki_note;
 		kn->kn_fop = &ttyread_filtops;
 		break;
 	case EVFILT_WRITE:
-		klist = &tp->t_wsel.si_note;
+		klist = &tp->t_wkq.ki_note;
 		kn->kn_fop = &ttywrite_filtops;
 		break;
 	default:
-		ap->a_result = 1;
+		ap->a_result = EOPNOTSUPP;
 		return (0);
 	}
 
 	kn->kn_hook = (caddr_t)dev;
-
-	crit_enter();
-	SLIST_INSERT_HEAD(klist, kn, kn_selnext);
-	crit_exit();
+	knote_insert(klist, kn);
 
 	return (0);
 }
@@ -1235,9 +1195,7 @@ filt_ttyrdetach(struct knote *kn)
 {
 	struct tty *tp = ((cdev_t)kn->kn_hook)->si_tty;
 
-	crit_enter();
-	SLIST_REMOVE(&tp->t_rsel.si_note, kn, knote, kn_selnext);
-	crit_exit();
+	knote_remove(&tp->t_rkq.ki_note, kn);
 }
 
 static int
@@ -1258,9 +1216,7 @@ filt_ttywdetach(struct knote *kn)
 {
 	struct tty *tp = ((cdev_t)kn->kn_hook)->si_tty;
 
-	crit_enter();
-	SLIST_REMOVE(&tp->t_wsel.si_note, kn, knote, kn_selnext);
-	crit_exit();
+	knote_remove(&tp->t_wkq.ki_note, kn);
 }
 
 static int
@@ -2252,12 +2208,10 @@ void
 ttwakeup(struct tty *tp)
 {
 
-	if (tp->t_rsel.si_pid != 0)
-		selwakeup(&tp->t_rsel);
 	if (ISSET(tp->t_state, TS_ASYNC) && tp->t_sigio != NULL)
 		pgsigio(tp->t_sigio, SIGIO, (tp->t_session != NULL));
 	wakeup(TSA_HUP_OR_INPUT(tp));
-	KNOTE(&tp->t_rsel.si_note, 0);
+	KNOTE(&tp->t_rkq.ki_note, 0);
 }
 
 /*
@@ -2267,8 +2221,6 @@ void
 ttwwakeup(struct tty *tp)
 {
 
-	if (tp->t_wsel.si_pid != 0 && tp->t_outq.c_cc <= tp->t_olowat)
-		selwakeup(&tp->t_wsel);
 	if (ISSET(tp->t_state, TS_ASYNC) && tp->t_sigio != NULL)
 		pgsigio(tp->t_sigio, SIGIO, (tp->t_session != NULL));
 	if (ISSET(tp->t_state, TS_BUSY | TS_SO_OCOMPLETE) ==
@@ -2281,7 +2233,7 @@ ttwwakeup(struct tty *tp)
 		CLR(tp->t_state, TS_SO_OLOWAT);
 		wakeup(TSA_OLOWAT(tp));
 	}
-	KNOTE(&tp->t_wsel.si_note, 0);
+	KNOTE(&tp->t_wkq.ki_note, 0);
 }
 
 /*
@@ -2624,42 +2576,49 @@ ttymalloc(struct tty *tp)
         return (tp);
 }
 
-#if 0
-/*
- * Free a tty struct.  Clists in the struct should have been freed by
- * ttyclose().
- *
- * XXX not yet usable: since we support a half-closed state and do not
- * ref count the tty reference from the session, it is possible for a 
- * session to hold a ref on the tty.  See TTY_DO_FULL_CLOSE.
- */
 void
-ttyfree(struct tty *tp)
+ttyunregister(struct tty *tp)
 {
-        kfree(tp, M_TTYS);
+	KKASSERT(ISSET(tp->t_state, TS_REGISTERED));
+	CLR(tp->t_state, TS_REGISTERED);
+	TAILQ_REMOVE(&tty_list, tp, t_list);
 }
-#endif /* 0 */
 
 void
 ttyregister(struct tty *tp)
 {
-	SLIST_INSERT_HEAD(&tty_list, tp, t_list);
+	KKASSERT(!ISSET(tp->t_state, TS_REGISTERED));
+	SET(tp->t_state, TS_REGISTERED);
+	TAILQ_INSERT_HEAD(&tty_list, tp, t_list);
 }
 
 static int
 sysctl_kern_ttys(SYSCTL_HANDLER_ARGS)
 {
 	int error;
-	struct tty *tp, t;
-	SLIST_FOREACH(tp, &tty_list, t_list) {
+	struct tty *tp;
+	struct tty t;
+	struct tty marker;
+
+	bzero(&marker, sizeof(marker));
+	marker.t_state = TS_MARKER;
+	error = 0;
+
+	TAILQ_INSERT_HEAD(&tty_list, &marker, t_list);
+	while ((tp = TAILQ_NEXT(&marker, t_list)) != NULL) {
+		TAILQ_REMOVE(&tty_list, &marker, t_list);
+		TAILQ_INSERT_AFTER(&tty_list, tp, &marker, t_list);
+		if (tp->t_state & TS_MARKER)
+			continue;
 		t = *tp;
 		if (t.t_dev)
 			t.t_dev = (cdev_t)(uintptr_t)dev2udev(t.t_dev);
 		error = SYSCTL_OUT(req, (caddr_t)&t, sizeof(t));
 		if (error)
-			return (error);
+			break;
 	}
-	return (0);
+	TAILQ_REMOVE(&tty_list, &marker, t_list);
+	return (error);
 }
 
 SYSCTL_PROC(_kern, OID_AUTO, ttys, CTLTYPE_OPAQUE|CTLFLAG_RD,

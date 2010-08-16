@@ -66,6 +66,17 @@ struct uprof {			/* profile arguments */
 	u_long	pr_ticks;	/* temp storage for ticks until AST */
 };
 
+#if defined(_KERNEL) || defined(_KERNEL_STRUCTURES)
+
+/*
+ * For krateprintf()
+ */
+struct krate {
+	int freq;
+	int ticks;
+	int count;
+};
+
 /*
  * Kernel shareable process resource limits.  Because this structure
  * is moderately large but changes infrequently, it is normally
@@ -100,8 +111,11 @@ struct uidinfo {
 	uid_t	ui_uid;			/* uid */
 	int	ui_ref;			/* reference count */
 	int	ui_posixlocks;		/* number of POSIX locks */
+	int	ui_openfiles;		/* number of open files */
 	struct varsymset ui_varsymset;	/* variant symlinks */
 };
+
+#endif
 
 #ifdef _KERNEL
 
