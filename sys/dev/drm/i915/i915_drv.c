@@ -697,6 +697,7 @@ i915_attach(device_t kdev)
 
 	int retcode = drm_attach(kdev, pciidlist);
 
+#if 0
 	/* add bit-banging i915_iic */
 	dev->iic = device_add_child(kdev, "i915_iic", -1);
 
@@ -712,6 +713,7 @@ i915_attach(device_t kdev)
 		device_printf(dev, "could not attach i915_iic\n");
 		goto theend;
 	}
+#endif
 
 theend:
 	return retcode;
