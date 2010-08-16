@@ -688,13 +688,33 @@ static int
 i915_attach(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
+	int error;
 
 	dev->driver = malloc(sizeof(struct drm_driver), DRM_MEM_DRIVER,
 	    M_WAITOK | M_ZERO);
 
 	i915_configure(dev);
 
-	return drm_attach(kdev, pciidlist);
+	int retcode = drm_attach(kdev, pciidlist);
+
+	/* add bit-banging i915_iic */
+	dev->iic = device_add_child(kdev, "i915_iic", -1);
+
+	if (!dev->iic) {
+		device_printf(dev, "could not add i915_iic\n");
+		goto theend;
+	}
+
+	/* probed and attached the bit-banging code */
+	error = device_probe_and_attach(dev->iic);
+
+	if (error) {
+		device_printf(dev, "could not attach i915_iic\n");
+		goto theend;
+	}
+
+theend:
+	return retcode;
 }
 
 static int

@@ -3214,6 +3214,8 @@ struct i2c_adapter {
 	int class;
 /* file intel_dp.c, function intel_dp_i2c_init() */
 	struct device dev;
+/* legacy for use in drm_i2c_transfer */
+	device_t iicbb;
 };
 
 /* file radeon_i2c.c, function pre_xfer() */

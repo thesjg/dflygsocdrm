@@ -40,7 +40,7 @@ SRCS    = \
 	drm_sysctl.c \
 	drm_vm.c
 
-SRCS   += device_if.h bus_if.h pci_if.h opt_drm.h
+SRCS   += device_if.h bus_if.h pci_if.h iicbb_if.h iicbus_if.h opt_drm.h
 CFLAGS += ${DEBUG_FLAGS} -I. -I.. -I/@dev/drm
 
 .if defined(DRM_DEBUG)

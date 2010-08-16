@@ -1266,6 +1266,9 @@ struct drm_device {
 	int unit; /* return value of device_get_unit() */
 	DRM_SPINTYPE static_lock;	/* substitutes for static locks */
 	DRM_SPINTYPE file_priv_lock;	/* file_priv process synch */
+	device_t iicbus; /* iicbus device */
+	device_t iicbb;  /* iicbb device */
+	device_t iic;    /* _iic device */
 };
 
 static inline int drm_dev_to_irq(struct drm_device *dev)
@@ -1669,6 +1672,8 @@ extern unsigned int drm_debug;
 extern struct class *drm_class;
 extern struct proc_dir_entry *drm_proc_root;
 extern struct dentry *drm_debugfs_root;
+
+extern int drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
 
 extern struct idr drm_minors_idr;
 

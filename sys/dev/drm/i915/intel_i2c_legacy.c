@@ -220,6 +220,8 @@ i915_iic_attach(device_t dev)
 		goto fail;
 	}
 
+	sc->drm_dev->iicbus = iicbus;
+
 #if 0
 	if (BUS_WRITE_IVAR(device_get_parent(dev), dev,
 			   CXM_IVAR_IICBUS, (uintptr_t)&iicbus)) {
@@ -315,8 +317,8 @@ i915_iic_reset(device_t dev, u_char speed, u_char addr, u_char * oldaddr)
 
 	/* JJJ:  raise SCL and SDA? */
 	intel_i2c_quirk_set(sc->drm_dev, true);
-	i915_set_data(sc->drm_dev, 1);
-	i915_set_clock(sc->drm_dev, 1);
+	i915_set_data(dev, 1);
+	i915_set_clock(dev, 1);
 	intel_i2c_quirk_set(sc->drm_dev, false);
 	udelay(20);
 
@@ -378,7 +380,7 @@ static void i915_set_data(device_t dev, int state_high)
 {
 	struct intel_i2c_chan *chan;
 	/* Get the device data */
-	chan = (struct intel_i2c_softc *)device_get_softc(dev);
+	chan = (struct intel_i2c_chan *)device_get_softc(dev);
 
 	struct drm_device *drm_dev = chan->drm_dev;
 	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;

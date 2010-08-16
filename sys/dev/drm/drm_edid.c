@@ -36,6 +36,14 @@
 #include "drmP.h"
 #include "drm_edid.h"
 
+#include "iicbb_if.h"
+#include "iicbus_if.h"
+
+int
+drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
+	return 0;
+}
+
 #define EDID_EST_TIMINGS 16
 #define EDID_STD_TIMINGS 8
 #define EDID_DETAILED_TIMINGS 4
