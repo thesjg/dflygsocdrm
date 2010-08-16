@@ -189,7 +189,7 @@ i915_iic_attach(device_t dev)
 #endif
 
 	/* add bit-banging generic code onto i915_iic interface */
-	sc->iicbb = device_add_child(dev, "iicbb", -1);
+	sc->iicbb = device_add_child(dev, "iicbb", unit);
 
 	if (!sc->iicbb) {
 		device_printf(dev, "could not add iicbb\n");

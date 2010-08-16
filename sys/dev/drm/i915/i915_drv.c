@@ -688,6 +688,7 @@ static int
 i915_attach(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
+	int unit = device_get_unit(kdev);
 	int error;
 
 	dev->driver = malloc(sizeof(struct drm_driver), DRM_MEM_DRIVER,
@@ -697,12 +698,11 @@ i915_attach(device_t kdev)
 
 	int retcode = drm_attach(kdev, pciidlist);
 
-#if 0
 	/* add bit-banging i915_iic */
-	dev->iic = device_add_child(kdev, "i915_iic", -1);
+	dev->iic = device_add_child(kdev, "i915_iic", unit);
 
 	if (!dev->iic) {
-		device_printf(dev, "could not add i915_iic\n");
+		device_printf(kdev, "could not add i915_iic\n");
 		goto theend;
 	}
 
@@ -710,10 +710,9 @@ i915_attach(device_t kdev)
 	error = device_probe_and_attach(dev->iic);
 
 	if (error) {
-		device_printf(dev, "could not attach i915_iic\n");
+		device_printf(kdev, "could not attach i915_iic\n");
 		goto theend;
 	}
-#endif
 
 theend:
 	return retcode;
