@@ -81,6 +81,7 @@
 #include <bus/iicbus/iiconf.h>
 
 #include "iicbb_if.h"
+#include "iicbus_if.h"
 
 /*
  * Intel GPIO access functions
@@ -130,8 +131,8 @@ static driver_t i915_iic_driver = {
 
 static devclass_t i915_iic_devclass;
 
-DRIVER_MODULE(i915_iic, i915, i915_iic_driver, i915_iic_devclass, 0, 0);
 MODULE_VERSION(i915_iic, 1);
+DRIVER_MODULE(i915_iic, i915, i915_iic_driver, i915_iic_devclass, 0, 0);
 MODULE_DEPEND(i915_iic, iicbb, IICBB_MINVER, IICBB_PREFVER, IICBB_MAXVER);
 
 /*
@@ -189,7 +190,7 @@ i915_iic_attach(device_t dev)
 #endif
 
 	/* add bit-banging generic code onto i915_iic interface */
-	sc->iicbb = device_add_child(dev, "iicbb", unit);
+	sc->iicbb = device_add_child(dev, "iicbb", -1);
 
 	if (!sc->iicbb) {
 		device_printf(dev, "could not add iicbb\n");
