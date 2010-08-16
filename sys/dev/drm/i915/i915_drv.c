@@ -705,7 +705,7 @@ i915_attach(device_t kdev)
 
 	/* add bit-banging i915_iic */
 	dev->iic = device_add_child(kdev, "i915_iic", unit);
-
+	printk("i915_attach after device_add_child\n");
 	if (!dev->iic) {
 		device_printf(kdev, "could not add i915_iic\n");
 		goto theend;
