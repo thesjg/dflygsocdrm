@@ -145,6 +145,7 @@ MODULE_DEPEND(i915_iic, iicbb, IICBB_MINVER, IICBB_PREFVER, IICBB_MAXVER);
 static int
 i915_iic_probe(device_t dev)
 {
+	printk("i915_iic_probe called\n");
 	device_set_desc(dev, "i915 I2C controller");
 
 	return 0;
@@ -156,6 +157,7 @@ i915_iic_probe(device_t dev)
 static int
 i915_iic_attach(device_t dev)
 {
+	printk("i915_iic_attach called\n");
 	device_t *kids;
 	device_t iicbus;
 	int error;
