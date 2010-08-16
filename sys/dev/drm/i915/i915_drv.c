@@ -710,7 +710,7 @@ i915_attach(device_t kdev)
 		device_printf(kdev, "could not add i915_iic\n");
 		goto theend;
 	}
-
+	printk("after the check for non-null dev->iic must not be null\n");
 	/* probed and attached the bit-banging code */
 	error = device_probe_and_attach(dev->iic);
 
