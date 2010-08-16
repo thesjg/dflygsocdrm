@@ -56,6 +56,7 @@
 #include <vm/vm_object.h>
 #include <vm/vm_page.h>
 #include <vm/vm_pager.h>
+#include <vm/vm_pageout.h>
 #include <vm/vm_zone.h>
 
 static void dev_pager_dealloc (vm_object_t);
@@ -63,15 +64,6 @@ static int dev_pager_getpage (vm_object_t, vm_page_t *, int);
 static void dev_pager_putpages (vm_object_t, vm_page_t *, int,
 		boolean_t, int *);
 static boolean_t dev_pager_haspage (vm_object_t, vm_pindex_t);
-
-/* list of device pager objects */
-static TAILQ_HEAD(, vm_page) dev_freepages_list =
-		TAILQ_HEAD_INITIALIZER(dev_freepages_list);
-static MALLOC_DEFINE(M_DRMFICTITIOUS_PAGES, "drm-mapped pages",
-		"DRM mapped pages");
-
-static vm_page_t dev_pager_getfake (vm_paddr_t);
-static void dev_pager_putfake (vm_page_t);
 
 struct pagerops drmpagerops = {
 	dev_pager_dealloc,
@@ -89,6 +81,8 @@ vm_object_t
 drm_pager_alloc(void *handle, off_t size, vm_prot_t prot, off_t foff)
 {
 	vm_object_t object;
+	vm_offset_t i;
+	vm_page_t m;
 
 	/*
 	 * Offset should be page aligned.
@@ -98,17 +92,32 @@ drm_pager_alloc(void *handle, off_t size, vm_prot_t prot, off_t foff)
 
 	size = round_page64(size);
 
-	/*
-	 * Look up pager, creating as necessary.
-	 */
 	mtx_lock(&dev_pager_mtx);
-		/*
-		 * Allocate object and associate it with the pager.
-		 */
-		object = vm_object_allocate(OBJT_DRM,
-					    OFF_TO_IDX(foff + size));
-		object->handle = handle;
-		TAILQ_INIT(&object->un_pager.devp.devp_pglist);
+
+	/*
+	 * Allocate object and associate it with the pager.
+	 */
+	object = vm_object_allocate(OBJT_DRM,
+				    OFF_TO_IDX(foff + size));
+	object->handle = handle;
+
+	/* Allocate fictitious pages for the full size GEM object */
+	for (i = 0; i < size; i += PAGE_SIZE) {
+		m = vm_page_alloc(object, i >> PAGE_SHIFT, VM_ALLOC_NORMAL | VM_ALLOC_ZERO);
+		if (m == NULL) {
+			mtx_unlock(&dev_pager_mtx);
+			vm_wait(0);
+			mtx_lock(&dev_pager_mtx);
+			i -= PAGE_SIZE;
+			continue;
+		}
+		lwkt_gettoken(&vm_token);
+		crit_enter();
+		vm_page_insert(m, object, i >> PAGE_SHIFT);
+		crit_exit();
+		lwkt_reltoken(&vm_token);
+	}
+
 	mtx_unlock(&dev_pager_mtx);
 
 	return (object);
@@ -120,24 +129,8 @@ drm_pager_alloc(void *handle, off_t size, vm_prot_t prot, off_t foff)
 static void
 dev_pager_dealloc(vm_object_t object)
 {
-	vm_page_t m;
-	cdev_t dev;
-
 	mtx_lock(&dev_pager_mtx);
-
-	if ((dev = object->handle) != NULL) {
-		KKASSERT(dev->si_object);
-		dev->si_object = NULL;
-	}
-	KKASSERT(object->swblock_count == 0);
-
-	/*
-	 * Free up our fake pages.
-	 */
-	while ((m = TAILQ_FIRST(&object->un_pager.devp.devp_pglist)) != 0) {
-		TAILQ_REMOVE(&object->un_pager.devp.devp_pglist, m, pageq);
-		dev_pager_putfake(m);
-	}
+	vm_object_page_remove(object, 0, object->size, FALSE);
 	mtx_unlock(&dev_pager_mtx);
 }
 
@@ -147,45 +140,16 @@ dev_pager_dealloc(vm_object_t object)
 static int
 dev_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
 {
-	vm_offset_t offset;
-	vm_paddr_t paddr;
-	vm_page_t page;
-	cdev_t dev;
-	int prot;
+	vm_page_t page = *mpp;
 
 	mtx_lock(&dev_pager_mtx);
 
-	page = *mpp;
-	dev = object->handle;
-	offset = page->pindex;
-	prot = PROT_READ;	/* XXX should pass in? */
-
-	paddr = pmap_phys_address(
-		    dev_dmmap(dev, (vm_offset_t)offset << PAGE_SHIFT, prot));
-	KASSERT(paddr != -1,("dev_pager_getpage: map function returns error"));
-
-	if (page->flags & PG_FICTITIOUS) {
-		/*
-		 * If the passed in reqpage page is a fake page, update it
-		 * with the new physical address.
-		 */
-		page->phys_addr = paddr;
-		page->valid = VM_PAGE_BITS_ALL;
-	} else {
-		/*
-		 * Replace the passed in reqpage page with our own fake page
-		 * and free up all the original pages.
-		 */
-		page = dev_pager_getfake(paddr);
-		TAILQ_INSERT_TAIL(&object->un_pager.devp.devp_pglist,
-				  page, pageq);
-		lwkt_gettoken(&vm_token);
-		crit_enter();
-		vm_page_free(*mpp);
-		vm_page_insert(page, object, offset);
-		crit_exit();
-		lwkt_reltoken(&vm_token);
+	*mpp = vm_page_lookup(object, page->pindex);
+	if (*mpp == NULL) {
+		mtx_unlock(&dev_pager_mtx);
+		return VM_PAGER_BAD;
 	}
+
 	mtx_unlock(&dev_pager_mtx);
 	return (VM_PAGER_OK);
 }
@@ -206,49 +170,5 @@ dev_pager_putpages(vm_object_t object, vm_page_t *m,
 static boolean_t
 dev_pager_haspage(vm_object_t object, vm_pindex_t pindex)
 {
-	return (TRUE);
-}
-
-/*
- * The caller must hold dev_pager_mtx
- */
-static vm_page_t
-dev_pager_getfake(vm_paddr_t paddr)
-{
-	vm_page_t m;
-
-	if ((m = TAILQ_FIRST(&dev_freepages_list)) != NULL) {
-		TAILQ_REMOVE(&dev_freepages_list, m, pageq);
-	} else {
-		m = kmalloc(sizeof(*m), M_DRMFICTITIOUS_PAGES, M_WAITOK);
-	}
-	bzero(m, sizeof(*m));
-
-	m->flags = PG_BUSY | PG_FICTITIOUS;
-	m->valid = VM_PAGE_BITS_ALL;
-	m->dirty = 0;
-	m->busy = 0;
-	m->queue = PQ_NONE;
-	m->object = NULL;
-
-	m->wire_count = 1;
-	m->hold_count = 0;
-	m->phys_addr = paddr;
-
-	return (m);
-}
-
-/*
- * Synthesized VM pages must be structurally stable for lockless lookups to
- * work properly.
- *
- * The caller must hold dev_pager_mtx
- */
-static void
-dev_pager_putfake(vm_page_t m)
-{
-	if (!(m->flags & PG_FICTITIOUS))
-		panic("dev_pager_putfake: bad page");
-	KKASSERT(m->object == NULL);
-	TAILQ_INSERT_HEAD(&dev_freepages_list, m, pageq);
+	return (pindex < object->size);
 }

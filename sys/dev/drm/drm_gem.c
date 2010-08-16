@@ -141,10 +141,9 @@ int drm_gem_object_init(struct drm_device *dev,
 #else
 	drm_vm_mmap_alloc(size, &object);
 #endif
-	vm_object_reference(object);
+/* should a reference be taken? */
 	obj->object = object;
-	if (IS_ERR(obj->filp))
-		return -ENOMEM;
+	obj->object->handle = obj;
 
 	kref_init(&obj->refcount);
 	kref_init(&obj->handlecount);
