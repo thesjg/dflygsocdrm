@@ -81,7 +81,6 @@
 #include <bus/iicbus/iiconf.h>
 
 #include "iicbb_if.h"
-#include "iicbus_if.h"
 
 /*
  * Intel GPIO access functions
