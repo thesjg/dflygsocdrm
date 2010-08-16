@@ -826,14 +826,14 @@ static int i915_getparam(struct drm_device *dev, void *data,
 		value = dev->pci_device;
 		break;
 	case I915_PARAM_HAS_GEM:
-#ifdef __linux__
+#ifdef DRM_NEWER_IGEM
 		value = dev_priv->has_gem;
 #else
 		/* We need to reset this to 1 once we have GEM */
 		value = 0;
 #endif
 		break;
-#ifdef __linux__
+#ifdef DRM_NEWER_IGEM
 	case I915_PARAM_NUM_FENCES_AVAIL:
 		value = dev_priv->num_fence_regs - dev_priv->fence_reg_start;
 		break;
@@ -847,7 +847,7 @@ static int i915_getparam(struct drm_device *dev, void *data,
 		/* depends on GEM */
 		value = dev_priv->has_gem;
 		break;
-#endif /* __linux__ */
+#endif
 	default:
 		DRM_DEBUG("Unknown parameter %d\n", param->param);
 		return -EINVAL;
@@ -881,7 +881,7 @@ static int i915_setparam(struct drm_device *dev, void *data,
 	case I915_SETPARAM_ALLOW_BATCHBUFFER:
 		dev_priv->allow_batchbuffer = param->value;
 		break;
-#ifdef __linux__
+#ifdef DRM_NEWER_IGEM
 	case I915_SETPARAM_NUM_USED_FENCES:
 		if (param->value > dev_priv->num_fence_regs ||
 		    param->value < 0)
@@ -889,7 +889,7 @@ static int i915_setparam(struct drm_device *dev, void *data,
 		/* Userspace can use first N regs */
 		dev_priv->fence_reg_start = param->value;
 		break;
-#endif /* __linux__ */
+#endif
 	default:
 		DRM_DEBUG("unknown parameter %d\n", param->param);
 		return -EINVAL;
@@ -1026,7 +1026,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		dev->max_vblank_count = 0x00ffffff; /* 24 bits of frame count */
 	}
 
-#ifdef I915_HAVE_GEM
+#ifdef DRM_NEWER_IGEM
 	i915_gem_load(dev);
 #endif
 	/* Init HWS */
@@ -1056,6 +1056,12 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	intel_opregion_init(dev);
 #endif
+
+#ifdef DRM_NEWER_IGEM
+	/* enable GEM by default */
+	dev_priv->has_gem = 1;
+#endif
+
 	DRM_SPININIT(&dev_priv->user_irq_lock, "userirq");
 	dev_priv->user_irq_refcount = 0;
 
@@ -1123,7 +1129,7 @@ void i915_driver_lastclose(struct drm_device * dev)
 
 	if (!dev_priv)
 		return;
-#ifdef I915_HAVE_GEM
+#ifdef DRM_NEWER_IGEM
 	i915_gem_lastclose(dev);
 #endif
 	if (dev_priv->agp_heap)
@@ -1135,7 +1141,7 @@ void i915_driver_lastclose(struct drm_device * dev)
 void i915_driver_preclose(struct drm_device * dev, struct drm_file *file_priv)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
-#ifdef I915_HAVE_GEM
+#ifdef DRM_NEWER_IGEM
 	i915_gem_release(dev, file_priv);
 #endif
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
