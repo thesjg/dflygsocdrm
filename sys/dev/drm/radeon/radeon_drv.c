@@ -428,7 +428,7 @@ static device_method_t radeon_methods[] = {
 };
 
 static driver_t radeon_driver = {
-	"drm",
+	"radeon",
 	radeon_methods,
 	sizeof(struct drm_device)
 };
