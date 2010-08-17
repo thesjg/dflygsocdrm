@@ -2885,7 +2885,8 @@ typedef struct DRM_AGP_MEM {
 	struct page **pages;
 	int key;
 	uint32_t physical;
-	device_t agdev;
+	device_t bridge;
+	vm_object_t object;
 } DRM_AGP_MEM;
 
 /* file drm_agpsupport.c, function drm_agp_alloc() */

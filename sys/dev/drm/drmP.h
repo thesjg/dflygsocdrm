@@ -1656,13 +1656,14 @@ extern int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
 extern int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request);
 extern int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
-extern DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data *bridge, size_t pages, u32 type);
+extern DRM_AGP_MEM *drm_agp_allocate_memory(DRM_AGP_BRIDGE_DATA_T bridge, size_t pages, u32 type);
 extern int drm_agp_free_memory(DRM_AGP_MEM * handle);
 extern int drm_agp_bind_memory(DRM_AGP_MEM * handle, off_t start);
 extern int drm_agp_unbind_memory(DRM_AGP_MEM * handle);
 extern void drm_agp_chipset_flush(struct drm_device *dev);
 
 /* legacy */
+DRM_DEVICE_T drm_agp_find_bridge(void *data);
 int	drm_device_is_agp(struct drm_device *dev);
 int	drm_device_is_pcie(struct drm_device *dev);
 

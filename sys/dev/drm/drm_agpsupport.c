@@ -38,6 +38,10 @@
 #include <bus/pci/pcireg.h>
 MALLOC_DECLARE(M_AGP);
 
+DRM_DEVICE_T drm_agp_find_bridge(void *data) {
+	return agp_find_device();
+}
+
 /* Returns 1 if AGP or 0 if not. */
 static int
 drm_device_find_capability(struct drm_device *dev, int cap)
@@ -241,15 +245,12 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 
 	pages = (request->size + PAGE_SIZE - 1) / PAGE_SIZE;
 	type = (u32) request->type;
-
-	memory = drm_agp_allocate_memory((struct agp_bridge_data*)NULL, pages,
-		type);
-	if (memory == NULL) {
+	if (!(memory = drm_alloc_agp(dev, pages, type))) {
 		free(entry, DRM_MEM_AGPLISTS);
 		return ENOMEM;
 	}
 
-/* Have not implemented using the key yet to add to handle */
+/* Have not implemented in legacy using the key yet to add to handle */
 	entry->handle = (unsigned long)memory;
 	entry->memory = memory;
 	entry->bound = 0;
@@ -451,7 +452,7 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 	struct drm_agp_head *head   = NULL;
 	int      agp_available = 1;
    
-	agpdev = DRM_AGP_FIND_DEVICE();
+	agpdev = drm_agp_find_bridge(NULL);
 	if (!agpdev)
 		agp_available = 0;
 
@@ -478,7 +479,7 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 }
 
 /** Calls agp_allocate_memory() */
-DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data * bridge,
+DRM_AGP_MEM *drm_agp_allocate_memory(DRM_AGP_BRIDGE_DATA_T bridge,
 				     size_t pages, u32 type)
 {
 	DRM_AGP_MEM *handle = malloc(sizeof(DRM_AGP_MEM),
@@ -489,8 +490,18 @@ DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data * bridge,
 	device_t agpdev;
 
 	agpdev = DRM_AGP_FIND_DEVICE();
-	if (!agpdev)
+	if (!agpdev) {
+		free(handle, DRM_MEM_AGPLISTS);
 		return NULL;
+	}
+
+	if (bridge == NULL) {
+		DRM_ERROR("bridge == null\n");
+	}
+	if (agpdev != bridge) {
+		DRM_ERROR("agpdev != bridge argument\n");
+	}
+	handle->bridge = agpdev;
 
 #ifdef __linux__
 	handle->pages = malloc(sizeof (struct page *) * pages,
@@ -566,7 +577,7 @@ drm_agp_bind_object(struct drm_device *dev,
 {
 	DRM_AGP_MEM *mem;
 	int ret;
-	device_t agpdev = DRM_AGP_FIND_DEVICE();
+	device_t agpdev = drm_agp_find_bridge(NULL);
 
 	struct agp_memory *memory = malloc(sizeof(struct agp_memory), M_AGP, M_WAITOK | M_ZERO);
 	if (!memory) {
@@ -582,7 +593,7 @@ drm_agp_bind_object(struct drm_device *dev,
 
 	DRM_DEBUG("\n");
 
-	mem = drm_agp_allocate_memory(dev->agp->bridge, num_pages,
+	mem = drm_agp_allocate_memory(dev->agp->agpdev, num_pages,
 				      type);
 	if (mem == NULL) {
 		DRM_ERROR("Failed to allocate memory for %ld pages\n",
@@ -628,7 +639,7 @@ drm_agp_bind_pages(struct drm_device *dev,
 
 	DRM_DEBUG("\n");
 
-	mem = drm_agp_allocate_memory(dev->agp->bridge, num_pages,
+	mem = drm_agp_allocate_memory(dev->agp->agpdev, num_pages,
 				      type);
 	if (mem == NULL) {
 		DRM_ERROR("Failed to allocate memory for %ld pages\n",

@@ -143,7 +143,7 @@ static void *agp_remap(unsigned long offset, unsigned long size,
 /** Wrapper around agp_allocate_memory() */
 DRM_AGP_MEM *drm_alloc_agp(struct drm_device * dev, int pages, u32 type)
 {
-	return drm_agp_allocate_memory(dev->agp->bridge, pages, type);
+	return drm_agp_allocate_memory(dev->agp->agpdev, pages, type);
 }
 
 /** Wrapper around agp_free_memory() */
