@@ -175,6 +175,8 @@ i915_iic_attach(device_t dev)
 	sc = device_get_softc(dev);
 	unit = device_get_unit(dev);
 
+	sc->drm_dev = (struct drm_device *)device_get_softc(device_get_parent(dev));
+
 #if 0
 	/* retrieve the cxm btag and bhandle */
 	if (BUS_READ_IVAR(device_get_parent(dev), dev,
@@ -315,6 +317,7 @@ i915_iic_reset(device_t dev, u_char speed, u_char addr, u_char * oldaddr)
 	/* Get the device data */
 	sc = device_get_softc(dev);
 
+#ifdef __linux__
 	intel_i2c_reset_gmbus(sc->drm_dev);
 
 	/* JJJ:  raise SCL and SDA? */
@@ -323,6 +326,7 @@ i915_iic_reset(device_t dev, u_char speed, u_char addr, u_char * oldaddr)
 	i915_set_clock(dev, 1);
 	intel_i2c_quirk_set(sc->drm_dev, false);
 	udelay(20);
+#endif
 
 	return IIC_ENOADDR;
 }

@@ -71,6 +71,10 @@ vga_pci_attach(device_t dev)
 
 	/* Always create a drm child for now to make it easier on drm. */
 	device_add_child(dev, "drm", -1);
+	/* Attach driver specific children for iic to attach to */
+	device_add_child(dev, "i915", -1);
+	device_add_child(dev, "radeon", -1);
+
 	bus_generic_attach(dev);
 	return (0);
 }

@@ -748,7 +748,7 @@ static device_method_t i915_methods[] = {
 };
 
 static driver_t i915_driver = {
-	"drm",
+	"i915",
 	i915_methods,
 	sizeof(struct drm_device)
 };
