@@ -1882,6 +1882,8 @@ struct io_mapping {
 };
 #endif
 
+struct io_mapping;
+
 /* file i915_dma.c, function i915_driver_load() */
 static __inline__ struct io_mapping *
 io_mapping_create_wc(unsigned long base, unsigned long offset) {
@@ -1893,7 +1895,7 @@ io_mapping_create_wc(unsigned long base, unsigned long offset) {
 
 /* file i915_dma.c, function i915_driver_unload() */
 static __inline__ void
-drm_io_mapping_free(unsigned long base, unsigned long size) {
+drm_io_mapping_free(struct io_mapping *mapping, unsigned long size) {
 #if 0 /* variant iomapped possibly only on __x86_64__ */
 	pmap_unmapdev((vm_offset_t)base, size);
 #endif

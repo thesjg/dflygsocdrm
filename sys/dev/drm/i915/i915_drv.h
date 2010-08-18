@@ -361,6 +361,7 @@ typedef struct drm_i915_private {
 	struct drm_i915_error_state *first_error;
 	struct work_struct error_work;
 	struct workqueue_struct *wq;
+	struct taskqueue *wq_legacy;
 
 	/* Display functions */
 	struct drm_i915_display_funcs display;

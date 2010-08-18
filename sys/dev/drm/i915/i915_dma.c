@@ -1413,6 +1413,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	unsigned long base, size;
 	int ret = 0, mmio_bar;
+	uint32_t agp_size, prealloc_size, prealloc_start;
 
 	/* i915 has 4 more counters */
 	dev->counters += 4;
@@ -1454,6 +1455,29 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 				     dev->agp->agp_info.aper_size * 1024*1024);
 	if (dev_priv->mm.gtt_mapping == NULL) {
 		DRM_ERROR("io_mapping_create_wc\n");
+	}
+
+	ret = i915_probe_agp(dev, &agp_size, &prealloc_size, &prealloc_start);
+	if (ret)
+#ifdef __linux__
+		goto out_iomapfree;
+#else
+		DRM_ERROR("i915_probe_agp failed\n");
+#endif
+
+	dev_priv->wq_legacy = taskqueue_create("i915", M_WAITOK,
+		taskqueue_thread_enqueue, &dev_priv->wq_legacy);
+
+	/* enable GEM by default */
+	dev_priv->has_gem = 0;
+
+	if (prealloc_size > agp_size * 3 / 4) {
+		DRM_ERROR("Detected broken video BIOS with %d/%dkB of video "
+			  "memory stolen.\n",
+			  prealloc_size / 1024, agp_size / 1024);
+		DRM_ERROR("Disabling GEM. (try reducing stolen memory or "
+			  "updating the BIOS to fix).\n");
+		dev_priv->has_gem = 0;
 	}
 
 	if (IS_G4X(dev)) {
@@ -1516,6 +1540,11 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 int i915_driver_unload(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
+
+	taskqueue_free(dev_priv->wq_legacy);
+
+	drm_io_mapping_free(dev_priv->mm.gtt_mapping,
+		dev->agp->agp_info.aper_size * 1024*1024);
 
 	i915_free_hws(dev);
 
