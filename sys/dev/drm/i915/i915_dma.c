@@ -950,6 +950,429 @@ static int i915_set_status_page(struct drm_device *dev, void *data,
 	return 0;
 }
 
+static int i915_get_bridge_dev(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+
+#ifdef __linux__
+	dev_priv->bridge_dev = pci_get_bus_and_slot(0, PCI_DEVFN(0,0));
+#else
+	dev_priv->bridge_dev = drm_agp_find_bridge(dev);
+#endif
+	if (!dev_priv->bridge_dev) {
+		DRM_ERROR("bridge device not found\n");
+		return -1;
+	}
+	return 0;
+}
+
+#define MCHBAR_I915 0x44
+#define MCHBAR_I965 0x48
+#define MCHBAR_SIZE (4*4096)
+
+#define DEVEN_REG 0x54
+#define   DEVEN_MCHBAR_EN (1 << 28)
+
+/* Allocate space for the MCH regs if needed, return nonzero on error */
+static int
+intel_alloc_mchbar_resource(struct drm_device *dev)
+{
+	drm_i915_private_t *dev_priv = dev->dev_private;
+	int reg = IS_I965G(dev) ? MCHBAR_I965 : MCHBAR_I915;
+	u32 temp_lo, temp_hi = 0;
+	u64 mchbar_addr;
+	int ret = 0;
+
+	if (IS_I965G(dev))
+		temp_hi = pci_read_config(dev_priv->bridge_dev, reg + 4, 4);
+	temp_lo = pci_read_config(dev_priv->bridge_dev, reg, 4);
+	mchbar_addr = ((u64)temp_hi << 32) | temp_lo;
+
+#ifdef __linux__
+	/* If ACPI doesn't have it, assume we need to allocate it ourselves */
+#ifdef CONFIG_PNP
+	if (mchbar_addr &&
+	    pnp_range_reserved(mchbar_addr, mchbar_addr + MCHBAR_SIZE)) {
+		ret = 0;
+		goto out;
+	}
+#endif
+
+	/* Get some space for it */
+	ret = pci_bus_alloc_resource(dev_priv->bridge_dev->bus, &dev_priv->mch_res,
+				     MCHBAR_SIZE, MCHBAR_SIZE,
+				     PCIBIOS_MIN_MEM,
+				     0,   pcibios_align_resource,
+				     dev_priv->bridge_dev);
+	if (ret) {
+		DRM_DEBUG_DRIVER("failed bus alloc: %d\n", ret);
+		dev_priv->mch_res.start = 0;
+		goto out;
+	}
+
+	if (IS_I965G(dev))
+		pci_write_config_dword(dev_priv->bridge_dev, reg + 4,
+				       upper_32_bits(dev_priv->mch_res.start));
+
+	pci_write_config_dword(dev_priv->bridge_dev, reg,
+			       lower_32_bits(dev_priv->mch_res.start));
+#else /* __linux__ */
+	if (mchbar_addr) { /* assume acpi is working */
+		DRM_INFO("registers returned MCHBAR address\n");
+		ret = 0;
+		goto out;
+	}
+#endif /* __linux__ */
+out:
+	return ret;
+}
+
+/* Setup MCHBAR if possible, return true if we should disable it again */
+static void
+intel_setup_mchbar(struct drm_device *dev)
+{
+	drm_i915_private_t *dev_priv = dev->dev_private;
+	int mchbar_reg = IS_I965G(dev) ? MCHBAR_I965 : MCHBAR_I915;
+	u32 temp;
+	bool enabled;
+
+	dev_priv->mchbar_need_disable = false;
+
+	if (IS_I915G(dev) || IS_I915GM(dev)) {
+		temp = pci_read_config(dev_priv->bridge_dev, DEVEN_REG, 4);
+		enabled = !!(temp & DEVEN_MCHBAR_EN);
+	} else {
+		temp = pci_read_config(dev_priv->bridge_dev, mchbar_reg, 4);
+		enabled = temp & 1;
+	}
+
+	/* If it's already enabled, don't have to do anything */
+	if (enabled) {
+		DRM_INFO("MCHBAR already enabled\n");
+		return;
+	}
+
+	if (intel_alloc_mchbar_resource(dev))
+		return;
+
+#ifdef __linux__
+	dev_priv->mchbar_need_disable = true;
+
+	/* Space is allocated or reserved, so enable it. */
+	if (IS_I915G(dev) || IS_I915GM(dev)) {
+		pci_write_config_dword(dev_priv->bridge_dev, DEVEN_REG,
+				       temp | DEVEN_MCHBAR_EN);
+	} else {
+		pci_read_config_dword(dev_priv->bridge_dev, mchbar_reg, &temp);
+		pci_write_config_dword(dev_priv->bridge_dev, mchbar_reg, temp | 1);
+	}
+#endif /* __linux__ */
+}
+
+static void
+intel_teardown_mchbar(struct drm_device *dev)
+{
+	drm_i915_private_t *dev_priv = dev->dev_private;
+	int mchbar_reg = IS_I965G(dev) ? MCHBAR_I965 : MCHBAR_I915;
+	u32 temp;
+
+	if (dev_priv->mchbar_need_disable) {
+		if (IS_I915G(dev) || IS_I915GM(dev)) {
+			temp = pci_read_config(dev_priv->bridge_dev, DEVEN_REG, 4);
+			temp &= ~DEVEN_MCHBAR_EN;
+			pci_write_config(dev_priv->bridge_dev, DEVEN_REG, temp, 4);
+		} else {
+			temp = pci_read_config(dev_priv->bridge_dev, mchbar_reg, 4);
+			temp &= ~1;
+			pci_write_config(dev_priv->bridge_dev, mchbar_reg, temp, 4);
+		}
+	}
+#ifdef __linux__
+	if (dev_priv->mch_res.start)
+		release_resource(&dev_priv->mch_res);
+#endif /* __linux__ */
+}
+
+/**
+ * i915_probe_agp - get AGP bootup configuration
+ * @pdev: PCI device
+ * @aperture_size: returns AGP aperture configured size
+ * @preallocated_size: returns size of BIOS preallocated AGP space
+ *
+ * Since Intel integrated graphics are UMA, the BIOS has to set aside
+ * some RAM for the framebuffer at early boot.  This code figures out
+ * how much was set aside so we can use it for our own purposes.
+ */
+static int i915_probe_agp(struct drm_device *dev, uint32_t *aperture_size,
+			  uint32_t *preallocated_size,
+			  uint32_t *start)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	u16 tmp = 0;
+	unsigned long overhead;
+	unsigned long stolen;
+
+	/* Get the fb aperture size and "stolen" memory amount. */
+	tmp = (u16)pci_read_config(dev_priv->bridge_dev, INTEL_GMCH_CTRL, 2);
+
+	*aperture_size = 1024 * 1024;
+	*preallocated_size = 1024 * 1024;
+
+	switch (dev->pci_device) {
+/* pci_ids from http://pciids.sourceforge.net */
+	case 0x3577 /* PCI_DEVICE_ID_INTEL_82830_CGC */:
+	case 0x2562 /* PCI_DEVICE_ID_INTEL_82845G_IG */:
+	case 0x3582 /* PCI_DEVICE_ID_INTEL_82855GM_IG */:
+	case 0x2572 /* PCI_DEVICE_ID_INTEL_82865_IG */:
+		if ((tmp & INTEL_GMCH_MEM_MASK) == INTEL_GMCH_MEM_64M)
+			*aperture_size *= 64;
+		else
+			*aperture_size *= 128;
+		break;
+	default:
+		/* 9xx supports large sizes, just look at the length */
+		*aperture_size = (uint32_t)drm_get_resource_len(dev, 2);
+		DRM_INFO("drm_get_resource(2) aperture_size = (%d)\n", *aperture_size);
+		break;
+	}
+
+	/*
+	 * Some of the preallocated space is taken by the GTT
+	 * and popup.  GTT is 1K per MB of aperture size, and popup is 4K.
+	 */
+	if (IS_G4X(dev) || IS_PINEVIEW(dev) || IS_IRONLAKE(dev) || IS_GEN6(dev))
+		overhead = 4096;
+	else
+		overhead = (*aperture_size / 1024) + 4096;
+
+	if (IS_GEN6(dev)) {
+		/* SNB has memory control reg at 0x50.w */
+		tmp = pci_read_config(dev->device, SNB_GMCH_CTRL, 2);
+
+		switch (tmp & SNB_GMCH_GMS_STOLEN_MASK) {
+		case INTEL_855_GMCH_GMS_DISABLED:
+			DRM_ERROR("video memory is disabled\n");
+			return -1;
+		case SNB_GMCH_GMS_STOLEN_32M:
+			stolen = 32 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_64M:
+			stolen = 64 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_96M:
+			stolen = 96 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_128M:
+			stolen = 128 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_160M:
+			stolen = 160 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_192M:
+			stolen = 192 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_224M:
+			stolen = 224 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_256M:
+			stolen = 256 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_288M:
+			stolen = 288 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_320M:
+			stolen = 320 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_352M:
+			stolen = 352 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_384M:
+			stolen = 384 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_416M:
+			stolen = 416 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_448M:
+			stolen = 448 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_480M:
+			stolen = 480 * 1024 * 1024;
+			break;
+		case SNB_GMCH_GMS_STOLEN_512M:
+			stolen = 512 * 1024 * 1024;
+			break;
+		default:
+			DRM_ERROR("unexpected GMCH_GMS value: 0x%02x\n",
+				  tmp & SNB_GMCH_GMS_STOLEN_MASK);
+			return -1;
+		}
+	} else {
+		switch (tmp & INTEL_GMCH_GMS_MASK) {
+		case INTEL_855_GMCH_GMS_DISABLED:
+			DRM_ERROR("video memory is disabled\n");
+			return -1;
+		case INTEL_855_GMCH_GMS_STOLEN_1M:
+			stolen = 1 * 1024 * 1024;
+			break;
+		case INTEL_855_GMCH_GMS_STOLEN_4M:
+			stolen = 4 * 1024 * 1024;
+			break;
+		case INTEL_855_GMCH_GMS_STOLEN_8M:
+			stolen = 8 * 1024 * 1024;
+			break;
+		case INTEL_855_GMCH_GMS_STOLEN_16M:
+			stolen = 16 * 1024 * 1024;
+			break;
+		case INTEL_855_GMCH_GMS_STOLEN_32M:
+			stolen = 32 * 1024 * 1024;
+			break;
+		case INTEL_915G_GMCH_GMS_STOLEN_48M:
+			stolen = 48 * 1024 * 1024;
+			break;
+		case INTEL_915G_GMCH_GMS_STOLEN_64M:
+			stolen = 64 * 1024 * 1024;
+			break;
+		case INTEL_GMCH_GMS_STOLEN_128M:
+			stolen = 128 * 1024 * 1024;
+			break;
+		case INTEL_GMCH_GMS_STOLEN_256M:
+			stolen = 256 * 1024 * 1024;
+			break;
+		case INTEL_GMCH_GMS_STOLEN_96M:
+			stolen = 96 * 1024 * 1024;
+			break;
+		case INTEL_GMCH_GMS_STOLEN_160M:
+			stolen = 160 * 1024 * 1024;
+			break;
+		case INTEL_GMCH_GMS_STOLEN_224M:
+			stolen = 224 * 1024 * 1024;
+			break;
+		case INTEL_GMCH_GMS_STOLEN_352M:
+			stolen = 352 * 1024 * 1024;
+			break;
+		default:
+			DRM_ERROR("unexpected GMCH_GMS value: 0x%02x\n",
+				  tmp & INTEL_GMCH_GMS_MASK);
+			return -1;
+		}
+	}
+
+	*preallocated_size = stolen - overhead;
+	*start = overhead;
+	DRM_INFO("preallocated_size = (%d)\n", *preallocated_size);
+	DRM_INFO("start = (%d)\n", *start);
+
+	return 0;
+}
+
+#define PTE_ADDRESS_MASK		0xfffff000
+#define PTE_ADDRESS_MASK_HIGH		0x000000f0 /* i915+ */
+#define PTE_MAPPING_TYPE_UNCACHED	(0 << 1)
+#define PTE_MAPPING_TYPE_DCACHE		(1 << 1) /* i830 only */
+#define PTE_MAPPING_TYPE_CACHED		(3 << 1)
+#define PTE_MAPPING_TYPE_MASK		(3 << 1)
+#define PTE_VALID			(1 << 0)
+
+static int i915_gtt_size(struct drm_device *dev)
+{
+	int gtt_bar = IS_I9XX(dev) ? 0 : 1;
+	int gtt_size;
+
+	if (IS_I965G(dev)) {
+		if (IS_G4X(dev) || IS_IRONLAKE(dev) || IS_GEN6(dev)) {
+			gtt_size = 2*1024*1024;
+		} else {
+			gtt_size = 512*1024;
+		}
+	} else {
+		gtt_bar = 3;
+		gtt_size = drm_get_resource_len(dev, gtt_bar);
+	}
+	DRM_INFO("i915_gtt_size = (%d)\n", gtt_size);
+	return gtt_size;
+}
+
+/**
+ * i915_gtt_to_phys - take a GTT address and turn it into a physical one
+ * @dev: drm device
+ * @gtt_addr: address to translate
+ *
+ * Some chip functions require allocations from stolen space but need the
+ * physical address of the memory in question.  We use this routine
+ * to get a physical address suitable for register programming from a given
+ * GTT address.
+ */
+static unsigned long i915_gtt_to_phys(struct drm_device *dev,
+				      unsigned long gtt_addr)
+{
+	unsigned long *gtt;
+	unsigned long entry, phys;
+	int gtt_bar = IS_I9XX(dev) ? 0 : 1;
+	int gtt_offset, gtt_size;
+
+	if (IS_I965G(dev)) {
+		if (IS_G4X(dev) || IS_IRONLAKE(dev) || IS_GEN6(dev)) {
+			gtt_offset = 2*1024*1024;
+			gtt_size = 2*1024*1024;
+		} else {
+			gtt_offset = 512*1024;
+			gtt_size = 512*1024;
+		}
+	} else {
+		gtt_bar = 3;
+		gtt_offset = 0;
+		gtt_size = drm_get_resource_len(dev, gtt_bar);
+	}
+#ifndef __linux__
+	DRM_INFO("i915_gtt_to_phys gtt_size = (%d)\n", gtt_size);
+#endif
+
+	gtt = ioremap_wc(drm_get_resource_start(dev, gtt_bar) + gtt_offset,
+			 gtt_size);
+	if (!gtt) {
+		DRM_ERROR("ioremap of GTT failed\n");
+		return 0;
+	}
+
+	entry = *(volatile u32 *)(gtt + (gtt_addr / 1024));
+
+	DRM_DEBUG_DRIVER("GTT addr: 0x%08lx, PTE: 0x%08lx\n", gtt_addr, entry);
+
+	/* Mask out these reserved bits on this hardware. */
+	if (!IS_I9XX(dev) || IS_I915G(dev) || IS_I915GM(dev) ||
+	    IS_I945G(dev) || IS_I945GM(dev)) {
+		entry &= ~PTE_ADDRESS_MASK_HIGH;
+	}
+
+	/* If it's not a mapping type we know, then bail. */
+	if ((entry & PTE_MAPPING_TYPE_MASK) != PTE_MAPPING_TYPE_UNCACHED &&
+	    (entry & PTE_MAPPING_TYPE_MASK) != PTE_MAPPING_TYPE_CACHED)	{
+		ioremapfree(gtt, gtt_size);
+		return 0;
+	}
+
+	if (!(entry & PTE_VALID)) {
+		DRM_ERROR("bad GTT entry in stolen space\n");
+		ioremapfree(gtt, gtt_size);
+		return 0;
+	}
+
+	ioremapfree(gtt, gtt_size);
+
+	phys =(entry & PTE_ADDRESS_MASK) |
+		((uint64_t)(entry & PTE_ADDRESS_MASK_HIGH) << (32 - 4));
+
+	DRM_INFO("GTT addr: 0x%08lx, phys addr: 0x%08lx\n", gtt_addr, phys);
+
+	return phys;
+}
+
+static void i915_warn_stolen(struct drm_device *dev)
+{
+	DRM_ERROR("not enough stolen space for compressed buffer, disabling\n");
+	DRM_ERROR("hint: you may be able to increase stolen memory size in the BIOS to avoid this\n");
+}
+
 int i915_master_create(struct drm_device *dev, struct drm_master *master)
 {
 	struct drm_i915_master_private *master_priv;
@@ -1015,8 +1438,23 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	base = drm_get_resource_start(dev, mmio_bar);
 	size = drm_get_resource_len(dev, mmio_bar);
 
+	if (i915_get_bridge_dev(dev)) {
+		DRM_ERROR("failed i915_get_bridge_dev\n");
+	}
+
 	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
 	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
+
+	if (ret) {
+		DRM_ERROR("failed to map registers\n");
+	}
+
+        dev_priv->mm.gtt_mapping =
+		io_mapping_create_wc(dev->agp->base,
+				     dev->agp->agp_info.aper_size * 1024*1024);
+	if (dev_priv->mm.gtt_mapping == NULL) {
+		DRM_ERROR("io_mapping_create_wc\n");
+	}
 
 	if (IS_G4X(dev)) {
 		dev->driver->get_vblank_counter = g45_get_vblank_counter;

@@ -743,7 +743,7 @@ int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma)
 	if (!vma->vm_pgoff
 #if __OS_HAS_AGP
 	    && (!dev->agp
-		|| dev->agp->agp_info.device->vendor != PCI_VENDOR_ID_APPLE)
+		|| dev->agp->agp_info.id_vendor != PCI_VENDOR_ID_APPLE)
 #endif
 	    )
 		return drm_mmap_dma(filp, vma);

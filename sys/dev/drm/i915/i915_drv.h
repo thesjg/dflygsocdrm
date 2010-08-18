@@ -260,7 +260,7 @@ typedef struct drm_i915_private {
 	void __iomem *regs;
 
 /* add a bsd member equivalent ? */
-	struct pci_dev *bridge_dev;
+	DRM_DEVICE_T bridge_dev;
 	drm_i915_ring_buffer_t ring;
 
 	drm_dma_handle_t *status_page_dmah;

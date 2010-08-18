@@ -1664,6 +1664,7 @@ extern void drm_agp_chipset_flush(struct drm_device *dev);
 
 /* legacy */
 DRM_DEVICE_T drm_agp_find_bridge(void *data);
+extern void drm_agp_copy_info(DRM_AGP_BRIDGE_DATA_T bridge, DRM_AGP_KERN *agp_info);
 int	drm_device_is_agp(struct drm_device *dev);
 int	drm_device_is_pcie(struct drm_device *dev);
 

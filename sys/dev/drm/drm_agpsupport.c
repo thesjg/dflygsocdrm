@@ -70,6 +70,22 @@ int drm_device_is_pcie(struct drm_device *dev)
 	return (drm_device_find_capability(dev, PCIY_EXPRESS));
 }
 
+void
+drm_agp_copy_info(DRM_AGP_BRIDGE_DATA_T bridge, DRM_AGP_KERN *agp_info)
+{
+	struct agp_info asked;
+	agp_get_info(bridge, &asked);
+	agp_info->version.major = 1;
+	agp_info->version.minor = 0;
+	agp_info->mode = asked.ai_mode;
+	agp_info->aper_base = asked.ai_aperture_base;
+	agp_info->aper_size = asked.ai_aperture_size >> 20;
+	agp_info->max_memory = asked.ai_memory_allowed >> PAGE_SHIFT;
+	agp_info->current_memory = asked.ai_memory_used >> PAGE_SHIFT;
+	agp_info->id_vendor = pci_get_vendor(bridge);
+	agp_info->id_device = pci_get_device(bridge);
+}
+
 /**
  * Get AGP information.
  *
@@ -98,8 +114,12 @@ int drm_agp_info(struct drm_device * dev, struct drm_agp_info *info)
 	info->aperture_size     = kern->ai_aperture_size;
 	info->memory_allowed    = kern->ai_memory_allowed;
 	info->memory_used       = kern->ai_memory_used;
+	info->id_vendor         = pci_get_vendor(dev->agp->agpdev);
+	info->id_device         = pci_get_device(dev->agp->agpdev);
+#if 0
 	info->id_vendor         = kern->ai_devid & 0xffff;
 	info->id_device         = kern->ai_devid >> 16;
+#endif
 
 	return 0;
 }
@@ -465,12 +485,13 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 			return NULL;
 		head->agpdev = agpdev;
 		agp_get_info(agpdev, &head->info);
-		head->base = head->info.ai_aperture_base;
+		drm_agp_copy_info(agpdev, &head->agp_info);
 		INIT_LIST_HEAD(&head->memory);
+/* legacy guesses at cant_use_aperture and page_mask */
+		head->cant_use_aperture = 0;
+		head->page_mask = 0x0fff;
+		head->base = head->info.ai_aperture_base;
 
-/* Sets neither
- * head->cant_use_aperture nor head->page_mask
- */
 		DRM_INFO("AGP at 0x%08lx %dMB\n",
 			 (long)head->info.ai_aperture_base,
 			 (int)(head->info.ai_aperture_size >> 20));

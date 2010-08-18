@@ -1875,27 +1875,53 @@ kunmap_atomic(void *dst, uint32_t flag) {
 	;
 }
 
+#if 0
 /* file i915_gem.c, function fast_user_write() */
 struct io_mapping {
 	int placeholder;
 };
+#endif
+
+/* file i915_dma.c, function i915_driver_load() */
+static __inline__ struct io_mapping *
+io_mapping_create_wc(unsigned long base, unsigned long offset) {
+#if 0 /* variant to iomap only on __x86_64__ */
+	return pmap_mapdev(base, offset);
+#endif
+	return (void *)base;
+}
+
+/* file i915_dma.c, function i915_driver_unload() */
+static __inline__ void
+drm_io_mapping_free(unsigned long base, unsigned long size) {
+#if 0 /* variant iomapped possibly only on __x86_64__ */
+	pmap_unmapdev((vm_offset_t)base, size);
+#endif
+	;
+}
 
 /* file i915_gem.c, function fast_user_write() */
 /* file intel_overlay.c, function intel_overlay_map_regs_atomic() */
-static __inline__ char *
+static __inline__ void *
 io_mapping_map_atomic_wc(
 	struct io_mapping *mapping,
-	loff_t page_base
+	unsigned long page_base
 ) {
-	return NULL;
+#if 0 /* variant iomapped only on __x86_64__ */
+	return (void *)mapping + page_base;
+#endif
+	return kmalloc(PAGE_SIZE, M_TEMP, M_WAITOK | M_ZERO);
 }
 
 /* file i915_gem.c, function fast_user_write() */
 static __inline__ void
 io_mapping_unmap_atomic(
-	char *vaddr_atomic
+	void *vaddr
 ) {
+#if 0 /* variant iomapped only on __x86_64__ */
 	;
+#endif
+	kfree(vaddr, M_TEMP);
 }
 
 /*
@@ -2196,19 +2222,25 @@ do_mmap(
 /* file drm_bufs.c, function drm_addmap_core() */
 static __inline__ void *
 ioremap(unsigned long offset, unsigned long size) {
-	return (void *)NULL;
+	return pmap_mapdev(offset, size);
+}
+
+/* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
+/* file i915_gem.c, function i915_gtt_to_phys() */
+static __inline__ void *
+ioremap_wc(unsigned long offset, unsigned long size) {
+	return pmap_mapdev(offset, size);
 }
 
 /* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
 static __inline__ void *
-ioremap_wc(unsigned long basePlusOffset, unsigned long size) {
-	return (void *)NULL;
+ioremap_nocache(unsigned long offset, unsigned long size) {
+	return pmap_mapdev(offset, size);
 }
 
-/* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
-static __inline__ void *
-ioremap_nocache(unsigned long basePlusOffset, unsigned long size) {
-	return (void *)NULL;
+static __inline__ void ioremapfree(void *handle, unsigned long size)
+{
+	pmap_unmapdev((vm_offset_t)handle, size);
 }
 
 /* file ttm/ttm_bo_util.c, function ttm_mem_reg_iounmap() */
@@ -2870,9 +2902,11 @@ typedef struct DRM_AGP_KERN {
 	unsigned long aper_size;
 /* units of pages */
 	unsigned long max_memory;
+/* changed implementation */
+	uint16_t id_vendor;
+	uint16_t id_device;
 /* units of pages */
 	unsigned long current_memory;
-	struct DRM_AGP_DEVICE *device;
 } DRM_AGP_KERN;
 
 /* file drm_agpsupport.c, function drm_agp_alloc() */
