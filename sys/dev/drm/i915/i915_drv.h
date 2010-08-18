@@ -864,7 +864,9 @@ extern int i915_emit_box(struct drm_device *dev,
 extern int i965_reset(struct drm_device *dev, u8 flags);
 
 /* i915_irq.c */
-void i915_hangcheck_elapsed(unsigned long data);
+/* API change */
+/* callout in DragonFly BSD takes void * not unsigned long as arg */
+void i915_hangcheck_elapsed(void *data);
 void i915_destroy_error_state(struct drm_device *dev);
 extern int i915_irq_emit(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);

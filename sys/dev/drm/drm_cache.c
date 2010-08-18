@@ -31,6 +31,10 @@
 #include "drmP.h"
 #include "drm_cache.h"
 
+void drm_clflush(volatile void *addr) {
+	__asm __volatile("clflush %0" : : "m" (*(char *)addr));
+}
+
 #if defined(CONFIG_X86)
 static void
 drm_clflush_page(struct page *page)

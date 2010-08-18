@@ -139,11 +139,10 @@ int drm_gem_object_init(struct drm_device *dev,
 #ifdef __linux__
 	obj->filp = shmem_file_setup("drm mm object", size, VM_NORESERVE);
 #else
-	drm_vm_mmap_alloc(size, &object);
+	object = vm_object_allocate(OBJT_DEFAULT, atop(round_page(size)));
 #endif
 /* should a reference be taken? */
 	obj->object = object;
-	obj->object->handle = obj;
 
 	kref_init(&obj->refcount);
 	kref_init(&obj->handlecount);

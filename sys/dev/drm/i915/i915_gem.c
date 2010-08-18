@@ -1841,7 +1841,8 @@ i915_add_request(struct drm_device *dev, struct drm_file *file_priv,
 		i915_gem_process_flushing_list(dev, flush_domains, seqno);
 
 	if (!dev_priv->mm.suspended) {
-		mod_timer(&dev_priv->hangcheck_timer, jiffies + DRM_I915_HANGCHECK_PERIOD);
+		callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
+			i915_hangcheck_elapsed, dev);
 		if (was_empty)
 			queue_delayed_work(dev_priv->wq, &dev_priv->mm.retire_work, HZ);
 	}
@@ -4842,7 +4843,7 @@ i915_gem_idle(struct drm_device *dev)
 	 * And not confound mm.suspended!
 	 */
 	dev_priv->mm.suspended = 1;
-	del_timer(&dev_priv->hangcheck_timer);
+	callout_stop(&dev_priv->hangcheck_timer);
 
 	i915_kernel_lost_context(dev);
 	i915_gem_cleanup_ringbuffer(dev);

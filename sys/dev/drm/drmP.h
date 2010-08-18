@@ -1529,6 +1529,8 @@ extern int drm_authmagic(struct drm_device *dev, void *data,
 
 /* Cache management (drm_cache.c) */
 void drm_clflush_pages(struct page *pages[], unsigned long num_pages);
+extern uint32_t cpu_clflush_line_size;
+extern void drm_clflush(volatile void *data);
 
 	/* Locking IOCTL support (drm_lock.h) */
 /* shared */

@@ -1534,6 +1534,27 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		return ret;
 	}
 
+#ifdef __linux__
+	/* Start out suspended */
+	dev_priv->mm.suspended = 1;
+
+	intel_detect_pch(dev);
+
+	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
+		ret = i915_load_modeset_init(dev, prealloc_start,
+					     prealloc_size, agp_size);
+		if (ret < 0) {
+			DRM_ERROR("failed to init modeset\n");
+			goto out_workqueue_free;
+		}
+	}
+
+	/* Must be done after probing outputs */
+	intel_opregion_init(dev, 0);
+#endif
+
+	callout_init(&dev_priv->hangcheck_timer);
+
 	return ret;
 }
 

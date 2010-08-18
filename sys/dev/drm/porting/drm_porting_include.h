@@ -129,5 +129,7 @@
 #include <cpu/lwbuf.h>
 #endif
 
+/* for cpu_procinfo */
+#include <machine/md_var.h>
 #endif /* __KERNEL__ */
 #endif
