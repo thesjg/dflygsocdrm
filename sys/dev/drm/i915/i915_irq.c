@@ -394,24 +394,20 @@ irqreturn_t ironlake_irq_handler(struct drm_device *dev)
 	}
 
 	if (gt_iir & GT_PIPE_NOTIFY) {
-#ifdef __linux__
 		u32 seqno = i915_get_gem_seqno(dev);
-#else /* to compile */
-		u32 seqno = 0;
-#endif /* __linux__ */
 		dev_priv->mm.irq_gem_seqno = seqno;
 #ifdef __linux__
 		trace_i915_gem_request_complete(dev, seqno);
 #endif
 		DRM_WAKEUP(&dev_priv->irq_queue);
 		dev_priv->hangcheck_count = 0;
-		mod_timer(&dev_priv->hangcheck_timer, jiffies + DRM_I915_HANGCHECK_PERIOD);
+		callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
+			i915_hangcheck_elapsed, dev);
 	}
 
 	if (de_iir & DE_GSE)
 		ironlake_opregion_gse_intr(dev);
 
-#ifdef __linux__ /* need to port intel_display.c */
 	if (de_iir & DE_PLANEA_FLIP_DONE) {
 		intel_prepare_page_flip(dev, 0);
 		intel_finish_page_flip(dev, 0);
@@ -421,7 +417,6 @@ irqreturn_t ironlake_irq_handler(struct drm_device *dev)
 		intel_prepare_page_flip(dev, 1);
 		intel_finish_page_flip(dev, 1);
 	}
-#endif /* __linux__ */
 
 	if (de_iir & DE_PIPEA_VBLANK)
 		drm_handle_vblank(dev, 0);
@@ -1238,7 +1233,7 @@ struct drm_i915_gem_request *i915_get_tail_request(struct drm_device *dev) {
  * ACTHD. If ACTHD hasn't changed by the time the hangcheck timer elapses
  * again, we assume the chip is wedged and try to fix it.
  */
-void i915_hangcheck_elapsed(unsigned long data)
+void i915_hangcheck_elapsed(void *data)
 {
 	struct drm_device *dev = (struct drm_device *)data;
 	drm_i915_private_t *dev_priv = dev->dev_private;
@@ -1253,14 +1248,12 @@ void i915_hangcheck_elapsed(unsigned long data)
 	else
 		acthd = I915_READ(ACTHD_I965);
 
-#ifdef __linux__
 	/* If all work is done then ACTHD clearly hasn't advanced. */
 	if (list_empty(&dev_priv->mm.request_list) ||
 		       i915_seqno_passed(i915_get_gem_seqno(dev), i915_get_tail_request(dev)->seqno)) {
 		dev_priv->hangcheck_count = 0;
 		return;
 	}
-#endif /* __linux__ */
 
 	if (dev_priv->last_acthd == acthd && dev_priv->hangcheck_count > 0) {
 		DRM_ERROR("Hangcheck timer elapsed... GPU hung\n");
@@ -1269,7 +1262,8 @@ void i915_hangcheck_elapsed(unsigned long data)
 	}
 
 	/* Reset timer case chip hangs without another request being added */
-	mod_timer(&dev_priv->hangcheck_timer, jiffies + DRM_I915_HANGCHECK_PERIOD);
+	callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
+		i915_hangcheck_elapsed, dev);
 
 	if (acthd != dev_priv->last_acthd)
 		dev_priv->hangcheck_count = 0;
