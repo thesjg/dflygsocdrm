@@ -745,12 +745,12 @@ void i915_restore_display(struct drm_device *dev)
 	/* only restore FBC info on the platform that supports FBC*/
 	if (I915_HAS_FBC(dev)) {
 		if (IS_GM45(dev)) {
-#ifdef __linux__ /* defined in intel_display.c */
+#if 1 /* defined in intel_display.c */
 			g4x_disable_fbc(dev);
 #endif /* __linux__ */
 			I915_WRITE(DPFC_CB_BASE, dev_priv->saveDPFC_CB_BASE);
 		} else {
-#ifdef __linux__ /* defined in intel_display.c */
+#if 1 /* defined in intel_display.c */
 			i8xx_disable_fbc(dev);
 #endif /* __linux__ */
 			I915_WRITE(FBC_CFB_BASE, dev_priv->saveFBC_CFB_BASE);
@@ -772,7 +772,7 @@ void i915_restore_display(struct drm_device *dev)
 	i915_restore_vga(dev);
 }
 
-int i915_save_state(struct drm_device *dev)
+int i915_save_state_legacy(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
@@ -908,7 +908,71 @@ int i915_save_state(struct drm_device *dev)
 	return 0;
 }
 
-int i915_restore_state(struct drm_device *dev)
+int i915_save_state(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	int i;
+
+#ifdef __linux__
+	pci_read_config_byte(dev->pdev, LBB, &dev_priv->saveLBB);
+#else
+	dev_priv->saveLBB = (u8) pci_read_config(dev->device, LBB, 1);
+#endif
+
+	/* Hardware status page */
+	dev_priv->saveHWS = I915_READ(HWS_PGA);
+
+	i915_save_display(dev);
+
+	/* Interrupt state */
+	if (IS_IRONLAKE(dev)) {
+		dev_priv->saveDEIER = I915_READ(DEIER);
+		dev_priv->saveDEIMR = I915_READ(DEIMR);
+		dev_priv->saveGTIER = I915_READ(GTIER);
+		dev_priv->saveGTIMR = I915_READ(GTIMR);
+		dev_priv->saveFDI_RXA_IMR = I915_READ(FDI_RXA_IMR);
+		dev_priv->saveFDI_RXB_IMR = I915_READ(FDI_RXB_IMR);
+		dev_priv->saveMCHBAR_RENDER_STANDBY =
+			I915_READ(MCHBAR_RENDER_STANDBY);
+	} else {
+		dev_priv->saveIER = I915_READ(IER);
+		dev_priv->saveIMR = I915_READ(IMR);
+	}
+
+	if (IS_IRONLAKE_M(dev))
+		ironlake_disable_drps(dev);
+
+	/* Cache mode state */
+	dev_priv->saveCACHE_MODE_0 = I915_READ(CACHE_MODE_0);
+
+	/* Memory Arbitration state */
+	dev_priv->saveMI_ARB_STATE = I915_READ(MI_ARB_STATE);
+
+	/* Scratch space */
+	for (i = 0; i < 16; i++) {
+		dev_priv->saveSWF0[i] = I915_READ(SWF00 + (i << 2));
+		dev_priv->saveSWF1[i] = I915_READ(SWF10 + (i << 2));
+	}
+	for (i = 0; i < 3; i++)
+		dev_priv->saveSWF2[i] = I915_READ(SWF30 + (i << 2));
+
+	/* Fences */
+	if (IS_I965G(dev)) {
+		for (i = 0; i < 16; i++)
+			dev_priv->saveFENCE[i] = I915_READ64(FENCE_REG_965_0 + (i * 8));
+	} else {
+		for (i = 0; i < 8; i++)
+			dev_priv->saveFENCE[i] = I915_READ(FENCE_REG_830_0 + (i * 4));
+
+		if (IS_I945G(dev) || IS_I945GM(dev) || IS_G33(dev))
+			for (i = 0; i < 8; i++)
+				dev_priv->saveFENCE[i+8] = I915_READ(FENCE_REG_945_8 + (i * 4));
+	}
+
+	return 0;
+}
+
+int i915_restore_state_legacy(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int i;
@@ -1069,3 +1133,68 @@ int i915_restore_state(struct drm_device *dev)
 	return 0;
 }
 
+int i915_restore_state(struct drm_device *dev)
+{
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	int i;
+
+#ifdef __linux__
+	pci_write_config_byte(dev->pdev, LBB, dev_priv->saveLBB);
+#else
+	pci_write_config(dev->device, LBB, dev_priv->saveLBB, 1);
+#endif
+
+	/* Hardware status page */
+	I915_WRITE(HWS_PGA, dev_priv->saveHWS);
+
+	/* Fences */
+	if (IS_I965G(dev)) {
+		for (i = 0; i < 16; i++)
+			I915_WRITE64(FENCE_REG_965_0 + (i * 8), dev_priv->saveFENCE[i]);
+	} else {
+		for (i = 0; i < 8; i++)
+			I915_WRITE(FENCE_REG_830_0 + (i * 4), dev_priv->saveFENCE[i]);
+		if (IS_I945G(dev) || IS_I945GM(dev) || IS_G33(dev))
+			for (i = 0; i < 8; i++)
+				I915_WRITE(FENCE_REG_945_8 + (i * 4), dev_priv->saveFENCE[i+8]);
+	}
+
+	i915_restore_display(dev);
+
+	/* Interrupt state */
+	if (IS_IRONLAKE(dev)) {
+		I915_WRITE(DEIER, dev_priv->saveDEIER);
+		I915_WRITE(DEIMR, dev_priv->saveDEIMR);
+		I915_WRITE(GTIER, dev_priv->saveGTIER);
+		I915_WRITE(GTIMR, dev_priv->saveGTIMR);
+		I915_WRITE(FDI_RXA_IMR, dev_priv->saveFDI_RXA_IMR);
+		I915_WRITE(FDI_RXB_IMR, dev_priv->saveFDI_RXB_IMR);
+	} else {
+		I915_WRITE (IER, dev_priv->saveIER);
+		I915_WRITE (IMR,  dev_priv->saveIMR);
+	}
+
+	/* Clock gating state */
+	intel_init_clock_gating(dev);
+
+	if (IS_IRONLAKE_M(dev))
+		ironlake_enable_drps(dev);
+
+	/* Cache mode state */
+	I915_WRITE (CACHE_MODE_0, dev_priv->saveCACHE_MODE_0 | 0xffff0000);
+
+	/* Memory arbitration state */
+	I915_WRITE (MI_ARB_STATE, dev_priv->saveMI_ARB_STATE | 0xffff0000);
+
+	for (i = 0; i < 16; i++) {
+		I915_WRITE(SWF00 + (i << 2), dev_priv->saveSWF0[i]);
+		I915_WRITE(SWF10 + (i << 2), dev_priv->saveSWF1[i]);
+	}
+	for (i = 0; i < 3; i++)
+		I915_WRITE(SWF30 + (i << 2), dev_priv->saveSWF2[i]);
+
+	/* I2C state */
+	intel_i2c_reset_gmbus(dev);
+
+	return 0;
+}

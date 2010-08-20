@@ -1631,6 +1631,19 @@ si_meminfo(struct sysinfo *si) {
 #define HZ	hz
 #define jiffies			ticks
 
+/* file radeon_pm.c, function radeon_sync_with_vblank() */
+/* file intel_display.c */
+static __inline__ unsigned long
+msecs_to_jiffies(unsigned long msecs) {
+	return DIV_ROUND_UP(msecs, (1000 / hz));
+}
+
+static __inline__ unsigned long
+usecs_to_jiffies(unsigned long usecs) {
+	unsigned long msecs = DIV_ROUND_UP(usecs, 1000);
+	return DIV_ROUND_UP(msecs, (1000 / hz));
+}
+
 typedef unsigned long cycles_t;
 
 /* file drm_fops.c, function drm_reclaim_locked_buffers() */
@@ -1674,7 +1687,13 @@ mdelay(int delay) {
 /* file intel_display.c, function intel_wait_for_vblank() */
 static __inline__ void
 msleep(int millis) {
-	DELAY(1000 * millis);
+	tsleep(curthread, 0, "msleep", millis_to_jiffies(millis));
+}
+
+/* file intel_display.c, function intel_wait_for_vblank() */
+static __inline__ void
+msleep_interruptible(int millis) {
+	tsleep(curthread, PCATCH, "msleep", millis_to_jiffies(millis));
 }
 
 /**********************************************************
@@ -3402,19 +3421,6 @@ wait_event_timeout(
 	unsigned long jiffies
 ) {
 	;
-}
-
-/* file radeon_pm.c, function radeon_sync_with_vblank() */
-/* file intel_display.c */
-static __inline__ unsigned long
-msecs_to_jiffies(unsigned long msecs) {
-	return DIV_ROUND_UP(msecs, (1000 / hz));
-}
-
-static __inline__ unsigned long
-usecs_to_jiffies(unsigned long usecs) {
-	unsigned long msecs = DIV_ROUND_UP(usecs, 1000);
-	return DIV_ROUND_UP(msecs, (1000 / hz));
 }
 
 /* file radeon_pm.c, function radeon_pm_set_clocks() */
