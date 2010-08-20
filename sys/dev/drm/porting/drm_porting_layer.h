@@ -1687,13 +1687,13 @@ mdelay(int delay) {
 /* file intel_display.c, function intel_wait_for_vblank() */
 static __inline__ void
 msleep(int millis) {
-	tsleep(curthread, 0, "msleep", millis_to_jiffies(millis));
+	tsleep(curthread, 0, "msleep", msecs_to_jiffies(millis));
 }
 
 /* file intel_display.c, function intel_wait_for_vblank() */
 static __inline__ void
 msleep_interruptible(int millis) {
-	tsleep(curthread, PCATCH, "msleep", millis_to_jiffies(millis));
+	tsleep(curthread, PCATCH, "msleep", msecs_to_jiffies(millis));
 }
 
 /**********************************************************
