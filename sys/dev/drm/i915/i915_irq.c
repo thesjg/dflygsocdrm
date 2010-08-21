@@ -1520,17 +1520,9 @@ int i915_driver_irq_postinstall(struct drm_device *dev)
 	/* Clear pending interrupt status */
 	I915_WRITE(IIR, I915_READ(IIR));
 
-#if 0
-	I915_WRITE(IER, I915_INTERRUPT_ENABLE_MASK);
-#endif
 	I915_WRITE(IER, enable_mask);
 	I915_WRITE(IMR, dev_priv->irq_mask_reg);
-#if 0
-	I915_WRITE(PIPEASTAT, dev_priv->pipestat[0] |
-	    (dev_priv->pipestat[0] >> 16));
-	I915_WRITE(PIPEBSTAT, dev_priv->pipestat[1] |
-	    (dev_priv->pipestat[1] >> 16));
-#endif
+
 	(void) I915_READ(IER);
 
 #if 0

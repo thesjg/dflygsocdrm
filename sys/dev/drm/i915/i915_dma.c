@@ -1911,6 +1911,7 @@ int i915_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 	file_priv->driver_priv = i915_file_priv;
 
 	INIT_LIST_HEAD(&i915_file_priv->mm.request_list);
+	DRM_INFO("i915_driver_open initialized mm.request_list as empty list\n");
 
 	return 0;
 }
