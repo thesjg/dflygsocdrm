@@ -1222,6 +1222,8 @@ void i915_enable_interrupt (struct drm_device *dev)
 	if (!HAS_PCH_SPLIT(dev))
 		opregion_enable_asle(dev);
 	dev_priv->irq_enabled = 1;
+#else
+	dev_priv->irq_enabled = 0;
 #endif /* __linux__ */
 }
 
@@ -1325,7 +1327,7 @@ void i915_hangcheck_elapsed(void *data)
 		return;
 	}
 
-#ifdef __linux__
+#if 1
 	/* Reset timer case chip hangs without another request being added */
 	callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
 		i915_hangcheck_elapsed, dev);
@@ -1338,9 +1340,11 @@ void i915_hangcheck_elapsed(void *data)
 
 	dev_priv->last_acthd = acthd;
 
+#if 0
 	/* Reset timer case chip hangs without another request being added */
 	callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
 		i915_hangcheck_elapsed, dev);
+#endif
 }
 
 /* drm_dma.h hooks
