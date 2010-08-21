@@ -565,7 +565,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	drm_local_map_t *map;
 	int err;
 
-#if __linux__
+#ifdef __linux__
 	if (!(DRM_SUSER(DRM_CURPROC) || map->type == _DRM_AGP || map->type == _DRM_SHM))
 		return -EPERM;
 #else

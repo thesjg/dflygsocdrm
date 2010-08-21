@@ -691,7 +691,7 @@ void drm_agp_chipset_flush(struct drm_device *dev)
 #if defined(__i386__) || defined(__x86_64__)
 	wbinvd();
 #endif
-#if __linux__
+#ifdef __linux__
 	agp_flush_chipset(dev->agp->bridge);
 #endif /* __linux__ */
 }

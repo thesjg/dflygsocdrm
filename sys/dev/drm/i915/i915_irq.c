@@ -25,15 +25,21 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
  */
+#ifdef __linux__
+#include <linux/sysrq.h>
+#include <linux/slab.h>
+#endif /* __linux__ */
 
 #include "drmP.h"
 #include "drm.h"
 #include "i915_drm.h"
 #include "i915_drv.h"
 
-#include "intel_drv.h"
+#ifdef __linux__
+#include "i915_trace.h"
+#endif /* __linux__ */
 
-#define DRM_NEWER_ICOUNTER 1
+#include "intel_drv.h"
 
 #define MAX_NOPID ((u32)~0)
 
@@ -44,7 +50,6 @@
  * we leave them always unmasked in IMR and then control enabling them through
  * PIPESTAT alone.
  */
-
 #define I915_INTERRUPT_ENABLE_FIX			\
 	(I915_ASLE_INTERRUPT |				\
 	 I915_DISPLAY_PIPE_A_EVENT_INTERRUPT |		\
@@ -52,12 +57,6 @@
 	 I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT |	\
 	 I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT |	\
 	 I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT)
-
-#if 0
-
-#define I915_INTERRUPT_ENABLE_FIX	(I915_DISPLAY_PIPE_A_EVENT_INTERRUPT | \
-				   	 I915_DISPLAY_PIPE_B_EVENT_INTERRUPT)
-#endif /* __linux__ */
 
 /** Interrupts that we mask and unmask at runtime. */
 #define I915_INTERRUPT_ENABLE_VAR	(I915_USER_INTERRUPT)
@@ -67,12 +66,6 @@
 
 #define I915_PIPE_VBLANK_ENABLE	(PIPE_START_VBLANK_INTERRUPT_ENABLE |\
 				 PIPE_VBLANK_INTERRUPT_ENABLE)
-
-#if 0
-/** These are all of the interrupts used by the driver */
-#define I915_INTERRUPT_ENABLE_MASK	(I915_INTERRUPT_ENABLE_FIX | \
-				    	 I915_INTERRUPT_ENABLE_VAR)
-#endif
 
 #define DRM_I915_VBLANK_PIPE_ALL	(DRM_I915_VBLANK_PIPE_A | \
 					 DRM_I915_VBLANK_PIPE_B)
@@ -142,9 +135,9 @@ static inline u32
 i915_pipestat(int pipe)
 {
 	if (pipe == 0)
-	    return PIPEASTAT;
+		return PIPEASTAT;
 	if (pipe == 1)
-	    return PIPEBSTAT;
+		return PIPEBSTAT;
 #ifdef __linux__
 	BUG();
 #else
@@ -252,20 +245,6 @@ u32 i915_get_vblank_counter(struct drm_device *dev, int pipe)
 	count = (high1 << 8) | low;
 
 	return count;
-}
-
-u32 g45_get_vblank_counter(struct drm_device *dev, int pipe)
-{
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *) dev->dev_private;
-	int reg = pipe ? PIPEB_FRMCOUNT_GM45 : PIPEA_FRMCOUNT_GM45;
-
-	if (!i915_pipe_enabled(dev, pipe)) {
-		DRM_DEBUG_DRIVER("trying to get vblank count for disabled "
-					"pipe %d\n", pipe);
-		return 0;
-	}
-
-	return I915_READ(reg);
 }
 
 u32 gm45_get_vblank_counter(struct drm_device *dev, int pipe)
@@ -900,9 +879,6 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 
 	if (IS_I965G(dev)) {
 		vblank_status = I915_START_VBLANK_INTERRUPT_STATUS;
-#if 0
-		vblank_status = PIPE_START_VBLANK_INTERRUPT_STATUS;
-#endif
 		vblank_enable = PIPE_START_VBLANK_INTERRUPT_ENABLE;
 	} else {
 		vblank_status = I915_VBLANK_INTERRUPT_STATUS;
@@ -1078,15 +1054,6 @@ void i915_user_irq_get(struct drm_device *dev)
 			i915_enable_irq(dev_priv, I915_USER_INTERRUPT);
 	}
 	spin_unlock_irqrestore(&dev_priv->user_irq_lock, irqflags);
-#if 0
-	if (dev->irq_enabled == 0)
-		return;
-
-	DRM_SPINLOCK(&dev_priv->user_irq_lock);
-	if (++dev_priv->user_irq_refcount == 1)
-		i915_enable_irq(dev_priv, I915_USER_INTERRUPT);
-	DRM_SPINUNLOCK(&dev_priv->user_irq_lock);
-#endif
 }
 
 void i915_user_irq_put(struct drm_device *dev)
@@ -1103,16 +1070,6 @@ void i915_user_irq_put(struct drm_device *dev)
 			i915_disable_irq(dev_priv, I915_USER_INTERRUPT);
 	}
 	spin_unlock_irqrestore(&dev_priv->user_irq_lock, irqflags);
-#if 0
-	if (dev->irq_enabled == 0)
-		return;
-
-	DRM_SPINLOCK(&dev_priv->user_irq_lock);
-	KASSERT(dev_priv->user_irq_refcount > 0, ("invalid refcount"));
-	if (--dev_priv->user_irq_refcount == 0)
-		i915_disable_irq(dev_priv, I915_USER_INTERRUPT);
-	DRM_SPINUNLOCK(&dev_priv->user_irq_lock);
-#endif
 }
 
 void i915_trace_irq_get(struct drm_device *dev, u32 seqno)
@@ -1236,21 +1193,6 @@ int i915_enable_vblank(struct drm_device *dev, int pipe)
 				     PIPE_VBLANK_INTERRUPT_ENABLE);
 	spin_unlock_irqrestore(&dev_priv->user_irq_lock, irqflags);
 	return 0;
-
-#if 0
-	if (!i915_pipe_enabled(dev, pipe))
-		return -EINVAL;
-
-	DRM_SPINLOCK(&dev_priv->user_irq_lock);
-	if (IS_I965G(dev))
-		i915_enable_pipestat(dev_priv, pipe,
-				     PIPE_START_VBLANK_INTERRUPT_ENABLE);
-	else
-		i915_enable_pipestat(dev_priv, pipe,
-				     PIPE_VBLANK_INTERRUPT_ENABLE);
-	DRM_SPINUNLOCK(&dev_priv->user_irq_lock);
-	return 0;
-#endif
 }
 
 /* Called from drm generic code, passed 'crtc' which
@@ -1270,14 +1212,6 @@ void i915_disable_vblank(struct drm_device *dev, int pipe)
 				      PIPE_VBLANK_INTERRUPT_ENABLE |
 				      PIPE_START_VBLANK_INTERRUPT_ENABLE);
 	spin_unlock_irqrestore(&dev_priv->user_irq_lock, irqflags);
-
-#if 0
-	DRM_SPINLOCK(&dev_priv->user_irq_lock);
-	i915_disable_pipestat(dev_priv, pipe,
-			      PIPE_VBLANK_INTERRUPT_ENABLE |
-			      PIPE_START_VBLANK_INTERRUPT_ENABLE);
-	DRM_SPINUNLOCK(&dev_priv->user_irq_lock);
-#endif
 }
 
 void i915_enable_interrupt (struct drm_device *dev)
@@ -1391,9 +1325,11 @@ void i915_hangcheck_elapsed(void *data)
 		return;
 	}
 
+#ifdef __linux__
 	/* Reset timer case chip hangs without another request being added */
 	callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
 		i915_hangcheck_elapsed, dev);
+#endif
 
 	if (acthd != dev_priv->last_acthd)
 		dev_priv->hangcheck_count = 0;
@@ -1401,6 +1337,10 @@ void i915_hangcheck_elapsed(void *data)
 		dev_priv->hangcheck_count++;
 
 	dev_priv->last_acthd = acthd;
+
+	/* Reset timer case chip hangs without another request being added */
+	callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
+		i915_hangcheck_elapsed, dev);
 }
 
 /* drm_dma.h hooks

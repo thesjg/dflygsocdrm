@@ -575,8 +575,10 @@ static void i915_configure(struct drm_device *dev)
 	dev->driver->buf_priv_size	= sizeof(drm_i915_private_t);
 	dev->driver->load		= i915_driver_load;
 	dev->driver->unload		= i915_driver_unload;
-	dev->driver->preclose		= i915_driver_preclose;
+	dev->driver->open		= i915_driver_open;
 	dev->driver->lastclose		= i915_driver_lastclose;
+	dev->driver->preclose		= i915_driver_preclose;
+	dev->driver->postclose		= i915_driver_postclose;
 	dev->driver->device_is_agp	= i915_driver_device_is_agp;
 	dev->driver->enable_vblank	= i915_enable_vblank;
 	dev->driver->disable_vblank	= i915_disable_vblank;
@@ -620,6 +622,7 @@ static struct drm_driver driver = {
 #endif /* __linux__ */
 	.load = i915_driver_load,
 	.unload = i915_driver_unload,
+	.open = i915_driver_open,
 	.lastclose = i915_driver_lastclose,
 	.preclose = i915_driver_preclose,
 	.postclose = i915_driver_postclose,
