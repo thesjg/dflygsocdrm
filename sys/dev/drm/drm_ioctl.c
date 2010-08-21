@@ -235,11 +235,11 @@ int drm_getmap(struct drm_device *dev, void *data,
 	map->size = r_list->map->size;
 	map->type = r_list->map->type;
 	map->flags = r_list->map->flags;
-#ifdef __linux__
+#ifdef DRM_NEWER_USER_TOKEN
 	map->handle = (void *)(unsigned long) r_list->user_token;
 #else
 	map->handle = r_list->map->handle;
-#endif /* __linux__ */
+#endif
 	map->mtrr = r_list->map->mtrr;
 	mutex_unlock(&dev->struct_mutex);
 

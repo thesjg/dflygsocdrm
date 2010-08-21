@@ -195,10 +195,10 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv)
 {
 	struct drm_ctx_priv_map *request = data;
-	drm_local_map_t *map;
-#ifdef __linux__
+	struct drm_local_map *map;
+#ifdef DRM_NEWER_USER_TOKEN
 	struct drm_map_list *_entry;
-#endif /* __linux__ */
+#endif
 
 	mutex_lock(&dev->struct_mutex);
 	if (dev->max_context < 0 ||
@@ -210,7 +210,7 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 	map = dev->context_sareas[request->ctx_id];
 	mutex_unlock(&dev->struct_mutex);
 
-#ifdef __linux__
+#ifdef DRM_NEWER_USER_TOKEN
 	request->handle = NULL;
 	list_for_each_entry(_entry, &dev->maplist, head) {
 		if (_entry->map == map) {
@@ -221,9 +221,9 @@ int drm_getsareactx(struct drm_device *dev, void *data,
 	}
 	if (request->handle == NULL)
 		return EINVAL;
-#endif /* __linux__ */
-
+#else
 	request->handle = map->handle;
+#endif
 
 	return 0;
 }

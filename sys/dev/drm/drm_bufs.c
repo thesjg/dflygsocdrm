@@ -131,7 +131,7 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 	int use_hashed_handle, shift;
 	unsigned long add;
 
-#ifdef DRM_NEWER_BUFSYNC
+#ifdef DRM_NEWER_USER_TOKEN
 	if (sizeof(long) == 8)
 		use_hashed_handle = ((user_token & 0xFFFFFFFF00000000UL) || hashed_handle);
 	else
@@ -506,11 +506,11 @@ done:
 
 int drm_addmap(struct drm_device * dev, resource_size_t offset,
 /* QUESTION: does userland know size to be unsigned int or unsigned long? */
-#ifdef __linux__
+#ifdef DRM_NEWER_USER_TOKEN
 	       unsigned int size, enum drm_map_type type,
 #else
 	       unsigned long size, enum drm_map_type type,
-#endif /* __linux__ */
+#endif
 	       enum drm_map_flags flags, struct drm_local_map ** map_ptr)
 {
 	struct drm_map_list *list;
@@ -542,13 +542,20 @@ int drm_addmap(struct drm_device * dev, resource_size_t offset,
 int drm_addmap_ioctl(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)
 {
-#if 0
+#ifdef DRM_NEWER_USER_TOKEN
 	struct drm_map *map = data;
 	struct drm_map_list *maplist;
 	int err;
 
+#ifdef __linux__
 	if (!(DRM_SUSER(DRM_CURPROC) || map->type == _DRM_AGP || map->type == _DRM_SHM))
-		return -EPERM;
+#else
+	if (!(dev->flags & (FREAD|FWRITE)))
+		return EACCES; /* Require read/write */
+
+	if (!(DRM_SUSER(DRM_CURPROC) || map->type == _DRM_AGP))
+#endif /* __linux__ */
+		return EACCES;
 
 	err = drm_addmap_core(dev, map->offset, map->size, map->type,
 			      map->flags, &maplist);
@@ -559,22 +566,17 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	/* avoid a warning on 64-bit, this casting isn't very nice, but the API is set so too late */
 	map->handle = (void *)(unsigned long)maplist->user_token;
 
-#endif /* DRM_NEWER_BUFS */
+#else /* DRM_NEWER_USER_TOKEN */
 
 	struct drm_map *request = data;
 	drm_local_map_t *map;
 	int err;
 
-#ifdef __linux__
-	if (!(DRM_SUSER(DRM_CURPROC) || map->type == _DRM_AGP || map->type == _DRM_SHM))
-		return -EPERM;
-#else
 	if (!(dev->flags & (FREAD|FWRITE)))
 		return EACCES; /* Require read/write */
 
 	if (!DRM_SUSER(DRM_CURPROC) && request->type != _DRM_AGP)
 		return EACCES;
-#endif /* __linux__ */
 
 	err = drm_addmap(dev, request->offset, request->size, request->type,
 	    request->flags, &map);
@@ -592,7 +594,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	if (request->type != _DRM_SHM) {
 		request->handle = (void *)request->offset;
 	}
-/* #endif DRM_NEWER_BUFS */
+#endif /* DRM_NEWER_USER_TOKEN */
 
 	return 0;
 }
@@ -610,7 +612,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 {
 	if (map == NULL) {
-		DRM_ERROR("drm_rmmap_locked(): map arg NULL\n");
+		DRM_ERROR("map arg NULL\n");
 		return -EINVAL;
 	}
 

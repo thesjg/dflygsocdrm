@@ -426,6 +426,7 @@ int mga_driver_load(struct drm_device *dev, unsigned long flags)
 	return 0;
 }
 
+#if __OS_HAS_AGP
 /**
  * Bootstrap the driver for AGP DMA.
  *
@@ -554,7 +555,7 @@ static int mga_do_agp_dma_bootstrap(struct drm_device *dev,
 		return err;
 	}
 
-#ifdef __linux__
+#ifdef DRM_NEWER_USER_TOKEN
 	{
 		struct drm_map_list *_entry;
 		unsigned long agp_token = 0;
@@ -596,6 +597,13 @@ static int mga_do_agp_dma_bootstrap(struct drm_device *dev,
 	DRM_INFO("Initialized card for AGP DMA.\n");
 	return 0;
 }
+#else
+static int mga_do_agp_dma_bootstrap(struct drm_device * dev,
+				    drm_mga_dma_bootstrap_t * dma_bs)
+{
+	return -EINVAL;
+}
+#endif
 
 /**
  * Bootstrap the driver for PCI DMA.

@@ -1563,7 +1563,7 @@ extern int drm_i_have_hw_lock(struct drm_device *dev, struct drm_file *file_priv
 /* Buffer management support (drm_bufs.c) */
 extern int drm_addbufs_agp(struct drm_device *dev, struct drm_buf_desc * request);
 extern int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc * request);
-#ifdef __linux__
+#ifdef DRM_NEWER_USER_TOKEN
 extern int drm_addmap(struct drm_device *dev, resource_size_t offset,
 		      unsigned int size, enum drm_map_type type,
 		      enum drm_map_flags flags, struct drm_local_map **map_ptr);
@@ -1905,20 +1905,31 @@ drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
 }
 #endif
 
-static __inline__ struct drm_local_map *
-drm_core_findmap(struct drm_device *dev, unsigned long offset)
+#ifdef DRM_NEWER_USER_TOKEN
+
+static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
+							 unsigned int token)
 {
 	struct drm_map_list *_entry;
 	list_for_each_entry(_entry, &dev->maplist, head)
-#ifdef __linux__
-	    if (_entry->user_token == offset)
+	    if (_entry->user_token == token)
 		return _entry->map;
-#else
-	    if (_entry->map->offset == offset)
-		return _entry->map;
-#endif /* __linux__ */
 	return NULL;
 }
+
+#else
+
+static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
+							 unsigned long offset)
+{
+	struct drm_map_list *_entry;
+	list_for_each_entry(_entry, &dev->maplist, head)
+	    if (_entry->map->offset == offset)
+		return _entry->map;
+	return NULL;
+}
+
+#endif
 
 static __inline__ void drm_core_dropmap(struct drm_map *map)
 {

@@ -186,6 +186,8 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	char buf[128];
 	int retcode;
 
+	unsigned long *user_token;
+
 	/* We can't hold the lock while doing SYSCTL_OUTs, so allocate a
 	 * temporary copy of all the map entries and then SYSCTL_OUT that.
 	 */
@@ -196,8 +198,16 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	}
 
 	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount,
-		DRM_MEM_DRIVER, M_WAITOK);
+		DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (tempmaps == NULL) {
+		mutex_unlock(&dev->struct_mutex);
+		return ENOMEM;
+	}
+
+	user_token = malloc(sizeof(unsigned long) * mapcount,
+		DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+	if (user_token == NULL) {
+		free(tempmaps, DRM_MEM_DRIVER);
 		mutex_unlock(&dev->struct_mutex);
 		return ENOMEM;
 	}
@@ -205,12 +215,13 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	i = 0;
 	list_for_each_entry(r_list, &dev->maplist, head) {
 		map = r_list->map;
+		user_token[i] = r_list->user_token;
 		tempmaps[i++] = *map;
 	}
 	mutex_unlock(&dev->struct_mutex);
 
-	DRM_SYSCTL_PRINT("\nslot offset	        size       "
-	    "type flags address            mtrr\n");
+	DRM_SYSCTL_PRINT("\nslot offset	          size "
+	    "type flags address            user_token        mtrr\n");
 
 	for (i = 0; i < mapcount; i++) {
 		map = &tempmaps[i];
@@ -226,16 +237,19 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 			yesno = "yes";
 
 		DRM_SYSCTL_PRINT(
-			"%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx %s\n",
+			"%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx 0x%016lx %s\n",
 			i,
 			map->offset,
 			map->size, type, map->flags,
-			(unsigned long)map->handle, yesno);
+			(unsigned long)map->handle,
+			(unsigned long)user_token[i],
+			yesno);
 	}
 	SYSCTL_OUT(req, "", 1);
 
 done:
 	free(tempmaps, DRM_MEM_DRIVER);
+	free(user_token, DRM_MEM_DRIVER);
 	return retcode;
 }
 
