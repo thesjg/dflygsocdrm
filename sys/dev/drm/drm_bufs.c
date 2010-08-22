@@ -421,7 +421,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		map->handle = dmah->vaddr;
 		map->offset = (unsigned long)dmah->busaddr;
 		kfree(dmah);
-#else
+#else /* __linux__ */
 		/* Unfortunately, we don't get any alignment specification from
 		 * the caller, so we have to guess.  drm_pci_alloc requires
 		 * a power-of-two alignment, so try to align the bus address of
@@ -542,7 +542,9 @@ int drm_addmap(struct drm_device * dev, resource_size_t offset,
 int drm_addmap_ioctl(struct drm_device *dev, void *data,
 		     struct drm_file *file_priv)
 {
+
 #ifdef DRM_NEWER_USER_TOKEN
+
 	struct drm_map *map = data;
 	struct drm_map_list *maplist;
 	int err;
@@ -594,6 +596,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	if (request->type != _DRM_SHM) {
 		request->handle = (void *)request->offset;
 	}
+
 #endif /* DRM_NEWER_USER_TOKEN */
 
 	return 0;

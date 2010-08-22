@@ -279,7 +279,8 @@ typedef device_t	DRM_AGP_BRIDGE_DATA_T;
 #define DRM_NEWER_HWLOCK 1
 #define DRM_NEWER_SAREA 1
 #define DRM_NEWER_MTRR 1
-#define DRM_NEWER_USER_TOKEN 1
+
+/* #define DRM_NEWER_USER_TOKEN 1 */
 
 #define DRM_OPEN_ARGS  struct dev_open_args *ap
 #define DRM_GET_DEV_ARGS  device_t kdev, DRM_PCI_DEVICE_ID *idlist
