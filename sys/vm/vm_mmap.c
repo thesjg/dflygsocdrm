@@ -1375,7 +1375,7 @@ out:
 }
 
 /*
- * Internal version of mmap.
+ * Internal version of mmap for a vm_object_t without a vnode.
  * Currently used by mmap, exec, and sys5 shared memory.
  * Handle is either a vnode pointer or NULL for MAP_ANON.
  *
@@ -1432,10 +1432,14 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * NOTE: Overflow checks require discrete statements or GCC4
 	 * will optimize it out.
 	 */
-	if (foff & PAGE_MASK) {
+	if ((foff & PAGE_MASK) && (handle_type != OBJT_DEVICE)) {
 		lwkt_reltoken(&vm_token);
 		return (EINVAL);
 	}
+
+	/*
+	 * We allow offsets without alignment because offset isn't used.
+	 */
 
 	if ((flags & (MAP_FIXED | MAP_TRYFIXED)) == 0) {
 		fitit = TRUE;
@@ -1456,11 +1460,10 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	}
 
 	/*
-	 * Lookup/allocate object.
+	 * No need to lookup/allocate object.
 	 */
 			/*
-			 * Device mappings (device size unknown?).
-			 * Force them to be shared.
+			 * Mapping without a regular or any file.
 			 */
 			object = *pobject;
 			if (object == NULL) {
@@ -1468,8 +1471,6 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 				return(EINVAL);
 			}
 			docow = MAP_PREFAULT_PARTIAL;
-			flags &= ~(MAP_PRIVATE|MAP_COPY);
-			flags |= MAP_SHARED;
 
 	/*
 	 * Deal with the adjusted flags
@@ -1523,7 +1524,6 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		 * or named anonymous without other references.
 		 */
 		vm_object_deallocate(object);
-		*pobject = NULL;
 		goto out;
 	}
 
