@@ -410,13 +410,15 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
  * by the GPU.
  */
 static int
-i915_gem_swizzle_page(struct page *page)
+i915_gem_swizzle_page(DRM_PAGE_T page)
 {
 	char *vaddr;
 	int i;
 	char temp[64];
 
-	vaddr = kmap(page);
+	DRM_LWBUF_T lwbuf;
+
+	vaddr = drm_kmap(page, &lwbuf);
 	if (vaddr == NULL)
 		return -ENOMEM;
 
@@ -426,30 +428,7 @@ i915_gem_swizzle_page(struct page *page)
 		memcpy(&vaddr[i + 64], temp, 64);
 	}
 
-	kunmap(page);
-
-	return 0;
-}
-
-/**
- * Swap every 64 bytes of this page around, to account for it having a new
- * bit 17 of its physical address and therefore being interpreted differently
- * by the GPU.
- */
-static int
-i915_gem_swizzle_page_legacy(caddr_t vaddr)
-{
-	int i;
-	char temp[64];
-
-	if (vaddr == NULL)
-		return -ENOMEM;
-
-	for (i = 0; i < PAGE_SIZE; i += 128) {
-		memcpy(temp, &vaddr[i], 64);
-		memcpy(&vaddr[i], &vaddr[i + 64], 64);
-		memcpy(&vaddr[i + 64], temp, 64);
-	}
+	drm_kunmap(page, lwbuf);
 
 	return 0;
 }
@@ -469,20 +448,6 @@ i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 	if (obj_priv->bit_17 == NULL)
 		return;
 
-#ifdef __linux__
-	for (i = 0; i < page_count; i++) {
-		char new_bit_17 = page_to_phys(obj_priv->pages[i]) >> 17;
-		if ((new_bit_17 & 0x1) !=
-		    (test_bit(i, obj_priv->bit_17) != 0)) {
-			int ret = i915_gem_swizzle_page(obj_priv->pages[i]);
-			if (ret != 0) {
-				DRM_ERROR("Failed to swizzle page\n");
-				return;
-			}
-			set_page_dirty(obj_priv->pages[i]);
-		}
-	}
-#else
 	vm_object_t object = obj->object;
 	vm_page_t p;
 	int k;
@@ -492,17 +457,14 @@ i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 		i = (int)p->pindex;
 		if ((new_bit_17 & 0x1) !=
 		    (test_bit(i, obj_priv->bit_17) != 0)) {
-			struct lwbuf *lwb = lwbuf_alloc(p);
-			caddr_t vaddr = lwbuf_kva(lwb);
-			int ret = i915_gem_swizzle_page_legacy(vaddr);
+			int ret = i915_gem_swizzle_page(p);
 			if (ret != 0) {
 				DRM_ERROR("Failed to swizzle page\n");
 				return;
 			}
-			lwbuf_free(lwb);
+			drm_set_page_dirty(p);
 		}
 	}
-#endif
 }
 
 void

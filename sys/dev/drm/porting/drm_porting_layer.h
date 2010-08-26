@@ -1340,7 +1340,7 @@ struct page {
 	struct list_head lru;
 };
 
-typedef vm_page_t	drm_page_t;
+typedef vm_page_t	DRM_PAGE_T;
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapin() */
 struct address_space {
@@ -1430,7 +1430,7 @@ page_cache_release(struct page *to_page) {
 }
 
 static __inline__ void
-drm_page_cache_release(drm_page_t page) {
+drm_page_cache_release(DRM_PAGE_T page) {
 	vm_page_unhold(page);
 }
 
@@ -1442,7 +1442,7 @@ set_page_dirty(struct page *to_page) {
 }
 
 static __inline__ void
-drm_set_page_dirty(drm_page_t page) {
+drm_set_page_dirty(DRM_PAGE_T page) {
 	vm_page_dirty(page);
 }
 
@@ -1563,7 +1563,7 @@ drm_get_user_pages(
 	unsigned long start,
 	unsigned long num_pages,
 	uint32_t vmprot,
-	drm_page_t *pages
+	DRM_PAGE_T *pages
 ) {
 /* For DragonFly BSD see xio_init_ubuf() in kern_xio.c */
 	vm_offset_t addr = trunc_page((vm_offset_t)start);
@@ -1583,21 +1583,33 @@ drm_get_user_pages(
 	return pinned_pages;
 }
 
-typedef struct lwbuf *	drm_lwbuf_t;
+typedef struct lwbuf *	DRM_LWBUF_T;
 
+/* file i915_gem_tiling.c, function i915_gem_swizzle_page() */
 static __inline__ char *
-drm_kmap_atomic(drm_page_t page, drm_lwbuf_t *plwb) {
+drm_kmap(DRM_PAGE_T page, DRM_LWBUF_T *plwb) {
 	*plwb = lwbuf_alloc(page);
 	return (char *)lwbuf_kva(*plwb);
 }
 
 static __inline__ void
-drm_kunmap_atomic(vm_offset_t vaddr, drm_lwbuf_t lwb) {
+drm_kunmap(void *vaddr, DRM_LWBUF_T lwb) {
+	lwbuf_free(lwb);
+}
+
+static __inline__ char *
+drm_kmap_atomic(DRM_PAGE_T page, DRM_LWBUF_T *plwb) {
+	*plwb = lwbuf_alloc(page);
+	return (char *)lwbuf_kva(*plwb);
+}
+
+static __inline__ void
+drm_kunmap_atomic(void *vaddr, DRM_LWBUF_T lwb) {
 	lwbuf_free(lwb);
 }
 
 static __inline__ vm_paddr_t
-drm_page_to_phys(drm_page_t page) {
+drm_page_to_phys(DRM_PAGE_T page) {
 	return page->phys_addr;
 }
 
@@ -1922,6 +1934,7 @@ drm_io_mapping_free(struct io_mapping *mapping, unsigned long size) {
 }
 
 /* file i915_gem.c, function fast_user_write() */
+/* file i915_gem.c, function slow_kernel_write() */
 /* file intel_overlay.c, function intel_overlay_map_regs_atomic() */
 static __inline__ void *
 io_mapping_map_atomic_wc(
@@ -1935,6 +1948,7 @@ io_mapping_map_atomic_wc(
 }
 
 /* file i915_gem.c, function fast_user_write() */
+/* file i915_gem.c, function slow_kernel_write() */
 static __inline__ void
 io_mapping_unmap_atomic(
 	void *vaddr

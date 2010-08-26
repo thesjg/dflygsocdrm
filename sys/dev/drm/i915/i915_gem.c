@@ -177,42 +177,15 @@ static int i915_gem_object_needs_bit17_swizzle(struct drm_gem_object *obj)
 }
 
 static inline int
-slow_shmem_copy(struct page *dst_page,
+slow_shmem_copy(DRM_PAGE_T dst_page,
 		int dst_offset,
-		struct page *src_page,
+		DRM_PAGE_T src_page,
 		int src_offset,
 		int length)
 {
 	char *dst_vaddr, *src_vaddr;
-
-	dst_vaddr = kmap_atomic(dst_page, KM_USER0);
-	if (dst_vaddr == NULL)
-		return -ENOMEM;
-
-	src_vaddr = kmap_atomic(src_page, KM_USER1);
-	if (src_vaddr == NULL) {
-		kunmap_atomic(dst_vaddr, KM_USER0);
-		return -ENOMEM;
-	}
-
-	memcpy(dst_vaddr + dst_offset, src_vaddr + src_offset, length);
-
-	kunmap_atomic(src_vaddr, KM_USER1);
-	kunmap_atomic(dst_vaddr, KM_USER0);
-
-	return 0;
-}
-
-static inline int
-slow_shmem_copy_legacy(drm_page_t dst_page,
-		int dst_offset,
-		drm_page_t src_page,
-		int src_offset,
-		int length)
-{
-	char *dst_vaddr, *src_vaddr;
-	drm_lwbuf_t dst_lwb;
-	drm_lwbuf_t src_lwb;
+	DRM_LWBUF_T dst_lwb;
+	DRM_LWBUF_T src_lwb;
 
 	dst_vaddr = drm_kmap_atomic(dst_page, &dst_lwb);
 	if (dst_vaddr == NULL)
@@ -233,82 +206,24 @@ slow_shmem_copy_legacy(drm_page_t dst_page,
 }
 
 static inline int
-slow_shmem_bit17_copy(struct page *gpu_page,
+slow_shmem_bit17_copy(DRM_PAGE_T gpu_page,
 		      int gpu_offset,
-		      struct page *cpu_page,
+		      DRM_PAGE_T cpu_page,
 		      int cpu_offset,
 		      int length,
 		      int is_read)
 {
 	char *gpu_vaddr, *cpu_vaddr;
+	DRM_LWBUF_T gpu_lwb;
+	DRM_LWBUF_T cpu_lwb;
 
 	/* Use the unswizzled path if this page isn't affected. */
-	if ((page_to_phys(gpu_page) & (1 << 17)) == 0) {
+	if ((drm_page_to_phys(gpu_page) & (1 << 17)) == 0) {
 		if (is_read)
 			return slow_shmem_copy(cpu_page, cpu_offset,
 					       gpu_page, gpu_offset, length);
 		else
 			return slow_shmem_copy(gpu_page, gpu_offset,
-					       cpu_page, cpu_offset, length);
-	}
-
-	gpu_vaddr = kmap_atomic(gpu_page, KM_USER0);
-	if (gpu_vaddr == NULL)
-		return -ENOMEM;
-
-	cpu_vaddr = kmap_atomic(cpu_page, KM_USER1);
-	if (cpu_vaddr == NULL) {
-		kunmap_atomic(gpu_vaddr, KM_USER0);
-		return -ENOMEM;
-	}
-
-	/* Copy the data, XORing A6 with A17 (1). The user already knows he's
-	 * XORing with the other bits (A9 for Y, A9 and A10 for X)
-	 */
-	while (length > 0) {
-		int cacheline_end = DRM_ALIGN(gpu_offset + 1, 64);
-		int this_length = min(cacheline_end - gpu_offset, length);
-		int swizzled_gpu_offset = gpu_offset ^ 64;
-
-		if (is_read) {
-			memcpy(cpu_vaddr + cpu_offset,
-			       gpu_vaddr + swizzled_gpu_offset,
-			       this_length);
-		} else {
-			memcpy(gpu_vaddr + swizzled_gpu_offset,
-			       cpu_vaddr + cpu_offset,
-			       this_length);
-		}
-		cpu_offset += this_length;
-		gpu_offset += this_length;
-		length -= this_length;
-	}
-
-	kunmap_atomic(cpu_vaddr, KM_USER1);
-	kunmap_atomic(gpu_vaddr, KM_USER0);
-
-	return 0;
-}
-
-static inline int
-slow_shmem_bit17_copy_legacy(drm_page_t gpu_page,
-		      int gpu_offset,
-		      drm_page_t cpu_page,
-		      int cpu_offset,
-		      int length,
-		      int is_read)
-{
-	char *gpu_vaddr, *cpu_vaddr;
-	drm_lwbuf_t gpu_lwb;
-	drm_lwbuf_t cpu_lwb;
-
-	/* Use the unswizzled path if this page isn't affected. */
-	if ((drm_page_to_phys(gpu_page) & (1 << 17)) == 0) {
-		if (is_read)
-			return slow_shmem_copy_legacy(cpu_page, cpu_offset,
-					       gpu_page, gpu_offset, length);
-		else
-			return slow_shmem_copy_legacy(gpu_page, gpu_offset,
 					       cpu_page, cpu_offset, length);
 	}
 
@@ -454,7 +369,7 @@ i915_gem_shmem_pread_slow(struct drm_device *dev, struct drm_gem_object *obj,
 #ifdef __linux__
 	struct mm_struct *mm = DRM_GET_CURRENT_MM();
 #endif
-	drm_page_t *user_pages;
+	DRM_PAGE_T *user_pages;
 	ssize_t remain;
 	loff_t offset, pinned_pages, i;
 	loff_t first_data_page, last_data_page, num_pages;
@@ -475,7 +390,7 @@ i915_gem_shmem_pread_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	last_data_page = (data_ptr + args->size - 1) / PAGE_SIZE;
 	num_pages = last_data_page - first_data_page + 1;
 
-	user_pages = drm_calloc_large(num_pages, sizeof(drm_page_t));
+	user_pages = drm_calloc_large(num_pages, sizeof(DRM_PAGE_T));
 	if (user_pages == NULL)
 		return -ENOMEM;
 
@@ -531,14 +446,14 @@ i915_gem_shmem_pread_slow(struct drm_device *dev, struct drm_gem_object *obj,
 			page_length = PAGE_SIZE - data_page_offset;
 
 		if (do_bit17_swizzling) {
-			ret = slow_shmem_bit17_copy_legacy(obj_priv->pages_legacy[shmem_page_index],
+			ret = slow_shmem_bit17_copy(obj_priv->pages_legacy[shmem_page_index],
 						    shmem_page_offset,
 						    user_pages[data_page_index],
 						    data_page_offset,
 						    page_length,
 						    1);
 		} else {
-			ret = slow_shmem_copy_legacy(user_pages[data_page_index],
+			ret = slow_shmem_copy(user_pages[data_page_index],
 					      data_page_offset,
 					      obj_priv->pages_legacy[shmem_page_index],
 					      shmem_page_offset,
@@ -640,18 +555,20 @@ fast_user_write(struct io_mapping *mapping,
 static inline int
 slow_kernel_write(struct io_mapping *mapping,
 		  loff_t gtt_base, int gtt_offset,
-		  struct page *user_page, int user_offset,
+		  DRM_PAGE_T user_page, int user_offset,
 		  int length)
 {
 	char *src_vaddr, *dst_vaddr;
 	unsigned long unwritten;
 
+	DRM_LWBUF_T src_lwbuf;
+
 	dst_vaddr = io_mapping_map_atomic_wc(mapping, gtt_base);
-	src_vaddr = kmap_atomic(user_page, KM_USER1);
+	src_vaddr = drm_kmap_atomic(user_page, &src_lwbuf);
 	unwritten = __copy_from_user_inatomic_nocache(dst_vaddr + gtt_offset,
 						      src_vaddr + user_offset,
 						      length);
-	kunmap_atomic(src_vaddr, KM_USER1);
+	drm_kunmap_atomic(src_vaddr, src_lwbuf);
 	io_mapping_unmap_atomic(dst_vaddr);
 	if (unwritten)
 		return -EFAULT;
@@ -659,7 +576,7 @@ slow_kernel_write(struct io_mapping *mapping,
 }
 
 static inline int
-fast_shmem_write(struct page **pages,
+fast_shmem_write(DRM_VM_OBJECT_T pages,
 		 loff_t page_base, int page_offset,
 		 char __user *data,
 		 int length)
@@ -667,11 +584,14 @@ fast_shmem_write(struct page **pages,
 	char __iomem *vaddr;
 	unsigned long unwritten;
 
-	vaddr = kmap_atomic(pages[page_base >> PAGE_SHIFT], KM_USER0);
+	DRM_LWBUF_T lwbuf;
+	vm_page_t p = vm_page_lookup(pages, page_base >> PAGE_SHIFT);
+
+	vaddr = drm_kmap_atomic(p, &lwbuf);
 	if (vaddr == NULL)
 		return -ENOMEM;
 	unwritten = __copy_from_user_inatomic(vaddr + page_offset, data, length);
-	kunmap_atomic(vaddr, KM_USER0);
+	drm_kunmap_atomic(vaddr, lwbuf);
 
 	if (unwritten)
 		return -EFAULT;
@@ -767,7 +687,7 @@ i915_gem_gtt_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	loff_t gtt_page_base, offset;
 	loff_t first_data_page, last_data_page, num_pages;
 	loff_t pinned_pages, i;
-	struct page **user_pages;
+	DRM_PAGE_T *user_pages;
 	struct mm_struct *mm = DRM_GET_CURRENT_MM();
 	int gtt_page_offset, data_page_offset, data_page_index, page_length;
 	int ret;
@@ -783,15 +703,16 @@ i915_gem_gtt_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	last_data_page = (data_ptr + args->size - 1) / PAGE_SIZE;
 	num_pages = last_data_page - first_data_page + 1;
 
-	user_pages = drm_calloc_large(num_pages, sizeof(struct page *));
+	user_pages = drm_calloc_large(num_pages, sizeof(DRM_PAGE_T));
 	if (user_pages == NULL)
 		return -ENOMEM;
 
+#if __linux__
 	down_read(&mm->mmap_sem);
 	pinned_pages = get_user_pages(DRM_GET_CURRENT(), mm, (uintptr_t)args->data_ptr,
 				      num_pages, 0, 0, user_pages, NULL);
 	up_read(&mm->mmap_sem);
-#if 0
+#else
 	vslock((void *)(uintptr_t)args->data_ptr, args->size);
 	pinned_pages = drm_get_user_pages((unsigned long)args->data_ptr,
 		num_pages, VM_PROT_READ | VM_PROT_WRITE, user_pages);
@@ -857,7 +778,8 @@ out_unlock:
 	mutex_unlock(&dev->struct_mutex);
 out_unpin_pages:
 	for (i = 0; i < pinned_pages; i++)
-		page_cache_release(user_pages[i]);
+		drm_page_cache_release(user_pages[i]);
+	vsunlock((void *)(uintptr_t)args->data_ptr, args->size);
 	drm_free_large(user_pages);
 
 	return ret;
@@ -909,7 +831,7 @@ i915_gem_shmem_pwrite_fast(struct drm_device *dev, struct drm_gem_object *obj,
 		if ((page_offset + remain) > PAGE_SIZE)
 			page_length = PAGE_SIZE - page_offset;
 
-		ret = fast_shmem_write(obj_priv->pages,
+		ret = fast_shmem_write(obj->object,
 				       page_base, page_offset,
 				       user_data, page_length);
 		if (ret)
@@ -944,7 +866,7 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 #ifdef __linux__
 	struct mm_struct *mm = DRM_GET_CURRENT_MM();
 #endif
-	drm_page_t *user_pages;
+	DRM_PAGE_T *user_pages;
 	ssize_t remain;
 	loff_t offset, pinned_pages, i;
 	loff_t first_data_page, last_data_page, num_pages;
@@ -965,7 +887,7 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	last_data_page = (data_ptr + args->size - 1) / PAGE_SIZE;
 	num_pages = last_data_page - first_data_page + 1;
 
-	user_pages = drm_calloc_large(num_pages, sizeof(drm_page_t *));
+	user_pages = drm_calloc_large(num_pages, sizeof(DRM_PAGE_T *));
 	if (user_pages == NULL)
 		return -ENOMEM;
 
@@ -1021,14 +943,14 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 			page_length = PAGE_SIZE - data_page_offset;
 
 		if (do_bit17_swizzling) {
-			ret = slow_shmem_bit17_copy_legacy(obj_priv->pages_legacy[shmem_page_index],
+			ret = slow_shmem_bit17_copy(obj_priv->pages_legacy[shmem_page_index],
 						    shmem_page_offset,
 						    user_pages[data_page_index],
 						    data_page_offset,
 						    page_length,
 						    0);
 		} else {
-			ret = slow_shmem_copy_legacy(obj_priv->pages_legacy[shmem_page_index],
+			ret = slow_shmem_copy(obj_priv->pages_legacy[shmem_page_index],
 					      shmem_page_offset,
 					      user_pages[data_page_index],
 					      data_page_offset,
@@ -1049,6 +971,7 @@ fail_unlock:
 fail_put_user_pages:
 	for (i = 0; i < pinned_pages; i++)
 		drm_page_cache_release(user_pages[i]);
+	vsunlock((void *)(uintptr_t)args->data_ptr, args->size);
 	drm_free_large(user_pages);
 
 	return ret;
@@ -1091,16 +1014,18 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 	 */
 	if (obj_priv->phys_obj)
 		ret = i915_gem_phys_pwrite(dev, obj, args, file_priv);
-#ifdef __linux__ /* UNIMPLEMENTED */
 	else if (obj_priv->tiling_mode == I915_TILING_NONE &&
 		 dev->gtt_total != 0) {
+#ifdef __linux__ /* UNIMPLEMENTED */
 		ret = i915_gem_gtt_pwrite_fast(dev, obj, args, file_priv);
 		if (ret == -EFAULT) {
+#endif
 			ret = i915_gem_gtt_pwrite_slow(dev, obj, args,
 						       file_priv);
+#ifdef __linux__ /* UNIMPLEMENTED */
 		}
-	}
 #endif
+	}
 	else if (i915_gem_object_needs_bit17_swizzle(obj)) {
 		ret = i915_gem_shmem_pwrite_slow(dev, obj, args, file_priv);
 	} else {
@@ -2484,7 +2409,7 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 		obj_priv->pages[i] = page;
 	}
 #else
-	drm_page_t page_legacy;
+	DRM_PAGE_T page_legacy;
 	int error;
 	if (obj_priv->pages_refcount++ != 0)
 		return 0;
@@ -2494,7 +2419,7 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 	 */
 	page_count = obj->size / PAGE_SIZE;
 
-	obj_priv->pages_legacy = drm_calloc_large(page_count, sizeof(drm_page_t));
+	obj_priv->pages_legacy = drm_calloc_large(page_count, sizeof(DRM_PAGE_T));
 	if (!obj_priv->pages_legacy) {
 		obj_priv->pages_refcount--;
 		return -ENOMEM;
@@ -2521,8 +2446,8 @@ err_pages:
 	while (i--)
 		vm_page_unhold(obj_priv->pages_legacy[i]);
 
-	drm_free_large(obj_priv->pages);
-	obj_priv->pages = NULL;
+	drm_free_large(obj_priv->pages_legacy);
+	obj_priv->pages_legacy = NULL;
 	obj_priv->pages_refcount--;
 	return ENODEV;
 }

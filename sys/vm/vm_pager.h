@@ -135,6 +135,10 @@ vm_pager_get_page(vm_object_t object, vm_page_t *m, int seqaccess)
 {
 	int r;
 
+/* For drm but can be generalized */
+	if (object->private_data && object->pgo_getpage)
+		object->pgo_getpage(object, m, seqaccess);
+
 	r = (*pagertab[object->type]->pgo_getpage)(object, m, seqaccess);
 	if (r == VM_PAGER_OK && (*m)->valid != VM_PAGE_BITS_ALL) {
 		vm_page_zero_invalid(*m, TRUE);
