@@ -1131,6 +1131,8 @@ struct workqueue {
 
 /* file ttm_memory.c, function ttm_mem_global_reserve() */
 struct workqueue_struct {
+	struct taskqueue *tq;
+	const char *name;
 	int placeholder;
 };
 
