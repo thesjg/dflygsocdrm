@@ -1301,8 +1301,7 @@ i915_gem_create_mmap_offset(struct drm_gem_object *obj)
 
 	/* Set the object up for mmap'ing */
 	list = &obj->map_list;
-/* ERROR QUESTION */
-	list->map = malloc(sizeof(struct drm_map_list) + sizeof(struct drm_local_map), DRM_MEM_MAPS, M_WAITOK | M_ZERO);
+	list->map = malloc(sizeof(struct drm_map_list), DRM_MEM_MAPS, M_WAITOK | M_ZERO);
 	if (!list->map)
 		return -ENOMEM;
 
@@ -1583,7 +1582,7 @@ static void
 i915_gem_object_truncate(struct drm_gem_object *obj)
 {
 	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__
 	struct inode *inode;
 
 	inode = obj->filp->f_path.dentry->d_inode;
