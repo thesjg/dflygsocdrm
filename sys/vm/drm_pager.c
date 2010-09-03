@@ -60,7 +60,7 @@
 #include <vm/vm_zone.h>
 
 static void dev_pager_dealloc (vm_object_t);
-static int dev_pager_getpage (vm_object_t, vm_page_t *, int);
+static int dev_pager_getpage (vm_object_t, vm_page_t *, int, off_t);
 static void dev_pager_putpages (vm_object_t, vm_page_t *, int,
 		boolean_t, int *);
 static boolean_t dev_pager_haspage (vm_object_t, vm_pindex_t);
@@ -138,7 +138,7 @@ dev_pager_dealloc(vm_object_t object)
  * No requirements.
  */
 static int
-dev_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
+dev_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess, off_t foff)
 {
 	vm_page_t page = *mpp;
 

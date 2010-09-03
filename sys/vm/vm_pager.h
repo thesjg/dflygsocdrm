@@ -62,7 +62,7 @@ struct bio;
 
 struct pagerops {
 	void (*pgo_dealloc) (vm_object_t);
-	int (*pgo_getpage) (vm_object_t, vm_page_t *, int);
+	int (*pgo_getpage) (vm_object_t, vm_page_t *, int, off_t);
 	void (*pgo_putpages) (vm_object_t, vm_page_t *, int, int, int *);
 	boolean_t (*pgo_haspage) (vm_object_t, vm_pindex_t);
 };
@@ -110,7 +110,7 @@ vm_object_t vnode_pager_reference (struct vnode *);
 
 void vm_pager_bufferinit (void);
 void vm_pager_deallocate (vm_object_t);
-static __inline int vm_pager_get_page (vm_object_t, vm_page_t *, int);
+static __inline int vm_pager_get_page (vm_object_t, vm_page_t *, int, off_t);
 static __inline boolean_t vm_pager_has_page (vm_object_t, vm_pindex_t);
 void vm_pager_sync (void);
 struct buf *getchainbuf(struct buf *bp, struct vnode *vp, int flags);
@@ -131,15 +131,15 @@ void swap_pager_unswapped (vm_page_t m);
  */
 
 static __inline int
-vm_pager_get_page(vm_object_t object, vm_page_t *m, int seqaccess)
+vm_pager_get_page(vm_object_t object, vm_page_t *m, int seqaccess, off_t foff)
 {
 	int r;
 
 /* For drm but can be generalized */
 	if (object->private_data && object->pgo_getpage)
-		object->pgo_getpage(object, m, seqaccess);
+		object->pgo_getpage(object, m, seqaccess, foff);
 
-	r = (*pagertab[object->type]->pgo_getpage)(object, m, seqaccess);
+	r = (*pagertab[object->type]->pgo_getpage)(object, m, seqaccess, foff);
 	if (r == VM_PAGER_OK && (*m)->valid != VM_PAGE_BITS_ALL) {
 		vm_page_zero_invalid(*m, TRUE);
 	}

@@ -171,7 +171,7 @@ struct vm_object {
 	int	swblock_count;
 	/* for drm drivers to specify own fault handlers */
 	void *private_data;
-	int (*pgo_getpage)(vm_object_t object, vm_page_t *mpp, int seqaccess);
+	int (*pgo_getpage)(vm_object_t object, vm_page_t *mpp, int seqaccess, off_t foff);
 };
 
 /*

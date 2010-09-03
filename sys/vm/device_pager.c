@@ -59,7 +59,7 @@
 #include <vm/vm_zone.h>
 
 static void dev_pager_dealloc (vm_object_t);
-static int dev_pager_getpage (vm_object_t, vm_page_t *, int);
+static int dev_pager_getpage (vm_object_t, vm_page_t *, int, off_t);
 static void dev_pager_putpages (vm_object_t, vm_page_t *, int, 
 		boolean_t, int *);
 static boolean_t dev_pager_haspage (vm_object_t, vm_pindex_t);
@@ -114,7 +114,7 @@ dev_pager_alloc(void *handle, off_t size, vm_prot_t prot, off_t foff)
 	 */
 	npages = OFF_TO_IDX(size);
 	for (off = foff; npages--; off += PAGE_SIZE) {
-		if (dev_dmmap(dev, off, (int)prot) == -1)
+		if (dev_dmmap(dev, off, (int)prot, foff, 0) == -1)
 			return (NULL);
 	}
 
@@ -176,7 +176,7 @@ dev_pager_dealloc(vm_object_t object)
  * No requirements.
  */
 static int
-dev_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
+dev_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess, off_t foff)
 {
 	vm_offset_t offset;
 	vm_paddr_t paddr;
@@ -192,7 +192,7 @@ dev_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
 	prot = PROT_READ;	/* XXX should pass in? */
 
 	paddr = pmap_phys_address(
-		    dev_dmmap(dev, (vm_offset_t)offset << PAGE_SHIFT, prot));
+		    dev_dmmap(dev, (vm_offset_t)offset << PAGE_SHIFT, prot, foff, 1));
 	KASSERT(paddr != -1,("dev_pager_getpage: map function returns error"));
 
 	if (page->flags & PG_FICTITIOUS) {

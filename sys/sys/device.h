@@ -121,6 +121,8 @@ struct dev_mmap_args {
 	vm_offset_t	a_offset;
 	int		a_nprot;
 	int		a_result;	/* page number */
+	off_t		a_foff;		/* original file offset */
+	int		a_is_getpage;	/* alloc or getpage? */
 };
 
 /*
@@ -327,7 +329,7 @@ int64_t dev_dpsize(cdev_t dev);
 int dev_dread(cdev_t dev, struct uio *uio, int ioflag);
 int dev_dwrite(cdev_t dev, struct uio *uio, int ioflag);
 int dev_dkqfilter(cdev_t dev, struct knote *kn);
-int dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot);
+int dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot, off_t foff, int is_getpage);
 int dev_dmmap_single(cdev_t dev, vm_offset_t offset, vm_size_t size, vm_object_t *object, int nprot);
 int dev_dclone(cdev_t dev);
 int dev_drevoke(cdev_t dev);

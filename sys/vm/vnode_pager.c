@@ -77,7 +77,7 @@
 #include <vm/vm_page2.h>
 
 static void vnode_pager_dealloc (vm_object_t);
-static int vnode_pager_getpage (vm_object_t, vm_page_t *, int);
+static int vnode_pager_getpage (vm_object_t, vm_page_t *, int, off_t);
 static void vnode_pager_putpages (vm_object_t, vm_page_t *, int, boolean_t, int *);
 static boolean_t vnode_pager_haspage (vm_object_t, vm_pindex_t);
 
@@ -468,7 +468,7 @@ vnode_pager_freepage(vm_page_t m)
  * backing vp's VOP_GETPAGES.
  */
 static int
-vnode_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
+vnode_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess, off_t foff)
 {
 	int rtval;
 	struct vnode *vp;

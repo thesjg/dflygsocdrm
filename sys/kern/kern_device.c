@@ -175,7 +175,7 @@ dev_dioctl(cdev_t dev, u_long cmd, caddr_t data, int fflag, struct ucred *cred,
 }
 
 int
-dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot)
+dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot, off_t foff, int is_getpage)
 {
 	struct dev_mmap_args ap;
 	int error;
@@ -184,6 +184,8 @@ dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot)
 	ap.a_head.a_dev = dev;
 	ap.a_offset = offset;
 	ap.a_nprot = nprot;
+	ap.a_foff = foff;
+	ap.a_is_getpage = is_getpage;
 	error = dev->si_ops->d_mmap(&ap);
 	if (error == 0)
 		return(ap.a_result);
