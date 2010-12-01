@@ -51,7 +51,7 @@ module_param_named(debug, drm_debug, int, 0600);
 
 static struct dev_ops drm_cdevsw = {
 /*	{ "drm", 145, D_TRACKCLOSE | D_KQFILTER }, */
-	{ "drm", 145, D_TRACKCLOSE | D_KQFILTER },
+	{ "drm", 145, D_TRACKCLOSE },
 	.d_open =       drm_open_legacy,
 	.d_close =	drm_close_legacy,
 	.d_read =       drm_read_legacy,
