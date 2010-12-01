@@ -37,7 +37,6 @@
  *
  *	from: @(#)cons.c	7.2 (Berkeley) 5/9/91
  * $FreeBSD: src/sys/kern/tty_cons.c,v 1.81.2.4 2001/12/17 18:44:41 guido Exp $
- * $DragonFly: src/sys/kern/tty_cons.c,v 1.21 2007/05/07 05:21:41 dillon Exp $
  */
 
 #include "opt_ddb.h"
@@ -72,7 +71,7 @@ static int cnintercept(struct dev_generic_args *ap);
 
 #define	CDEV_MAJOR	0
 static struct dev_ops cn_ops = {
-	{ "console", CDEV_MAJOR, D_TTY | D_KQFILTER },
+	{ "console", 0, D_TTY },
 	.d_open =	cnopen,
 	.d_close =	cnclose,
 	.d_read =	cnread,
@@ -82,7 +81,7 @@ static struct dev_ops cn_ops = {
 };
 
 static struct dev_ops cn_iops = {
-	{ "intercept", CDEV_MAJOR, D_TTY | D_KQFILTER },
+	{ "intercept", 0, D_TTY },
 	.d_default =    cnintercept
 };
 
@@ -101,6 +100,7 @@ int	cons_unavail = 0;	/* XXX:
 				 * physical console not available for
 				 * input (i.e., it is in graphics mode)
 				 */
+int	sysbeep_enable = 1;
 
 static u_char cn_is_open;		/* nonzero if logical console is open */
 static int openmode, openflag;		/* how /dev/console was openned */
@@ -113,6 +113,8 @@ static char *console_pausestr=
 struct consdev *cn_tab;		/* physical console device info */
 struct consdev *gdb_tab;	/* physical gdb debugger device info */
 
+SYSCTL_INT(_kern, OID_AUTO, sysbeep_enable, CTLFLAG_RW, &sysbeep_enable, 0, "");
+
 CONS_DRIVER(cons, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
 SET_DECLARE(cons_set, struct consdev);
 
@@ -120,6 +122,15 @@ void
 cninit(void)
 {
 	struct consdev *best_cp, *cp, **list;
+
+	/*
+	 * Workaround for token acquisition and releases during the
+	 * console init.  For some reason if lwkt_gettoken()'s mpcount
+	 * optimization is turned off the console init blows up.  It
+	 * might be trying to kprintf() something in the middle of
+	 * its init.
+	 */
+	lwkt_gettoken(&tty_token);
 
 	/*
 	 * Check if we should mute the console (for security reasons perhaps)
@@ -154,8 +165,7 @@ cninit(void)
 	if (best_cp == NULL) {
 		if (cn_tab != NULL && cn_tab->cn_term != NULL)
 			(*cn_tab->cn_term)(cn_tab);
-		cn_tab = best_cp;
-		return;
+		goto done;
 	}
 
 	/*
@@ -170,7 +180,18 @@ cninit(void)
 	}
 	if (boothowto & RB_PAUSE)
 		console_pausing = 1;
+done:
 	cn_tab = best_cp;
+
+	/*
+	 * We can safely release the token after the init is done.
+	 * Also assert that the mpcount is still correct or otherwise
+	 * the SMP/AP boot will blow up on us.
+	 */
+	lwkt_reltoken(&tty_token);
+#ifdef SMP
+	KKASSERT(curthread->td_mpcount == 1);
+#endif
 }
 
 

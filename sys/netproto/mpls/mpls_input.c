@@ -42,6 +42,9 @@
 #include <net/netisr.h>
 #include <net/route.h>
 
+#include <sys/thread2.h>
+#include <sys/mplock2.h>
+
 #include <netproto/mpls/mpls.h>
 #include <netproto/mpls/mpls_var.h>
 
@@ -54,7 +57,7 @@ SYSCTL_INT(_net_mpls, OID_AUTO, forwarding, CTLFLAG_RW,
     &mplsforwarding, 0, "Enable MPLS forwarding between interfaces");
 */
 
-static void	mpls_input_handler(struct netmsg *);
+static void	mpls_input_handler(netmsg_t);
 static void	mpls_forward(struct mbuf *);
 
 void
@@ -76,16 +79,18 @@ mpls_init(void)
 	bzero(&mplsstat, sizeof(struct mpls_stats));
 #endif
 
-	netisr_register(NETISR_MPLS, mpls_mport, pktinfo_portfn_notsupp,
-			mpls_input_handler, NETISR_FLAG_NOTMPSAFE);
+	netisr_register(NETISR_MPLS, mpls_input_handler, mpls_cpufn);
 }
 
 static void
-mpls_input_handler(struct netmsg *msg0)
+mpls_input_handler(netmsg_t msg)
 {
-        struct mbuf *m = ((struct netmsg_packet *)msg0)->nm_packet;
+        struct mbuf *m = msg->packet.nm_packet;
 
+	get_mplock();
         mpls_input(m);
+	rel_mplock();
+	/* do not reply, msg embedded in mbuf */
 }
 
 void
@@ -121,10 +126,7 @@ again:
 		if (MPLS_STACK(ntohl(mpls->mpls_shim))) {
 			/* Decapsulate the ip datagram from the mpls frame. */
 			m_adj(m, sizeof(struct mpls));
-/*
-			ip_input(m);
-*/
-			netisr_dispatch(NETISR_IP, m);
+			netisr_queue(NETISR_IP, m);
 			return;
 		}
 		goto again; /* If not the bottom label, per RFC4182. */
@@ -143,7 +145,7 @@ again:
 		if (MPLS_STACK(ntohl(mpls->mpls_shim))) {
 			/* Decapsulate the ip datagram from the mpls frame. */
 			m_adj(m, sizeof(struct mpls));
-			netisr_dispatch(NETISR_IPV6, m);
+			netisr_queue(NETISR_IPV6, m);
 			return;
 		}
 		goto again; /* If not the bottom label, per RFC4182. */

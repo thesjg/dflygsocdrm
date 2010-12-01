@@ -47,13 +47,14 @@
 #include <sys/sched.h>
 #include <sys/sysctl.h>
 #include <sys/thread.h>
-#include <sys/thread2.h>
 #include <sys/kthread.h>
-#include <sys/mplock2.h>
 #include <sys/unistd.h>
 #include <vm/vm.h>
 #include <vm/vm_page.h>
 #include <cpu/lwbuf.h>
+
+#include <sys/thread2.h>
+#include <sys/mplock2.h>
 
 /*
  * Implement the pre-zeroed page mechanism.
@@ -62,7 +63,7 @@
 #define ZIDLE_HI(v)	((v) * 4 / 5)
 
 /* Number of bytes to zero between reschedule checks */
-#define IDLEZERO_RUN	(32)
+#define IDLEZERO_RUN	(64)
 
 /* Maximum number of pages per second to zero */
 #define NPAGES_RUN	(20000)
@@ -142,6 +143,9 @@ vm_page_zero_time(void)
 	return (DEFAULT_SLEEP_TIME);
 }
 
+/*
+ * MPSAFE thread
+ */
 static void
 vm_pagezero(void __unused *arg)
 {
@@ -163,7 +167,6 @@ vm_pagezero(void __unused *arg)
 	 * For now leave the MP lock held, the VM routines cannot be called
 	 * with it released until tokenization is finished.
 	 */
-	/* rel_mplock(); */
 	lwkt_setpri_self(TDPRI_IDLE_WORK);
 	lwkt_setcpu_self(globaldata_find(ncpus - 1));
 	sleep_time = DEFAULT_SLEEP_TIME;
@@ -204,20 +207,17 @@ vm_pagezero(void __unused *arg)
 			break;
 		case STATE_ZERO_PAGE:
 			/*
-			 * Zero-out the page, stop immediately if a
-			 * resched has been requested.
+			 * Zero-out the page
 			 */
 			while (i < PAGE_SIZE) {
-				if (lwkt_check_resched(curthread))
-					break;
 				if (idlezero_nocache == 1)
 					bzeront(&pg[i], IDLEZERO_RUN);
 				else
 					bzero(&pg[i], IDLEZERO_RUN);
 				i += IDLEZERO_RUN;
+				lwkt_yield();
 			}
-			if (i == PAGE_SIZE)
-				state = STATE_RELEASE_PAGE;
+			state = STATE_RELEASE_PAGE;
 			break;
 		case STATE_RELEASE_PAGE:
 			lwbuf_free(buf);
@@ -227,8 +227,7 @@ vm_pagezero(void __unused *arg)
 			++idlezero_count;
 			break;
 		}
-		if (lwkt_check_resched(curthread))
-			lwkt_switch();
+		lwkt_yield();
 	}
 }
 

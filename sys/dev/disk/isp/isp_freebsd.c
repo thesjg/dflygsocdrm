@@ -1,5 +1,4 @@
 /* $FreeBSD: src/sys/dev/isp/isp_freebsd.c,v 1.32.2.20 2002/10/11 18:49:25 mjacob Exp $ */
-/* $DragonFly: src/sys/dev/disk/isp/isp_freebsd.c,v 1.21 2008/05/18 20:30:22 pavalos Exp $ */
 /*
  * Platform (FreeBSD) dependent common attachment code for Qlogic adapters.
  *
@@ -43,10 +42,8 @@ static timeout_t isp_watchdog;
 static void isp_kthread(void *);
 static void isp_action(struct cam_sim *, union ccb *);
 
-
-#define ISP_CDEV_MAJOR	248
 static struct dev_ops isp_ops = {
-	{ "isp", ISP_CDEV_MAJOR, D_TAPE },
+	{ "isp", 0, D_TAPE },
 	.d_open =	nullopen,
 	.d_close =	nullclose,
 	.d_ioctl =	ispioctl,
@@ -1892,7 +1889,7 @@ isp_watchdog(void *arg)
 			XS_CMD_C_WDOG(xs);
 			callout_reset(&xs->ccb_h.timeout_ch, hz,
 				      isp_watchdog, xs);
-			if (isp_getrqentry(isp, &nxti, &optr, (void **) &qe)) {
+			if (isp_getrqentry(isp, &nxti, &optr, (void *) &qe)) {
 				ISP_UNLOCK(isp);
 				return;
 			}
@@ -1917,6 +1914,7 @@ isp_kthread(void *arg)
 {
 	struct ispsoftc *isp = arg;
 
+	get_mplock();
 	crit_enter();
 	isp->isp_osinfo.intsok = 1;
 
@@ -1958,6 +1956,7 @@ isp_kthread(void *arg)
 		tsleep(&isp->isp_osinfo.kthread, 0, "isp_fc_worker", 0);
 		isp_prt(isp, ISP_LOGDEBUG0, "kthread: waiting until called");
 	}
+	rel_mplock();
 }
 
 static void

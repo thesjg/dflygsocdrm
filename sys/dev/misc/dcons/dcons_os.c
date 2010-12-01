@@ -1,4 +1,6 @@
 /*
+ * (MPSAFE)
+ *
  * Copyright (C) 2003,2004
  * 	Hidetoshi Shimokawa. All rights reserved.
  * 
@@ -32,7 +34,6 @@
  * SUCH DAMAGE.
  * 
  * $FreeBSD: src/sys/dev/dcons/dcons_os.c,v 1.4 2004/10/24 12:41:04 simokawa Exp $
- * $DragonFly: src/sys/dev/misc/dcons/dcons_os.c,v 1.13 2007/08/07 13:14:11 hasso Exp $
  */
 
 #include <sys/param.h>
@@ -87,14 +88,12 @@
 #define DCONS_FORCE_GDB	1
 #endif
 
-#define CDEV_MAJOR      184
-
 static d_open_t		dcons_open;
 static d_close_t	dcons_close;
 static d_ioctl_t	dcons_ioctl;
 
 static struct dev_ops dcons_ops = {
-	{ "dcons", CDEV_MAJOR, D_TTY | D_KQFILTER },
+	{ "dcons", 0, D_TTY },
 	.d_open =	dcons_open,
 	.d_close =	dcons_close,
 	.d_read =	ttyread,
@@ -171,6 +170,7 @@ dcons_check_break(struct dcons_softc *dc, int c)
 	if (c < 0)
 		return (c);
 
+	lwkt_gettoken(&tty_token);
 #if __FreeBSD_version >= 502122
 	if (kdb_alt_break(c, &dc->brk_state)) {
 		if ((dc->flags & DC_GDB) != 0) {
@@ -202,6 +202,7 @@ dcons_check_break(struct dcons_softc *dc, int c)
 	if (c == KEY_CR)
 		dc->brk_state = STATE1;
 #endif
+	lwkt_reltoken(&tty_token);
 	return (c);
 }
 #else
@@ -213,6 +214,7 @@ dcons_os_checkc(struct dcons_softc *dc)
 {
 	int c;
 
+	lwkt_gettoken(&tty_token);
 	if (dg.dma_tag != NULL)
 		bus_dmamap_sync(dg.dma_tag, dg.dma_map, BUS_DMASYNC_POSTREAD);
   
@@ -221,6 +223,7 @@ dcons_os_checkc(struct dcons_softc *dc)
 	if (dg.dma_tag != NULL)
 		bus_dmamap_sync(dg.dma_tag, dg.dma_map, BUS_DMASYNC_PREREAD);
 
+	lwkt_reltoken(&tty_token);
 	return (c);
 }
 
@@ -256,6 +259,7 @@ dcons_open(struct dev_open_args *ap)
 	if (unit != 0)
 		return (ENXIO);
 
+	lwkt_gettoken(&tty_token);
 	tp = dev->si_tty = ttymalloc(dev->si_tty);
 	tp->t_oproc = dcons_tty_start;
 	tp->t_param = dcons_tty_param;
@@ -276,6 +280,7 @@ dcons_open(struct dev_open_args *ap)
 		ttsetwater(tp);
 	} else if ((tp->t_state & TS_XCLUDE) && priv_check_cred(ap->a_cred, PRIV_ROOT, 0)) {
 		crit_exit();
+		lwkt_reltoken(&tty_token);
 		return (EBUSY);
 	}
 	crit_exit();
@@ -285,7 +290,7 @@ dcons_open(struct dev_open_args *ap)
 #else
 	error = ttyld_open(tp, dev);
 #endif
-
+	lwkt_reltoken(&tty_token);
 	return (error);
 }
 
@@ -300,11 +305,13 @@ dcons_close(struct dev_close_args *ap)
 	if (unit != 0)
 		return (ENXIO);
 
+	lwkt_gettoken(&tty_token);
 	tp = dev->si_tty;
 	if (tp->t_state & TS_ISOPEN) {
 		(*linesw[tp->t_line].l_close)(tp, ap->a_fflag);
 		ttyclose(tp);
 	}
+	lwkt_reltoken(&tty_token);
 
 	return (0);
 }
@@ -321,24 +328,32 @@ dcons_ioctl(struct dev_ioctl_args *ap)
 	if (unit != 0)
 		return (ENXIO);
 
+	lwkt_gettoken(&tty_token);
 	tp = dev->si_tty;
 	error = (*linesw[tp->t_line].l_ioctl)(tp, ap->a_cmd, ap->a_data, ap->a_fflag, ap->a_cred);
-	if (error != ENOIOCTL)
+	if (error != ENOIOCTL) {
+		lwkt_reltoken(&tty_token);
 		return (error);
+	}
 
 	error = ttioctl(tp, ap->a_cmd, ap->a_data, ap->a_fflag);
-	if (error != ENOIOCTL)
+	if (error != ENOIOCTL) {
+		lwkt_reltoken(&tty_token);
 		return (error);
+	}
 
+	lwkt_reltoken(&tty_token);
 	return (ENOTTY);
 }
 
 static int
 dcons_tty_param(struct tty *tp, struct termios *t)
 {
+	lwkt_gettoken(&tty_token);
 	tp->t_ispeed = t->c_ispeed;
 	tp->t_ospeed = t->c_ospeed;
 	tp->t_cflag = t->c_cflag;
+	lwkt_reltoken(&tty_token);
 	return 0;
 }
 
@@ -347,10 +362,12 @@ dcons_tty_start(struct tty *tp)
 {
 	struct dcons_softc *dc;
 
+	lwkt_gettoken(&tty_token);
 	dc = (struct dcons_softc *)tp->t_dev->si_drv1;
 	crit_enter();
 	if (tp->t_state & (TS_TIMEOUT | TS_TTSTOP)) {
 		ttwwakeup(tp);
+		lwkt_reltoken(&tty_token);
 		return;
 	}
 
@@ -361,6 +378,7 @@ dcons_tty_start(struct tty *tp)
 
 	ttwwakeup(tp);
 	crit_exit();
+	lwkt_reltoken(&tty_token);
 }
 
 static void
@@ -370,6 +388,7 @@ dcons_timeout(void *v)
 	struct dcons_softc *dc;
 	int i, c, polltime;
 
+	lwkt_gettoken(&tty_token);
 	for (i = 0; i < DCONS_NPORT; i ++) {
 		dc = &sc[i];
 		tp = ((DEV)dc->dev)->si_tty;
@@ -385,6 +404,7 @@ dcons_timeout(void *v)
 	if (polltime < 1)
 		polltime = 1;
 	callout_reset(&dcons_callout, polltime, dcons_timeout, tp);
+	lwkt_reltoken(&tty_token);
 }
 
 static void
@@ -536,7 +556,9 @@ ok:
 	return 0;
 }
 
-
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static int
 dcons_attach_port(int port, char *name, int flags)
 {
@@ -544,6 +566,7 @@ dcons_attach_port(int port, char *name, int flags)
 	struct tty *tp;
 	DEV dev;
 
+	ASSERT_LWKT_TOKEN_HELD(&tty_token);
 	dc = &sc[port];
 	dc->flags = flags;
 	dev = make_dev(&dcons_ops, port,
@@ -562,15 +585,19 @@ dcons_attach_port(int port, char *name, int flags)
 	return(0);
 }
 
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static int
 dcons_attach(void)
 {
 	int polltime;
 
+	ASSERT_LWKT_TOKEN_HELD(&tty_token);
 	dcons_attach_port(DCONS_CON, "dcons", 0);
 	dcons_attach_port(DCONS_GDB, "dgdb", DC_GDB);
 #if __FreeBSD_version < 500000
-	callout_init(&dcons_callout);
+	callout_init_mp(&dcons_callout);
 #else
 	callout_init(&dcons_callout, 0);
 #endif
@@ -581,12 +608,16 @@ dcons_attach(void)
 	return(0);
 }
 
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static int
 dcons_detach(int port)
 {
 	struct	tty *tp;
 	struct dcons_softc *dc;
 
+	ASSERT_LWKT_TOKEN_HELD(&tty_token);
 	dc = &sc[port];
 
 	tp = ((DEV)dc->dev)->si_tty;
@@ -621,6 +652,7 @@ dcons_modevent(module_t mode, int type, void *data)
 {
 	int err = 0, ret;
 
+	lwkt_gettoken(&tty_token);
 	switch (type) {
 	case MOD_LOAD:
 		ret = dcons_drv_init(1);
@@ -663,6 +695,7 @@ dcons_modevent(module_t mode, int type, void *data)
 		err = EOPNOTSUPP;
 		break;
 	}
+	lwkt_reltoken(&tty_token);
 	return(err);
 }
 

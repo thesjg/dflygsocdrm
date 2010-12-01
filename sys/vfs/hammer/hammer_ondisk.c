@@ -289,10 +289,8 @@ hammer_unload_volume(hammer_volume_t volume, void *data __unused)
 	/*
 	 * Clean up the persistent ref ioerror might have on the volume
 	 */
-	if (volume->io.ioerror) {
-		volume->io.ioerror = 0;
-		hammer_rel(&volume->io.lock);
-	}
+	if (volume->io.ioerror)
+		hammer_io_clear_error_noassert(&volume->io);
 
 	/*
 	 * This should release the bp.  Releasing the volume with flush set
@@ -446,7 +444,7 @@ hammer_load_volume(hammer_volume_t volume)
 
 	if (volume->ondisk == NULL) {
 		error = hammer_io_read(volume->devvp, &volume->io,
-				       volume->maxraw_off);
+				       HAMMER_BUFSIZE);
 		if (error == 0) {
 			volume->ondisk = (void *)volume->io.bp->b_data;
                         hammer_ref_interlock_done(&volume->io.lock);
@@ -505,6 +503,33 @@ hammer_mountcheck_volumes(struct hammer_mount *hmp)
  * through to the big-block allocator, or routines like hammer_del_buffers()
  * will not be able to locate all potentially conflicting buffers.
  */
+
+/*
+ * Helper function returns whether a zone offset can be directly translated
+ * to a raw buffer index or not.  Really only the volume and undo zones
+ * can't be directly translated.  Volumes are special-cased and undo zones
+ * shouldn't be aliased accessed in read-only mode.
+ *
+ * This function is ONLY used to detect aliased zones during a read-only
+ * mount.
+ */
+static __inline int
+hammer_direct_zone(hammer_off_t buf_offset)
+{
+	switch(HAMMER_ZONE_DECODE(buf_offset)) {
+	case HAMMER_ZONE_RAW_BUFFER_INDEX:
+	case HAMMER_ZONE_FREEMAP_INDEX:
+	case HAMMER_ZONE_BTREE_INDEX:
+	case HAMMER_ZONE_META_INDEX:
+	case HAMMER_ZONE_LARGE_DATA_INDEX:
+	case HAMMER_ZONE_SMALL_DATA_INDEX:
+		return(1);
+	default:
+		return(0);
+	}
+	/* NOT REACHED */
+}
+
 hammer_buffer_t
 hammer_get_buffer(hammer_mount_t hmp, hammer_off_t buf_offset,
 		  int bytes, int isnew, int *errorp)
@@ -528,6 +553,7 @@ again:
 		 * any other action.  Shortcut the operation if the
 		 * ondisk structure is valid.
 		 */
+found_aliased:
 		if (hammer_ref_interlock(&buffer->io.lock) == 0) {
 			hammer_io_advance(&buffer->io);
 			KKASSERT(buffer->ondisk);
@@ -554,17 +580,38 @@ again:
 		 * buffers will never be in a modified state.  This should
 		 * only occur on the 0->1 transition of refs.
 		 *
-		 * lose_list can be modified via a biodone() interrupt.
+		 * lose_list can be modified via a biodone() interrupt
+		 * so the io_token must be held.
 		 */
 		if (buffer->io.mod_list == &hmp->lose_list) {
-			crit_enter();	/* biodone race against list */
-			TAILQ_REMOVE(buffer->io.mod_list, &buffer->io,
-				     mod_entry);
-			crit_exit();
-			buffer->io.mod_list = NULL;
-			KKASSERT(buffer->io.modified == 0);
+			lwkt_gettoken(&hmp->io_token);
+			if (buffer->io.mod_list == &hmp->lose_list) {
+				TAILQ_REMOVE(buffer->io.mod_list, &buffer->io,
+					     mod_entry);
+				buffer->io.mod_list = NULL;
+				KKASSERT(buffer->io.modified == 0);
+			}
+			lwkt_reltoken(&hmp->io_token);
 		}
 		goto found;
+	} else if (hmp->ronly && hammer_direct_zone(buf_offset)) {
+		/*
+		 * If this is a read-only mount there could be an alias
+		 * in the raw-zone.  If there is we use that buffer instead.
+		 *
+		 * rw mounts will not have aliases.  Also note when going
+		 * from ro -> rw the recovered raw buffers are flushed and
+		 * reclaimed, so again there will not be any aliases once
+		 * the mount is rw.
+		 */
+		buffer = RB_LOOKUP(hammer_buf_rb_tree, &hmp->rb_bufs_root,
+				   (buf_offset & ~HAMMER_OFF_ZONE_MASK) |
+				   HAMMER_ZONE_RAW_BUFFER);
+		if (buffer) {
+			kprintf("HAMMER: recovered aliased %016jx\n",
+				(intmax_t)buf_offset);
+			goto found_aliased;
+		}
 	}
 
 	/*
@@ -742,6 +789,13 @@ hammer_del_buffers(hammer_mount_t hmp, hammer_off_t base_offset,
 				   base_offset);
 		if (buffer) {
 			error = hammer_ref_buffer(buffer);
+			if (hammer_debug_general & 0x20000) {
+				kprintf("hammer: delbufr %016jx "
+					"rerr=%d 1ref=%d\n",
+					(intmax_t)buffer->zoneX_offset,
+					error,
+					hammer_oneref(&buffer->io.lock));
+			}
 			if (error == 0 && !hammer_oneref(&buffer->io.lock)) {
 				error = EAGAIN;
 				hammer_rel_buffer(buffer, 0);
@@ -793,7 +847,7 @@ hammer_load_buffer(hammer_buffer_t buffer, int isnew)
 	 */
 	volume = buffer->io.volume;
 
-	if (hammer_debug_io & 0x0001) {
+	if (hammer_debug_io & 0x0004) {
 		kprintf("load_buffer %016llx %016llx isnew=%d od=%p\n",
 			(long long)buffer->zoneX_offset,
 			(long long)buffer->zone2_offset,
@@ -801,11 +855,30 @@ hammer_load_buffer(hammer_buffer_t buffer, int isnew)
 	}
 
 	if (buffer->ondisk == NULL) {
+		/*
+		 * Issue the read or generate a new buffer.  When reading
+		 * the limit argument controls any read-ahead clustering
+		 * hammer_io_read() is allowed to do.
+		 *
+		 * We cannot read-ahead in the large-data zone and we cannot
+		 * cross a largeblock boundary as the next largeblock might
+		 * use a different buffer size.
+		 */
 		if (isnew) {
 			error = hammer_io_new(volume->devvp, &buffer->io);
-		} else {
+		} else if ((buffer->zoneX_offset & HAMMER_OFF_ZONE_MASK) ==
+			   HAMMER_ZONE_LARGE_DATA) {
 			error = hammer_io_read(volume->devvp, &buffer->io,
-					       volume->maxraw_off);
+					       buffer->io.bytes);
+		} else {
+			hammer_off_t limit;
+
+			limit = (buffer->zone2_offset +
+				 HAMMER_LARGEBLOCK_MASK64) &
+				~HAMMER_LARGEBLOCK_MASK64;
+			limit -= buffer->zone2_offset;
+			error = hammer_io_read(volume->devvp, &buffer->io,
+					       limit);
 		}
 		if (error == 0)
 			buffer->ondisk = (void *)buffer->io.bp->b_data;
@@ -848,8 +921,7 @@ hammer_unload_buffer(hammer_buffer_t buffer, void *data)
 	 * and acquire a ref.  Expect a 0->1 transition.
 	 */
 	if (buffer->io.ioerror) {
-		buffer->io.ioerror = 0;
-		hammer_rel(&buffer->io.lock);
+		hammer_io_clear_error_noassert(&buffer->io);
 		--hammer_count_refedbufs;
 	}
 	hammer_ref_interlock_true(&buffer->io.lock);
@@ -877,6 +949,7 @@ hammer_unload_buffer(hammer_buffer_t buffer, void *data)
 int
 hammer_ref_buffer(hammer_buffer_t buffer)
 {
+	hammer_mount_t hmp;
 	int error;
 	int locked;
 
@@ -885,22 +958,23 @@ hammer_ref_buffer(hammer_buffer_t buffer)
 	 * 0->1 transition.
 	 */
 	locked = hammer_ref_interlock(&buffer->io.lock);
+	hmp = buffer->io.hmp;
 
 	/*
 	 * At this point a biodone() will not touch the buffer other then
 	 * incidental bits.  However, lose_list can be modified via
 	 * a biodone() interrupt.
 	 *
-	 * No longer loose
+	 * No longer loose.  lose_list requires the io_token.
 	 */
-	if (buffer->io.mod_list == &buffer->io.hmp->lose_list) {
-		crit_enter();
-		if (buffer->io.mod_list == &buffer->io.hmp->lose_list) {
+	if (buffer->io.mod_list == &hmp->lose_list) {
+		lwkt_gettoken(&hmp->io_token);
+		if (buffer->io.mod_list == &hmp->lose_list) {
 			TAILQ_REMOVE(buffer->io.mod_list, &buffer->io,
 				     mod_entry);
 			buffer->io.mod_list = NULL;
 		}
-		crit_exit();
+		lwkt_reltoken(&hmp->io_token);
 	}
 
 	if (locked) {

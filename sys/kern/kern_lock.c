@@ -55,12 +55,6 @@
 #include <sys/spinlock2.h>
 
 /*
- * 0: no warnings, 1: warnings, 2: panic
- */
-static int lockmgr_from_int = 1;
-SYSCTL_INT(_debug, OID_AUTO, lockmgr_from_int, CTLFLAG_RW, &lockmgr_from_int, 0, "");
-
-/*
  * Locking primitives implementation.
  * Locks provide shared/exclusive sychronization.
  */
@@ -169,48 +163,34 @@ debuglockmgr(struct lock *lkp, u_int flags,
 	int error;
 	int extflags;
 	int dowakeup;
-	static int didpanic;
 
 	error = 0;
 	dowakeup = 0;
 
-	if (lockmgr_from_int && mycpu->gd_intr_nesting_level &&
+	if (mycpu->gd_intr_nesting_level &&
 	    (flags & LK_NOWAIT) == 0 &&
-	    (flags & LK_TYPE_MASK) != LK_RELEASE && didpanic == 0) {
+	    (flags & LK_TYPE_MASK) != LK_RELEASE &&
+	    panic_cpu_gd != mycpu
+	) {
+
 #ifndef DEBUG_LOCKS
-		    if (lockmgr_from_int == 2) {
-			    didpanic = 1;
-			    panic(
-				"lockmgr %s from %p: called from interrupt",
-				lkp->lk_wmesg, ((int **)&lkp)[-1]);
-			    didpanic = 0;
-		    } else {
-			    kprintf(
-				"lockmgr %s from %p: called from interrupt\n",
-				lkp->lk_wmesg, ((int **)&lkp)[-1]);
-		    }
+		panic("lockmgr %s from %p: called from interrupt, ipi, "
+		      "or hard code section",
+		      lkp->lk_wmesg, ((int **)&lkp)[-1]);
 #else
-		    if (lockmgr_from_int == 2) {
-			    didpanic = 1;
-			    panic(
-				"lockmgr %s from %s:%d: called from interrupt",
-				lkp->lk_wmesg, file, line);
-			    didpanic = 0;
-		    } else {
-			    kprintf(
-				"lockmgr %s from %s:%d: called from interrupt\n",
-				lkp->lk_wmesg, file, line);
-		    }
+		panic("lockmgr %s from %s:%d: called from interrupt, ipi, "
+		      "or hard code section",
+		      lkp->lk_wmesg, file, line);
 #endif
 	}
 
 	/*
 	 * So sue me, I'm too tired.
 	 */
-	if (spin_trylock_wr(&lkp->lk_spinlock) == FALSE) {
+	if (spin_trylock(&lkp->lk_spinlock) == FALSE) {
 		if (flags & LK_NOSPINWAIT)
 			return(EBUSY);
-		spin_lock_wr(&lkp->lk_spinlock);
+		spin_lock(&lkp->lk_spinlock);
 	}
 
 	extflags = (flags | lkp->lk_flags) & LK_EXTFLG_MASK;
@@ -258,7 +238,7 @@ debuglockmgr(struct lock *lkp, u_int flags,
 
 	case LK_DOWNGRADE:
 		if (lkp->lk_lockholder != td || lkp->lk_exclusivecount == 0) {
-			spin_unlock_wr(&lkp->lk_spinlock);
+			spin_unlock(&lkp->lk_spinlock);
 			panic("lockmgr: not holding exclusive lock");
 		}
 		sharelock(lkp, lkp->lk_exclusivecount);
@@ -293,7 +273,7 @@ debuglockmgr(struct lock *lkp, u_int flags,
 		 * will always be unlocked.
 		 */
 		if ((lkp->lk_lockholder == td) || (lkp->lk_sharecount <= 0)) {
-			spin_unlock_wr(&lkp->lk_spinlock);
+			spin_unlock(&lkp->lk_spinlock);
 			panic("lockmgr: upgrade exclusive lock");
 		}
 		dowakeup += shareunlock(lkp, 1);
@@ -322,7 +302,7 @@ debuglockmgr(struct lock *lkp, u_int flags,
 			lkp->lk_flags |= LK_HAVE_EXCL;
 			lkp->lk_lockholder = td;
 			if (lkp->lk_exclusivecount != 0) {
-				spin_unlock_wr(&lkp->lk_spinlock);
+				spin_unlock(&lkp->lk_spinlock);
 				panic("lockmgr: non-zero exclusive count");
 			}
 			lkp->lk_exclusivecount = 1;
@@ -351,7 +331,7 @@ debuglockmgr(struct lock *lkp, u_int flags,
 			 *	Recursive lock.
 			 */
 			if ((extflags & (LK_NOWAIT | LK_CANRECURSE)) == 0) {
-				spin_unlock_wr(&lkp->lk_spinlock);
+				spin_unlock(&lkp->lk_spinlock);
 				panic("lockmgr: locking against myself");
 			}
 			if ((extflags & LK_CANRECURSE) != 0) {
@@ -385,7 +365,7 @@ debuglockmgr(struct lock *lkp, u_int flags,
 		lkp->lk_flags |= LK_HAVE_EXCL;
 		lkp->lk_lockholder = td;
 		if (lkp->lk_exclusivecount != 0) {
-			spin_unlock_wr(&lkp->lk_spinlock);
+			spin_unlock(&lkp->lk_spinlock);
 			panic("lockmgr: non-zero exclusive count");
 		}
 		lkp->lk_exclusivecount = 1;
@@ -401,7 +381,7 @@ debuglockmgr(struct lock *lkp, u_int flags,
 		if (lkp->lk_exclusivecount != 0) {
 			if (lkp->lk_lockholder != td &&
 			    lkp->lk_lockholder != LK_KERNTHREAD) {
-				spin_unlock_wr(&lkp->lk_spinlock);
+				spin_unlock(&lkp->lk_spinlock);
 				panic("lockmgr: pid %d, not %s thr %p/%p unlocking",
 				    (td->td_proc ? td->td_proc->p_pid : -1),
 				    "exclusive lock holder",
@@ -426,12 +406,12 @@ debuglockmgr(struct lock *lkp, u_int flags,
 		break;
 
 	default:
-		spin_unlock_wr(&lkp->lk_spinlock);
+		spin_unlock(&lkp->lk_spinlock);
 		panic("lockmgr: unknown locktype request %d",
 		    flags & LK_TYPE_MASK);
 		/* NOTREACHED */
 	}
-	spin_unlock_wr(&lkp->lk_spinlock);
+	spin_unlock(&lkp->lk_spinlock);
 	if (dowakeup)
 		wakeup(lkp);
 	return (error);
@@ -488,7 +468,7 @@ lockmgr_clrexclusive_interlocked(struct lock *lkp)
 	if (lkp->lk_flags & LK_WAIT_NONZERO)
 		dowakeup = 1;
 	COUNT(td, -1);
-	spin_unlock_wr(&lkp->lk_spinlock);
+	spin_unlock(&lkp->lk_spinlock);
 	if (dowakeup)
 		wakeup((void *)lkp);
 }
@@ -517,12 +497,12 @@ lockinit(struct lock *lkp, char *wmesg, int timo, int flags)
 void
 lockreinit(struct lock *lkp, char *wmesg, int timo, int flags)
 {
-	spin_lock_wr(&lkp->lk_spinlock);
+	spin_lock(&lkp->lk_spinlock);
 	lkp->lk_flags = (lkp->lk_flags & ~LK_EXTFLG_MASK) |
 			(flags & LK_EXTFLG_MASK);
 	lkp->lk_wmesg = wmesg;
 	lkp->lk_timo = timo;
-	spin_unlock_wr(&lkp->lk_spinlock);
+	spin_unlock(&lkp->lk_spinlock);
 }
 
 /*
@@ -548,7 +528,7 @@ lockstatus(struct lock *lkp, struct thread *td)
 {
 	int lock_type = 0;
 
-	spin_lock_wr(&lkp->lk_spinlock);
+	spin_lock(&lkp->lk_spinlock);
 	if (lkp->lk_exclusivecount != 0) {
 		if (td == NULL || lkp->lk_lockholder == td)
 			lock_type = LK_EXCLUSIVE;
@@ -557,7 +537,7 @@ lockstatus(struct lock *lkp, struct thread *td)
 	} else if (lkp->lk_sharecount != 0) {
 		lock_type = LK_SHARED;
 	}
-	spin_unlock_wr(&lkp->lk_spinlock);
+	spin_unlock(&lkp->lk_spinlock);
 	return (lock_type);
 }
 
@@ -585,9 +565,9 @@ lockcount(struct lock *lkp)
 {
 	int count;
 
-	spin_lock_wr(&lkp->lk_spinlock);
+	spin_lock(&lkp->lk_spinlock);
 	count = lkp->lk_exclusivecount + lkp->lk_sharecount;
-	spin_unlock_wr(&lkp->lk_spinlock);
+	spin_unlock(&lkp->lk_spinlock);
 	return (count);
 }
 

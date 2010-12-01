@@ -87,6 +87,9 @@ int ahcidebug = AHCI_D_VERBOSE;
 #define  AHCI_REG_VS_1_0		0x00010000 /* 1.0 */
 #define  AHCI_REG_VS_1_1		0x00010100 /* 1.1 */
 #define  AHCI_REG_VS_1_2		0x00010200 /* 1.2 */
+#define  AHCI_REG_VS_1_3		0x00010300 /* 1.3 */
+#define  AHCI_REG_VS_1_4		0x00010400 /* 1.4 */
+#define  AHCI_REG_VS_1_5		0x00010500 /* 1.5 (future...) */
 
 #define AHCI_REG_CCC_CTL	0x014 /* Coalescing Control */
 #define  AHCI_REG_CCC_CTL_INT(_r)	(((_r) & 0xf8) >> 3) /* CCC INT slot */
@@ -377,12 +380,15 @@ struct ahci_port {
 #define AP_F_SCAN_COMPLETED	0x0020
 #define AP_F_IGNORE_IFS		0x0040
 #define AP_F_IFS_IGNORED	0x0080
-#define AP_F_IFS_OCCURED	0x0100
+#define AP_F_UNUSED_0100	0x0100
 #define AP_F_EXCLUSIVE_ACCESS	0x0200
 #define AP_F_ERR_CCB_RESERVED	0x0400
+#define AP_F_HARSH_REINIT	0x0800
 	int			ap_signal;	/* os per-port thread sig */
 	thread_t		ap_thread;	/* os per-port thread */
 	struct lock		ap_lock;	/* os per-port lock */
+	struct lock		ap_sim_lock;	/* cam sim lock */
+	struct lock		ap_sig_lock;	/* signal thread */
 #define AP_SIGF_INIT		0x0001
 #define AP_SIGF_TIMEOUT		0x0002
 #define AP_SIGF_PORTINT		0x0004

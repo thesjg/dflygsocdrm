@@ -59,17 +59,31 @@
 #include <sys/udev.h>
 #include "udevd.h"
 
+int debugopt = 0;
+
 static int udevfd;
+static int hangup_ongoing = 0;
+static struct pollfd fds[NFDS];
 
 extern pthread_mutex_t	monitor_lock;
 extern TAILQ_HEAD(udev_monitor_list_head, udev_monitor)	udev_monitor_list;
 extern TAILQ_HEAD(pdev_array_list_head, pdev_array_entry)	pdev_array_list;
+
+static void usage(void);
 
 int match_dev_dict(prop_dictionary_t, prop_dictionary_t);
 prop_dictionary_t find_dev_dict(int64_t, prop_dictionary_t, int *);
 
 void udev_read_event(int);
 prop_array_t udev_getdevs(int);
+
+static
+void
+usage(void)
+{
+	fprintf(stderr, "usage: udevd [-d]\n");
+	exit(1);
+}
 
 int
 match_dev_dict(prop_dictionary_t dict, prop_dictionary_t match_dict)
@@ -295,6 +309,32 @@ killed(int sig __unused)
 	pdev_array_clean();
 }
 
+static void
+hangup(int sig __unused)
+{
+	FILE *pidf;
+	int s;
+
+	syslog(LOG_ERR, "udevd hangup+resume");
+
+	pidf = fopen("/var/run/udevd.pid", "w");
+	if (pidf != NULL) {
+		fprintf(pidf, "%ld\n", (long)getpid());
+		fclose(pidf);
+	}
+
+	hangup_ongoing = 1;
+	close(fds[UDEV_SOCKET_FD_IDX].fd);
+	pdev_array_clean();
+	s = init_local_server(LISTEN_SOCKET_FILE, SOCK_STREAM, 0);
+	if (s < 0)
+		err(1, "init_local_server");
+
+	fds[UDEV_SOCKET_FD_IDX].fd = s;
+	pdev_array_entry_insert(udev_getdevs(udevfd));
+	hangup_ongoing = 0;
+}
+
 int
 ignore_signal(int signum)
 {
@@ -310,24 +350,37 @@ ignore_signal(int signum)
 }
 
 static int
-set_killed_signal(void)
+set_signal(int signum, sig_t sig_func)
 {
 	struct sigaction act;
 	int ret;
 
-	act.sa_handler = killed;
+	act.sa_handler = sig_func;
 	sigemptyset(&act.sa_mask);
 	act.sa_flags = 0;
 
-	ret = sigaction(SIGTERM, &act, NULL);
-	return ret;	
+	ret = sigaction(signum, &act, NULL);
+	return ret;
 }
 
-int main(int argc __unused, char *argv[] __unused)
+int main(int argc, char *argv[])
 {
 	int error __unused, i, r, s;
-	struct pollfd fds[NFDS];
 	FILE *pidf;
+	int ch = 0;
+
+	while ((ch = getopt(argc, argv, "d")) != -1) {
+		switch(ch) {
+		case 'd':
+			debugopt = 1;
+			break;
+		default:
+			usage();
+			/* NOT REACHED */
+		}
+	}
+	argc -= optind;
+	argv += optind;
 
 	TAILQ_INIT(&pdev_array_list);
 	TAILQ_INIT(&udev_monitor_list);
@@ -349,16 +402,22 @@ int main(int argc __unused, char *argv[] __unused)
 		err(1, "init_local_server");
 
 	pidf = fopen("/var/run/udevd.pid", "w");
+#if 0
 	if (pidf == NULL)
 		err(1, "pidfile");
+#endif
 
-	set_killed_signal();
+	set_signal(SIGTERM, killed);
+	set_signal(SIGHUP, hangup);
 
-	if (daemon(0, 0) == -1)
-		err(1, "daemon");
+	if (debugopt == 0)
+		if (daemon(0, 0) == -1)
+			err(1, "daemon");
 
-	fprintf(pidf, "%ld\n", (long)getpid());
-	fclose(pidf);
+	if (pidf != NULL) {
+		fprintf(pidf, "%ld\n", (long)getpid());
+		fclose(pidf);
+	}
 
 	syslog(LOG_ERR, "udevd started");
 
@@ -372,8 +431,19 @@ int main(int argc __unused, char *argv[] __unused)
 
 	for (;;) {
 		r = poll(fds, NFDS, -1);
-		if (r < 0)
-			err(1, "polling...");
+		if (r < 0) {
+			if (hangup_ongoing == 0) {
+				if (errno == EINTR) {
+					usleep(5000);
+					continue;
+				} else {
+					err(1, "polling...");
+				}
+			} else {
+				usleep(20000); /* 20 ms */
+				continue;
+			}
+		}
 
 		for (i = 0; (i < NFDS) && (r > 0); i++) {
 			if (fds[i].revents == 0)
@@ -393,5 +463,6 @@ int main(int argc __unused, char *argv[] __unused)
 		}
 	}
 
+	syslog(LOG_ERR, "udevd is exiting normally");
 	return 0;
 }

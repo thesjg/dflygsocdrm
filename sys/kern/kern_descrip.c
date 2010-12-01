@@ -70,7 +70,6 @@
  *
  *	@(#)kern_descrip.c	8.6 (Berkeley) 4/19/94
  * $FreeBSD: src/sys/kern/kern_descrip.c,v 1.81.2.19 2004/02/28 00:43:31 tegge Exp $
- * $DragonFly: src/sys/kern/kern_descrip.c,v 1.79 2008/08/31 13:18:28 aggelos Exp $
  */
 
 #include "opt_compat.h"
@@ -110,7 +109,6 @@
 static void fsetfd_locked(struct filedesc *fdp, struct file *fp, int fd);
 static void fdreserve_locked (struct filedesc *fdp, int fd0, int incr);
 static struct file *funsetfd_locked (struct filedesc *fdp, int fd);
-static int checkfpclosed(struct filedesc *fdp, int fd, struct file *fp);
 static void ffree(struct file *fp);
 
 static MALLOC_DEFINE(M_FILEDESC, "file desc", "Open file descriptor table");
@@ -126,7 +124,7 @@ static	 d_open_t  fdopen;
 
 #define CDEV_MAJOR 22
 static struct dev_ops fildesc_ops = {
-	{ "FD", CDEV_MAJOR, 0 },
+	{ "FD", 0, 0 },
 	.d_open =	fdopen,
 };
 
@@ -170,12 +168,13 @@ sys_getdtablesize(struct getdtablesize_args *uap)
 	struct plimit *limit = p->p_limit;
 	int dtsize;
 
-	spin_lock_rd(&limit->p_spin);
+	spin_lock(&limit->p_spin);
 	if (limit->pl_rlimit[RLIMIT_NOFILE].rlim_cur > INT_MAX)
 		dtsize = INT_MAX;
 	else
 		dtsize = (int)limit->pl_rlimit[RLIMIT_NOFILE].rlim_cur;
-	spin_unlock_rd(&limit->p_spin);
+	spin_unlock(&limit->p_spin);
+
 	if (dtsize > maxfilesperproc)
 		dtsize = maxfilesperproc;
 	if (dtsize < minfilesperproc)
@@ -354,7 +353,7 @@ kern_fcntl(int fd, int cmd, union fcntl_dat *dat, struct ucred *cred)
 		 * we were blocked getting the lock.  If this occurs the
 		 * close might not have caught the lock.
 		 */
-		if (checkfpclosed(p->p_fd, fd, fp)) {
+		if (checkfdclosed(p->p_fd, fd, fp)) {
 			dat->fc_flock.l_whence = SEEK_SET;
 			dat->fc_flock.l_start = 0;
 			dat->fc_flock.l_len = 0;
@@ -495,14 +494,14 @@ retry:
 	if (new < 0 || new > dtsize)
 		return (EINVAL);
 
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if ((unsigned)old >= fdp->fd_nfiles || fdp->fd_files[old].fp == NULL) {
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		return (EBADF);
 	}
 	if (type == DUP_FIXED && old == new) {
 		*res = new;
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		return (0);
 	}
 	fp = fdp->fd_files[old].fp;
@@ -521,11 +520,11 @@ retry:
 	 * setup for the next code block.
 	 */
 	if (type == DUP_VARIABLE || new >= fdp->fd_nfiles) {
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		error = fdalloc(p, new, &newfd);
-		spin_lock_wr(&fdp->fd_spin);
+		spin_lock(&fdp->fd_spin);
 		if (error) {
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			fdrop(fp);
 			return (error);
 		}
@@ -534,7 +533,7 @@ retry:
 		 */
 		if (old >= fdp->fd_nfiles || fdp->fd_files[old].fp != fp) {
 			fsetfd_locked(fdp, NULL, newfd);
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			fdrop(fp);
 			goto retry;
 		}
@@ -543,7 +542,7 @@ retry:
 		 */
 		if (type != DUP_VARIABLE && new != newfd) {
 			fsetfd_locked(fdp, NULL, newfd);
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			fdrop(fp);
 			goto retry;
 		}
@@ -553,7 +552,7 @@ retry:
 		 */
 		if (old == newfd) {
 			fsetfd_locked(fdp, NULL, newfd);
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			fdrop(fp);
 			goto retry;
 		}
@@ -561,7 +560,7 @@ retry:
 		delfp = NULL;
 	} else {
 		if (fdp->fd_files[new].reserved) {
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			fdrop(fp);
 			kprintf("Warning: dup(): target descriptor %d is reserved, waiting for it to be resolved\n", new);
 			tsleep(fdp, 0, "fdres", hz);
@@ -612,7 +611,7 @@ retry:
 	 */
 	fsetfd_locked(fdp, fp, new);
 	fdp->fd_files[new].fileflags = oldflags & ~UF_EXCLOSE;
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	fdrop(fp);
 	*res = new;
 
@@ -622,17 +621,19 @@ retry:
 	 * close() were performed on it).
 	 */
 	if (delfp) {
+		if (SLIST_FIRST(&delfp->f_klist))
+			knote_fdclose(delfp, fdp, new);
 		closef(delfp, p);
 		if (holdleaders) {
-			spin_lock_wr(&fdp->fd_spin);
+			spin_lock(&fdp->fd_spin);
 			fdp->fd_holdleaderscount--;
 			if (fdp->fd_holdleaderscount == 0 &&
 			    fdp->fd_holdleaderswakeup != 0) {
 				fdp->fd_holdleaderswakeup = 0;
-				spin_unlock_wr(&fdp->fd_spin);
+				spin_unlock(&fdp->fd_spin);
 				wakeup(&fdp->fd_holdleaderscount);
 			} else {
-				spin_unlock_wr(&fdp->fd_spin);
+				spin_unlock(&fdp->fd_spin);
 			}
 		}
 	}
@@ -788,18 +789,18 @@ kern_closefrom(int fd)
 	 * reserved descriptors that have not yet been assigned.  
 	 * fd_lastfile can change as a side effect of kern_close().
 	 */
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	while (fd <= fdp->fd_lastfile) {
 		if (fdp->fd_files[fd].fp != NULL) {
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			/* ok if this races another close */
 			if (kern_close(fd) == EINTR)
 				return (EINTR);
-			spin_lock_wr(&fdp->fd_spin);
+			spin_lock(&fdp->fd_spin);
 		}
 		++fd;
 	}
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (0);
 }
 
@@ -830,9 +831,9 @@ kern_close(int fd)
 	KKASSERT(p);
 	fdp = p->p_fd;
 
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if ((fp = funsetfd_locked(fdp, fd)) == NULL) {
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		return (EBADF);
 	}
 	holdleaders = 0;
@@ -849,23 +850,20 @@ kern_close(int fd)
 	 * we now hold the fp reference that used to be owned by the descriptor
 	 * array.
 	 */
-	spin_unlock_wr(&fdp->fd_spin);
-	if (SLIST_FIRST(&fp->f_klist)) {
-		get_mplock();
+	spin_unlock(&fdp->fd_spin);
+	if (SLIST_FIRST(&fp->f_klist))
 		knote_fdclose(fp, fdp, fd);
-		rel_mplock();
-	}
 	error = closef(fp, p);
 	if (holdleaders) {
-		spin_lock_wr(&fdp->fd_spin);
+		spin_lock(&fdp->fd_spin);
 		fdp->fd_holdleaderscount--;
 		if (fdp->fd_holdleaderscount == 0 &&
 		    fdp->fd_holdleaderswakeup != 0) {
 			fdp->fd_holdleaderswakeup = 0;
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			wakeup(&fdp->fd_holdleaderscount);
 		} else {
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 		}
 	}
 	return (error);
@@ -989,8 +987,8 @@ sys_fpathconf(struct fpathconf_args *uap)
 }
 
 static int fdexpand;
-SYSCTL_INT(_debug, OID_AUTO, fdexpand, CTLFLAG_RD, &fdexpand,
-	   0, "");
+SYSCTL_INT(_debug, OID_AUTO, fdexpand, CTLFLAG_RD, &fdexpand, 0,
+    "Number of times a file table has been expanded");
 
 /*
  * Grow the file table so it can hold through descriptor (want).
@@ -1013,18 +1011,18 @@ fdgrow_locked(struct filedesc *fdp, int want)
 		nf = 2 * nf + 1;
 	} while (nf <= want);
 
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	newfiles = kmalloc(nf * sizeof(struct fdnode), M_FILEDESC, M_WAITOK);
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 
 	/*
 	 * We could have raced another extend while we were not holding
 	 * the spinlock.
 	 */
 	if (fdp->fd_nfiles >= nf) {
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		kfree(newfiles, M_FILEDESC);
-		spin_lock_wr(&fdp->fd_spin);
+		spin_lock(&fdp->fd_spin);
 		return;
 	}
 	/*
@@ -1040,9 +1038,9 @@ fdgrow_locked(struct filedesc *fdp, int want)
 	fdp->fd_nfiles = nf;
 
 	if (oldfiles != fdp->fd_builtin_files) {
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		kfree(oldfiles, M_FILEDESC);
-		spin_lock_wr(&fdp->fd_spin);
+		spin_lock(&fdp->fd_spin);
 	}
 	fdexpand++;
 }
@@ -1108,12 +1106,13 @@ fdalloc(struct proc *p, int want, int *result)
 	/*
 	 * Check dtable size limit
 	 */
-	spin_lock_rd(&p->p_limit->p_spin);
+	spin_lock(&p->p_limit->p_spin);
 	if (p->p_rlimit[RLIMIT_NOFILE].rlim_cur > INT_MAX)
 		lim = INT_MAX;
 	else
 		lim = (int)p->p_rlimit[RLIMIT_NOFILE].rlim_cur;
-	spin_unlock_rd(&p->p_limit->p_spin);
+	spin_unlock(&p->p_limit->p_spin);
+
 	if (lim > maxfilesperproc)
 		lim = maxfilesperproc;
 	if (lim < minfilesperproc)
@@ -1142,7 +1141,7 @@ fdalloc(struct proc *p, int want, int *result)
 	/*
 	 * Grow the dtable if necessary
 	 */
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if (want >= fdp->fd_nfiles)
 		fdgrow_locked(fdp, want);
 
@@ -1193,7 +1192,7 @@ retry:
 	 * No space in current array.  Expand?
 	 */
 	if (fdp->fd_nfiles >= lim) {
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		return (EMFILE);
 	}
 	fdgrow_locked(fdp, want);
@@ -1211,7 +1210,7 @@ found:
 	fdp->fd_files[fd].fileflags = 0;
 	fdp->fd_files[fd].reserved = 1;
 	fdreserve_locked(fdp, fd, 1);
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (0);
 }
 
@@ -1228,31 +1227,32 @@ fdavail(struct proc *p, int n)
 	struct fdnode *fdnode;
 	int i, lim, last;
 
-	spin_lock_rd(&p->p_limit->p_spin);
+	spin_lock(&p->p_limit->p_spin);
 	if (p->p_rlimit[RLIMIT_NOFILE].rlim_cur > INT_MAX)
 		lim = INT_MAX;
 	else
 		lim = (int)p->p_rlimit[RLIMIT_NOFILE].rlim_cur;
-	spin_unlock_rd(&p->p_limit->p_spin);
+	spin_unlock(&p->p_limit->p_spin);
+
 	if (lim > maxfilesperproc)
 		lim = maxfilesperproc;
 	if (lim < minfilesperproc)
 		lim = minfilesperproc;
 
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if ((i = lim - fdp->fd_nfiles) > 0 && (n -= i) <= 0) {
-		spin_unlock_rd(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		return (1);
 	}
 	last = min(fdp->fd_nfiles, lim);
 	fdnode = &fdp->fd_files[fdp->fd_freefile];
 	for (i = last - fdp->fd_freefile; --i >= 0; ++fdnode) {
 		if (fdnode->fp == NULL && --n <= 0) {
-			spin_unlock_rd(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			return (1);
 		}
 	}
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (0);
 }
 
@@ -1318,6 +1318,8 @@ fdrevoke(void *f_data, short f_type, struct ucred *cred)
 
 /*
  * Locate matching file pointers directly.
+ *
+ * WARNING: allfiles_scan_exclusive() holds a spinlock through these calls!
  */
 static int
 fdrevoke_check_callback(struct file *fp, void *vinfo)
@@ -1389,32 +1391,32 @@ fdrevoke_proc_callback(struct proc *p, void *vinfo)
 	/*
 	 * Softref the fdp to prevent it from being destroyed
 	 */
-	spin_lock_wr(&p->p_spin);
+	spin_lock(&p->p_spin);
 	if ((fdp = p->p_fd) == NULL) {
-		spin_unlock_wr(&p->p_spin);
+		spin_unlock(&p->p_spin);
 		return(0);
 	}
 	atomic_add_int(&fdp->fd_softrefs, 1);
-	spin_unlock_wr(&p->p_spin);
+	spin_unlock(&p->p_spin);
 
 	/*
 	 * Locate and close any matching file descriptors.
 	 */
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	for (n = 0; n < fdp->fd_nfiles; ++n) {
 		if ((fp = fdp->fd_files[n].fp) == NULL)
 			continue;
 		if (fp->f_flag & FREVOKED) {
 			fhold(info->nfp);
 			fdp->fd_files[n].fp = info->nfp;
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			knote_fdclose(fp, fdp, n);	/* XXX */
 			closef(fp, p);
-			spin_lock_wr(&fdp->fd_spin);
+			spin_lock(&fdp->fd_spin);
 			--info->count;
 		}
 	}
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	atomic_subtract_int(&fdp->fd_softrefs, 1);
 	return(0);
 }
@@ -1471,10 +1473,10 @@ falloc(struct lwp *lp, struct file **resultfp, int *resultfd)
 	fp->f_ops = &badfileops;
 	fp->f_seqcount = 1;
 	fsetcred(fp, cred);
-	spin_lock_wr(&filehead_spin);
+	spin_lock(&filehead_spin);
 	nfiles++;
 	LIST_INSERT_HEAD(&filehead, fp, f_list);
-	spin_unlock_wr(&filehead_spin);
+	spin_unlock(&filehead_spin);
 	if (resultfd) {
 		if ((error = fdalloc(lp->lwp_proc, 0, resultfd)) != 0) {
 			fdrop(fp);
@@ -1489,20 +1491,23 @@ done:
 }
 
 /*
+ * Check for races against a file descriptor by determining that the
+ * file pointer is still associated with the specified file descriptor,
+ * and a close is not currently in progress.
+ *
  * MPSAFE
  */
-static
 int
-checkfpclosed(struct filedesc *fdp, int fd, struct file *fp)
+checkfdclosed(struct filedesc *fdp, int fd, struct file *fp)
 {
 	int error;
 
-	spin_lock_rd(&fdp->fd_spin);
-	if ((unsigned) fd >= fdp->fd_nfiles || fp != fdp->fd_files[fd].fp)
+	spin_lock(&fdp->fd_spin);
+	if ((unsigned)fd >= fdp->fd_nfiles || fp != fdp->fd_files[fd].fp)
 		error = EBADF;
 	else
 		error = 0;
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (error);
 }
 
@@ -1538,9 +1543,9 @@ fsetfd_locked(struct filedesc *fdp, struct file *fp, int fd)
 void
 fsetfd(struct filedesc *fdp, struct file *fp, int fd)
 {
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	fsetfd_locked(fdp, fp, fd);
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 }
 
 /*
@@ -1572,7 +1577,7 @@ fgetfdflags(struct filedesc *fdp, int fd, int *flagsp)
 {
 	int error;
 
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if (((u_int)fd) >= fdp->fd_nfiles) {
 		error = EBADF;
 	} else if (fdp->fd_files[fd].fp == NULL) {
@@ -1581,7 +1586,7 @@ fgetfdflags(struct filedesc *fdp, int fd, int *flagsp)
 		*flagsp = fdp->fd_files[fd].fileflags;
 		error = 0;
 	}
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (error);
 }
 
@@ -1593,7 +1598,7 @@ fsetfdflags(struct filedesc *fdp, int fd, int add_flags)
 {
 	int error;
 
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if (((u_int)fd) >= fdp->fd_nfiles) {
 		error = EBADF;
 	} else if (fdp->fd_files[fd].fp == NULL) {
@@ -1602,7 +1607,7 @@ fsetfdflags(struct filedesc *fdp, int fd, int add_flags)
 		fdp->fd_files[fd].fileflags |= add_flags;
 		error = 0;
 	}
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (error);
 }
 
@@ -1614,7 +1619,7 @@ fclrfdflags(struct filedesc *fdp, int fd, int rem_flags)
 {
 	int error;
 
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if (((u_int)fd) >= fdp->fd_nfiles) {
 		error = EBADF;
 	} else if (fdp->fd_files[fd].fp == NULL) {
@@ -1623,7 +1628,7 @@ fclrfdflags(struct filedesc *fdp, int fd, int rem_flags)
 		fdp->fd_files[fd].fileflags &= ~rem_flags;
 		error = 0;
 	}
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (error);
 }
 
@@ -1662,10 +1667,10 @@ void
 ffree(struct file *fp)
 {
 	KASSERT((fp->f_count == 0), ("ffree: fp_fcount not 0!"));
-	spin_lock_wr(&filehead_spin);
+	spin_lock(&filehead_spin);
 	LIST_REMOVE(fp, f_list);
 	nfiles--;
-	spin_unlock_wr(&filehead_spin);
+	spin_unlock(&filehead_spin);
 	fsetcred(fp, NULL);
 	if (fp->f_nchandle.ncp)
 	    cache_drop(&fp->f_nchandle);
@@ -1700,7 +1705,7 @@ fdinit(struct proc *p)
 	struct filedesc *fdp = p->p_fd;
 
 	newfdp = kmalloc(sizeof(struct filedesc), M_FILEDESC, M_WAITOK|M_ZERO);
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if (fdp->fd_cdir) {
 		newfdp->fd_cdir = fdp->fd_cdir;
 		vref(newfdp->fd_cdir);
@@ -1721,7 +1726,7 @@ fdinit(struct proc *p)
 		vref(newfdp->fd_jdir);
 		cache_copy(&fdp->fd_njdir, &newfdp->fd_njdir);
 	}
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 
 	/* Create the file descriptor table. */
 	newfdp->fd_refcnt = 1;
@@ -1745,9 +1750,9 @@ fdshare(struct proc *p)
 	struct filedesc *fdp;
 
 	fdp = p->p_fd;
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	fdp->fd_refcnt++;
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (fdp);
 }
 
@@ -1778,7 +1783,7 @@ fdcopy(struct proc *p)
 	 */
 	newfdp = kmalloc(sizeof(struct filedesc), M_FILEDESC, M_WAITOK | M_ZERO);
 again:
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if (fdp->fd_lastfile < NDFILE) {
 		newfdp->fd_files = newfdp->fd_builtin_files;
 		i = NDFILE;
@@ -1793,16 +1798,16 @@ again:
 			i = ni;
 			ni = (i - 1) / 2;
 		}
-		spin_unlock_rd(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		newfdp->fd_files = kmalloc(i * sizeof(struct fdnode),
 					  M_FILEDESC, M_WAITOK | M_ZERO);
 
 		/*
 		 * Check for race, retry
 		 */
-		spin_lock_rd(&fdp->fd_spin);
+		spin_lock(&fdp->fd_spin);
 		if (i <= fdp->fd_lastfile) {
-			spin_unlock_rd(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			kfree(newfdp->fd_files, M_FILEDESC);
 			goto again;
 		}
@@ -1867,7 +1872,7 @@ again:
 			}
 		}
 	}
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (newfdp);
 }
 
@@ -1899,7 +1904,7 @@ fdfree(struct proc *p, struct filedesc *repl)
 	/*
 	 * Severe messing around to follow.
 	 */
-	spin_lock_wr(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 
 	/* Check for special need to clear POSIX style locks */
 	fdtol = p->p_fdtol;
@@ -1917,7 +1922,7 @@ fdfree(struct proc *p, struct filedesc *repl)
 				}
 				fp = fdnode->fp;
 				fhold(fp);
-				spin_unlock_wr(&fdp->fd_spin);
+				spin_unlock(&fdp->fd_spin);
 
 				lf.l_whence = SEEK_SET;
 				lf.l_start = 0;
@@ -1930,7 +1935,7 @@ fdfree(struct proc *p, struct filedesc *repl)
 						   &lf,
 						   F_POSIX);
 				fdrop(fp);
-				spin_lock_wr(&fdp->fd_spin);
+				spin_lock(&fdp->fd_spin);
 			}
 		}
 	retry:
@@ -1966,16 +1971,16 @@ fdfree(struct proc *p, struct filedesc *repl)
 		}
 		p->p_fdtol = NULL;
 		if (fdtol != NULL) {
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			kfree(fdtol, M_FILEDESC_TO_LEADER);
-			spin_lock_wr(&fdp->fd_spin);
+			spin_lock(&fdp->fd_spin);
 		}
 	}
 	if (--fdp->fd_refcnt > 0) {
-		spin_unlock_wr(&fdp->fd_spin);
-		spin_lock_wr(&p->p_spin);
+		spin_unlock(&fdp->fd_spin);
+		spin_lock(&p->p_spin);
 		p->p_fd = repl;
-		spin_unlock_wr(&p->p_spin);
+		spin_unlock(&p->p_spin);
 		return;
 	}
 
@@ -1992,20 +1997,22 @@ fdfree(struct proc *p, struct filedesc *repl)
 		if (fdp->fd_files[i].fp) {
 			fp = funsetfd_locked(fdp, i);
 			if (fp) {
-				spin_unlock_wr(&fdp->fd_spin);
+				spin_unlock(&fdp->fd_spin);
+				if (SLIST_FIRST(&fp->f_klist))
+					knote_fdclose(fp, fdp, i);
 				closef(fp, p);
-				spin_lock_wr(&fdp->fd_spin);
+				spin_lock(&fdp->fd_spin);
 			}
 		}
 	}
-	spin_unlock_wr(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 
 	/*
 	 * Interlock against an allproc scan operations (typically frevoke).
 	 */
-	spin_lock_wr(&p->p_spin);
+	spin_lock(&p->p_spin);
 	p->p_fd = repl;
-	spin_unlock_wr(&p->p_spin);
+	spin_unlock(&p->p_spin);
 
 	/*
 	 * Wait for any softrefs to go away.  This race rarely occurs so
@@ -2048,7 +2055,7 @@ holdfp(struct filedesc *fdp, int fd, int flag)
 {
 	struct file* fp;
 
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if (((u_int)fd) >= fdp->fd_nfiles) {
 		fp = NULL;
 		goto done;
@@ -2061,7 +2068,7 @@ holdfp(struct filedesc *fdp, int fd, int flag)
 	}
 	fhold(fp);
 done:
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	return (fp);
 }
 
@@ -2078,7 +2085,7 @@ holdsock(struct filedesc *fdp, int fd, struct file **fpp)
 	struct file *fp;
 	int error;
 
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if ((unsigned)fd >= fdp->fd_nfiles) {
 		error = EBADF;
 		fp = NULL;
@@ -2095,7 +2102,7 @@ holdsock(struct filedesc *fdp, int fd, struct file **fpp)
 	fhold(fp);
 	error = 0;
 done:
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	*fpp = fp;
 	return (error);
 }
@@ -2111,7 +2118,7 @@ holdvnode(struct filedesc *fdp, int fd, struct file **fpp)
 	struct file *fp;
 	int error;
 
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	if ((unsigned)fd >= fdp->fd_nfiles) {
 		error = EBADF;
 		fp = NULL;
@@ -2129,7 +2136,7 @@ holdvnode(struct filedesc *fdp, int fd, struct file **fpp)
 	fhold(fp);
 	error = 0;
 done:
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	*fpp = fp;
 	return (error);
 }
@@ -2390,6 +2397,7 @@ fdrop(struct file *fp)
 	if (atomic_fetchadd_int(&fp->f_count, -1) > 1)
 		return (0);
 
+	KKASSERT(SLIST_FIRST(&fp->f_klist) == NULL);
 	get_mplock();
 
 	/*
@@ -2546,24 +2554,24 @@ dupfdopen(struct filedesc *fdp, int dfd, int sfd, int mode, int error)
 			error = EACCES;
 			break;
 		}
-		spin_lock_wr(&fdp->fd_spin);
+		spin_lock(&fdp->fd_spin);
 		fdp->fd_files[dfd].fileflags = fdp->fd_files[sfd].fileflags;
 		fsetfd_locked(fdp, wfp, dfd);
-		spin_unlock_wr(&fdp->fd_spin);
+		spin_unlock(&fdp->fd_spin);
 		error = 0;
 		break;
 	case ENXIO:
 		/*
 		 * Steal away the file pointer from dfd, and stuff it into indx.
 		 */
-		spin_lock_wr(&fdp->fd_spin);
+		spin_lock(&fdp->fd_spin);
 		fdp->fd_files[dfd].fileflags = fdp->fd_files[sfd].fileflags;
 		fsetfd(fdp, wfp, dfd);
 		if ((xfp = funsetfd_locked(fdp, sfd)) != NULL) {
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			fdrop(xfp);
 		} else {
-			spin_unlock_wr(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 		}
 		error = 0;
 		break;
@@ -2614,13 +2622,13 @@ allfiles_scan_exclusive(int (*callback)(struct file *, void *), void *data)
 	struct file *fp;
 	int res;
 
-	spin_lock_wr(&filehead_spin);
+	spin_lock(&filehead_spin);
 	LIST_FOREACH(fp, &filehead, f_list) {
 		res = callback(fp, data);
 		if (res < 0)
 			break;
 	}
-	spin_unlock_wr(&filehead_spin);
+	spin_unlock(&filehead_spin);
 }
 
 /*
@@ -2698,19 +2706,19 @@ sysctl_kern_file_callback(struct proc *p, void *data)
 	/*
 	 * Softref the fdp to prevent it from being destroyed
 	 */
-	spin_lock_wr(&p->p_spin);
+	spin_lock(&p->p_spin);
 	if ((fdp = p->p_fd) == NULL) {
-		spin_unlock_wr(&p->p_spin);
+		spin_unlock(&p->p_spin);
 		return(0);
 	}
 	atomic_add_int(&fdp->fd_softrefs, 1);
-	spin_unlock_wr(&p->p_spin);
+	spin_unlock(&p->p_spin);
 
 	/*
 	 * The fdp's own spinlock prevents the contents from being
 	 * modified.
 	 */
-	spin_lock_rd(&fdp->fd_spin);
+	spin_lock(&fdp->fd_spin);
 	for (n = 0; n < fdp->fd_nfiles; ++n) {
 		if ((fp = fdp->fd_files[n].fp) == NULL)
 			continue;
@@ -2719,14 +2727,14 @@ sysctl_kern_file_callback(struct proc *p, void *data)
 		} else {
 			uid = p->p_ucred ? p->p_ucred->cr_uid : -1;
 			kcore_make_file(&kf, fp, p->p_pid, uid, n);
-			spin_unlock_rd(&fdp->fd_spin);
+			spin_unlock(&fdp->fd_spin);
 			info->error = SYSCTL_OUT(info->req, &kf, sizeof(kf));
-			spin_lock_rd(&fdp->fd_spin);
+			spin_lock(&fdp->fd_spin);
 			if (info->error)
 				break;
 		}
 	}
-	spin_unlock_rd(&fdp->fd_spin);
+	spin_unlock(&fdp->fd_spin);
 	atomic_subtract_int(&fdp->fd_softrefs, 1);
 	if (info->error)
 		return(-1);
@@ -2781,9 +2789,6 @@ struct fileops badfileops = {
 	.fo_shutdown = badfo_shutdown
 };
 
-/*
- * MPSAFE
- */
 int
 badfo_readwrite(
 	struct file *fp,
@@ -2794,9 +2799,6 @@ badfo_readwrite(
 	return (EBADF);
 }
 
-/*
- * MPSAFE
- */
 int
 badfo_ioctl(struct file *fp, u_long com, caddr_t data,
 	    struct ucred *cred, struct sysmsg *msgv)
@@ -2804,9 +2806,6 @@ badfo_ioctl(struct file *fp, u_long com, caddr_t data,
 	return (EBADF);
 }
 
-/*
- * MPSAFE
- */
 int
 badfo_poll(struct file *fp, int events, struct ucred *cred)
 {
@@ -2814,14 +2813,18 @@ badfo_poll(struct file *fp, int events, struct ucred *cred)
 }
 
 /*
- * MPSAFE
+ * Must return an error to prevent registration, typically
+ * due to a revoked descriptor (file_filtops assigned).
  */
 int
 badfo_kqfilter(struct file *fp, struct knote *kn)
 {
-	return (0);
+	return (EOPNOTSUPP);
 }
 
+/*
+ * MPSAFE
+ */
 int
 badfo_stat(struct file *fp, struct stat *sb, struct ucred *cred)
 {

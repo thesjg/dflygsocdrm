@@ -60,7 +60,6 @@
 #include <sys/syslog.h>
 #include <sys/vnode.h>
 #include <sys/conf.h>
-#include <sys/buf2.h>
 #include <machine/inttypes.h>
 #include "dir.h"
 #include "quota.h"
@@ -71,6 +70,8 @@
 #include "ffs_extern.h"
 #include "ufs_extern.h"
 
+#include <sys/buf2.h>
+#include <sys/mplock2.h>
 #include <sys/thread2.h>
 
 /*
@@ -528,18 +529,30 @@ static int stat_dir_entry;	/* bufs redirtied as dir entry cannot write */
 #ifdef DEBUG
 #include <vm/vm.h>
 #include <sys/sysctl.h>
-SYSCTL_INT(_debug, OID_AUTO, max_softdeps, CTLFLAG_RW, &max_softdeps, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, tickdelay, CTLFLAG_RW, &tickdelay, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, worklist_push, CTLFLAG_RW, &stat_worklist_push, 0,"");
-SYSCTL_INT(_debug, OID_AUTO, blk_limit_push, CTLFLAG_RW, &stat_blk_limit_push, 0,"");
-SYSCTL_INT(_debug, OID_AUTO, ino_limit_push, CTLFLAG_RW, &stat_ino_limit_push, 0,"");
-SYSCTL_INT(_debug, OID_AUTO, blk_limit_hit, CTLFLAG_RW, &stat_blk_limit_hit, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, ino_limit_hit, CTLFLAG_RW, &stat_ino_limit_hit, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, sync_limit_hit, CTLFLAG_RW, &stat_sync_limit_hit, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, indir_blk_ptrs, CTLFLAG_RW, &stat_indir_blk_ptrs, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, inode_bitmap, CTLFLAG_RW, &stat_inode_bitmap, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, direct_blk_ptrs, CTLFLAG_RW, &stat_direct_blk_ptrs, 0, "");
-SYSCTL_INT(_debug, OID_AUTO, dir_entry, CTLFLAG_RW, &stat_dir_entry, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, max_softdeps, CTLFLAG_RW, &max_softdeps, 0,
+    "Maximum soft dependencies before slowdown occurs");
+SYSCTL_INT(_debug, OID_AUTO, tickdelay, CTLFLAG_RW, &tickdelay, 0,
+    "Ticks to delay before allocating during slowdown");
+SYSCTL_INT(_debug, OID_AUTO, worklist_push, CTLFLAG_RW, &stat_worklist_push, 0,
+    "Number of worklist cleanups");
+SYSCTL_INT(_debug, OID_AUTO, blk_limit_push, CTLFLAG_RW, &stat_blk_limit_push, 0,
+    "Number of times block limit neared");
+SYSCTL_INT(_debug, OID_AUTO, ino_limit_push, CTLFLAG_RW, &stat_ino_limit_push, 0,
+    "Number of times inode limit neared");
+SYSCTL_INT(_debug, OID_AUTO, blk_limit_hit, CTLFLAG_RW, &stat_blk_limit_hit, 0,
+    "Number of times block slowdown imposed");
+SYSCTL_INT(_debug, OID_AUTO, ino_limit_hit, CTLFLAG_RW, &stat_ino_limit_hit, 0,
+    "Number of times inode slowdown imposed ");
+SYSCTL_INT(_debug, OID_AUTO, sync_limit_hit, CTLFLAG_RW, &stat_sync_limit_hit, 0,
+    "Number of synchronous slowdowns imposed");
+SYSCTL_INT(_debug, OID_AUTO, indir_blk_ptrs, CTLFLAG_RW, &stat_indir_blk_ptrs, 0,
+    "Bufs redirtied as indir ptrs not written");
+SYSCTL_INT(_debug, OID_AUTO, inode_bitmap, CTLFLAG_RW, &stat_inode_bitmap, 0,
+    "Bufs redirtied as inode bitmap not written");
+SYSCTL_INT(_debug, OID_AUTO, direct_blk_ptrs, CTLFLAG_RW, &stat_direct_blk_ptrs, 0,
+    "Bufs redirtied as direct ptrs not written");
+SYSCTL_INT(_debug, OID_AUTO, dir_entry, CTLFLAG_RW, &stat_dir_entry, 0,
+    "Bufs redirtied as dir entry cannot write");
 #endif /* DEBUG */
 
 /*
@@ -576,6 +589,8 @@ add_to_worklist(struct worklist *wk)
  * that blocks of a file are freed before the inode itself is freed. This
  * ordering ensures that no new <vfsid, inum, lbn> triples will be generated
  * until all the old ones have been purged from the dependency lists.
+ *
+ * bioops callback - hold io_token
  */
 static int 
 softdep_process_worklist(struct mount *matchmnt)
@@ -583,6 +598,8 @@ softdep_process_worklist(struct mount *matchmnt)
 	thread_t td = curthread;
 	int matchcnt, loopcount;
 	long starttime;
+
+	get_mplock();
 
 	/*
 	 * Record the process identifier of our caller so that we can give
@@ -598,8 +615,10 @@ softdep_process_worklist(struct mount *matchmnt)
 	 * related to its mount point that are in the list.
 	 */
 	if (matchmnt == NULL) {
-		if (softdep_worklist_busy < 0)
-			return(-1);
+		if (softdep_worklist_busy < 0) {
+			matchcnt = -1;
+			goto done;
+		}
 		softdep_worklist_busy += 1;
 	}
 
@@ -664,6 +683,8 @@ softdep_process_worklist(struct mount *matchmnt)
 		if (softdep_worklist_req && softdep_worklist_busy == 0)
 			wakeup(&softdep_worklist_req);
 	}
+done:
+	rel_mplock();
 	return (matchcnt);
 }
 
@@ -745,12 +766,15 @@ process_worklist_item(struct mount *matchmnt, int flags)
 
 /*
  * Move dependencies from one buffer to another.
+ *
+ * bioops callback - hold io_token
  */
 static void
 softdep_move_dependencies(struct buf *oldbp, struct buf *newbp)
 {
 	struct worklist *wk, *wktail;
 
+	get_mplock();
 	if (LIST_FIRST(&newbp->b_dep) != NULL)
 		panic("softdep_move_dependencies: need merge code");
 	wktail = NULL;
@@ -765,6 +789,7 @@ softdep_move_dependencies(struct buf *oldbp, struct buf *newbp)
 		newbp->b_ops = &softdep_bioops;
 	}
 	FREE_LOCK(&lk);
+	rel_mplock();
 }
 
 /*
@@ -3067,16 +3092,22 @@ markernext(struct worklist *marker)
 /*
  * checkread, checkwrite
  *
+ * bioops callback - hold io_token
  */
 static  int
 softdep_checkread(struct buf *bp)
 {
+	/* nothing to do, mp lock not needed */
 	return(0);
 }
 
+/*
+ * bioops callback - hold io_token
+ */
 static  int
 softdep_checkwrite(struct buf *bp)
 {
+	/* nothing to do, mp lock not needed */
 	return(0);
 }
 
@@ -3102,6 +3133,8 @@ softdep_checkwrite(struct buf *bp)
  * The buffer must be locked, thus, no I/O completion operations can occur
  * while we are manipulating its associated dependencies.
  *
+ * bioops callback - hold io_token
+ *
  * Parameters:
  *	bp:	structure describing disk write to occur
  */
@@ -3119,6 +3152,7 @@ softdep_disk_io_initiation(struct buf *bp)
 	if (bp->b_cmd == BUF_CMD_READ)
 		panic("softdep_disk_io_initiation: read");
 
+	get_mplock();
 	marker.wk_type = D_LAST + 1;	/* Not a normal workitem */
 	
 	/*
@@ -3128,7 +3162,6 @@ softdep_disk_io_initiation(struct buf *bp)
 		LIST_INSERT_AFTER(wk, &marker, wk_list);
 
 		switch (wk->wk_type) {
-
 		case D_PAGEDEP:
 			initiate_write_filepage(WK_PAGEDEP(wk), bp);
 			continue;
@@ -3181,6 +3214,7 @@ softdep_disk_io_initiation(struct buf *bp)
 			/* NOTREACHED */
 		}
 	}
+	rel_mplock();
 }
 
 /*
@@ -3384,6 +3418,8 @@ initiate_write_inodeblock(struct inodedep *inodedep, struct buf *bp)
  * procedure, before the block is made available to other
  * processes or other routines are called.
  *
+ * bioops callback - hold io_token
+ *
  * Parameters:
  *	bp:	describes the completed disk write
  */
@@ -3399,6 +3435,7 @@ softdep_disk_write_complete(struct buf *bp)
 	struct inodedep *inodedep;
 	struct bmsafemap *bmsafemap;
 
+	get_mplock();
 #ifdef DEBUG
 	if (lk.lkt_held != NOHOLDER)
 		panic("softdep_disk_write_complete: lock is held");
@@ -3508,6 +3545,7 @@ softdep_disk_write_complete(struct buf *bp)
 		panic("softdep_disk_write_complete: lock lost");
 	lk.lkt_held = NOHOLDER;
 #endif
+	rel_mplock();
 }
 
 /*
@@ -4087,6 +4125,8 @@ merge_inode_lists(struct inodedep *inodedep)
  * If we are doing an fsync, then we must ensure that any directory
  * entries for the inode have been written after the inode gets to disk.
  *
+ * bioops callback - hold io_token
+ *
  * Parameters:
  *	vp:	the "in_core" copy of the inode
  */
@@ -4113,11 +4153,13 @@ softdep_fsync(struct vnode *vp)
 	if ((vp->v_mount->mnt_flag & MNT_SOFTDEP) == 0)
 		return (0);
 
+	get_mplock();
 	ip = VTOI(vp);
 	fs = ip->i_fs;
 	ACQUIRE_LOCK(&lk);
 	if (inodedep_lookup(fs, ip->i_number, 0, &inodedep) == 0) {
 		FREE_LOCK(&lk);
+		rel_mplock();
 		return (0);
 	}
 	if (LIST_FIRST(&inodedep->id_inowait) != NULL ||
@@ -4173,11 +4215,14 @@ softdep_fsync(struct vnode *vp)
 		vn_unlock(vp);
 		error = VFS_VGET(mnt, NULL, parentino, &pvp);
 		vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
-		if (error != 0)
+		if (error != 0) {
+			rel_mplock();
 			return (error);
+		}
 		if (flushparent) {
 			if ((error = ffs_update(pvp, 1)) != 0) {
 				vput(pvp);
+				rel_mplock();
 				return (error);
 			}
 		}
@@ -4188,13 +4233,16 @@ softdep_fsync(struct vnode *vp)
 		if (error == 0)
 			error = bwrite(bp);
 		vput(pvp);
-		if (error != 0)
+		if (error != 0) {
+			rel_mplock();
 			return (error);
+		}
 		ACQUIRE_LOCK(&lk);
 		if (inodedep_lookup(fs, ip->i_number, 0, &inodedep) == 0)
 			break;
 	}
 	FREE_LOCK(&lk);
+	rel_mplock();
 	return (0);
 }
 
@@ -5011,6 +5059,8 @@ clear_inodedeps(struct thread *td)
  * Function to determine if the buffer has outstanding dependencies
  * that will cause a roll-back if the buffer is written. If wantcount
  * is set, return number of dependencies, otherwise just yes or no.
+ *
+ * bioops callback - hold io_token
  */
 static int
 softdep_count_dependencies(struct buf *bp, int wantcount)
@@ -5023,8 +5073,11 @@ softdep_count_dependencies(struct buf *bp, int wantcount)
 	struct diradd *dap;
 	int i, retval;
 
+	get_mplock();
+
 	retval = 0;
 	ACQUIRE_LOCK(&lk);
+
 	LIST_FOREACH(wk, &bp->b_dep, wk_list) {
 		switch (wk->wk_type) {
 
@@ -5084,6 +5137,8 @@ softdep_count_dependencies(struct buf *bp, int wantcount)
 	}
 out:
 	FREE_LOCK(&lk);
+	rel_mplock();
+
 	return retval;
 }
 
@@ -5143,10 +5198,13 @@ drain_output(struct vnode *vp, int islocked)
  * Called whenever a buffer that is being invalidated or reallocated
  * contains dependencies. This should only happen if an I/O error has
  * occurred. The routine is called with the buffer locked.
+ *
+ * bioops callback - hold io_token
  */ 
 static void
 softdep_deallocate_dependencies(struct buf *bp)
 {
+	/* nothing to do, mp lock not needed */
 	if ((bp->b_flags & B_ERROR) == 0)
 		panic("softdep_deallocate_dependencies: dangling deps");
 	softdep_error(bp->b_vp->v_mount->mnt_stat.f_mntfromname, bp->b_error);

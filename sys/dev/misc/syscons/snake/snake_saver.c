@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1995-1998 Søren Schmidt
  * All rights reserved.
  *
@@ -37,6 +39,7 @@
 #include <sys/sysctl.h>
 #include <sys/consio.h>
 #include <sys/fbio.h>
+#include <sys/thread.h>
 
 #include <machine/pc/display.h>
 
@@ -61,14 +64,17 @@ snake_saver(video_adapter_t *adp, int blank)
 #define	save	message
 #define	savs	messagep
 
+
 	sc = sc_find_softc(adp, NULL);
-	if (sc == NULL)
+	if (sc == NULL) {
 		return EAGAIN;
+	}
 	scp = sc->cur_scp;
 
 	if (blank) {
-		if (adp->va_info.vi_flags & V_INFO_GRAPHICS)
+		if (adp->va_info.vi_flags & V_INFO_GRAPHICS) {
 			return EAGAIN;
+		}
 		if (blanked <= 0) {
 			sc_vtb_clear(&scp->scr, sc->scr_map[0x20],
 				     (FG_LIGHTGREY | BG_BLACK) << 8);
@@ -83,8 +89,9 @@ snake_saver(video_adapter_t *adp, int blank)
 				    (FG_LIGHTGREY | BG_BLACK) << 8);
 			blanked = 1;
 		}
-		if (blanked++ < 4)
+		if (blanked++ < 4) {
 			return 0;
+		}
 		blanked = 1;
 		sc_vtb_putc(&scp->scr, savs[messagelen - 1], sc->scr_map[0x20],
 			    (FG_LIGHTGREY | BG_BLACK) << 8);
@@ -103,8 +110,9 @@ snake_saver(video_adapter_t *adp, int blank)
 		for (f=messagelen-1; f>=0; f--)
 			sc_vtb_putc(&scp->scr, savs[f], sc->scr_map[save[f]],
 				    (FG_LIGHTGREY | BG_BLACK) << 8);
-	} else
+	} else {
 		blanked = 0;
+	}
 
 	return 0;
 }

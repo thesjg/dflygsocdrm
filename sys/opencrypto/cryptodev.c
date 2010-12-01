@@ -185,6 +185,12 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data,
 		case CRYPTO_AES_CBC:
 			txform = &enc_xform_rijndael128;
 			break;
+		case CRYPTO_AES_XTS:
+			txform = &enc_xform_aes_xts;
+			break;
+		case CRYPTO_AES_CTR:
+			txform = &enc_xform_aes_ctr;
+			break;		
 		case CRYPTO_NULL_CBC:
 			txform = &enc_xform_null;
 			break;
@@ -278,8 +284,11 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data,
 			error = checkforsoftware(crid);
 			if (error)
 				goto bail;
-		} else
+		} else {
 			crid = CRYPTOCAP_F_HARDWARE;
+			if (crypto_devallowsoft)
+				crid |= CRYPTOCAP_F_SOFTWARE;
+		}
 		error = crypto_newsession(&sid, (txform ? &crie : &cria), crid);
 		if (error)
 			goto bail;
@@ -748,7 +757,7 @@ csecreate(struct fcrypt *fcr, u_int64_t sid, caddr_t key, u_int64_t keylen,
 {
 	struct csession *cse;
 
-	cse = kmalloc(sizeof(struct csession), M_XDATA, M_NOWAIT);
+	cse = kmalloc(sizeof(struct csession), M_XDATA, M_WAITOK | M_ZERO);
 	if (cse == NULL)
 		return NULL;
 	lockinit(&cse->lock, "cryptodev", 0, LK_CANRECURSE);
@@ -843,7 +852,7 @@ cryptoioctl(struct dev_ioctl_args *ap)
 }
 
 static struct dev_ops crypto_ops = {
-	{ "crypto", 0, D_MPSAFE_READ | D_MPSAFE_WRITE | D_MPSAFE_IOCTL },
+	{ "crypto", 0, D_MPSAFE },
 	.d_open =	cryptoopen,
 	.d_read =	cryptoread,
 	.d_write =	cryptowrite,

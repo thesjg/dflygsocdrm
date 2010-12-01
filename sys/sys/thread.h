@@ -104,6 +104,7 @@ typedef struct lwkt_token {
     struct lwkt_tokref	*t_ref;		/* Owning ref or NULL */
     intptr_t		t_flags;	/* MP lock required */
     long		t_collisions;	/* Collision counter */
+    const char		*t_desc;	/* Descriptive name */
 } lwkt_token;
 
 #define LWKT_TOKEN_MPSAFE	0x0001
@@ -113,27 +114,63 @@ typedef struct lwkt_token {
  *	UP - Not MPSAFE (full MP lock will also be acquired)
  *	MP - Is MPSAFE  (only the token will be acquired)
  */
-#define LWKT_TOKEN_UP_INITIALIZER	\
+#define LWKT_TOKEN_UP_INITIALIZER(name)	\
 {					\
 	.t_ref = NULL,			\
 	.t_flags = 0,			\
-	.t_collisions = 0		\
+	.t_collisions = 0,		\
+	.t_desc = #name			\
 }
 
-#define LWKT_TOKEN_MP_INITIALIZER	\
+#define LWKT_TOKEN_MP_INITIALIZER(name)	\
 {					\
 	.t_ref = NULL,			\
 	.t_flags = LWKT_TOKEN_MPSAFE,	\
-	.t_collisions = 0		\
+	.t_collisions = 0,		\
+	.t_desc = #name			\
 }
 
-#define ASSERT_LWKT_TOKEN_HELD(tok) \
-	KKASSERT((tok)->t_ref->tr_owner == curthread)
+/*
+ * Assert that a particular token is held
+ */
+#define ASSERT_LWKT_TOKEN_HELD(tok)	\
+	KKASSERT((tok)->t_ref && (tok)->t_ref->tr_owner == curthread)
+#define ASSERT_NO_TOKENS_HELD(td)	\
+	KKASSERT((td)->td_toks_stop == &td->toks_array[0])
+
+/*
+ * Assert that a particular token is held and we are in a hard
+ * code execution section (interrupt, ipi, or hard code section).
+ * Hard code sections are not allowed to block or potentially block.
+ * e.g. lwkt_gettoken() would only be ok if the token were already
+ * held.
+ */
+#define ASSERT_LWKT_TOKEN_HARD(tok)					\
+	do {								\
+		globaldata_t zgd __debugvar = mycpu;			\
+		KKASSERT((tok)->t_ref &&				\
+			 (tok)->t_ref->tr_owner == zgd->gd_curthread &&	\
+			 zgd->gd_intr_nesting_level > 0);		\
+	} while(0)
+
+/*
+ * Assert that a particular token is held and we are in a normal
+ * critical section.  Critical sections will not be preempted but
+ * can explicitly block (tsleep, lwkt_gettoken, etc).
+ */
+#define ASSERT_LWKT_TOKEN_CRIT(tok)					\
+	do {								\
+		globaldata_t zgd __debugvar = mycpu;			\
+		KKASSERT((tok)->t_ref &&				\
+			 (tok)->t_ref->tr_owner == zgd->gd_curthread &&	\
+			 zgd->gd_curthread->td_critcount > 0);		\
+	} while(0)
 
 struct lwkt_tokref {
     lwkt_token_t	tr_tok;		/* token in question */
     struct thread	*tr_owner;	/* me */
     intptr_t		tr_flags;	/* copy of t_flags */
+    const void		*tr_stallpc;	/* stalled at pc */
 };
 
 #define MAXCPUFIFO      16	/* power of 2 */
@@ -196,9 +233,6 @@ typedef struct lwkt_cpu_msg {
  * must be done through cpu_*msg() functions.  e.g. you could request
  * ownership of a thread that way, or hand a thread off to another cpu.
  *
- * NOTE: td_pri is bumped by TDPRI_CRIT when entering a critical section,
- * but this does not effect how the thread is scheduled by LWKT.
- *
  * NOTE: td_ucred is synchronized from the p_ucred on user->kernel syscall,
  *	 trap, and AST/signal transitions to provide a stable ucred for
  *	 (primarily) system calls.  This field will be NULL for pure kernel
@@ -219,9 +253,10 @@ struct thread {
     const char	*td_wmesg;	/* string name for blockage */
     const volatile void	*td_wchan;	/* waiting on channel */
     int		td_pri;		/* 0-31, 31=highest priority (note 1) */
+    int		td_critcount;	/* critical section priority */
     int		td_flags;	/* TDF flags */
     int		td_wdomain;	/* domain for wchan address (typ 0) */
-    void	(*td_preemptable)(struct thread *td, int critpri);
+    void	(*td_preemptable)(struct thread *td, int critcount);
     void	(*td_release)(struct thread *td);
     char	*td_kstack;	/* kernel stack */
     int		td_kstack_size;	/* size of kernel stack */
@@ -231,17 +266,21 @@ struct thread {
     __uint64_t	td_sticks;      /* Statclock hits in system mode (uS) */
     __uint64_t	td_iticks;	/* Statclock hits processing intr (uS) */
     int		td_locks;	/* lockmgr lock debugging */
-    int		td_unused01;
     void	*td_dsched_priv1;	/* priv data for I/O schedulers */
     int		td_refs;	/* hold position in gd_tdallq / hold free */
     int		td_nest_count;	/* prevent splz nesting */
 #ifdef SMP
     int		td_mpcount;	/* MP lock held (count) */
+    int		td_xpcount;	/* MP lock held inherited (count) */
     int		td_cscount;	/* cpu synchronization master */
+    int		td_unused02[4];	/* for future fields */
 #else
     int		td_mpcount_unused;	/* filler so size matches */
+    int		td_xpcount_unused;
     int		td_cscount_unused;
+    int		td_unused02[4];
 #endif
+    int		td_unused03[4];		/* for future fields */
     struct iosched_data td_iosdata;	/* Dynamic I/O scheduling data */
     struct timeval td_start;	/* start time for a thread/process */
     char	td_comm[MAXCOMLEN+1]; /* typ 16+1 bytes */
@@ -250,6 +289,9 @@ struct thread {
     struct caps_kinfo *td_caps;	/* list of client and server registrations */
     lwkt_tokref_t td_toks_stop;
     struct lwkt_tokref td_toks_array[LWKT_MAXTOKENS];
+    int		td_fairq_lticks;	/* fairq wakeup accumulator reset */
+    int		td_fairq_accum;		/* fairq priority accumulator */
+    const void	*td_mplock_stallpc;	/* last mplock stall address */
 #ifdef DEBUG_CRIT_SECTIONS
 #define CRIT_DEBUG_ARRAY_SIZE   32
 #define CRIT_DEBUG_ARRAY_MASK   (CRIT_DEBUG_ARRAY_SIZE - 1)
@@ -260,8 +302,8 @@ struct thread {
     struct md_thread td_mach;
 };
 
-#define td_toks_base	td_toks_array[0]
-#define td_toks_end	td_toks_array[LWKT_MAXTOKENS]
+#define td_toks_base		td_toks_array[0]
+#define td_toks_end		td_toks_array[LWKT_MAXTOKENS]
 
 #define TD_TOKS_HELD(td)	((td)->td_toks_stop != &(td)->td_toks_base)
 #define TD_TOKS_NOT_HELD(td)	((td)->td_toks_stop == &(td)->td_toks_base)
@@ -305,11 +347,13 @@ struct thread {
 #define TDF_BLOCKED		0x00040000	/* Thread is blocked */
 #define TDF_PANICWARN		0x00080000	/* panic warning in switch */
 #define TDF_BLOCKQ		0x00100000	/* on block queue */
-#define TDF_MPSAFE		0x00200000	/* (thread creation) */
+#define TDF_UNUSED00200000	0x00200000
 #define TDF_EXITING		0x00400000	/* thread exiting */
 #define TDF_USINGFP		0x00800000	/* thread using fp coproc */
 #define TDF_KERNELFP		0x01000000	/* kernel using fp coproc */
-#define TDF_NETWORK		0x02000000	/* network proto thread */
+#define TDF_UNUSED02000000	0x02000000
+#define TDF_CRYPTO		0x04000000	/* crypto thread */
+#define TDF_MARKER		0x80000000	/* fairq marker thread */
 
 /*
  * Thread priorities.  Typically only one thread from any given
@@ -338,14 +382,21 @@ struct thread {
 #define TDPRI_INT_HIGH		29	/* high priority interrupt */
 #define TDPRI_MAX		31
 
-#define TDPRI_MASK		31
-#define TDPRI_CRIT		32	/* high bits of td_pri used for crit */
+/*
+ * Scale is the approximate number of ticks for which we desire the
+ * entire gd_tdrunq to get service.  With hz = 100 a scale of 8 is 80ms.
+ *
+ * Setting this value too small will result in inefficient switching
+ * rates.
+ */
+#define TDFAIRQ_SCALE		8
+#define TDFAIRQ_MAX(gd)		((gd)->gd_fairq_total_pri * TDFAIRQ_SCALE)
 
 #define LWKT_THREAD_STACK	(UPAGES * PAGE_SIZE)
 
 #define CACHE_NTHREADS		6
 
-#define IN_CRITICAL_SECT(td)	((td)->td_pri >= TDPRI_CRIT)
+#define IN_CRITICAL_SECT(td)	((td)->td_critcount)
 
 #ifdef _KERNEL
 
@@ -360,6 +411,7 @@ extern struct lwkt_token kvm_token;
 extern struct lwkt_token proc_token;
 extern struct lwkt_token tty_token;
 extern struct lwkt_token vnode_token;
+extern struct lwkt_token vmobj_token;
 
 /*
  * Procedures
@@ -385,24 +437,32 @@ extern void lwkt_token_wait(void);
 extern void lwkt_hold(thread_t);
 extern void lwkt_rele(thread_t);
 extern void lwkt_passive_release(thread_t);
+extern void lwkt_maybe_splz(thread_t);
 
 extern void lwkt_gettoken(lwkt_token_t);
+extern void lwkt_gettoken_hard(lwkt_token_t);
 extern int  lwkt_trytoken(lwkt_token_t);
 extern void lwkt_reltoken(lwkt_token_t);
-extern int  lwkt_getalltokens(thread_t);
+extern void lwkt_reltoken_hard(lwkt_token_t);
+extern int  lwkt_getalltokens(thread_t, const char **, const void **);
 extern void lwkt_relalltokens(thread_t);
 extern void lwkt_drain_token_requests(void);
-extern void lwkt_token_init(lwkt_token_t, int);
+extern void lwkt_token_init(lwkt_token_t, int, const char *);
 extern void lwkt_token_uninit(lwkt_token_t);
 
 extern void lwkt_token_pool_init(void);
 extern lwkt_token_t lwkt_token_pool_lookup(void *);
 extern lwkt_token_t lwkt_getpooltoken(void *);
+extern void lwkt_relpooltoken(void *);
 
 extern void lwkt_setpri(thread_t, int);
 extern void lwkt_setpri_initial(thread_t, int);
 extern void lwkt_setpri_self(int);
-extern int lwkt_check_resched(thread_t);
+extern void lwkt_fairq_schedulerclock(thread_t td);
+extern void lwkt_fairq_setpri_self(int pri);
+extern int lwkt_fairq_push(int pri);
+extern void lwkt_fairq_pop(int pri);
+extern void lwkt_fairq_yield(void);
 extern void lwkt_setcpu_self(struct globaldata *);
 extern void lwkt_migratecpu(int);
 
@@ -432,7 +492,7 @@ extern void lwkt_cpusync_start(cpumask_t, lwkt_cpusync_t);
 extern void lwkt_cpusync_add(cpumask_t, lwkt_cpusync_t);
 extern void lwkt_cpusync_finish(lwkt_cpusync_t);
 
-extern void crit_panic(void);
+extern void crit_panic(void) __dead2;
 extern struct lwp *lwkt_preempted_proc(void);
 
 extern int  lwkt_create (void (*func)(void *), void *, struct thread **,

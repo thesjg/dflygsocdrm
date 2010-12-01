@@ -343,13 +343,11 @@ void	ieee80211_ies_expand(struct ieee80211_ies *);
  */
 struct ieee80211_node_table {
 	struct ieee80211com	*nt_ic;		/* back reference */
-	ieee80211_node_lock_t	nt_nodelock;	/* on node table */
 	TAILQ_HEAD(, ieee80211_node) nt_node;	/* information of all nodes */
 	LIST_HEAD(, ieee80211_node) nt_hash[IEEE80211_NODE_HASHSIZE];
 	struct ieee80211_node	**nt_keyixmap;	/* key ix -> node map */
 	int			nt_keyixmax;	/* keyixmap size */
 	const char		*nt_name;	/* table name for debug msgs */
-	ieee80211_scan_lock_t	nt_scanlock;	/* on nt_scangen */
 	u_int			nt_scangen;	/* gen# for iterators */
 	int			nt_inact_init;	/* initial node inact setting */
 };
@@ -430,7 +428,6 @@ struct ieee80211_node *ieee80211_find_txnode(struct ieee80211vap *,
 		const uint8_t macaddr[IEEE80211_ADDR_LEN]);
 #endif
 int	ieee80211_node_delucastkey(struct ieee80211_node *);
-void	ieee80211_node_timeout(void *arg);
 
 typedef void ieee80211_iter_func(void *, struct ieee80211_node *);
 void	ieee80211_iterate_nodes(struct ieee80211_node_table *,

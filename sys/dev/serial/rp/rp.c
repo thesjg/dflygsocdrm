@@ -1,4 +1,6 @@
-/* 
+/*
+ * (MPSAFE)
+ *
  * Copyright (c) Comtrol Corporation <support@comtrol.com>
  * All rights reserved.
  *
@@ -30,7 +32,6 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/dev/rp/rp.c,v 1.45.2.2 2002/11/07 22:26:59 tegge Exp $
- * $DragonFly: src/sys/dev/serial/rp/rp.c,v 1.21 2006/12/22 23:26:24 swildner Exp $
  */
 
 /* 
@@ -145,9 +146,11 @@ int sReadAiopID(CONTROLLER_T *CtlP, int aiop)
 {
    Byte_t AiopID;		/* ID byte from AIOP */
 
+   crit_enter();
    rp_writeaiop1(CtlP, aiop, _CMD_REG, RESET_ALL);     /* reset AIOP */
    rp_writeaiop1(CtlP, aiop, _CMD_REG, 0x0);
    AiopID = rp_readaiop1(CtlP, aiop, _CHN_STAT0) & 0x07;
+   crit_exit();
    if(AiopID == 0x06)
       return(1);
    else 			       /* AIOP does not exist */
@@ -172,11 +175,13 @@ int sReadAiopNumChan(CONTROLLER_T *CtlP, int aiop)
 {
    Word_t x, y;
 
+   crit_enter();
    rp_writeaiop4(CtlP, aiop, _INDX_ADDR,0x12340000L); /* write to chan 0 SRAM */
    rp_writeaiop2(CtlP, aiop, _INDX_ADDR,0);	   /* read from SRAM, chan 0 */
    x = rp_readaiop2(CtlP, aiop, _INDX_DATA);
    rp_writeaiop2(CtlP, aiop, _INDX_ADDR,0x4000);  /* read from SRAM, chan 4 */
    y = rp_readaiop2(CtlP, aiop, _INDX_DATA);
+   crit_exit();
    if(x != y)  /* if different must be 8 chan */
       return(8);
    else
@@ -210,6 +215,7 @@ int sInitChan(	CONTROLLER_T *CtlP,
    if(ChanNum >= CtlP->AiopNumChan[AiopNum])
       return(FALSE);		       /* exceeds num chans in AIOP */
 
+   crit_enter();
    /* Channel, AIOP, and controller identifiers */
    ChP->CtlP = CtlP;
    ChP->ChanID = CtlP->AiopID[AiopNum];
@@ -305,6 +311,7 @@ int sInitChan(	CONTROLLER_T *CtlP,
    ChP->TxPrioBuf = ChOff + _TXP_BUF;
    sEnRxProcessor(ChP); 	       /* start the Rx processor */
 
+   crit_exit();
    return(TRUE);
 }
 
@@ -330,11 +337,13 @@ void sStopRxProcessor(CHANNEL_T *ChP)
 {
    Byte_t R[4];
 
+   crit_enter();
    R[0] = ChP->R[0];
    R[1] = ChP->R[1];
    R[2] = 0x0a;
    R[3] = ChP->R[3];
    rp_writech4(ChP, _INDX_ADDR,*(DWord_t *)&R[0]);
+   crit_exit();
 }
 
 /***************************************************************************
@@ -360,6 +369,7 @@ void sFlushRxFIFO(CHANNEL_T *ChP)
    if(sGetRxCnt(ChP) == 0)	       /* Rx FIFO empty */
       return;			       /* don't need to flush */
 
+   crit_enter();
    RxFIFOEnabled = FALSE;
    if(ChP->R[0x32] == 0x08) /* Rx FIFO is enabled */
    {
@@ -378,6 +388,7 @@ void sFlushRxFIFO(CHANNEL_T *ChP)
    rp_writech2(ChP,_INDX_DATA,0);
    if(RxFIFOEnabled)
       sEnRxFIFO(ChP);		       /* enable Rx FIFO */
+   crit_exit();
 }
 
 /***************************************************************************
@@ -400,8 +411,11 @@ void sFlushTxFIFO(CHANNEL_T *ChP)
    Byte_t Ch;			/* channel number within AIOP */
    int TxEnabled;		       /* TRUE if transmitter enabled */
 
-   if(sGetTxCnt(ChP) == 0)	       /* Tx FIFO empty */
+   crit_enter();
+   if(sGetTxCnt(ChP) == 0) {	       /* Tx FIFO empty */
+      crit_exit();
       return;			       /* don't need to flush */
+   }
 
    TxEnabled = FALSE;
    if(ChP->TxControl[3] & TX_ENABLE)
@@ -420,6 +434,7 @@ void sFlushTxFIFO(CHANNEL_T *ChP)
    if(TxEnabled)
       sEnTransmit(ChP); 	       /* enable transmitter */
    sStartRxProcessor(ChP);	       /* restart Rx processor */
+   crit_exit();
 }
 
 /***************************************************************************
@@ -440,11 +455,14 @@ int sWriteTxPrioByte(CHANNEL_T *ChP, Byte_t Data)
    Byte_t DWBuf[4];		/* buffer for double word writes */
    Word_t *WordPtr;	     /* must be far because Win SS != DS */
 
+   crit_enter();
    if(sGetTxCnt(ChP) > 1)	       /* write it to Tx priority buffer */
    {
       rp_writech2(ChP,_INDX_ADDR,ChP->TxPrioCnt); /* get priority buffer status */
-      if(rp_readch1(ChP,_INDX_DATA) & PRI_PEND) /* priority buffer busy */
+      if(rp_readch1(ChP,_INDX_DATA) & PRI_PEND) {/* priority buffer busy */
+         crit_exit();
 	 return(0);		       /* nothing sent */
+      }
 
       WordPtr = (Word_t *)(&DWBuf[0]);
       *WordPtr = ChP->TxPrioBuf;       /* data byte address */
@@ -462,6 +480,7 @@ int sWriteTxPrioByte(CHANNEL_T *ChP, Byte_t Data)
    {
       sWriteTxByte(ChP,sGetTxRxDataIO(ChP),Data);
    }
+   crit_exit();
    return(1);			       /* 1 byte sent */
 }
 
@@ -570,9 +589,8 @@ static	d_close_t	rpclose;
 static	d_write_t	rpwrite;
 static	d_ioctl_t	rpioctl;
 
-#define	CDEV_MAJOR	81
-struct dev_ops rp_ops = {
-	{ "rp", CDEV_MAJOR, D_TTY | D_KQFILTER },
+static struct dev_ops rp_ops = {
+	{ "rp", 0, D_TTY },
 	.d_open =	rpopen,
 	.d_close =	rpclose,
 	.d_read =	ttyread,
@@ -621,6 +639,9 @@ static	void	rpstop (struct tty *, int);
 static	void	rphardclose	(struct rp_port *);
 static	void	rp_disc_optim	(struct tty *tp, struct termios *t);
 
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static void
 rp_do_receive(struct rp_port *rp, struct tty *tp,
 			CHANNEL_t *cp, unsigned int ChanStatus)
@@ -628,6 +649,7 @@ rp_do_receive(struct rp_port *rp, struct tty *tp,
 	unsigned	int	CharNStat;
 	int	ToRecv, wRecv, ch, ttynocopy;
 
+	ASSERT_LWKT_TOKEN_HELD(&tty_token);
 	ToRecv = sGetRxCnt(cp);
 	if(ToRecv == 0)
 		return;
@@ -713,12 +735,17 @@ rp_do_receive(struct rp_port *rp, struct tty *tp,
 	}
 }
 
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static void
 rp_handle_port(struct rp_port *rp)
 {
 	CHANNEL_t	*cp;
 	struct	tty	*tp;
 	unsigned	int	IntMask, ChanStatus;
+
+	ASSERT_LWKT_TOKEN_HELD(&tty_token);
 
 	if(!rp)
 		return;
@@ -762,6 +789,7 @@ static void rp_do_poll(void *not_used)
 	int	unit, aiop, ch, line, count;
 	unsigned char	CtlMask, AiopMask;
 
+	lwkt_gettoken(&tty_token);
 	for(unit = 0; unit < rp_ndevs; unit++) {
 	rp = rp_addr(unit);
 	ctl = rp->rp_ctlp;
@@ -795,6 +823,7 @@ static void rp_do_poll(void *not_used)
 	}
 	if(rp_num_ports_open)
 		callout_reset(&rp_poll_ch, POLL_INTERVAL, rp_do_poll, NULL);
+	lwkt_reltoken(&tty_token);
 }
 
 int
@@ -808,6 +837,7 @@ rp_attachcommon(CONTROLLER_T *ctlp, int num_aiops, int num_ports)
 	struct	rp_port *rp;
 	struct	tty	*tty;
 
+	lwkt_gettoken(&tty_token);
 	unit = device_get_unit(ctlp->dev);
 
 	kprintf("RocketPort%d (Version %s) %d ports.\n", unit,
@@ -893,11 +923,12 @@ rp_attachcommon(CONTROLLER_T *ctlp, int num_aiops, int num_ports)
 	}
 
 	rp_ndevs++;
+	lwkt_reltoken(&tty_token);
 	return (0);
 
 nogo:
 	rp_releaseresource(ctlp);
-
+	lwkt_reltoken(&tty_token);
 	return (retval);
 }
 
@@ -906,6 +937,7 @@ rp_releaseresource(CONTROLLER_t *ctlp)
 {
 	int i, unit;
 
+	lwkt_gettoken(&tty_token);
 	unit = device_get_unit(ctlp->dev);
 
 	if (ctlp->rp != NULL) {
@@ -927,6 +959,7 @@ rp_releaseresource(CONTROLLER_t *ctlp)
 	if (ctlp->dev != NULL)
 		ctlp->dev = NULL;
 	dev_ops_remove_minor(&rp_ops, /*0xffff0000, */(unit + 1) << 16);
+	lwkt_reltoken(&tty_token);
 }
 
 int
@@ -939,23 +972,28 @@ rpopen(struct dev_open_args *ap)
 	int	error;
 	unsigned int	IntMask, ChanStatus;
 
+	lwkt_gettoken(&tty_token);
 	if (!rp_initialized) {
 		rp_initialized = 1;
-		callout_init(&rp_poll_ch);
+		callout_init_mp(&rp_poll_ch);
 	}
 
    umynor = (((minor(dev) >> 16) -1) * 32);    /* SG */
 	port  = (minor(dev) & 0x1f);                /* SG */
 	mynor = (port + umynor);                    /* SG */
 	unit = minor_to_unit[mynor];
-	if (rp_addr(unit) == NULL)
+	if (rp_addr(unit) == NULL) {
+		lwkt_reltoken(&tty_token);
 		return (ENXIO);
-	if(IS_CONTROL(dev))
+	}
+	if(IS_CONTROL(dev)) {
+		lwkt_reltoken(&tty_token);
 		return(0);
+	}
 	rp = rp_addr(unit) + port;
 /*	rp->rp_tty = &rp_tty[rp->rp_port];
 */
-	callout_init(&rp->wakeup_callout);
+	callout_init_mp(&rp->wakeup_callout);
 	tp = rp->rp_tty;
 	dev->si_tty = tp;
 
@@ -1042,6 +1080,7 @@ open_top:
 		--rp->wopeners;
 		if(error != 0) {
 			crit_exit();
+			lwkt_reltoken(&tty_token);
 			return(error);
 		}
 
@@ -1087,6 +1126,7 @@ out:
 out2:
 	if (error == 0)
 		device_busy(rp->rp_ctlp->dev);
+	lwkt_reltoken(&tty_token);
 	return(error);
 }
 
@@ -1099,13 +1139,16 @@ rpclose(struct dev_close_args *ap)
 	struct	tty	*tp;
 	CHANNEL_t	*cp;
 
+	lwkt_gettoken(&tty_token);
    umynor = (((minor(dev) >> 16) -1) * 32);    /* SG */
 	port  = (minor(dev) & 0x1f);                /* SG */
 	mynor = (port + umynor);                    /* SG */
    unit = minor_to_unit[mynor];                /* SG */
 
-	if(IS_CONTROL(dev))
+	if(IS_CONTROL(dev)) {
+		lwkt_reltoken(&tty_token);
 		return(0);
+	}
 	rp = rp_addr(unit) + port;
 	cp = &rp->rp_channel;
 	tp = rp->rp_tty;
@@ -1123,9 +1166,13 @@ rpclose(struct dev_close_args *ap)
 
 	device_unbusy(rp->rp_ctlp->dev);
 
+	lwkt_reltoken(&tty_token);
 	return(0);
 }
 
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static void
 rphardclose(struct rp_port *rp)
 {
@@ -1133,6 +1180,7 @@ rphardclose(struct rp_port *rp)
 	struct	tty	*tp;
 	CHANNEL_t	*cp;
 
+	ASSERT_LWKT_TOKEN_HELD(&tty_token);
 	cp = &rp->rp_channel;
 	tp = rp->rp_tty;
 	mynor = MINOR_MAGIC(tp->t_dev);
@@ -1179,16 +1227,20 @@ rpwrite(struct dev_write_args *ap)
 
 	if(IS_CONTROL(dev))
 		return(ENODEV);
+	lwkt_gettoken(&tty_token);
 	rp = rp_addr(unit) + port;
 	tp = rp->rp_tty;
 	while(rp->rp_disable_writes) {
 		rp->rp_waiting = 1;
 		error = ttysleep(tp, (caddr_t)rp, PCATCH, "rp_write", 0);
-		if (error)
+		if (error) {
+			lwkt_reltoken(&tty_token);
 			return(error);
+		}
 	}
 
 	error = (*linesw[tp->t_line].l_write)(tp, ap->a_uio, ap->a_ioflag);
+	lwkt_reltoken(&tty_token);
 	return error;
 }
 
@@ -1197,9 +1249,11 @@ rpdtrwakeup(void *chan)
 {
 	struct	rp_port *rp;
 
+	lwkt_gettoken(&tty_token);
 	rp = (struct rp_port *)chan;
 	rp->state &= SET_DTR;
 	wakeup(&rp->dtr_wait);
+	lwkt_reltoken(&tty_token);
 }
 
 int
@@ -1216,6 +1270,7 @@ rpioctl(struct dev_ioctl_args *ap)
 	int	arg, flags, result, ChanStatus;
 	struct	termios *t;
 
+	lwkt_gettoken(&tty_token);
    umynor = (((minor(dev) >> 16) -1) * 32);    /* SG */
 	port  = (minor(dev) & 0x1f);                /* SG */
 	mynor = (port + umynor);                    /* SG */
@@ -1233,25 +1288,33 @@ rpioctl(struct dev_ioctl_args *ap)
 			ct =  IS_CALLOUT(dev) ? &rp->lt_out : &rp->lt_in;
 			break;
 		default:
+			lwkt_reltoken(&tty_token);
 			return(ENODEV); 	/* /dev/nodev */
 		}
 		switch (cmd) {
 		case TIOCSETA:
 			error = priv_check_cred(ap->a_cred, PRIV_ROOT, 0);
-			if(error != 0)
+			if(error != 0) {
+				lwkt_reltoken(&tty_token);
 				return(error);
+			}
 			*ct = *(struct termios *)data;
+			lwkt_reltoken(&tty_token);
 			return(0);
 		case TIOCGETA:
 			*(struct termios *)data = *ct;
+			lwkt_reltoken(&tty_token);
 			return(0);
 		case TIOCGETD:
 			*(int *)data = TTYDISC;
+			lwkt_reltoken(&tty_token);
 			return(0);
 		case TIOCGWINSZ:
 			bzero(data, sizeof(struct winsize));
+			lwkt_reltoken(&tty_token);
 			return(0);
 		default:
+			lwkt_reltoken(&tty_token);
 			return(ENOTTY);
 		}
 	}
@@ -1263,8 +1326,10 @@ rpioctl(struct dev_ioctl_args *ap)
 	term = tp->t_termios;
 	oldcmd = cmd;
 	error = ttsetcompat(tp, &cmd, data, &term);
-	if(error != 0)
+	if(error != 0) {
+		lwkt_reltoken(&tty_token);
 		return(error);
+	}
 	if(cmd != oldcmd) {
 		data = (caddr_t)&term;
 	}
@@ -1297,6 +1362,7 @@ rpioctl(struct dev_ioctl_args *ap)
 	error = (*linesw[tp->t_line].l_ioctl)(tp, cmd, data,
 					      ap->a_fflag, ap->a_cred);
 	if(error != ENOIOCTL) {
+		lwkt_reltoken(&tty_token);
 		return(error);
 	}
 	crit_enter();
@@ -1308,6 +1374,7 @@ rpioctl(struct dev_ioctl_args *ap)
 	rp_disc_optim(tp, &tp->t_termios);
 	if(error != ENOIOCTL) {
 		crit_exit();
+		lwkt_reltoken(&tty_token);
 		return(error);
 	}
 	switch(cmd) {
@@ -1386,6 +1453,7 @@ rpioctl(struct dev_ioctl_args *ap)
 		error = priv_check_cred(ap->a_cred, PRIV_ROOT, 0);
 		if(error != 0) {
 			crit_exit();
+			lwkt_reltoken(&tty_token);
 			return(error);
 		}
 		rp->dtr_wait = *(int *)data * hz/100;
@@ -1395,9 +1463,11 @@ rpioctl(struct dev_ioctl_args *ap)
 		break;
 	default:
 		crit_exit();
+		lwkt_reltoken(&tty_token);
 		return ENOTTY;
 	}
 	crit_exit();
+	lwkt_reltoken(&tty_token);
 	return(0);
 }
 
@@ -1425,7 +1495,7 @@ rpparam(struct tty *tp, struct termios *t)
 	int	devshift;
 #endif
 
-
+	lwkt_gettoken(&tty_token);
    umynor = (((minor(tp->t_dev) >> 16) -1) * 32);    /* SG */
 	port  = (minor(tp->t_dev) & 0x1f);                /* SG */
 	mynor = (port + umynor);                          /* SG */
@@ -1448,8 +1518,10 @@ rpparam(struct tty *tp, struct termios *t)
 	lflag = t->c_lflag;
 
 	ospeed = ttspeedtab(t->c_ispeed, baud_table);
-	if(ospeed < 0 || t->c_ispeed != t->c_ospeed)
+	if(ospeed < 0 || t->c_ispeed != t->c_ospeed) {
+		lwkt_reltoken(&tty_token);
 		return(EINVAL);
+	}
 
 	tp->t_ispeed = t->c_ispeed;
 	tp->t_ospeed = t->c_ospeed;
@@ -1460,6 +1532,7 @@ rpparam(struct tty *tp, struct termios *t)
 
 	if(t->c_ospeed == 0) {
 		sClrDTR(cp);
+		lwkt_reltoken(&tty_token);
 		return(0);
 	}
 	rp->rp_fifo_lw = ((t->c_ospeed*2) / 1000) +1;
@@ -1539,12 +1612,14 @@ rpparam(struct tty *tp, struct termios *t)
 */
 	crit_exit();
 
+	lwkt_reltoken(&tty_token);
 	return(0);
 }
 
 static void
 rp_disc_optim(struct tty *tp, struct termios *t)
 {
+	lwkt_gettoken(&tty_token);
 	if(!(t->c_iflag & (ICRNL | IGNCR | IMAXBEL | INLCR | ISTRIP | IXON))
 		&&(!(t->c_iflag & BRKINT) || (t->c_iflag & IGNBRK))
 		&&(!(t->c_iflag & PARMRK)
@@ -1554,6 +1629,7 @@ rp_disc_optim(struct tty *tp, struct termios *t)
 		tp->t_state |= TS_CAN_BYPASS_L_RINT;
 	else
 		tp->t_state &= ~TS_CAN_BYPASS_L_RINT;
+	lwkt_reltoken(&tty_token);
 }
 
 static void
@@ -1568,6 +1644,7 @@ rpstart(struct tty *tp)
 	int	count, wcount;
 
 
+	lwkt_gettoken(&tty_token);
    umynor = (((minor(tp->t_dev) >> 16) -1) * 32);    /* SG */
 	port  = (minor(tp->t_dev) & 0x1f);                /* SG */
 	mynor = (port + umynor);                          /* SG */
@@ -1580,6 +1657,7 @@ rpstart(struct tty *tp)
 	if(tp->t_state & (TS_TIMEOUT | TS_TTSTOP)) {
 		ttwwakeup(tp);
 		crit_exit();
+		lwkt_reltoken(&tty_token);
 		return;
 	}
 	if(rp->rp_xmit_stopped) {
@@ -1594,6 +1672,7 @@ rpstart(struct tty *tp)
 		}
 		ttwwakeup(tp);
 		crit_exit();
+		lwkt_reltoken(&tty_token);
 		return;
 	}
 	xmit_fifo_room = TXFIFO_SIZE - sGetTxCnt(cp);
@@ -1614,6 +1693,7 @@ rpstart(struct tty *tp)
 
 	ttwwakeup(tp);
 	crit_exit();
+	lwkt_reltoken(&tty_token);
 }
 
 static
@@ -1624,6 +1704,7 @@ rpstop(struct tty *tp, int flag)
 	CHANNEL_t	*cp;
 	int	unit, mynor, port, umynor;                  /* SG */
 
+	lwkt_gettoken(&tty_token);
    umynor = (((minor(tp->t_dev) >> 16) -1) * 32);    /* SG */
 	port  = (minor(tp->t_dev) & 0x1f);                /* SG */
 	mynor = (port + umynor);                          /* SG */
@@ -1645,4 +1726,5 @@ rpstop(struct tty *tp, int flag)
 	}
 	crit_exit();
 	rpstart(tp);
+	lwkt_reltoken(&tty_token);
 }

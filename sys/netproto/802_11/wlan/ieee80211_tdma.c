@@ -223,8 +223,6 @@ tdma_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	enum ieee80211_state ostate;
 	int status;
 
-	IEEE80211_LOCK_ASSERT(ic);
-
 	ostate = vap->iv_state;
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_STATE, "%s: %s -> %s (%d)\n",
 	    __func__, ieee80211_state_name[ostate],
@@ -276,7 +274,7 @@ tdma_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		    ((ts->tdma_slotcnt * ts->tdma_slotlen) / 1024));
 		vap->iv_swbmiss_count = 0;
 		callout_reset(&vap->iv_swbmiss, vap->iv_swbmiss_period,
-			ieee80211_swbmiss, vap);
+			      ieee80211_swbmiss_callout, vap);
 	}
 	return status;
 }
@@ -605,7 +603,7 @@ tdma_process_params(struct ieee80211_node *ni, const u_int8_t *ie,
 			    "slot %u collision rxtsf %llu tsf %llu\n",
 			    tdma->tdma_slot,
 			    (unsigned long long) le64toh(ni->ni_tstamp.tsf),
-			    vap->iv_bss->ni_tstamp.tsf);
+			    (unsigned long long)vap->iv_bss->ni_tstamp.tsf);
 			setbit(ts->tdma_inuse, tdma->tdma_slot);
 
 			(void) tdma_update(vap, tdma, ni, 1);

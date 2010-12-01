@@ -74,6 +74,7 @@ MAN=	accept_filter.9 \
 	devtoname.9 \
 	driver.9 \
 	DRIVER_MODULE.9 \
+	dsched.9 \
 	EVENTHANDLER.9 \
 	extattr.9 \
 	fetch.9 \
@@ -145,6 +146,8 @@ MAN=	accept_filter.9 \
 	sysctl.9 \
 	sysctl_add_oid.9 \
 	sysctl_ctx_init.9 \
+	SYSINIT.9 \
+	systimer.9 \
 	taskqueue.9 \
 	time.9 \
 	token.9 \
@@ -403,6 +406,25 @@ MLINKS+=devstat.9 devicestat.9 \
 	devstat.9 devstat_end_transaction_buf.9 \
 	devstat.9 devstat_remove_entry.9 \
 	devstat.9 devstat_start_transaction.9
+MLINKS+=dsched.9 dsched_cancel_bio.9 \
+	dsched.9 dsched_debug.9 \
+	dsched.9 DSCHED_DISK_CTX_LOCK.9 \
+	dsched.9 dsched_disk_ctx_ref.9 \
+	dsched.9 DSCHED_DISK_CTX_UNLOCK.9 \
+	dsched.9 dsched_disk_ctx_unref.9 \
+	dsched.9 dsched_get_bio_dp.9 \
+	dsched.9 dsched_get_bio_priv.9 \
+	dsched.9 dsched_get_disk_priv.9 \
+	dsched.9 dsched_new_policy_thread_tdio.9 \
+	dsched.9 DSCHED_POLICY_MODULE.9 \
+	dsched.9 dsched_register.9 \
+	dsched.9 dsched_strategy_async.9 \
+	dsched.9 dsched_strategy_raw.9 \
+	dsched.9 DSCHED_THREAD_IO_LOCK.9 \
+	dsched.9 dsched_thread_io_ref.9 \
+	dsched.9 DSCHED_THREAD_IO_UNLOCK.9 \
+	dsched.9 dsched_thread_io_unref.9 \
+	dsched.9 dsched_unregister.9
 MLINKS+=EVENTHANDLER.9 EVENTHANDLER_DECLARE.9 \
 	EVENTHANDLER.9 EVENTHANDLER_DEREGISTER.9 \
 	EVENTHANDLER.9 eventhandler_deregister.9 \
@@ -603,8 +625,8 @@ MLINKS+=mutex.9 mtx_downgrade.9 \
 	mutex.9 mtx_lock_sh_try.9 \
 	mutex.9 mtx_notlocked.9 \
 	mutex.9 mtx_notlocked_ex.9 \
-	mutex.9 mtx_notowner.9 \
-	mutex.9 mtx_owner.9 \
+	mutex.9 mtx_notowned.9 \
+	mutex.9 mtx_owned.9 \
 	mutex.9 mtx_spinlock_ex.9 \
 	mutex.9 mtx_spinlock_sh.9 \
 	mutex.9 mtx_uninit.9 \
@@ -738,16 +760,12 @@ MLINKS+=sleep.9 lksleep.9 \
 	sleep.9 wakeup_one.9 \
 	sleep.9 zsleep.9
 MLINKS+=spinlock.9 spin_init.9 \
-	spinlock.9 spin_lock_rd.9 \
-	spinlock.9 spin_lock_rd_quick.9 \
-	spinlock.9 spin_lock_wr.9 \
-	spinlock.9 spin_lock_wr_quick.9 \
-	spinlock.9 spin_trylock_wr.9 \
+	spinlock.9 spin_lock.9 \
+	spinlock.9 spin_lock_quick.9 \
+	spinlock.9 spin_trylock.9 \
 	spinlock.9 spin_uninit.9 \
-	spinlock.9 spin_unlock_rd.9 \
-	spinlock.9 spin_unlock_rd_quick.9 \
-	spinlock.9 spin_unlock_wr.9 \
-	spinlock.9 spin_unlock_wr_quick.9
+	spinlock.9 spin_unlock.9 \
+	spinlock.9 spin_unlock_quick.9
 MLINKS+=store.9 casuword.9 \
 	store.9 subyte.9 \
 	store.9 susword.9 \
@@ -784,6 +802,12 @@ MLINKS+=sysctl_ctx_init.9 sysctl_ctx_entry_add.9 \
 	sysctl_ctx_init.9 sysctl_ctx_entry_del.9 \
 	sysctl_ctx_init.9 sysctl_ctx_entry_find.9 \
 	sysctl_ctx_init.9 sysctl_ctx_free.9
+MLINKS+=SYSINIT.9 sysinit.9
+MLINKS+=systimer.9 systimer_adjust_periodic.9 \
+	systimer.9 systimer_init_oneshot.9 \
+	systimer.9 systimer_init_periodic.9 \
+	systimer.9 systimer_init_periodic_nq.9 \
+	systimer.9 systimers.9
 MLINKS+=taskqueue.9 TASK_INIT.9 \
 	taskqueue.9 taskqueue_block.9 \
 	taskqueue.9 taskqueue_create.9 \

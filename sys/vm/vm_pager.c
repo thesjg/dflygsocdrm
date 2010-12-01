@@ -348,7 +348,7 @@ getpbuf(int *pfreecnt)
 {
 	struct buf *bp;
 
-	spin_lock_wr(&bswspin);
+	spin_lock(&bswspin);
 
 	for (;;) {
 		if (pfreecnt) {
@@ -368,7 +368,7 @@ getpbuf(int *pfreecnt)
 	if (pfreecnt)
 		--*pfreecnt;
 
-	spin_unlock_wr(&bswspin);
+	spin_unlock(&bswspin);
 
 	initpbuf(bp);
 	KKASSERT(dsched_is_clear_buf_priv(bp));
@@ -381,7 +381,7 @@ getpbuf_kva(int *pfreecnt)
 {
 	struct buf *bp;
 
-	spin_lock_wr(&bswspin);
+	spin_lock(&bswspin);
 
 	for (;;) {
 		if (pfreecnt) {
@@ -401,7 +401,7 @@ getpbuf_kva(int *pfreecnt)
 	if (pfreecnt)
 		--*pfreecnt;
 
-	spin_unlock_wr(&bswspin);
+	spin_unlock(&bswspin);
 
 	initpbuf(bp);
 	KKASSERT(dsched_is_clear_buf_priv(bp));
@@ -422,17 +422,17 @@ trypbuf(int *pfreecnt)
 {
 	struct buf *bp;
 
-	spin_lock_wr(&bswspin);
+	spin_lock(&bswspin);
 
 	if (*pfreecnt == 0 || (bp = TAILQ_FIRST(&bswlist_raw)) == NULL) {
-		spin_unlock_wr(&bswspin);
+		spin_unlock(&bswspin);
 		return NULL;
 	}
 	TAILQ_REMOVE(&bswlist_raw, bp, b_freelist);
 	--pbuf_raw_count;
 	--*pfreecnt;
 
-	spin_unlock_wr(&bswspin);
+	spin_unlock(&bswspin);
 
 	initpbuf(bp);
 
@@ -444,17 +444,17 @@ trypbuf_kva(int *pfreecnt)
 {
 	struct buf *bp;
 
-	spin_lock_wr(&bswspin);
+	spin_lock(&bswspin);
 
 	if (*pfreecnt == 0 || (bp = TAILQ_FIRST(&bswlist_kva)) == NULL) {
-		spin_unlock_wr(&bswspin);
+		spin_unlock(&bswspin);
 		return NULL;
 	}
 	TAILQ_REMOVE(&bswlist_kva, bp, b_freelist);
 	--pbuf_kva_count;
 	--*pfreecnt;
 
-	spin_unlock_wr(&bswspin);
+	spin_unlock(&bswspin);
 
 	initpbuf(bp);
 
@@ -479,9 +479,9 @@ relpbuf(struct buf *bp, int *pfreecnt)
 	KKASSERT(bp->b_flags & B_PAGING);
 	dsched_exit_buf(bp);
 
-	spin_lock_wr(&bswspin);
-
 	BUF_UNLOCK(bp);
+
+	spin_lock(&bswspin);
 	if (bp->b_kvabase) {
 		TAILQ_INSERT_HEAD(&bswlist_kva, bp, b_freelist);
 		++pbuf_kva_count;
@@ -501,8 +501,7 @@ relpbuf(struct buf *bp, int *pfreecnt)
 		if (++*pfreecnt == 1)
 			wake_freecnt = 1;
 	}
-
-	spin_unlock_wr(&bswspin);
+	spin_unlock(&bswspin);
 
 	if (wake_bsw_kva)
 		wakeup(&bswneeded_kva);

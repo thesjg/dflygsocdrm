@@ -49,62 +49,6 @@ MALLOC_DEFINE(M_DMSTRIPE, "dm_stripe", "Device Mapper Target Stripe");
 
 static void dm_target_stripe_destroy_config(dm_target_stripe_config_t *tsc);
 
-#ifdef DM_TARGET_MODULE
-/*
- * Every target can be compiled directly to dm driver or as a
- * separate module this part of target is used for loading targets
- * to dm driver.
- * Target can be unloaded from kernel only if there are no users of
- * it e.g. there are no devices which uses that target.
- */
-#include <sys/kernel.h>
-#include <sys/module.h>
-
-static int
-dm_target_stripe_modcmd(modcmd_t cmd, void *arg)
-{
-	dm_target_t *dmt;
-	int r;
-	dmt = NULL;
-
-	switch (cmd) {
-	case MODULE_CMD_INIT:
-		if ((dmt = dm_target_lookup("stripe")) != NULL) {
-			dm_target_unbusy(dmt);
-			return EEXIST;
-		}
-		dmt = dm_target_alloc("stripe");
-
-		dmt->version[0] = 1;
-		dmt->version[1] = 0;
-		dmt->version[2] = 0;
-		strlcpy(dmt->name, "stripe", DM_MAX_TYPE_NAME);
-		dmt->init = &dm_target_stripe_init;
-		dmt->status = &dm_target_stripe_status;
-		dmt->strategy = &dm_target_stripe_strategy;
-		dmt->deps = &dm_target_stripe_deps;
-		dmt->destroy = &dm_target_stripe_destroy;
-		dmt->upcall = &dm_target_stripe_upcall;
-
-		r = dm_target_insert(dmt);
-
-		break;
-
-	case MODULE_CMD_FINI:
-		r = dm_target_rem("stripe");
-		break;
-
-	case MODULE_CMD_STAT:
-		return ENOTTY;
-
-	default:
-		return ENOTTY;
-	}
-
-	return r;
-}
-#endif
-
 /*
  * Init function called from dm_table_load_ioctl.
  *
@@ -112,7 +56,7 @@ dm_target_stripe_modcmd(modcmd_t cmd, void *arg)
  * start length striped #stripes chunk_size device1 offset1 ... deviceN offsetN
  * 0 65536 striped 2 512 /dev/hda 0 /dev/hdb 0
  */
-int
+static int
 dm_target_stripe_init(dm_dev_t *dmv, void **target_config, char *params)
 {
 	dm_target_stripe_config_t *tsc;
@@ -187,7 +131,7 @@ dm_target_stripe_init(dm_dev_t *dmv, void **target_config, char *params)
 /*
  * Status routine called to get params string.
  */
-char *
+static char *
 dm_target_stripe_status(void *target_config)
 {
 	dm_target_stripe_config_t *tsc;
@@ -225,7 +169,7 @@ dm_target_stripe_status(void *target_config)
 /*
  * Strategy routine called from dm_strategy.
  */
-int
+static int
 dm_target_stripe_strategy(dm_table_entry_t *table_en, struct buf *bp)
 {
 	dm_target_stripe_config_t *tsc;
@@ -273,7 +217,7 @@ dm_target_stripe_strategy(dm_table_entry_t *table_en, struct buf *bp)
 			nestbuf->b_flags |= bio->bio_buf->b_flags & B_HASBOGUS;
 
 			nestiobuf_add(bio, nestbuf, blkoff,
-					issue_blks * DEV_BSIZE);
+					issue_blks * DEV_BSIZE, NULL);
 
 			/* I need number of bytes. */
 			nestbuf->b_bio1.bio_offset =
@@ -297,7 +241,7 @@ dm_target_stripe_strategy(dm_table_entry_t *table_en, struct buf *bp)
 			nestbuf = getpbuf(NULL);
 			nestbuf->b_flags |= bio->bio_buf->b_flags & B_HASBOGUS;
 
-			nestiobuf_add(bio, nestbuf, 0, 0);
+			nestiobuf_add(bio, nestbuf, 0, 0, NULL);
 			nestbuf->b_bio1.bio_offset = 0;
 			vn_strategy(tsc->stripe_devs[devnr].pdev->pdev_vnode,
 				    &nestbuf->b_bio1);
@@ -313,10 +257,88 @@ dm_target_stripe_strategy(dm_table_entry_t *table_en, struct buf *bp)
 	return 0;
 }
 
+
+static int
+dm_target_stripe_dump(dm_table_entry_t *table_en, void *data, size_t length, off_t offset)
+{
+	dm_target_stripe_config_t *tsc;
+	uint64_t blkno, blkoff;
+	uint64_t stripe, blknr;
+	uint32_t stripe_off, stripe_rest, num_blks, issue_blks;
+	uint64_t off2, len2;
+	int devnr;
+
+	tsc = table_en->target_config;
+	if (tsc == NULL)
+		return 0;
+
+	/* calculate extent of request */
+	KKASSERT(length % DEV_BSIZE == 0);
+
+	blkno = offset / DEV_BSIZE;
+	blkoff = 0;
+	num_blks = length / DEV_BSIZE;
+
+	/*
+	 * 0 length means flush buffers and return
+	 */
+	if (length == 0) {
+		for (devnr = 0; devnr < tsc->stripe_num; ++devnr) {
+			if (tsc->stripe_devs[devnr].pdev->pdev_vnode->v_rdev == NULL)
+				return ENXIO;
+
+			dev_ddump(tsc->stripe_devs[devnr].pdev->pdev_vnode->v_rdev,
+			    data, 0, offset, 0);
+		}
+		return 0;
+	}
+
+	while (num_blks > 0) {
+		/* blockno to strip piece nr */
+		stripe = blkno / tsc->stripe_chunksize;
+		stripe_off = blkno % tsc->stripe_chunksize;
+
+		/* where we are inside the strip */
+		devnr = stripe % tsc->stripe_num;
+		blknr = stripe / tsc->stripe_num;
+
+		/* how much is left before we hit a boundary */
+		stripe_rest = tsc->stripe_chunksize - stripe_off;
+
+		/* issue this piece on stripe `stripe' */
+		issue_blks = MIN(stripe_rest, num_blks);
+
+#if 0
+		nestiobuf_add(bio, nestbuf, blkoff,
+				issue_blks * DEV_BSIZE);
+#endif
+		len2 = issue_blks * DEV_BSIZE;
+
+		/* I need number of bytes. */
+		off2 = blknr * tsc->stripe_chunksize + stripe_off;
+		off2 += tsc->stripe_devs[devnr].offset;
+		off2 *= DEV_BSIZE;
+		off2 = dm_pdev_correct_dump_offset(tsc->stripe_devs[devnr].pdev,
+		    off2);
+
+		if (tsc->stripe_devs[devnr].pdev->pdev_vnode->v_rdev == NULL)
+			return ENXIO;
+
+		dev_ddump(tsc->stripe_devs[devnr].pdev->pdev_vnode->v_rdev,
+		    (char *)data + blkoff, 0, off2, len2);
+
+		blkno += issue_blks;
+		blkoff += issue_blks * DEV_BSIZE;
+		num_blks -= issue_blks;
+	}
+
+	return 0;
+}
+
 /*
  * Destroy a dm table entry for stripes.
  */
-int
+static int
 dm_target_stripe_destroy(dm_table_entry_t *table_en)
 {
 	dm_target_stripe_config_t *tsc;
@@ -349,7 +371,7 @@ dm_target_stripe_destroy_config(dm_target_stripe_config_t *tsc)
 /*
  * Generate properties from stripe table entry.
  */
-int
+static int
 dm_target_stripe_deps(dm_table_entry_t *table_en, prop_array_t prop_array)
 {
 	dm_target_stripe_config_t *tsc;
@@ -375,8 +397,53 @@ dm_target_stripe_deps(dm_table_entry_t *table_en, prop_array_t prop_array)
 /*
  * Unsupported for this target.
  */
-int
+static int
 dm_target_stripe_upcall(dm_table_entry_t * table_en, struct buf * bp)
 {
 	return 0;
 }
+
+static int
+dmts_mod_handler(module_t mod, int type, void *unused)
+{
+        dm_target_t *dmt = NULL;
+        int err = 0;
+
+        switch(type) {
+        case MOD_LOAD:
+                if ((dmt = dm_target_lookup("striped")) != NULL) {
+                        dm_target_unbusy(dmt);
+                        return EEXIST;
+                }
+                dmt = dm_target_alloc("striped");
+                dmt->version[0] = 1;
+                dmt->version[1] = 0;
+                dmt->version[2] = 3;
+                strlcpy(dmt->name, "striped", DM_MAX_TYPE_NAME);
+                dmt->init = &dm_target_stripe_init;
+                dmt->status = &dm_target_stripe_status;
+                dmt->strategy = &dm_target_stripe_strategy;
+                dmt->deps = &dm_target_stripe_deps;
+                dmt->destroy = &dm_target_stripe_destroy;
+                dmt->upcall = &dm_target_stripe_upcall;
+                dmt->dump = &dm_target_stripe_dump;
+
+                err = dm_target_insert(dmt);
+		if (err == 0)
+			kprintf("dm_target_stripe: Successfully initialized\n");
+                break;
+
+        case MOD_UNLOAD:
+                err = dm_target_rem("striped");
+                if (err == 0)
+                        kprintf("dm_target_stripe: unloaded\n");
+                break;
+
+	default:
+		break;
+	}
+
+	return err;
+}
+
+DM_TARGET_MODULE(dm_target_stripe, dmts_mod_handler);

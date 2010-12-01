@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1999 Kazutaka YOKOTA <yokota@zodiac.mech.utsunomiya-u.ac.jp>
  * All rights reserved.
  *
@@ -36,6 +38,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/thread.h>
+#include <sys/thread2.h>
 
 #include <machine/console.h>
 
@@ -195,6 +199,7 @@ vga_txtcursor_shape(scr_stat *scp, int base, int height, int blink)
 {
 	if (base < 0 || base >= scp->font_size)
 		return;
+
 	/* the caller may set height <= 0 in order to disable the cursor */
 #if 0
 	scp->cursor_base = base;
@@ -203,6 +208,7 @@ vga_txtcursor_shape(scr_stat *scp, int base, int height, int blink)
 	(*vidsw[scp->sc->adapter]->set_hw_cursor_shape)(scp->sc->adp,
 							base, height,
 							scp->font_size, blink);
+
 }
 
 static void
@@ -401,6 +407,7 @@ draw_txtmouse(scr_stat *scp, int x, int y)
 		color = ((a & 0xf000) >> 4) | ((a & 0x0f00) << 4);
 	sc_vtb_putc(&scp->scr, pos, sc_vtb_getc(&scp->scr, pos), color);
     }
+
 }
 
 static void
@@ -544,6 +551,8 @@ vga_pxlborder_planar(scr_stat *scp, int color)
 	int y;
 	int i;
 
+	lwkt_gettoken(&tty_token);
+
 	(*vidsw[scp->sc->adapter]->set_border)(scp->sc->adp, color);
 
 	outw(GDCIDX, 0x0005);		/* read mode 0, write mode 0 */
@@ -569,6 +578,7 @@ vga_pxlborder_planar(scr_stat *scp, int color)
 	}
 	outw(GDCIDX, 0x0000);		/* set/reset */
 	outw(GDCIDX, 0x0001);		/* set/reset enable */
+	lwkt_reltoken(&tty_token);
 }
 
 static void
@@ -1212,7 +1222,9 @@ vga_pxlmouse_planar(scr_stat *scp, int x, int y, int on)
 static void
 vga_grborder(scr_stat *scp, int color)
 {
+	lwkt_gettoken(&tty_token);
 	(*vidsw[scp->sc->adapter]->set_border)(scp->sc->adp, color);
+	lwkt_reltoken(&tty_token);
 }
 
 #endif

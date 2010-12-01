@@ -54,12 +54,7 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/isa/apic_ipl.s,v 1.27.2.2 2000/09/30 02:49:35 ps Exp $
- * $DragonFly: src/sys/platform/pc64/apic/apic_ipl.s,v 1.1 2008/08/29 17:07:12 dillon Exp $
  */
-
-#if 0
-#include "use_npx.h"
-#endif
 
 #include <machine/asmacros.h>
 #include <machine/segments.h>
@@ -71,21 +66,7 @@
 #include "apic_ipl.h"
 #include "assym.s"
 
-#ifdef APIC_IO
-
-	.data
-	ALIGN_DATA
-
-	/*
-	 * Interrupt mask for APIC interrupts, defaults to all hardware
-	 * interrupts turned off.
-	 */
-
-	.p2align 2				/* MUST be 32bit aligned */
-
-	.globl apic_imen
-apic_imen:
-	.long	APIC_HWI_MASK
+#ifdef SMP /* APIC-IO */
 
 	.text
 	SUPERALIGN_TEXT
@@ -98,15 +79,15 @@ ENTRY(APIC_INTRDIS)
 	APIC_IMASK_LOCK			/* enter critical reg */
 	movl	%edi, %eax
 1:
-	btsl	%eax, apic_imen
 	imull	$AIMI_SIZE, %eax
-	addq	$CNAME(int_to_apicintpin), %rax
-	movq	AIMI_APIC_ADDRESS(%rax), %rdx
-	movl	AIMI_REDIRINDEX(%rax), %ecx
+	orl	$AIMI_FLAG_MASKED, CNAME(int_to_apicintpin) + AIMI_FLAGS(%rax)
+	movq	CNAME(int_to_apicintpin) + AIMI_APIC_ADDRESS(%rax), %rdx
+	movl	CNAME(int_to_apicintpin) + AIMI_REDIRINDEX(%rax), %ecx
 	testq	%rdx, %rdx
 	jz	2f
 	movl	%ecx, (%rdx)		/* target register index */
-	orl	$IOART_INTMASK,16(%rdx)	/* set intmask in target apic reg */
+	orl	$IOART_INTMASK, IOAPIC_WINDOW(%rdx)
+					/* set intmask in target apic reg */
 2:
 	APIC_IMASK_UNLOCK		/* exit critical reg */
 	ret
@@ -115,15 +96,15 @@ ENTRY(APIC_INTREN)
 	APIC_IMASK_LOCK			/* enter critical reg */
 	movl	%edi, %eax
 1:
-	btrl	%eax, apic_imen		/* update apic_imen */
 	imull	$AIMI_SIZE, %eax
-	addq	$CNAME(int_to_apicintpin), %rax
-	movq	AIMI_APIC_ADDRESS(%rax), %rdx
-	movl	AIMI_REDIRINDEX(%rax), %ecx
+	andl	$~AIMI_FLAG_MASKED, CNAME(int_to_apicintpin) + AIMI_FLAGS(%rax)
+	movq	CNAME(int_to_apicintpin) + AIMI_APIC_ADDRESS(%rax), %rdx
+	movl	CNAME(int_to_apicintpin) + AIMI_REDIRINDEX(%rax), %ecx
 	testq	%rdx, %rdx
 	jz	2f
 	movl	%ecx, (%rdx)		/* write the target register index */
-	andl	$~IOART_INTMASK, 16(%rdx) /* clear mask bit */
+	andl	$~IOART_INTMASK, IOAPIC_WINDOW(%rdx)
+					/* clear mask bit */
 2:	
 	APIC_IMASK_UNLOCK		/* exit critical reg */
 	ret
@@ -140,7 +121,7 @@ ENTRY(io_apic_read)
 	movq	ioapic, %rax
 	movq	(%rax,%rcx,8), %rdx	/* APIC base register address */
 	movl	%esi, (%rdx)		/* write the target register index */
-	movl	16(%rdx), %eax		/* read the APIC register data */
+	movl	IOAPIC_WINDOW(%rdx), %eax /* read the APIC register data */
 	ret				/* %eax = register value */
 
 /*
@@ -151,6 +132,6 @@ ENTRY(io_apic_write)
 	movq	ioapic, %rax
 	movq	(%rax,%rcx,8), %r8	/* APIC base register address */
 	movl	%esi, (%r8)		/* write the target register index */
-	movl	%edx, 16(%r8)		/* write the APIC register data */
+	movl	%edx, IOAPIC_WINDOW(%r8) /* write the APIC register data */
 	ret				/* %eax = void */
 #endif

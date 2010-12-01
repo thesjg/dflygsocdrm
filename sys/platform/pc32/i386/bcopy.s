@@ -30,16 +30,12 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
- * $DragonFly: src/sys/platform/pc32/i386/bcopy.s,v 1.10 2008/05/09 06:35:11 dillon Exp $
  */
 /*
  * bcopy(source:%esi, target:%edi, count:%ecx)
  *
  *	note: esi, edi, eax, ecx, and edx may be destroyed
  */
-
-#include "use_npx.h"
 
 #include <machine/asmacros.h>
 #include <machine/cputypes.h>
@@ -302,7 +298,7 @@ ENTRY(asm_generic_bcopy)
 	pushl	%ecx ;							\
 	movl	GD_CURTHREAD(%eax),%edx ;	/* EDX = CURTHREAD */	\
 	movl	TD_SAVEFPU(%edx),%ebx ;		/* save app save area */\
-	addl	$TDPRI_CRIT,TD_PRI(%edx) ;				\
+	incl	TD_CRITCOUNT(%edx) ;					\
 	cmpl	$0,GD_NPXTHREAD(%eax) ;					\
 	je	100f ;							\
 	fxsave	0(%ebx) ;			/* race(1) */		\
@@ -315,11 +311,11 @@ ENTRY(asm_generic_bcopy)
 	orl	$TDF_KERNELFP,TD_FLAGS(%edx) ;				\
 	clts ;								\
 	movl	%edx,GD_NPXTHREAD(%eax) ;	/* race(3) */		\
-	subl	$TDPRI_CRIT,TD_PRI(%edx) ;	/* crit_exit() */	\
+	decl	TD_CRITCOUNT(%edx) ;		/* crit_exit() */	\
 	cmpl	$0,GD_REQFLAGS(%eax) ;					\
 	je	101f ;							\
-	cmpl	$TDPRI_CRIT,TD_PRI(%edx) ;				\
-	jge	101f ;							\
+	testl	$-1,TD_CRITCOUNT(%edx) ;				\
+	jne	101f ;							\
 	call	splz_check ;						\
 	/* note: eax,ecx,edx destroyed */				\
 101: ;									\

@@ -125,6 +125,7 @@
  */
 #define NCHHASH(hash)	(&nchashtbl[(hash) & nchash])
 #define MINNEG		1024
+#define MINPOS		1024
 
 MALLOC_DEFINE(M_VFSCACHE, "vfscache", "VFS name cache entries");
 
@@ -150,28 +151,33 @@ static struct spinlock		ncspin;
  *	have a namecache record, even if it does have one.
  */
 static int	ncvp_debug;
-SYSCTL_INT(_debug, OID_AUTO, ncvp_debug, CTLFLAG_RW, &ncvp_debug, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, ncvp_debug, CTLFLAG_RW, &ncvp_debug, 0,
+    "Namecache debug level (0-3)");
 
 static u_long	nchash;			/* size of hash table */
-SYSCTL_ULONG(_debug, OID_AUTO, nchash, CTLFLAG_RD, &nchash, 0, "");
+SYSCTL_ULONG(_debug, OID_AUTO, nchash, CTLFLAG_RD, &nchash, 0,
+    "Size of namecache hash table");
 
 static int	ncnegfactor = 16;	/* ratio of negative entries */
-SYSCTL_INT(_debug, OID_AUTO, ncnegfactor, CTLFLAG_RW, &ncnegfactor, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, ncnegfactor, CTLFLAG_RW, &ncnegfactor, 0,
+    "Ratio of namecache negative entries");
 
 static int	nclockwarn;		/* warn on locked entries in ticks */
-SYSCTL_INT(_debug, OID_AUTO, nclockwarn, CTLFLAG_RW, &nclockwarn, 0, "");
-
-static int	numneg;			/* number of cache entries allocated */
-SYSCTL_INT(_debug, OID_AUTO, numneg, CTLFLAG_RD, &numneg, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, nclockwarn, CTLFLAG_RW, &nclockwarn, 0,
+    "Warn on locked namecache entries in ticks");
 
 static int	numdefered;		/* number of cache entries allocated */
-SYSCTL_INT(_debug, OID_AUTO, numdefered, CTLFLAG_RD, &numdefered, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, numdefered, CTLFLAG_RD, &numdefered, 0,
+    "Number of cache entries allocated");
 
-static int	numcache;		/* number of cache entries allocated */
-SYSCTL_INT(_debug, OID_AUTO, numcache, CTLFLAG_RD, &numcache, 0, "");
+static int	ncposlimit;		/* number of cache entries allocated */
+SYSCTL_INT(_debug, OID_AUTO, ncposlimit, CTLFLAG_RW, &ncposlimit, 0,
+    "Number of cache entries allocated");
 
-SYSCTL_INT(_debug, OID_AUTO, vnsize, CTLFLAG_RD, 0, sizeof(struct vnode), "");
-SYSCTL_INT(_debug, OID_AUTO, ncsize, CTLFLAG_RD, 0, sizeof(struct namecache), "");
+SYSCTL_INT(_debug, OID_AUTO, vnsize, CTLFLAG_RD, 0, sizeof(struct vnode),
+    "sizeof(struct vnode)");
+SYSCTL_INT(_debug, OID_AUTO, ncsize, CTLFLAG_RD, 0, sizeof(struct namecache),
+    "sizeof(struct namecache)");
 
 int cache_mpsafe = 1;
 SYSCTL_INT(_vfs, OID_AUTO, cache_mpsafe, CTLFLAG_RW, &cache_mpsafe, 0, "");
@@ -181,6 +187,7 @@ static struct vnode *cache_dvpref(struct namecache *ncp);
 static void _cache_lock(struct namecache *ncp);
 static void _cache_setunresolved(struct namecache *ncp);
 static void _cache_cleanneg(int count);
+static void _cache_cleanpos(int count);
 static void _cache_cleandefered(void);
 
 /*
@@ -189,8 +196,10 @@ static void _cache_cleandefered(void);
 SYSCTL_NODE(_vfs, OID_AUTO, cache, CTLFLAG_RW, 0, "Name cache statistics");
 #define STATNODE(mode, name, var) \
 	SYSCTL_ULONG(_vfs_cache, OID_AUTO, name, mode, var, 0, "");
-STATNODE(CTLFLAG_RD, numneg, &numneg);
-STATNODE(CTLFLAG_RD, numcache, &numcache);
+#define STATNODE_INT(mode, name, var) \
+	SYSCTL_UINT(_vfs_cache, OID_AUTO, name, mode, var, 0, "");
+static int numneg; STATNODE_INT(CTLFLAG_RD, numneg, &numneg);
+static int numcache; STATNODE_INT(CTLFLAG_RD, numcache, &numcache);
 static u_long numcalls; STATNODE(CTLFLAG_RD, numcalls, &numcalls);
 static u_long dothits; STATNODE(CTLFLAG_RD, dothits, &dothits);
 static u_long dotdothits; STATNODE(CTLFLAG_RD, dotdothits, &dotdothits);
@@ -569,13 +578,13 @@ _cache_unlink_parent(struct namecache *ncp)
 		KKASSERT(ncp->nc_parent == par);
 		_cache_hold(par);
 		_cache_lock(par);
-		spin_lock_wr(&ncp->nc_head->spin);
+		spin_lock(&ncp->nc_head->spin);
 		LIST_REMOVE(ncp, nc_hash);
 		TAILQ_REMOVE(&par->nc_list, ncp, nc_entry);
 		dropvp = NULL;
 		if (par->nc_vp && TAILQ_EMPTY(&par->nc_list))
 			dropvp = par->nc_vp;
-		spin_unlock_wr(&ncp->nc_head->spin);
+		spin_unlock(&ncp->nc_head->spin);
 		ncp->nc_parent = NULL;
 		ncp->nc_head = NULL;
 		_cache_unlock(par);
@@ -876,10 +885,10 @@ _cache_setvp(struct mount *mp, struct namecache *ncp, struct vnode *vp)
 		 */
 		if (!TAILQ_EMPTY(&ncp->nc_list))
 			vhold(vp);
-		spin_lock_wr(&vp->v_spinlock);
+		spin_lock(&vp->v_spinlock);
 		ncp->nc_vp = vp;
 		TAILQ_INSERT_HEAD(&vp->v_namecache, ncp, nc_vnode);
-		spin_unlock_wr(&vp->v_spinlock);
+		spin_unlock(&vp->v_spinlock);
 		if (ncp->nc_exlocks)
 			vhold(vp);
 
@@ -908,10 +917,10 @@ _cache_setvp(struct mount *mp, struct namecache *ncp, struct vnode *vp)
 		 * other remote FSs.
 		 */
 		ncp->nc_vp = NULL;
-		spin_lock_wr(&ncspin);
+		spin_lock(&ncspin);
 		TAILQ_INSERT_TAIL(&ncneglist, ncp, nc_vnode);
 		++numneg;
-		spin_unlock_wr(&ncspin);
+		spin_unlock(&ncspin);
 		ncp->nc_error = ENOENT;
 		if (mp)
 			ncp->nc_namecache_gen = mp->mnt_namecache_gen;
@@ -968,10 +977,10 @@ _cache_setunresolved(struct namecache *ncp)
 		ncp->nc_error = ENOTCONN;
 		if ((vp = ncp->nc_vp) != NULL) {
 			atomic_add_int(&numcache, -1);
-			spin_lock_wr(&vp->v_spinlock);
+			spin_lock(&vp->v_spinlock);
 			ncp->nc_vp = NULL;
 			TAILQ_REMOVE(&vp->v_namecache, ncp, nc_vnode);
-			spin_unlock_wr(&vp->v_spinlock);
+			spin_unlock(&vp->v_spinlock);
 
 			/*
 			 * Any vp associated with an ncp with children is
@@ -984,10 +993,10 @@ _cache_setunresolved(struct namecache *ncp)
 			if (ncp->nc_exlocks)
 				vdrop(vp);
 		} else {
-			spin_lock_wr(&ncspin);
+			spin_lock(&ncspin);
 			TAILQ_REMOVE(&ncneglist, ncp, nc_vnode);
 			--numneg;
-			spin_unlock_wr(&ncspin);
+			spin_unlock(&ncspin);
 		}
 		ncp->nc_flag &= ~(NCF_WHITEOUT|NCF_ISDIR|NCF_ISSYMLINK);
 	}
@@ -1257,7 +1266,7 @@ cache_inval_vp(struct vnode *vp, int flags)
 	struct namecache *next;
 
 restart:
-	spin_lock_wr(&vp->v_spinlock);
+	spin_lock(&vp->v_spinlock);
 	ncp = TAILQ_FIRST(&vp->v_namecache);
 	if (ncp)
 		_cache_hold(ncp);
@@ -1265,7 +1274,7 @@ restart:
 		/* loop entered with ncp held and vp spin-locked */
 		if ((next = TAILQ_NEXT(ncp, nc_vnode)) != NULL)
 			_cache_hold(next);
-		spin_unlock_wr(&vp->v_spinlock);
+		spin_unlock(&vp->v_spinlock);
 		_cache_lock(ncp);
 		if (ncp->nc_vp != vp) {
 			kprintf("Warning: cache_inval_vp: race-A detected on "
@@ -1278,16 +1287,16 @@ restart:
 		_cache_inval(ncp, flags);
 		_cache_put(ncp);		/* also releases reference */
 		ncp = next;
-		spin_lock_wr(&vp->v_spinlock);
+		spin_lock(&vp->v_spinlock);
 		if (ncp && ncp->nc_vp != vp) {
-			spin_unlock_wr(&vp->v_spinlock);
+			spin_unlock(&vp->v_spinlock);
 			kprintf("Warning: cache_inval_vp: race-B detected on "
 				"%s\n", ncp->nc_name);
 			_cache_drop(ncp);
 			goto restart;
 		}
 	}
-	spin_unlock_wr(&vp->v_spinlock);
+	spin_unlock(&vp->v_spinlock);
 	return(TAILQ_FIRST(&vp->v_namecache) != NULL);
 }
 
@@ -1306,7 +1315,7 @@ cache_inval_vp_nonblock(struct vnode *vp)
 	struct namecache *ncp;
 	struct namecache *next;
 
-	spin_lock_wr(&vp->v_spinlock);
+	spin_lock(&vp->v_spinlock);
 	ncp = TAILQ_FIRST(&vp->v_namecache);
 	if (ncp)
 		_cache_hold(ncp);
@@ -1314,7 +1323,7 @@ cache_inval_vp_nonblock(struct vnode *vp)
 		/* loop entered with ncp held */
 		if ((next = TAILQ_NEXT(ncp, nc_vnode)) != NULL)
 			_cache_hold(next);
-		spin_unlock_wr(&vp->v_spinlock);
+		spin_unlock(&vp->v_spinlock);
 		if (_cache_lock_nonblock(ncp)) {
 			_cache_drop(ncp);
 			if (next)
@@ -1332,16 +1341,16 @@ cache_inval_vp_nonblock(struct vnode *vp)
 		_cache_inval(ncp, 0);
 		_cache_put(ncp);		/* also releases reference */
 		ncp = next;
-		spin_lock_wr(&vp->v_spinlock);
+		spin_lock(&vp->v_spinlock);
 		if (ncp && ncp->nc_vp != vp) {
-			spin_unlock_wr(&vp->v_spinlock);
+			spin_unlock(&vp->v_spinlock);
 			kprintf("Warning: cache_inval_vp: race-B detected on "
 				"%s\n", ncp->nc_name);
 			_cache_drop(ncp);
 			goto done;
 		}
 	}
-	spin_unlock_wr(&vp->v_spinlock);
+	spin_unlock(&vp->v_spinlock);
 done:
 	return(TAILQ_FIRST(&vp->v_namecache) != NULL);
 }
@@ -1385,9 +1394,9 @@ cache_rename(struct nchandle *fnch, struct nchandle *tnch)
 	hash = fnv_32_buf(&tncp_par, sizeof(tncp_par), hash);
 	nchpp = NCHHASH(hash);
 
-	spin_lock_wr(&nchpp->spin);
+	spin_lock(&nchpp->spin);
 	_cache_link_parent(fncp, tncp_par, nchpp);
-	spin_unlock_wr(&nchpp->spin);
+	spin_unlock(&nchpp->spin);
 
 	_cache_put(tncp_par);
 
@@ -1607,11 +1616,11 @@ cache_fromdvp(struct vnode *dvp, struct ucred *cred, int makeit,
 	 * Handle the makeit == 0 degenerate case
 	 */
 	if (makeit == 0) {
-		spin_lock_wr(&dvp->v_spinlock);
+		spin_lock(&dvp->v_spinlock);
 		nch->ncp = TAILQ_FIRST(&dvp->v_namecache);
 		if (nch->ncp)
 			cache_hold(nch);
-		spin_unlock_wr(&dvp->v_spinlock);
+		spin_unlock(&dvp->v_spinlock);
 	}
 
 	/*
@@ -1621,14 +1630,14 @@ cache_fromdvp(struct vnode *dvp, struct ucred *cred, int makeit,
 		/*
 		 * Break out if we successfully acquire a working ncp.
 		 */
-		spin_lock_wr(&dvp->v_spinlock);
+		spin_lock(&dvp->v_spinlock);
 		nch->ncp = TAILQ_FIRST(&dvp->v_namecache);
 		if (nch->ncp) {
 			cache_hold(nch);
-			spin_unlock_wr(&dvp->v_spinlock);
+			spin_unlock(&dvp->v_spinlock);
 			break;
 		}
-		spin_unlock_wr(&dvp->v_spinlock);
+		spin_unlock(&dvp->v_spinlock);
 
 		/*
 		 * If dvp is the root of its filesystem it should already
@@ -1768,14 +1777,14 @@ cache_fromdvp_try(struct vnode *dvp, struct ucred *cred,
 			break;
 		}
 		vn_unlock(pvp);
-		spin_lock_wr(&pvp->v_spinlock);
+		spin_lock(&pvp->v_spinlock);
 		if ((nch.ncp = TAILQ_FIRST(&pvp->v_namecache)) != NULL) {
 			_cache_hold(nch.ncp);
-			spin_unlock_wr(&pvp->v_spinlock);
+			spin_unlock(&pvp->v_spinlock);
 			vrele(pvp);
 			break;
 		}
-		spin_unlock_wr(&pvp->v_spinlock);
+		spin_unlock(&pvp->v_spinlock);
 		if (pvp->v_flag & VROOT) {
 			nch.ncp = _cache_get(pvp->v_mount->mnt_ncmountpt.ncp);
 			error = cache_resolve_mp(nch.mount);
@@ -2047,7 +2056,7 @@ cache_zap(struct namecache *ncp, int nonblock)
 			_cache_hold(par);
 			_cache_lock(par);
 		}
-		spin_lock_wr(&ncp->nc_head->spin);
+		spin_lock(&ncp->nc_head->spin);
 	}
 
 	/*
@@ -2062,7 +2071,7 @@ cache_zap(struct namecache *ncp, int nonblock)
 			break;
 		if (atomic_cmpset_int(&ncp->nc_refs, refs, refs - 1)) {
 			if (par) {
-				spin_unlock_wr(&ncp->nc_head->spin);
+				spin_unlock(&ncp->nc_head->spin);
 				_cache_put(par);
 			}
 			_cache_unlock(ncp);
@@ -2090,7 +2099,7 @@ cache_zap(struct namecache *ncp, int nonblock)
 			dropvp = par->nc_vp;
 		ncp->nc_head = NULL;
 		ncp->nc_parent = NULL;
-		spin_unlock_wr(&nchpp->spin);
+		spin_unlock(&nchpp->spin);
 		_cache_unlock(par);
 	} else {
 		KKASSERT(ncp->nc_head == NULL);
@@ -2122,20 +2131,25 @@ cache_zap(struct namecache *ncp, int nonblock)
  * Clean up dangling negative cache and defered-drop entries in the
  * namecache.
  */
-static enum { CHI_LOW, CHI_HIGH } cache_hysteresis_state = CHI_LOW;
+typedef enum { CHI_LOW, CHI_HIGH } cache_hs_t;
+
+static cache_hs_t neg_cache_hysteresis_state = CHI_LOW;
+static cache_hs_t pos_cache_hysteresis_state = CHI_LOW;
 
 void
 cache_hysteresis(void)
 {
+	int poslimit;
+
 	/*
 	 * Don't cache too many negative hits.  We use hysteresis to reduce
 	 * the impact on the critical path.
 	 */
-	switch(cache_hysteresis_state) {
+	switch(neg_cache_hysteresis_state) {
 	case CHI_LOW:
 		if (numneg > MINNEG && numneg * ncnegfactor > numcache) {
 			_cache_cleanneg(10);
-			cache_hysteresis_state = CHI_HIGH;
+			neg_cache_hysteresis_state = CHI_HIGH;
 		}
 		break;
 	case CHI_HIGH:
@@ -2144,7 +2158,34 @@ cache_hysteresis(void)
 		) {
 			_cache_cleanneg(10);
 		} else {
-			cache_hysteresis_state = CHI_LOW;
+			neg_cache_hysteresis_state = CHI_LOW;
+		}
+		break;
+	}
+
+	/*
+	 * Don't cache too many positive hits.  We use hysteresis to reduce
+	 * the impact on the critical path.
+	 *
+	 * Excessive positive hits can accumulate due to large numbers of
+	 * hardlinks (the vnode cache will not prevent hl ncps from growing
+	 * into infinity).
+	 */
+	if ((poslimit = ncposlimit) == 0)
+		poslimit = desiredvnodes * 2;
+
+	switch(pos_cache_hysteresis_state) {
+	case CHI_LOW:
+		if (numcache > poslimit && numcache > MINPOS) {
+			_cache_cleanpos(10);
+			pos_cache_hysteresis_state = CHI_HIGH;
+		}
+		break;
+	case CHI_HIGH:
+		if (numcache > poslimit * 5 / 6 && numcache > MINPOS) {
+			_cache_cleanpos(10);
+		} else {
+			pos_cache_hysteresis_state = CHI_LOW;
 		}
 		break;
 	}
@@ -2226,7 +2267,7 @@ cache_nlookup(struct nchandle *par_nch, struct nlcomponent *nlc)
 	new_ncp = NULL;
 	nchpp = NCHHASH(hash);
 restart:
-	spin_lock_wr(&nchpp->spin);
+	spin_lock(&nchpp->spin);
 	LIST_FOREACH(ncp, &nchpp->list, nc_hash) {
 		numchecks++;
 
@@ -2241,7 +2282,7 @@ restart:
 		    (ncp->nc_flag & NCF_DESTROYED) == 0
 		) {
 			_cache_hold(ncp);
-			spin_unlock_wr(&nchpp->spin);
+			spin_unlock(&nchpp->spin);
 			if (par_locked) {
 				_cache_unlock(par_nch->ncp);
 				par_locked = 0;
@@ -2271,7 +2312,7 @@ restart:
 	 *	 mount case, in which case nc_name will be NULL.
 	 */
 	if (new_ncp == NULL) {
-		spin_unlock_wr(&nchpp->spin);
+		spin_unlock(&nchpp->spin);
 		new_ncp = cache_alloc(nlc->nlc_namelen);
 		if (nlc->nlc_namelen) {
 			bcopy(nlc->nlc_nameptr, new_ncp->nc_name,
@@ -2281,7 +2322,7 @@ restart:
 		goto restart;
 	}
 	if (par_locked == 0) {
-		spin_unlock_wr(&nchpp->spin);
+		spin_unlock(&nchpp->spin);
 		_cache_lock(par_nch->ncp);
 		par_locked = 1;
 		goto restart;
@@ -2293,7 +2334,7 @@ restart:
 	 */
 	ncp = new_ncp;
 	_cache_link_parent(ncp, par_nch->ncp, nchpp);
-	spin_unlock_wr(&nchpp->spin);
+	spin_unlock(&nchpp->spin);
 	_cache_unlock(par_nch->ncp);
 	/* par_locked = 0 - not used */
 found:
@@ -2342,7 +2383,7 @@ cache_nlookup_nonblock(struct nchandle *par_nch, struct nlcomponent *nlc)
 	new_ncp = NULL;
 	nchpp = NCHHASH(hash);
 restart:
-	spin_lock_wr(&nchpp->spin);
+	spin_lock(&nchpp->spin);
 	LIST_FOREACH(ncp, &nchpp->list, nc_hash) {
 		numchecks++;
 
@@ -2357,7 +2398,7 @@ restart:
 		    (ncp->nc_flag & NCF_DESTROYED) == 0
 		) {
 			_cache_hold(ncp);
-			spin_unlock_wr(&nchpp->spin);
+			spin_unlock(&nchpp->spin);
 			if (par_locked) {
 				_cache_unlock(par_nch->ncp);
 				par_locked = 0;
@@ -2387,7 +2428,7 @@ restart:
 	 *	 mount case, in which case nc_name will be NULL.
 	 */
 	if (new_ncp == NULL) {
-		spin_unlock_wr(&nchpp->spin);
+		spin_unlock(&nchpp->spin);
 		new_ncp = cache_alloc(nlc->nlc_namelen);
 		if (nlc->nlc_namelen) {
 			bcopy(nlc->nlc_nameptr, new_ncp->nc_name,
@@ -2397,7 +2438,7 @@ restart:
 		goto restart;
 	}
 	if (par_locked == 0) {
-		spin_unlock_wr(&nchpp->spin);
+		spin_unlock(&nchpp->spin);
 		if (_cache_lock_nonblock(par_nch->ncp) == 0) {
 			par_locked = 1;
 			goto restart;
@@ -2411,7 +2452,7 @@ restart:
 	 */
 	ncp = new_ncp;
 	_cache_link_parent(ncp, par_nch->ncp, nchpp);
-	spin_unlock_wr(&nchpp->spin);
+	spin_unlock(&nchpp->spin);
 	_cache_unlock(par_nch->ncp);
 	/* par_locked = 0 - not used */
 found:
@@ -2722,33 +2763,66 @@ _cache_cleanneg(int count)
 	struct namecache *ncp;
 
 	/*
-	 * Automode from the vnlru proc - clean out 10% of the negative cache
+	 * Attempt to clean out the specified number of negative cache
 	 * entries.
 	 */
-	if (count == 0)
-		count = numneg / 10 + 1;
+	while (count) {
+		spin_lock(&ncspin);
+		ncp = TAILQ_FIRST(&ncneglist);
+		if (ncp == NULL) {
+			spin_unlock(&ncspin);
+			break;
+		}
+		TAILQ_REMOVE(&ncneglist, ncp, nc_vnode);
+		TAILQ_INSERT_TAIL(&ncneglist, ncp, nc_vnode);
+		_cache_hold(ncp);
+		spin_unlock(&ncspin);
+		if (_cache_lock_special(ncp) == 0) {
+			ncp = cache_zap(ncp, 1);
+			if (ncp)
+				_cache_drop(ncp);
+		} else {
+			_cache_drop(ncp);
+		}
+		--count;
+	}
+}
+
+/*
+ * Clean out positive cache entries when too many have accumulated.
+ *
+ * MPSAFE
+ */
+static void
+_cache_cleanpos(int count)
+{
+	static volatile int rover;
+	struct nchash_head *nchpp;
+	struct namecache *ncp;
+	int rover_copy;
 
 	/*
 	 * Attempt to clean out the specified number of negative cache
 	 * entries.
 	 */
 	while (count) {
-		spin_lock_wr(&ncspin);
-		ncp = TAILQ_FIRST(&ncneglist);
-		if (ncp == NULL) {
-			spin_unlock_wr(&ncspin);
-			break;
-		}
-		TAILQ_REMOVE(&ncneglist, ncp, nc_vnode);
-		TAILQ_INSERT_TAIL(&ncneglist, ncp, nc_vnode);
-		_cache_hold(ncp);
-		spin_unlock_wr(&ncspin);
-		if (_cache_lock_special(ncp) == 0) {
-			ncp = cache_zap(ncp, 0);
-			if (ncp)
+		rover_copy = ++rover;	/* MPSAFEENOUGH */
+		nchpp = NCHHASH(rover_copy);
+
+		spin_lock(&nchpp->spin);
+		ncp = LIST_FIRST(&nchpp->list);
+		if (ncp)
+			_cache_hold(ncp);
+		spin_unlock(&nchpp->spin);
+
+		if (ncp) {
+			if (_cache_lock_special(ncp) == 0) {
+				ncp = cache_zap(ncp, 1);
+				if (ncp)
+					_cache_drop(ncp);
+			} else {
 				_cache_drop(ncp);
-		} else {
-			_cache_drop(ncp);
+			}
 		}
 		--count;
 	}
@@ -2779,7 +2853,7 @@ _cache_cleandefered(void)
 	for (i = 0; i <= nchash; ++i) {
 		nchpp = &nchashtbl[i];
 
-		spin_lock_wr(&nchpp->spin);
+		spin_lock(&nchpp->spin);
 		LIST_INSERT_HEAD(&nchpp->list, &dummy, nc_hash);
 		ncp = &dummy;
 		while ((ncp = LIST_NEXT(ncp, nc_hash)) != NULL) {
@@ -2788,17 +2862,17 @@ _cache_cleandefered(void)
 			LIST_REMOVE(&dummy, nc_hash);
 			LIST_INSERT_AFTER(ncp, &dummy, nc_hash);
 			_cache_hold(ncp);
-			spin_unlock_wr(&nchpp->spin);
+			spin_unlock(&nchpp->spin);
 			if (_cache_lock_nonblock(ncp) == 0) {
 				ncp->nc_flag &= ~NCF_DEFEREDZAP;
 				_cache_unlock(ncp);
 			}
 			_cache_drop(ncp);
-			spin_lock_wr(&nchpp->spin);
+			spin_lock(&nchpp->spin);
 			ncp = &dummy;
 		}
 		LIST_REMOVE(&dummy, nc_hash);
-		spin_unlock_wr(&nchpp->spin);
+		spin_unlock(&nchpp->spin);
 	}
 }
 
@@ -2818,7 +2892,8 @@ nchinit(void)
 	}
 	TAILQ_INIT(&ncneglist);
 	spin_init(&ncspin);
-	nchashtbl = hashinit_ext(desiredvnodes*2, sizeof(struct nchash_head),
+	nchashtbl = hashinit_ext(desiredvnodes / 2,
+				 sizeof(struct nchash_head),
 				 M_VFSCACHE, &nchash);
 	for (i = 0; i <= (int)nchash; ++i) {
 		LIST_INIT(&nchashtbl[i].list);
@@ -2936,7 +3011,8 @@ cache_purgevfs(struct mount *mp)
 #endif
 
 static int disablecwd;
-SYSCTL_INT(_debug, OID_AUTO, disablecwd, CTLFLAG_RW, &disablecwd, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, disablecwd, CTLFLAG_RW, &disablecwd, 0,
+    "Disable getcwd");
 
 static u_long numcwdcalls; STATNODE(CTLFLAG_RD, numcwdcalls, &numcwdcalls);
 static u_long numcwdfail1; STATNODE(CTLFLAG_RD, numcwdfail1, &numcwdfail1);
@@ -3087,7 +3163,8 @@ done:
 
 static int disablefullpath;
 SYSCTL_INT(_debug, OID_AUTO, disablefullpath, CTLFLAG_RW,
-    &disablefullpath, 0, "");
+    &disablefullpath, 0,
+    "Disable fullpath lookups");
 
 STATNODE(numfullpathcalls);
 STATNODE(numfullpathfail1);
@@ -3241,17 +3318,17 @@ vn_fullpath(struct proc *p, struct vnode *vn, char **retbuf, char **freebuf, int
 		if ((vn = p->p_textvp) == NULL)
 			return (EINVAL);
 	}
-	spin_lock_wr(&vn->v_spinlock);
+	spin_lock(&vn->v_spinlock);
 	TAILQ_FOREACH(ncp, &vn->v_namecache, nc_vnode) {
 		if (ncp->nc_nlen)
 			break;
 	}
 	if (ncp == NULL) {
-		spin_unlock_wr(&vn->v_spinlock);
+		spin_unlock(&vn->v_spinlock);
 		return (EINVAL);
 	}
 	_cache_hold(ncp);
-	spin_unlock_wr(&vn->v_spinlock);
+	spin_unlock(&vn->v_spinlock);
 
 	atomic_add_int(&numfullpathcalls, -1);
 	nch.ncp = ncp;;

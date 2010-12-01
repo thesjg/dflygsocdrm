@@ -48,6 +48,7 @@
 
 #include <sys/thread2.h>
 #include <sys/msgport2.h>
+#include <sys/mplock2.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -91,7 +92,7 @@ struct	ipxpcb ipxrawpcb;
 
 long	ipx_pexseq;
 
-static	void ipxintr(struct netmsg *);
+static	void ipxintr(netmsg_t msg);
 static	int ipx_do_route(struct ipx_addr *src, struct route *ro);
 static	void ipx_undo_route(struct route *ro);
 static	void ipx_forward(struct mbuf *m);
@@ -117,21 +118,22 @@ ipx_init(void)
 	ipx_hostmask.sipx_addr.x_net = ipx_broadnet;
 	ipx_hostmask.sipx_addr.x_host = ipx_broadhost;
 
-	netisr_register(NETISR_IPX, cpu0_portfn, pktinfo_portfn_cpu0,
-			ipxintr, NETISR_FLAG_NOTMPSAFE);
+	netisr_register(NETISR_IPX, ipxintr, NULL);
 }
 
 /*
  * IPX input routine.  Pass to next level.
  */
 static void
-ipxintr(struct netmsg *msg)
+ipxintr(netmsg_t msg)
 {
-	struct mbuf *m = ((struct netmsg_packet *)msg)->nm_packet;
+	struct mbuf *m = msg->packet.nm_packet;
 	struct ipx *ipx;
 	struct ipxpcb *ipxp;
 	struct ipx_ifaddr *ia;
 	int len;
+
+	get_mplock();
 
 	/*
 	 * If no IPX addresses have been set yet but the interfaces
@@ -269,7 +271,7 @@ ours:
 bad:
 	m_freem(m);
 out:
-	;
+	rel_mplock();
 	/* msg was embedded in the mbuf, do not reply! */
 }
 
@@ -278,22 +280,24 @@ out:
  *	arg_as_sa:	XXX should be swapped with dummy
  */
 void
-ipx_ctlinput(int cmd, struct sockaddr *arg_as_sa, void *dummy)
+ipx_ctlinput(netmsg_t msg)
 {
+	int cmd = msg->ctlinput.nm_cmd;
+	struct sockaddr *arg_as_sa = msg->ctlinput.nm_arg;
 	caddr_t arg = (/* XXX */ caddr_t)arg_as_sa;
 	struct ipx_addr *ipx;
+	struct sockaddr_ipx *sipx;
 
 	if (cmd < 0 || cmd > PRC_NCMDS)
-		return;
-	switch (cmd) {
-		struct sockaddr_ipx *sipx;
+		goto out;
 
+	switch (cmd) {
 	case PRC_IFDOWN:
 	case PRC_HOSTDEAD:
 	case PRC_HOSTUNREACH:
 		sipx = (struct sockaddr_ipx *)arg;
 		if (sipx->sipx_family != AF_IPX)
-			return;
+			break;
 		ipx = &sipx->sipx_addr;
 		break;
 
@@ -302,6 +306,8 @@ ipx_ctlinput(int cmd, struct sockaddr *arg_as_sa, void *dummy)
 			kprintf("ipx_ctlinput: cmd %d.\n", cmd);
 		break;
 	}
+out:
+	lwkt_replymsg(&msg->lmsg, 0);
 }
 
 /*

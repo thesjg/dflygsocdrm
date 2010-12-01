@@ -110,7 +110,7 @@ int BIO_set(BIO *bio, BIO_METHOD *method)
 
 int BIO_free(BIO *a)
 	{
-	int ret=0,i;
+	int i;
 
 	if (a == NULL) return(0);
 
@@ -133,7 +133,7 @@ int BIO_free(BIO *a)
 	CRYPTO_free_ex_data(CRYPTO_EX_INDEX_BIO, a, &a->ex_data);
 
 	if ((a->method == NULL) || (a->method->destroy == NULL)) return(1);
-	ret=a->method->destroy(a);
+	a->method->destroy(a);
 	OPENSSL_free(a);
 	return(1);
 	}
@@ -429,7 +429,7 @@ BIO *BIO_push(BIO *b, BIO *bio)
 	if (bio != NULL)
 		bio->prev_bio=lb;
 	/* called to do internal processing */
-	BIO_ctrl(b,BIO_CTRL_PUSH,0,NULL);
+	BIO_ctrl(b,BIO_CTRL_PUSH,0,lb);
 	return(b);
 	}
 
@@ -441,7 +441,7 @@ BIO *BIO_pop(BIO *b)
 	if (b == NULL) return(NULL);
 	ret=b->next_bio;
 
-	BIO_ctrl(b,BIO_CTRL_POP,0,NULL);
+	BIO_ctrl(b,BIO_CTRL_POP,0,b);
 
 	if (b->prev_bio != NULL)
 		b->prev_bio->next_bio=b->next_bio;

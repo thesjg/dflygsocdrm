@@ -290,6 +290,10 @@ struct ip6aux {
 #define	IPV6_FORWARDING		0x02	/* most of IPv6 header exists */
 #define	IPV6_MINMTU		0x04	/* use minimum MTU (IPV6_USE_MIN_MTU) */
 
+/* direction passed to ip_cpufn as last parameter */
+#define IP6_MPORT_IN		0 /* Find lwkt port for incoming packets */
+#define IP6_MPORT_OUT		1 /* Find lwkt port for outgoing packets */
+
 extern struct	ip6stat ip6stat;	/* statistics */
 extern u_int32_t ip6_id;		/* fragment identifier */
 extern int	ip6_defhlim;		/* default hop limit */
@@ -334,9 +338,9 @@ struct inpcb;
 struct sockopt;
 struct in6_ifaddr;
 struct ip6_hdr;
-struct netmsg;
+union netmsg;
 
-int	icmp6_ctloutput (struct socket *, struct sockopt *sopt);
+void	icmp6_ctloutput (union netmsg *);
 
 void	ip6_init (void);
 void	ip6intr (void);
@@ -369,6 +373,7 @@ int	ip6_output (struct mbuf *, struct ip6_pktopts *,
 			int,
 			struct ip6_moptions *, struct ifnet **,
 			struct inpcb *);
+void	ip6_ctloutput_dispatch(netmsg_t msg);
 int	ip6_ctloutput (struct socket *, struct sockopt *sopt);
 int	ip6_raw_ctloutput (struct socket *, struct sockopt *);
 void	init_ip6pktopts (struct ip6_pktopts *);
@@ -388,8 +393,8 @@ void	frag6_drain (void);
 
 void	rip6_init (void);
 int	rip6_input (struct mbuf **mp, int *offp, int proto);
-void	rip6_ctlinput (int, struct sockaddr *, void *);
-int	rip6_ctloutput (struct socket *so, struct sockopt *sopt);
+void	rip6_ctlinput (union netmsg *);
+void	rip6_ctloutput (union netmsg *);
 int	rip6_output (struct mbuf *, struct socket *, ...);
 int	rip6_usrreq (struct socket *,
 	    int, struct mbuf *, struct mbuf *, struct mbuf *, struct proc *);

@@ -52,6 +52,10 @@ emulation/linux/x86_64/linux32_sysvec.c	optional	compat_linux32
 
 # XXX use assembler versions of bf_enc and des_enc
 crypto/blowfish/bf_enc.c		optional	ipsec ipsec_esp
+crypto/aesni/aesencdec_x86_64.S	optional	aesni
+crypto/aesni/aeskeys_x86_64.S	optional	aesni
+crypto/aesni/aesni.c		optional	aesni
+crypto/aesni/aesni_wrap.c	optional	aesni
 crypto/des/des_enc.c			optional	ipsec ipsec_esp
 crypto/des/des_ecb.c			optional	netsmbcrypto
 crypto/des/des_enc.c			optional	netsmbcrypto
@@ -61,6 +65,26 @@ crypto/des/des_enc.c			optional	crypto
 crypto/des/des_ecb.c			optional	crypto
 crypto/des/des_setkey.c			optional	crypto
 
+${OSACPI_MD_DIR}/OsdEnvironment.c	optional        acpi
+${OSACPI_MD_DIR}/acpi_machdep.c		optional        acpi
+${OSACPI_MD_DIR}/acpi_pstate_machdep.c	optional	acpi
+${OSACPI_MD_DIR}/acpi_wakeup.c		optional        acpi
+acpi.h					optional	acpi		\
+	dependency	"$S/${ACPICA_DIR}/include/acpi.h"		\
+	compile-with	"cp $S/${ACPICA_DIR}/include/acpi.h ${.OBJDIR}/"	\
+	no-obj no-implicit-rule before-depend				\
+	clean		"acpi.h"
+platform/acenv.h			optional	acpi		\
+	dependency	"$S/${ACPICA_DIR}/include/platform/acenv.h"	\
+	compile-with	"mkdir -p ${.OBJDIR}/platform; cat ${.ALLSRC} | sed -e 's/__FreeBSD__/__DragonFly__/' -e 's/acfreebsd.h/acdragonfly.h/' > ${.TARGET}" \
+	no-obj no-implicit-rule before-depend				\
+	clean		"acenv.h"
+acpi_wakecode.h				optional        acpi		\
+	dependency	"$S/${OSACPI_MD_DIR}/acpi_wakecode.S"		\
+	compile-with	"${MAKE} -f $S/${OSACPI_MD_DIR}/Makefile MAKESRCPATH=$S/${OSACPI_MD_DIR}" \
+       no-obj no-implicit-rule before-depend				\
+       clean           "acpi_wakecode.h acpi_wakecode.o acpi_wakecode.bin"
+#
 dev/video/fb/fb.c			optional	vga
 dev/video/fb/splash.c			optional	splash
 dev/video/fb/vga.c			optional	vga
@@ -70,6 +94,10 @@ dev/misc/kbd/kbd.c			optional	atkbd
 dev/misc/kbd/kbd.c			optional	kbd
 dev/misc/kbd/kbd.c			optional	sc
 dev/misc/kbd/kbd.c			optional	ukbd
+dev/misc/kbd/kbdsw.c			optional	atkbd
+dev/misc/kbd/kbdsw.c			optional	kbd
+dev/misc/kbd/kbdsw.c			optional	sc
+dev/misc/kbd/kbdsw.c			optional	ukbd
 dev/misc/syscons/schistory.c		optional	sc
 dev/misc/syscons/scmouse.c		optional	sc
 dev/misc/syscons/scterm.c		optional	sc
@@ -153,7 +181,7 @@ platform/pc64/icu/icu_vector.s          standard
 bus/pci/x86_64/legacy.c			optional	pci
 bus/pci/x86_64/pci_bus.c			optional	pci
 bus/pci/x86_64/pci_cfgreg.c		optional	pci
-bus/pci/x86_64/mptable_pci.c		optional	pci smp apic_io
+bus/pci/x86_64/mptable_pci.c		optional	pci smp
 # notyet (BIOS struct and functions)
 #bus/pci/x86_64/pci_pir.c			optional	pci
 
@@ -168,6 +196,7 @@ platform/pc64/x86_64/console.c	standard
 platform/pc64/x86_64/ipl_funcs.c	standard
 kern/syscalls.c			standard
 platform/pc64/x86_64/mp_machdep.c		optional	smp
+platform/pc64/x86_64/mp_madt.c		optional	smp
 dev/misc/atkbd/atkbd_isa.c		optional	atkbd
 dev/misc/atkbdc_layer/atkbdc_isa.c	optional	atkbdc
 dev/misc/ppc/ppc.c			optional	ppc

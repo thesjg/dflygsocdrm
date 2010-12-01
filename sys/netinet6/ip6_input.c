@@ -1,5 +1,4 @@
 /*	$FreeBSD: src/sys/netinet6/ip6_input.c,v 1.11.2.15 2003/01/24 05:11:35 sam Exp $	*/
-/*	$DragonFly: src/sys/netinet6/ip6_input.c,v 1.38 2008/09/24 14:26:39 sephe Exp $	*/
 /*	$KAME: ip6_input.c,v 1.259 2002/01/21 04:58:09 jinmei Exp $	*/
 
 /*
@@ -86,15 +85,16 @@
 #include <sys/proc.h>
 #include <sys/priv.h>
 
-#include <sys/thread2.h>
-#include <sys/msgport2.h>
-
 #include <net/if.h>
 #include <net/if_types.h>
 #include <net/if_dl.h>
 #include <net/route.h>
 #include <net/netisr.h>
 #include <net/pfil.h>
+
+#include <sys/thread2.h>
+#include <sys/msgport2.h>
+#include <net/netmsg2.h>
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h>
@@ -129,13 +129,10 @@
 
 #include <netinet6/ip6protosw.h>
 
-/* we need it for NLOOP. */
-#include "use_loop.h"
-
 #include <net/net_osdep.h>
 
 extern struct domain inet6domain;
-extern struct ip6protosw inet6sw[];
+extern struct protosw inet6sw[];
 
 u_char ip6_protox[IPPROTO_MAX];
 struct in6_ifaddr *in6_ifaddr;
@@ -160,10 +157,11 @@ struct ip6stat ip6stat;
 static void ip6_init2 (void *);
 static struct ip6aux *ip6_setdstifaddr (struct mbuf *, struct in6_ifaddr *);
 static int ip6_hopopts_input (u_int32_t *, u_int32_t *, struct mbuf **, int *);
-static void ip6_input(struct netmsg *msg);
+static void ip6_input(netmsg_t msg);
 #ifdef PULLDOWN_TEST
 static struct mbuf *ip6_pullexthdr (struct mbuf *, size_t, int);
 #endif
+static void transport6_processing_handler(netmsg_t netmsg);
 
 /*
  * IP6 initialization: fill in IP6 protocol switch table.
@@ -172,21 +170,17 @@ static struct mbuf *ip6_pullexthdr (struct mbuf *, size_t, int);
 void
 ip6_init(void)
 {
-	struct ip6protosw *pr;
+	struct protosw *pr;
 	int i;
 	struct timeval tv;
 
-#ifdef DIAGNOSTIC
-	if (sizeof(struct protosw) != sizeof(struct ip6protosw))
-		panic("sizeof(protosw) != sizeof(ip6protosw)");
-#endif
-	pr = (struct ip6protosw *)pffindproto(PF_INET6, IPPROTO_RAW, SOCK_RAW);
+	pr = pffindproto(PF_INET6, IPPROTO_RAW, SOCK_RAW);
 	if (pr == 0)
 		panic("ip6_init");
 	for (i = 0; i < IPPROTO_MAX; i++)
 		ip6_protox[i] = pr - inet6sw;
-	for (pr = (struct ip6protosw *)inet6domain.dom_protosw;
-	    pr < (struct ip6protosw *)inet6domain.dom_protoswNPROTOSW; pr++)
+	for (pr = inet6domain.dom_protosw;
+	    pr < inet6domain.dom_protoswNPROTOSW; pr++)
 		if (pr->pr_domain->dom_family == PF_INET6 &&
 		    pr->pr_protocol && pr->pr_protocol != IPPROTO_RAW)
 			ip6_protox[pr->pr_protocol] = pr - inet6sw;
@@ -198,8 +192,7 @@ ip6_init(void)
 			"error %d\n", __func__, i);
 	}
 
-	netisr_register(NETISR_IPV6, cpu0_portfn, pktinfo_portfn_cpu0,
-			ip6_input, NETISR_FLAG_NOTMPSAFE);
+	netisr_register(NETISR_IPV6, ip6_input, NULL); /* XXX cpufn */
 	scope6_init();
 	addrsel_policy_init();
 	nd6_init();
@@ -241,9 +234,9 @@ extern struct	route_in6 ip6_forward_rt;
 
 static
 void
-ip6_input(struct netmsg *msg)
+ip6_input(netmsg_t msg)
 {
-	struct mbuf *m = ((struct netmsg_packet *)msg)->nm_packet;
+	struct mbuf *m = msg->packet.nm_packet;
 	struct ip6_hdr *ip6;
 	int off = sizeof(struct ip6_hdr), nest;
 	u_int32_t plen;
@@ -796,6 +789,8 @@ hbhcheck:
 
 	rh_present = 0;
 	while (nxt != IPPROTO_DONE) {
+		struct protosw *sw6;
+
 		if (ip6_hdrnestlimit && (++nest > ip6_hdrnestlimit)) {
 			ip6stat.ip6s_toomanyhdr++;
 			in6_ifstat_inc(m->m_pkthdr.rcvif, ifs6_in_hdrerr);
@@ -837,20 +832,41 @@ hbhcheck:
 			}
 		}
 
+		sw6 = &inet6sw[ip6_protox[nxt]];
 #ifdef IPSEC
 		/*
 		 * enforce IPsec policy checking if we are seeing last header.
 		 * note that we do not visit this with protocols with pcb layer
 		 * code - like udp/tcp/raw ip.
 		 */
-		if ((inet6sw[ip6_protox[nxt]].pr_flags & PR_LASTHDR) &&
-		    ipsec6_in_reject(m, NULL)) {
+		if ((sw6->pr_flags & PR_LASTHDR) && ipsec6_in_reject(m, NULL)) {
 			ipsec6stat.in_polvio++;
 			goto bad;
 		}
 #endif
+		/*
+		 * If this is a terminal header forward to the port, otherwise
+		 * process synchronously for more headers.
+		 */
+		if (sw6->pr_flags & PR_LASTHDR) {
+			struct netmsg_packet *pmsg;
+			lwkt_port_t port;
 
-		nxt = (*inet6sw[ip6_protox[nxt]].pr_input)(&m, &off, nxt);
+			port = cpu_portfn(0); /* XXX */
+			KKASSERT(port != NULL);
+			pmsg = &m->m_hdr.mh_netmsg;
+			netmsg_init(&pmsg->base, NULL,
+				    &netisr_apanic_rport,
+				    0, transport6_processing_handler);
+			pmsg->nm_packet = m;
+			pmsg->nm_nxt = nxt;
+			pmsg->base.lmsg.u.ms_result = off;
+			lwkt_sendmsg(port, &pmsg->base.lmsg);
+			/* done with m */
+			nxt = IPPROTO_DONE;
+		} else {
+			nxt = sw6->pr_input(&m, &off, nxt);
+		}
 	}
 	goto bad2;
 bad:
@@ -858,6 +874,28 @@ bad:
 bad2:
 	;
 	/* msg was embedded in the mbuf, do not reply! */
+}
+
+/*
+ * We have to call the pr_input() function from the correct protocol
+ * thread.  The sw6->pr_soport() request at the end of ip6_input()
+ * returns the port and we forward a netmsg to the port to execute
+ * this function.
+ */
+static void
+transport6_processing_handler(netmsg_t netmsg)
+{
+	struct netmsg_packet *pmsg = (struct netmsg_packet *)netmsg;
+	struct protosw *sw6;
+	int hlen;
+	int nxt;
+
+	sw6 = &inet6sw[ip6_protox[pmsg->nm_nxt]];
+	hlen = pmsg->base.lmsg.u.ms_result;
+
+	nxt = sw6->pr_input(&pmsg->nm_packet, &hlen, pmsg->nm_nxt);
+	KKASSERT(nxt == IPPROTO_DONE);
+	/* netmsg was embedded in the mbuf, do not reply! */
 }
 
 /*
@@ -1355,7 +1393,7 @@ ip6_savecontrol(struct inpcb *in6p, struct mbuf **mp, struct ip6_hdr *ip6,
 					mp = &(*mp)->m_next;
 				break;
 			case IPPROTO_ROUTING:
-				if (!in6p->in6p_flags & IN6P_RTHDR)
+				if (!(in6p->in6p_flags & IN6P_RTHDR))
 					break;
 
 				*mp = sbcreatecontrol((caddr_t)ip6e, elen,
@@ -1422,14 +1460,15 @@ ip6_notify_pmtu(struct inpcb *in6p, struct sockaddr_in6 *dst, u_int32_t *mtu)
 	    IPV6_PATHMTU, IPPROTO_IPV6)) == NULL)
 		return;
 
+	lwkt_gettoken(&so->so_rcv.ssb_token);
 	if (sbappendaddr(&so->so_rcv.sb, (struct sockaddr *)dst, NULL, m_mtu)
 	    == 0) {
 		m_freem(m_mtu);
 		/* XXX: should count statistics */
-	} else
+	} else {
 		sorwakeup(so);
-
-	return;
+	}
+	lwkt_reltoken(&so->so_rcv.ssb_token);
 }
 
 #ifdef PULLDOWN_TEST

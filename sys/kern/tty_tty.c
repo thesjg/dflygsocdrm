@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1982, 1986, 1991, 1993
  *	The Regents of the University of California.  All rights reserved.
  *
@@ -32,7 +34,6 @@
  *
  *	@(#)tty_tty.c	8.2 (Berkeley) 9/23/93
  * $FreeBSD: src/sys/kern/tty_tty.c,v 1.30 1999/09/25 18:24:24 phk Exp $
- * $DragonFly: src/sys/kern/tty_tty.c,v 1.19 2007/07/03 17:22:14 dillon Exp $
  */
 
 /*
@@ -64,9 +65,8 @@ static int cttyfilt_read(struct knote *, long);
 static int cttyfilt_write(struct knote *, long);
 
 #define	CDEV_MAJOR	1
-/* Don't make this static, since fdesc_vnops uses it. */
-struct dev_ops ctty_ops = {
-	{ "ctty", CDEV_MAJOR, D_TTY | D_KQFILTER },
+static struct dev_ops ctty_ops = {
+	{ "ctty", 0, D_TTY },
 	.d_open =	cttyopen,
 	.d_close =	cttyclose,
 	.d_read =	cttyread,
@@ -219,23 +219,32 @@ cttyioctl(struct dev_ioctl_args *ap)
 	struct proc *p = curproc;
 
 	KKASSERT(p);
+	lwkt_gettoken(&proc_token);
 	ttyvp = cttyvp(p);
-	if (ttyvp == NULL)
+	if (ttyvp == NULL) {
+		lwkt_reltoken(&proc_token);
 		return (EIO);
+	}
 	/*
 	 * Don't allow controlling tty to be set to the controlling tty
 	 * (infinite recursion).
 	 */
-	if (ap->a_cmd == TIOCSCTTY)
+	if (ap->a_cmd == TIOCSCTTY) {
+		lwkt_reltoken(&proc_token);
 		return EINVAL;
+	}
 	if (ap->a_cmd == TIOCNOTTY) {
 		if (!SESS_LEADER(p)) {
 			p->p_flag &= ~P_CONTROLT;
+			lwkt_reltoken(&proc_token);
 			return (0);
 		} else {
+			lwkt_reltoken(&proc_token);
 			return (EINVAL);
 		}
 	}
+	lwkt_reltoken(&proc_token);
+
 	return (VOP_IOCTL(ttyvp, ap->a_cmd, ap->a_data, ap->a_fflag,
 			  ap->a_cred, ap->a_sysmsg));
 }

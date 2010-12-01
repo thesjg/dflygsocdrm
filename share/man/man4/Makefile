@@ -15,6 +15,7 @@ MAN=	aac.4 \
 	adv.4 \
 	adw.4 \
 	ae.4 \
+	aesni.4 \
 	age.4 \
 	agp.4 \
 	aha.4 \
@@ -25,11 +26,16 @@ MAN=	aac.4 \
 	aibs.4 \
 	alc.4 \
 	ale.4 \
+	alpm.4 \
 	altq.4 \
 	amd.4 \
+	amdpm.4 \
+	amdsmb.4 \
 	amr.4 \
 	an.4 \
 	aps.4 \
+	arcmsr.4 \
+	arp.4 \
 	ata.4 \
 	atapicam.4 \
 	ath.4 \
@@ -93,7 +99,6 @@ MAN=	aac.4 \
 	gre.4 \
 	gusc.4 \
 	hifn.4 \
-	hotplug.4 \
 	ichsmb.4 \
 	icmp.4 \
 	icmp6.4 \
@@ -141,6 +146,7 @@ MAN=	aac.4 \
 	lpt.4 \
 	md.4 \
 	mem.4 \
+	mfi.4 \
 	miibus.4 \
 	mlx.4 \
 	mly.4 \
@@ -217,6 +223,7 @@ MAN=	aac.4 \
 	pty.4 \
 	puc.4 \
 	ral.4 \
+	random.4 \
 	rc.4 \
 	re.4 \
 	rl.4 \
@@ -309,6 +316,7 @@ MAN=	aac.4 \
 	uftdi.4 \
 	ugen.4 \
 	ugensa.4 \
+	uguru.4 \
 	uhci.4 \
 	uhid.4 \
 	uhidev.4 \
@@ -390,6 +398,7 @@ MLINKS+=nataraid.4 ar.4
 MLINKS+=netintro.4 networking.4
 MLINKS+=pccbb.4 cbb.4
 MLINKS+=pcm.4 sound.4
+MLINKS+=random.4 urandom.4
 MLINKS+=scsi.4 CAM.4 \
 	scsi.4 cam.4 \
 	scsi.4 scbus.4 \

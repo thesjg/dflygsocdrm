@@ -45,15 +45,12 @@ CFLAGS+=	-DLOADER_NFS_SUPPORT
 CFLAGS+=	-DLOADER_TFTP_SUPPORT
 .endif
 
-.if !defined(NOFORTH)
-# Enable BootForth
-BOOT_FORTH=	yes
-CFLAGS+=	-DBOOT_FORTH -I${.CURDIR}/../../ficl -I${.CURDIR}/../../ficl/sparc64
-.if exists(${.OBJDIR}/../../ficl/libficl.a)
-LIBFICL=	${.OBJDIR}/../../ficl/libficl.a
+BOOT_DLOADER=	yes
+CFLAGS+=	-I${.CURDIR}/../../dloader -I${.CURDIR}/../../dloader/sparc64
+.if exists(${.OBJDIR}/../../dloader/libdloader.a)
+LIBDLOADER=	${.OBJDIR}/../../dloader/libdloader.a
 .else
-LIBFICL=	${.CURDIR}/../../ficl/libficl.a
-.endif
+LIBDLOADER=	${.CURDIR}/../../dloader/libdloader.a
 .endif
 
 # Always add MI sources 
@@ -82,7 +79,7 @@ LIBSTAND=	-lstand
 .endif
 CFLAGS+=	-I${.CURDIR}/../../../../lib/libstand/
 
-LDADD=		${LIBFICL} ${LIBOFW} ${LIBSTAND}
+LDADD=		${LIBDLOADER} ${LIBOFW} ${LIBSTAND}
 
 vers.c:	${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version
 	sh ${.CURDIR}/../../common/newvers.sh ${.CURDIR}/version ${NEWVERSWHAT}
@@ -91,12 +88,12 @@ ${BASE}.help: help.common help.sparc64
 	cat ${.ALLSRC} | \
 	    awk -f ${.CURDIR}/../../common/merge_help.awk > ${.TARGET}
 
-.PATH: ${.CURDIR}/../../forth
-FILES=	${BASE}.help loader.4th support.4th loader.conf
+.PATH: ${.CURDIR}/../../dloader
+FILES=	${BASE}.help dloader.conf
 FILESDIR_loader.conf=	/boot/defaults
 
-.if !exists(${DESTDIR}/boot/loader.rc)
-FILES+= loader.rc
+.if !exists(${DESTDIR}/boot/rloader.rc)
+FILES+= rloader.rc
 .endif
 
 # There are no things relevant to all boot parts of FreeBSD/sparc64 yet.

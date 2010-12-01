@@ -58,7 +58,6 @@
 
 #include <machine/limits.h>
 
-#define CLUSTERDEBUG
 #if defined(CLUSTERDEBUG)
 #include <sys/sysctl.h>
 static int	rcluster= 0;
@@ -123,13 +122,16 @@ cluster_read(struct vnode *vp, off_t filesize, off_t loffset,
 	 * Then we limit maxreq to max_readahead to ensure it is a reasonable
 	 * value.
 	 *
-	 * Finally we must ensure that loffset + maxreq does not cross the
+	 * Finally we must ensure that (loffset + maxreq) does not cross the
 	 * boundary (filesize) for the current blocksize.  If we allowed it
 	 * to cross we could end up with buffers past the boundary with the
 	 * wrong block size (HAMMER large-data areas use mixed block sizes).
+	 * minreq is also absolutely limited to filesize.
 	 */
 	if (maxreq < minreq)
 		maxreq = minreq;
+	/* minreq not used beyond this point */
+
 	if (maxreq > max_readahead) {
 		maxreq = max_readahead;
 		if (maxreq > 16 * 1024 * 1024)
@@ -213,7 +215,7 @@ cluster_read(struct vnode *vp, off_t filesize, off_t loffset,
 		loffset += i * blksize;
 		reqbp = bp = NULL;
 	} else {
-		off_t firstread = bp->b_loffset;
+		__debugvar off_t firstread = bp->b_loffset;
 		int nblks;
 
 		/*
@@ -611,11 +613,12 @@ cluster_callback(struct bio *bio)
 	while ((tbp = bio->bio_caller_info1.cluster_head) != NULL) {
 		bio->bio_caller_info1.cluster_head = tbp->b_cluster_next;
 		if (error) {
-			tbp->b_flags |= B_ERROR;
+			tbp->b_flags |= B_ERROR | B_IODEBUG;
 			tbp->b_error = error;
 		} else {
 			tbp->b_dirtyoff = tbp->b_dirtyend = 0;
 			tbp->b_flags &= ~(B_ERROR|B_INVAL);
+			tbp->b_flags |= B_IODEBUG;
 			/*
 			 * XXX the bdwrite()/bqrelse() issued during
 			 * cluster building clears B_RELBUF (see bqrelse()
@@ -1012,11 +1015,7 @@ cluster_wbuild(struct vnode *vp, int blksize, off_t start_loffset, int bytes)
 		bp->b_cmd = BUF_CMD_WRITE;
 
 		vfs_busy_pages(vp, bp);
-		bp->b_runningbufspace = bp->b_bufsize;
-		if (bp->b_runningbufspace) {
-			runningbufspace += bp->b_runningbufspace;
-			++runningbufcount;
-		}
+		bsetrunningbufspace(bp, bp->b_bufsize);
 		BUF_KERNPROC(bp);
 		vn_strategy(vp, &bp->b_bio1);
 

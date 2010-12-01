@@ -58,6 +58,10 @@ bf_enc.o			optional	ipsec ipsec_esp		\
 	dependency	"$S/crypto/blowfish/arch/i386/bf_enc.S $S/crypto/blowfish/arch/i386/bf_enc_586.S $S/crypto/blowfish/arch/i386/bf_enc_686.S"		\
 	compile-with	"${CC} -c -I$S/crypto/blowfish/arch/i386 ${ASM_CFLAGS} ${WERROR} ${.IMPSRC}"	\
 	no-implicit-rule
+crypto/aesni/aesencdec_i386.S	optional	aesni
+crypto/aesni/aeskeys_i386.S	optional	aesni
+crypto/aesni/aesni.c		optional	aesni
+crypto/aesni/aesni_wrap.c	optional	aesni
 crypto/des/arch/i386/des_enc.S		optional	ipsec ipsec_esp
 crypto/des/des_ecb.c			optional	netsmbcrypto
 crypto/des/arch/i386/des_enc.S		optional	netsmbcrypto
@@ -109,6 +113,10 @@ dev/misc/kbd/kbd.c			optional	atkbd
 dev/misc/kbd/kbd.c			optional	kbd
 dev/misc/kbd/kbd.c			optional	sc
 dev/misc/kbd/kbd.c			optional	ukbd
+dev/misc/kbd/kbdsw.c			optional	atkbd
+dev/misc/kbd/kbdsw.c			optional	kbd
+dev/misc/kbd/kbdsw.c			optional	sc
+dev/misc/kbd/kbdsw.c			optional	ukbd
 dev/raid/pst/pst-pci.c			optional	pst pci
 dev/raid/pst/pst-iop.c			optional	pst
 dev/raid/pst/pst-raid.c			optional	pst
@@ -228,12 +236,11 @@ dev/serial/stli/istallion.c		optional nowerror	stli
 dev/misc/labpc/labpc.c			optional	labpc
 dev/misc/mse/mse.c			optional	mse
 platform/pc32/isa/npx.c			mandatory	npx
-bus/iicbus/i386/pcf.c			optional	pcf
 bus/pci/i386/legacy.c			optional	pci
 bus/pci/i386/pci_bus.c			optional	pci
 bus/pci/i386/pci_cfgreg.c		optional	pci
 bus/pci/i386/pci_pir.c			optional	pci
-bus/pci/i386/mptable_pci.c		optional	pci smp apic_io
+bus/pci/i386/mptable_pci.c		optional	pci smp
 platform/pc32/isa/pmtimer.c		optional	pmtimer acpi
 # XXX drhodus
 platform/pc32/isa/prof_machdep.c	optional	profiling-routine

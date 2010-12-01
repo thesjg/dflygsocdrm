@@ -1356,7 +1356,7 @@ fxp_intr_body(struct fxp_softc *sc, u_int8_t statack, int count)
 	for (;;) {
 		m = sc->rfa_headm;
 		rfa = (struct fxp_rfa *)(m->m_ext.ext_buf +
-		    RFA_ALIGNMENT_FUDGE);
+					 RFA_ALIGNMENT_FUDGE);
 
 #ifdef DEVICE_POLLING /* loop at most count times if count >=0 */
 		if (count >= 0 && count-- == 0) {
@@ -1376,6 +1376,8 @@ fxp_intr_body(struct fxp_softc *sc, u_int8_t statack, int count)
 		 * Remove first packet from the chain.
 		 */
 		sc->rfa_headm = m->m_next;
+		if (sc->rfa_headm == NULL)
+			sc->rfa_tailm = NULL;
 		m->m_next = NULL;
 
 		/*
@@ -1395,8 +1397,8 @@ fxp_intr_body(struct fxp_softc *sc, u_int8_t statack, int count)
 			total_len = rfa->actual_size & 0x3fff;
 			if (total_len < sizeof(struct ether_header) ||
 			    total_len > MCLBYTES - RFA_ALIGNMENT_FUDGE -
-				sizeof(struct fxp_rfa) ||
-			    rfa->rfa_status & FXP_RFA_STATUS_CRC) {
+					sizeof(struct fxp_rfa) ||
+			    (rfa->rfa_status & FXP_RFA_STATUS_CRC)) {
 				m_freem(m);
 				continue;
 			}
@@ -1961,7 +1963,8 @@ fxp_add_rfabuf(struct fxp_softc *sc, struct mbuf *oldm)
 	 */
 	rfa = mtod(m, struct fxp_rfa *);
 	m->m_data += sizeof(struct fxp_rfa);
-	rfa->size = (u_int16_t)(MCLBYTES - sizeof(struct fxp_rfa) - RFA_ALIGNMENT_FUDGE);
+	rfa->size = (u_int16_t)(MCLBYTES - sizeof(struct fxp_rfa) -
+				RFA_ALIGNMENT_FUDGE);
 
 	/*
 	 * Initialize the rest of the RFA.  Note that since the RFA
@@ -1982,8 +1985,8 @@ fxp_add_rfabuf(struct fxp_softc *sc, struct mbuf *oldm)
 	 * one to the end by fixing up the tail to point to this one.
 	 */
 	if (sc->rfa_headm != NULL) {
-		p_rfa = (struct fxp_rfa *) (sc->rfa_tailm->m_ext.ext_buf +
-		    RFA_ALIGNMENT_FUDGE);
+		p_rfa = (struct fxp_rfa *)(sc->rfa_tailm->m_ext.ext_buf +
+					   RFA_ALIGNMENT_FUDGE);
 		sc->rfa_tailm->m_next = m;
 		v = vtophys(rfa);
 		fxp_lwcopy(&v, (volatile u_int32_t *) p_rfa->link_addr);

@@ -92,7 +92,7 @@ newspoolf(struct queue *queue)
 	 */
 	if (fstat(fd, &st) != 0)
 		goto fail;
-	if (asprintf(&queue->id, "%"PRIxMAX, st.st_ino) < 0)
+	if (asprintf(&queue->id, "%"PRIxMAX, (uintmax_t)st.st_ino) < 0)
 		goto fail;
 
 	queue->mailf = fdopen(fd, "r+");
@@ -315,7 +315,7 @@ skip_item:
 		if (queuefn != NULL)
 			free(queuefn);
 		if (mailfn != NULL)
-			free(queuefn);
+			free(mailfn);
 	}
 	closedir(spooldir);
 	return (0);

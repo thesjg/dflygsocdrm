@@ -77,6 +77,7 @@
 #include <sys/proc.h>
 #include <sys/vmmeter.h>
 #include <sys/vnode.h>
+#include <sys/kernel.h>
 
 #include <vm/vm.h>
 #include <vm/vm_param.h>
@@ -96,12 +97,20 @@
 #include <vm/vm_page2.h>
 #include <sys/mplock2.h>
 
+#define VMACTION_HSIZE	256
+#define VMACTION_HMASK	(VMACTION_HSIZE - 1)
+
 static void vm_page_queue_init(void);
 static void vm_page_free_wakeup(void);
 static vm_page_t vm_page_select_cache(vm_object_t, vm_pindex_t);
 static vm_page_t _vm_page_list_find2(int basequeue, int index);
 
 struct vpgqueues vm_page_queues[PQ_COUNT]; /* Array of tailq lists */
+
+LIST_HEAD(vm_page_action_list, vm_page_action);
+struct vm_page_action_list	action_list[VMACTION_HSIZE];
+static volatile int vm_pages_waiting;
+
 
 #define ASSERT_IN_CRIT_SECTION()	KKASSERT(crit_test(curthread));
 
@@ -125,6 +134,9 @@ vm_page_queue_init(void)
 
 	for (i = 0; i < PQ_COUNT; i++)
 		TAILQ_INIT(&vm_page_queues[i].pl);
+
+	for (i = 0; i < VMACTION_HSIZE; i++)
+		LIST_INIT(&action_list[i]);
 }
 
 /*
@@ -422,7 +434,6 @@ vm_page_insert(vm_page_t m, vm_object_t object, vm_pindex_t pindex)
 	/*
 	 * Insert it into the object.
 	 */
-	ASSERT_MP_LOCK_HELD(curthread);
 	vm_page_rb_tree_RB_INSERT(&object->rb_memq, m);
 	object->generation++;
 
@@ -430,6 +441,12 @@ vm_page_insert(vm_page_t m, vm_object_t object, vm_pindex_t pindex)
 	 * show that the object has one more resident page.
 	 */
 	object->resident_page_count++;
+
+	/*
+	 * Add the pv_list_cout of the page when its inserted in
+	 * the object
+	*/
+	object->agg_pv_list_count = object->agg_pv_list_count + m->md.pv_list_count;
 
 	/*
 	 * Since we are inserting a new and possibly dirty page,
@@ -478,9 +495,9 @@ vm_page_remove(vm_page_t m)
 	/*
 	 * Remove the page from the object and update the object.
 	 */
-	ASSERT_MP_LOCK_HELD(curthread);
 	vm_page_rb_tree_RB_REMOVE(&object->rb_memq, m);
 	object->resident_page_count--;
+	object->agg_pv_list_count = object->agg_pv_list_count - m->md.pv_list_count;
 	object->generation++;
 	m->object = NULL;
 
@@ -492,7 +509,7 @@ vm_page_remove(vm_page_t m)
  * Locate and return the page at (object, pindex), or NULL if the
  * page could not be found.
  *
- * The caller must hold vm_token if non-blocking operation is desired.
+ * The caller must hold vm_token.
  */
 vm_page_t
 vm_page_lookup(vm_object_t object, vm_pindex_t pindex)
@@ -502,11 +519,9 @@ vm_page_lookup(vm_object_t object, vm_pindex_t pindex)
 	/*
 	 * Search the hash table for this object/offset pair
 	 */
-	ASSERT_MP_LOCK_HELD(curthread);
+	ASSERT_LWKT_TOKEN_HELD(&vm_token);
 	crit_enter();
-	lwkt_gettoken(&vm_token);
 	m = vm_page_rb_tree_RB_LOOKUP(&object->rb_memq, pindex);
-	lwkt_reltoken(&vm_token);
 	crit_exit();
 	KKASSERT(m == NULL || (m->object == object && m->pindex == pindex));
 	return(m);
@@ -903,44 +918,68 @@ vm_test_nominal(void)
 /*
  * Block until free pages are available for allocation, called in various
  * places before memory allocations.
+ *
+ * The caller may loop if vm_page_count_min() == FALSE so we cannot be
+ * more generous then that.
  */
 void
 vm_wait(int timo)
 {
-	crit_enter();
+	/*
+	 * never wait forever
+	 */
+	if (timo == 0)
+		timo = hz;
 	lwkt_gettoken(&vm_token);
+
 	if (curthread == pagethread) {
-		vm_pageout_pages_needed = 1;
-		tsleep(&vm_pageout_pages_needed, 0, "VMWait", timo);
-	} else {
-		if (vm_pages_needed == 0) {
-			vm_pages_needed = 1;
-			wakeup(&vm_pages_needed);
+		/*
+		 * The pageout daemon itself needs pages, this is bad.
+		 */
+		if (vm_page_count_min(0)) {
+			vm_pageout_pages_needed = 1;
+			tsleep(&vm_pageout_pages_needed, 0, "VMWait", timo);
 		}
-		tsleep(&vmstats.v_free_count, 0, "vmwait", timo);
+	} else {
+		/*
+		 * Wakeup the pageout daemon if necessary and wait.
+		 */
+		if (vm_page_count_target()) {
+			if (vm_pages_needed == 0) {
+				vm_pages_needed = 1;
+				wakeup(&vm_pages_needed);
+			}
+			++vm_pages_waiting;	/* SMP race ok */
+			tsleep(&vmstats.v_free_count, 0, "vmwait", timo);
+		}
 	}
 	lwkt_reltoken(&vm_token);
-	crit_exit();
 }
 
 /*
  * Block until free pages are available for allocation
  *
- * Called only in vm_fault so that processes page faulting can be
+ * Called only from vm_fault so that processes page faulting can be
  * easily tracked.
  */
 void
 vm_waitpfault(void)
 {
-	crit_enter();
-	lwkt_gettoken(&vm_token);
-	if (vm_pages_needed == 0) {
-		vm_pages_needed = 1;
-		wakeup(&vm_pages_needed);
+	/*
+	 * Wakeup the pageout daemon if necessary and wait.
+	 */
+	if (vm_page_count_target()) {
+		lwkt_gettoken(&vm_token);
+		if (vm_page_count_target()) {
+			if (vm_pages_needed == 0) {
+				vm_pages_needed = 1;
+				wakeup(&vm_pages_needed);
+			}
+			++vm_pages_waiting;	/* SMP race ok */
+			tsleep(&vmstats.v_free_count, 0, "pfault", hz);
+		}
+		lwkt_reltoken(&vm_token);
 	}
-	tsleep(&vmstats.v_free_count, 0, "pfault", 0);
-	lwkt_reltoken(&vm_token);
-	crit_exit();
 }
 
 /*
@@ -990,8 +1029,8 @@ static __inline void
 vm_page_free_wakeup(void)
 {
 	/*
-	 * if pageout daemon needs pages, then tell it that there are
-	 * some free.
+	 * If the pageout daemon itself needs pages, then tell it that
+	 * there are some free.
 	 */
 	if (vm_pageout_pages_needed &&
 	    vmstats.v_cache_count + vmstats.v_free_count >= 
@@ -1002,13 +1041,32 @@ vm_page_free_wakeup(void)
 	}
 
 	/*
-	 * wakeup processes that are waiting on memory if we hit a
-	 * high water mark. And wakeup scheduler process if we have
-	 * lots of memory. this process will swapin processes.
+	 * Wakeup processes that are waiting on memory.
+	 *
+	 * NOTE: vm_paging_target() is the pageout daemon's target, while
+	 *	 vm_page_count_target() is somewhere inbetween.  We want
+	 *	 to wake processes up prior to the pageout daemon reaching
+	 *	 its target to provide some hysteresis.
 	 */
-	if (vm_pages_needed && !vm_page_count_min(0)) {
-		vm_pages_needed = 0;
-		wakeup(&vmstats.v_free_count);
+	if (vm_pages_waiting) {
+		if (!vm_page_count_target()) {
+			/*
+			 * Plenty of pages are free, wakeup everyone.
+			 */
+			vm_pages_waiting = 0;
+			wakeup(&vmstats.v_free_count);
+			++mycpu->gd_cnt.v_ppwakeups;
+		} else if (!vm_page_count_min(0)) {
+			/*
+			 * Some pages are free, wakeup someone.
+			 */
+			int wcount = vm_pages_waiting;
+			if (wcount > 0)
+				--wcount;
+			vm_pages_waiting = wcount;
+			wakeup_one(&vmstats.v_free_count);
+			++mycpu->gd_cnt.v_ppwakeups;
+		}
 	}
 }
 
@@ -1693,7 +1751,10 @@ vm_page_set_valid(vm_page_t m, int base, int size)
  *	 Also note that e.g. NFS may use a byte-granular base
  *	 and size.
  *
- * Page must be busied?
+ * WARNING: Page must be busied?  But vfs_clean_one_page() will call
+ *	    this without necessarily busying the page (via bdwrite()).
+ *	    So for now vm_token must also be held.
+ *
  * No other requirements.
  */
 void
@@ -1714,7 +1775,10 @@ vm_page_set_validclean(vm_page_t m, int base, int size)
 /*
  * Set valid & dirty.  Used by buwrite()
  *
- * Page must be busied?
+ * WARNING: Page must be busied?  But vfs_dirty_one_page() will
+ *	    call this function in buwrite() so for now vm_token must
+ * 	    be held.
+ *
  * No other requirements.
  */
 void
@@ -1874,21 +1938,82 @@ vm_page_test_dirty(vm_page_t m)
 }
 
 /*
+ * Register an action, associating it with its vm_page
+ */
+void
+vm_page_register_action(vm_page_action_t action, vm_page_event_t event)
+{
+	struct vm_page_action_list *list;
+	int hv;
+
+	hv = (int)((intptr_t)action->m >> 8) & VMACTION_HMASK;
+	list = &action_list[hv];
+
+	lwkt_gettoken(&vm_token);
+	vm_page_flag_set(action->m, PG_ACTIONLIST);
+	action->event = event;
+	LIST_INSERT_HEAD(list, action, entry);
+	lwkt_reltoken(&vm_token);
+}
+
+/*
+ * Unregister an action, disassociating it from its related vm_page
+ */
+void
+vm_page_unregister_action(vm_page_action_t action)
+{
+	struct vm_page_action_list *list;
+	int hv;
+
+	lwkt_gettoken(&vm_token);
+	if (action->event != VMEVENT_NONE) {
+		action->event = VMEVENT_NONE;
+		LIST_REMOVE(action, entry);
+
+		hv = (int)((intptr_t)action->m >> 8) & VMACTION_HMASK;
+		list = &action_list[hv];
+		if (LIST_EMPTY(list))
+			vm_page_flag_clear(action->m, PG_ACTIONLIST);
+	}
+	lwkt_reltoken(&vm_token);
+}
+
+/*
  * Issue an event on a VM page.  Corresponding action structures are
  * removed from the page's list and called.
+ *
+ * If the vm_page has no more pending action events we clear its
+ * PG_ACTIONLIST flag.
  */
 void
 vm_page_event_internal(vm_page_t m, vm_page_event_t event)
 {
-	struct vm_page_action *scan, *next;
+	struct vm_page_action_list *list;
+	struct vm_page_action *scan;
+	struct vm_page_action *next;
+	int hv;
+	int all;
 
-	LIST_FOREACH_MUTABLE(scan, &m->action_list, entry, next) {
-		if (scan->event == event) {
-			scan->event = VMEVENT_NONE;
-			LIST_REMOVE(scan, entry);
-			scan->func(m, scan);
+	hv = (int)((intptr_t)m >> 8) & VMACTION_HMASK;
+	list = &action_list[hv];
+	all = 1;
+
+	lwkt_gettoken(&vm_token);
+	LIST_FOREACH_MUTABLE(scan, list, entry, next) {
+		if (scan->m == m) {
+			if (scan->event == event) {
+				scan->event = VMEVENT_NONE;
+				LIST_REMOVE(scan, entry);
+				scan->func(m, scan);
+				/* XXX */
+			} else {
+				all = 0;
+			}
 		}
 	}
+	if (all)
+		vm_page_flag_clear(m, PG_ACTIONLIST);
+	lwkt_reltoken(&vm_token);
 }
 
 

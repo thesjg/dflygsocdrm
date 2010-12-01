@@ -131,14 +131,15 @@ struct bounce_zone {
 };
 
 #ifdef SMP
-#define BZ_LOCK(bz)	spin_lock_wr(&(bz)->spin)
-#define BZ_UNLOCK(bz)	spin_unlock_wr(&(bz)->spin)
+#define BZ_LOCK(bz)	spin_lock(&(bz)->spin)
+#define BZ_UNLOCK(bz)	spin_unlock(&(bz)->spin)
 #else
 #define BZ_LOCK(bz)	crit_enter()
 #define BZ_UNLOCK(bz)	crit_exit()
 #endif
 
-static struct lwkt_token bounce_zone_tok = LWKT_TOKEN_MP_INITIALIZER;
+static struct lwkt_token bounce_zone_tok =
+	LWKT_TOKEN_MP_INITIALIZER(bounce_zone_tok);
 static int busdma_zonecount;
 static STAILQ_HEAD(, bounce_zone) bounce_zone_list =
 	STAILQ_HEAD_INITIALIZER(bounce_zone_list);
@@ -165,6 +166,8 @@ struct bus_dmamap {
 
 static STAILQ_HEAD(, bus_dmamap) bounce_map_callbacklist =
 	STAILQ_HEAD_INITIALIZER(bounce_map_callbacklist);
+static struct spinlock bounce_map_list_spin =
+	SPINLOCK_INITIALIZER(&bounce_map_list_spin);
 
 static struct bus_dmamap nobounce_dmamap;
 
@@ -212,7 +215,7 @@ bus_dma_tag_lock(bus_dma_tag_t tag, bus_dma_segment_t *cache)
 	if (tag->nsegments <= BUS_DMA_CACHE_SEGMENTS)
 		return(cache);
 #ifdef SMP
-	spin_lock_wr(&tag->spin);
+	spin_lock(&tag->spin);
 #endif
 	return(tag->segments);
 }
@@ -223,7 +226,7 @@ bus_dma_tag_unlock(bus_dma_tag_t tag)
 {
 #ifdef SMP
 	if (tag->nsegments > BUS_DMA_CACHE_SEGMENTS)
-		spin_unlock_wr(&tag->spin);
+		spin_unlock(&tag->spin);
 #endif
 }
 
@@ -1333,14 +1336,11 @@ get_map_waiting(bus_dma_tag_t dmat)
 static void
 add_map_callback(bus_dmamap_t map)
 {
-	/* XXX callbacklist is not MPSAFE */
-	crit_enter();
-	get_mplock();
+	spin_lock(&bounce_map_list_spin);
 	STAILQ_INSERT_TAIL(&bounce_map_callbacklist, map, links);
 	busdma_swi_pending = 1;
 	setsoftvm();
-	rel_mplock();
-	crit_exit();
+	spin_unlock(&bounce_map_list_spin);
 }
 
 void
@@ -1348,13 +1348,13 @@ busdma_swi(void)
 {
 	bus_dmamap_t map;
 
-	crit_enter();
+	spin_lock(&bounce_map_list_spin);
 	while ((map = STAILQ_FIRST(&bounce_map_callbacklist)) != NULL) {
 		STAILQ_REMOVE_HEAD(&bounce_map_callbacklist, links);
-		crit_exit();
+		spin_unlock(&bounce_map_list_spin);
 		bus_dmamap_load(map->dmat, map, map->buf, map->buflen,
 				map->callback, map->callback_arg, /*flags*/0);
-		crit_enter();
+		spin_lock(&bounce_map_list_spin);
 	}
-	crit_exit();
+	spin_unlock(&bounce_map_list_spin);
 }

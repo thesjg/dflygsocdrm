@@ -1,5 +1,5 @@
+/*	@(#)rm_class.c  1.48     97/12/05 SMI	*/
 /*	$KAME: altq_rmclass.c,v 1.18 2003/11/06 06:32:53 kjc Exp $	*/
-/*	$DragonFly: src/sys/net/altq/altq_rmclass.c,v 1.8 2006/12/22 23:44:55 swildner Exp $ */
 
 /*
  * Copyright (c) 1991-1997 Regents of the University of California.
@@ -36,8 +36,6 @@
  * LBL code modified by speer@eng.sun.com, May 1977.
  * For questions and/or comments, please send mail to cbq@ee.lbl.gov
  */
-
-#ident "@(#)rm_class.c  1.48     97/12/05 SMI"
 
 #include "opt_altq.h"
 #include "opt_inet.h"

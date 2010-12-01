@@ -80,6 +80,72 @@ int max_installed_soft_intr;
 
 #define EMERGENCY_INTR_POLLING_FREQ_MAX 20000
 
+/*
+ * Assert that callers into interrupt handlers don't return with
+ * dangling tokens, spinlocks, or mp locks.
+ */
+#ifdef INVARIANTS
+# ifdef SMP
+/* INVARIANTS & SMP */
+#  define SMP_INVARIANTS_DECLARE				\
+	int mpcount;
+
+#  define SMP_INVARIANTS_GET(td)				\
+	mpcount = (td)->td_mpcount
+
+#  define SMP_INVARIANTS_TEST(td, name)				\
+	KASSERT(mpcount == (td)->td_mpcount,			\
+		("mpcount mismatch after interrupt handler %s",	\
+		 name))
+
+#  define SMP_INVARIANTS_ADJMP(count)				\
+	mpcount += (count)
+
+# else 
+/* INVARIANTS & !SMP */
+#  define SMP_INVARIANTS_DECLARE
+#  define SMP_INVARIANTS_GET(td)
+#  define SMP_INVARIANTS_TEST(td, name)
+
+# endif /* ndef SMP */
+
+#define TD_INVARIANTS_DECLARE   \
+        SMP_INVARIANTS_DECLARE  \
+        int spincount;          \
+        lwkt_tokref_t curstop
+
+#define TD_INVARIANTS_GET(td)                                   \
+        do {                                                    \
+                SMP_INVARIANTS_GET(td);                         \
+                spincount = (td)->td_gd->gd_spinlocks_wr;       \
+                curstop = (td)->td_toks_stop;                   \
+        } while(0)
+
+#define TD_INVARIANTS_TEST(td, name)                                    \
+        do {                                                            \
+                KASSERT(spincount == (td)->td_gd->gd_spinlocks_wr,      \
+                        ("spincount mismatch after interrupt handler %s", \
+                        name));                                         \
+                KASSERT(curstop == (td)->td_toks_stop,                  \
+                        ("token count mismatch after interrupt handler %s", \
+                        name));                                         \
+                SMP_INVARIANTS_TEST(td, name);                          \
+        } while(0)
+
+#else
+/* !INVARIANTS */
+# ifdef SMP
+/* !INVARIANTS & SMP */
+# define SMP_INVARIANTS_ADJMP(count)
+
+# endif
+
+#define TD_INVARIANTS_DECLARE
+#define TD_INVARIANTS_GET(td)
+#define TD_INVARIANTS_TEST(td, name)
+
+#endif /* ndef INVARIANTS */
+
 static int sysctl_emergency_freq(SYSCTL_HANDLER_ARGS);
 static int sysctl_emergency_enable(SYSCTL_HANDLER_ARGS);
 static void emergency_intr_timer_callback(systimer_t, struct intrframe *);
@@ -88,9 +154,6 @@ static void ithread_emergency(void *arg);
 static void report_stray_interrupt(int intr, struct intr_info *info);
 static void int_moveto_destcpu(int *, int *, int);
 static void int_moveto_origcpu(int, int);
-#ifdef SMP
-static void intr_get_mplock(void);
-#endif
 
 int intr_info_size = sizeof(intr_info_ary) / sizeof(intr_info_ary[0]);
 
@@ -101,18 +164,6 @@ static struct thread emergency_intr_thread;
 #define ISTATE_NORMAL		1
 #define ISTATE_LIVELOCKED	2
 
-#ifdef SMP
-static int intr_mpsafe = 1;
-static int intr_migrate = 0;
-static int intr_migrate_count;
-TUNABLE_INT("kern.intr_mpsafe", &intr_mpsafe);
-SYSCTL_INT(_kern, OID_AUTO, intr_mpsafe,
-        CTLFLAG_RW, &intr_mpsafe, 0, "Run INTR_MPSAFE handlers without the BGL");
-SYSCTL_INT(_kern, OID_AUTO, intr_migrate,
-        CTLFLAG_RW, &intr_migrate, 0, "Migrate to cpu holding BGL");
-SYSCTL_INT(_kern, OID_AUTO, intr_migrate_count,
-        CTLFLAG_RW, &intr_migrate_count, 0, "");
-#endif
 static int livelock_limit = 40000;
 static int livelock_lowater = 20000;
 static int livelock_debug = -1;
@@ -235,9 +286,8 @@ register_int(int intr, inthand2_t *handler, void *arg, const char *name,
      * it up.
      */
     if (emergency_intr_thread.td_kstack == NULL) {
-	lwkt_create(ithread_emergency, NULL, NULL,
-		    &emergency_intr_thread, TDF_STOPREQ|TDF_INTTHREAD, -1,
-		    "ithread emerg");
+	lwkt_create(ithread_emergency, NULL, NULL, &emergency_intr_thread,
+		    TDF_STOPREQ | TDF_INTTHREAD, -1, "ithread emerg");
 	systimer_init_periodic_nq(&emergency_intr_timer,
 		    emergency_intr_timer_callback, &emergency_intr_thread, 
 		    (emergency_intr_enable ? emergency_intr_freq : 1));
@@ -251,9 +301,9 @@ register_int(int intr, inthand2_t *handler, void *arg, const char *name,
      */
     if (info->i_state == ISTATE_NOTHREAD) {
 	info->i_state = ISTATE_NORMAL;
-	lwkt_create((void *)ithread_handler, (void *)(intptr_t)intr, NULL,
-	    &info->i_thread, TDF_STOPREQ|TDF_INTTHREAD|TDF_MPSAFE, -1, 
-	    "ithread %d", intr);
+	lwkt_create(ithread_handler, (void *)(intptr_t)intr, NULL,
+		    &info->i_thread, TDF_STOPREQ | TDF_INTTHREAD, -1,
+		    "ithread %d", intr);
 	if (intr >= FIRST_SOFTINT)
 	    lwkt_setpri(&info->i_thread, TDPRI_SOFT_NORM);
 	else
@@ -624,7 +674,8 @@ ithread_fast_handler(struct intrframe *frame)
 #ifdef SMP
     int got_mplock;
 #endif
-    intrec_t rec, next_rec;
+    TD_INVARIANTS_DECLARE;
+    intrec_t rec, nrec;
     globaldata_t gd;
     thread_t td;
 
@@ -633,7 +684,7 @@ ithread_fast_handler(struct intrframe *frame)
     td = curthread;
 
     /* We must be in critical section. */
-    KKASSERT(td->td_pri >= TDPRI_CRIT);
+    KKASSERT(td->td_critcount);
 
     info = &intr_info_ary[intr];
 
@@ -668,9 +719,12 @@ ithread_fast_handler(struct intrframe *frame)
     got_mplock = 0;
 #endif
 
+    TD_INVARIANTS_GET(td);
     list = &info->i_reclist;
-    for (rec = *list; rec; rec = next_rec) {
-	next_rec = rec->next;	/* rec may be invalid after call */
+
+    for (rec = *list; rec; rec = nrec) {
+	/* rec may be invalid after call */
+	nrec = rec->next;
 
 	if (rec->intr_flags & INTR_CLOCK) {
 #ifdef SMP
@@ -681,6 +735,7 @@ ithread_fast_handler(struct intrframe *frame)
 		    break;
 		}
 		got_mplock = 1;
+		SMP_INVARIANTS_ADJMP(1);
 	    }
 #endif
 	    if (rec->serializer) {
@@ -690,6 +745,7 @@ ithread_fast_handler(struct intrframe *frame)
 	    } else {
 		rec->handler(rec->argument, frame);
 	    }
+	    TD_INVARIANTS_TEST(td, rec->name);
 	}
     }
 
@@ -720,8 +776,7 @@ ithread_fast_handler(struct intrframe *frame)
 /*
  * Interrupt threads run this as their main loop.
  *
- * The handler begins execution outside a critical section and with the BGL
- * held.
+ * The handler begins execution outside a critical section and no MP lock.
  *
  * The i_running state starts at 0.  When an interrupt occurs, the hardware
  * interrupt is disabled and sched_ithd() The HW interrupt remains disabled
@@ -748,6 +803,7 @@ ithread_handler(void *arg)
     globaldata_t gd;
     struct systimer ill_timer;	/* enforced freq. timer */
     u_int ill_count;		/* interrupt livelock counter */
+    TD_INVARIANTS_DECLARE;
 
     ill_count = 0;
     intr = (int)(intptr_t)arg;
@@ -756,7 +812,7 @@ ithread_handler(void *arg)
 
     /*
      * The loop must be entered with one critical section held.  The thread
-     * is created with TDF_MPSAFE so the MP lock is not held on start.
+     * does not hold the mplock on startup.
      */
     gd = mycpu;
     lseconds = gd->gd_time_seconds;
@@ -770,15 +826,10 @@ ithread_handler(void *arg)
 	 * always operate with the BGL.
 	 */
 #ifdef SMP
-	if (intr_mpsafe == 0) {
-	    if (mpheld == 0) {
-		intr_get_mplock();
-		mpheld = 1;
-	    }
-	} else if (info->i_mplock_required != mpheld) {
+	if (info->i_mplock_required != mpheld) {
 	    if (info->i_mplock_required) {
 		KKASSERT(mpheld == 0);
-		intr_get_mplock();
+		get_mplock();
 		mpheld = 1;
 	    } else {
 		KKASSERT(mpheld != 0);
@@ -786,12 +837,9 @@ ithread_handler(void *arg)
 		mpheld = 0;
 	    }
 	}
-
-	/*
-	 * scheduled cpu may have changed, see intr_get_mplock()
-	 */
-	gd = mycpu;
 #endif
+
+	TD_INVARIANTS_GET(gd->gd_curthread);
 
 	/*
 	 * If an interrupt is pending, clear i_running and execute the
@@ -809,6 +857,7 @@ ithread_handler(void *arg)
 		report_stray_interrupt(intr, info);
 
 	    for (rec = *list; rec; rec = nrec) {
+		/* rec may be invalid after call */
 		nrec = rec->next;
 		if (rec->serializer) {
 		    lwkt_serialize_handler_call(rec->serializer, rec->handler,
@@ -816,6 +865,7 @@ ithread_handler(void *arg)
 		} else {
 		    rec->handler(rec->argument, NULL);
 		}
+		TD_INVARIANTS_TEST(gd->gd_curthread, rec->name);
 	    }
 	}
 
@@ -867,12 +917,6 @@ ithread_handler(void *arg)
 	     */
 	    if (ill_count <= livelock_limit) {
 		if (info->i_running == 0) {
-#ifdef SMP
-		    if (mpheld && intr_migrate) {
-			rel_mplock();
-			mpheld = 0;
-		    }
-#endif
 		    lwkt_deschedule_self(gd->gd_curthread);
 		    lwkt_switch();
 		}
@@ -926,34 +970,6 @@ ithread_handler(void *arg)
     /* not reached */
 }
 
-#ifdef SMP
-
-/*
- * An interrupt thread is trying to get the MP lock.  To avoid cpu-bound
- * code in the kernel on cpu X from interfering we chase the MP lock.
- */
-static void
-intr_get_mplock(void)
-{
-    int owner;
-
-    if (intr_migrate == 0) {
-	get_mplock();
-	return;
-    }
-    while (try_mplock() == 0) {
-	owner = owner_mplock();
-	if (owner >= 0 && owner != mycpu->gd_cpuid) {
-		lwkt_migratecpu(owner);
-		++intr_migrate_count;
-	} else {
-		lwkt_switch();
-	}
-    }
-}
-
-#endif
-
 /*
  * Emergency interrupt polling thread.  The thread begins execution
  * outside a critical section with the BGL held.
@@ -975,20 +991,27 @@ ithread_emergency(void *arg __unused)
     struct intr_info *info;
     intrec_t rec, nrec;
     int intr;
+    thread_t td __debugvar = curthread;
+    TD_INVARIANTS_DECLARE;
+
+    get_mplock();
+    TD_INVARIANTS_GET(td);
 
     for (;;) {
 	for (intr = 0; intr < max_installed_hard_intr; ++intr) {
 	    info = &intr_info_ary[intr];
 	    for (rec = info->i_reclist; rec; rec = nrec) {
+		/* rec may be invalid after call */
+		nrec = rec->next;
 		if ((rec->intr_flags & INTR_NOPOLL) == 0) {
 		    if (rec->serializer) {
-			lwkt_serialize_handler_call(rec->serializer,
+			lwkt_serialize_handler_try(rec->serializer,
 						rec->handler, rec->argument, NULL);
 		    } else {
 			rec->handler(rec->argument, NULL);
 		    }
+		    TD_INVARIANTS_TEST(td, rec->name);
 		}
-		nrec = rec->next;
 	    }
 	}
 	lwkt_deschedule_self(curthread);

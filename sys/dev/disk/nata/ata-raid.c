@@ -699,7 +699,7 @@ ata_raid_done(struct ata_request *request)
 
 		/* is this a rebuild composite */
 		if ((composite = request->composite)) {
-		    spin_lock_wr(&composite->lock);
+		    spin_lock(&composite->lock);
 		
 		    /* handle the read part of a rebuild composite */
 		    if (request->flags & ATA_R_READ) {
@@ -735,7 +735,7 @@ ata_raid_done(struct ata_request *request)
 				finished = 1;
 			}
 		    }
-		    spin_unlock_wr(&composite->lock);
+		    spin_unlock(&composite->lock);
 		}
 
 		/* if read failed retry on the mirror */
@@ -756,7 +756,7 @@ ata_raid_done(struct ata_request *request)
 	    else if (bbp->b_cmd == BUF_CMD_WRITE) {
 		/* do we have a mirror or rebuild to deal with ? */
 		if ((composite = request->composite)) {
-		    spin_lock_wr(&composite->lock);
+		    spin_lock(&composite->lock);
 		    if (composite->wr_done & (1 << mirror)) {
 			if (request->result) {
 			    if (composite->request[mirror]->result) {
@@ -779,7 +779,7 @@ ata_raid_done(struct ata_request *request)
 			if (!composite->residual)
 			    finished = 1;
 		    }
-		    spin_unlock_wr(&composite->lock);
+		    spin_unlock(&composite->lock);
 		}
 		/* no mirror we are done */
 		else {
@@ -885,9 +885,8 @@ ata_raid_dump(struct dev_dump_args *ap)
 	}
 
 	bzero(&dbuf, sizeof(struct buf));
-	BUF_LOCKINIT(&dbuf);
-	BUF_LOCK(&dbuf, LK_EXCLUSIVE);
 	initbufbio(&dbuf);
+	BUF_LOCK(&dbuf, LK_EXCLUSIVE);
 	/* bio_offset is byte granularity, convert block granularity a_blkno */
 	dbuf.b_bio1.bio_offset = ap->a_offset;
 	dbuf.b_bio1.bio_caller_info1.ptr = (void *)rdp;
@@ -903,6 +902,7 @@ ata_raid_dump(struct dev_dump_args *ap)
 	    return(dbuf.b_error ? dbuf.b_error : EIO);
 	}
 	BUF_UNLOCK(&dbuf);
+	uninitbufbio(&dbuf);
 
 	return 0;
 }
@@ -912,7 +912,7 @@ ata_raid_config_changed(struct ar_softc *rdp, int writeback)
 {
     int disk, count, status;
 
-    spin_lock_wr(&rdp->lock);
+    spin_lock(&rdp->lock);
     /* set default all working mode */
     status = rdp->status;
     rdp->status &= ~AR_S_DEGRADED;
@@ -988,7 +988,7 @@ ata_raid_config_changed(struct ar_softc *rdp, int writeback)
 	    writeback = 1;
 	}
     }
-    spin_unlock_wr(&rdp->lock);
+    spin_unlock(&rdp->lock);
     if (writeback)
 	ata_raid_write_metadata(rdp);
 
@@ -1024,6 +1024,7 @@ ata_raid_create(struct ata_ioc_raid_config *config)
     device_t subdisk;
     int array, disk;
     int ctlr = 0, disk_size = 0, total_disks = 0;
+    device_t gpdev;
 
     for (array = 0; array < MAX_ARRAYS; array++) {
 	if (!ata_raid_arrays[array])
@@ -1048,7 +1049,9 @@ ata_raid_create(struct ata_ioc_raid_config *config)
 	    }
 	    rdp->disks[disk].dev = device_get_parent(subdisk);
 
-	    switch (pci_get_vendor(GRANDPARENT(rdp->disks[disk].dev))) {
+	    gpdev = GRANDPARENT(rdp->disks[disk].dev);
+
+	    switch (pci_get_vendor(gpdev)) {
 	    case ATA_HIGHPOINT_ID:
 		/* 
 		 * we need some way to decide if it should be v2 or v3
@@ -1393,10 +1396,16 @@ ata_raid_read_metadata(device_t subdisk)
 {
     devclass_t pci_devclass = devclass_find("pci");
     devclass_t devclass=device_get_devclass(GRANDPARENT(GRANDPARENT(subdisk)));
+    device_t gpdev;
+    uint16_t vendor;
 
     /* prioritize vendor native metadata layout if possible */
     if (devclass == pci_devclass) {
-	switch (pci_get_vendor(GRANDPARENT(device_get_parent(subdisk)))) {
+	gpdev = device_get_parent(subdisk);
+	gpdev = GRANDPARENT(gpdev);
+	vendor = pci_get_vendor(gpdev);
+
+	switch (vendor) {
 	case ATA_HIGHPOINT_ID: 
 	    if (ata_raid_hptv3_read_meta(subdisk, ata_raid_arrays))
 		return 0;

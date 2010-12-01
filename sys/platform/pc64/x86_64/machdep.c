@@ -40,7 +40,6 @@
  * $FreeBSD: src/sys/i386/i386/machdep.c,v 1.385.2.30 2003/05/31 08:48:05 alc Exp $
  */
 
-#include "use_ether.h"
 //#include "use_npx.h"
 #include "use_isa.h"
 #include "opt_atalk.h"
@@ -52,6 +51,7 @@
 #include "opt_ipx.h"
 #include "opt_msgbuf.h"
 #include "opt_swap.h"
+#include "opt_apic.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -119,6 +119,8 @@
 #include <sys/ptrace.h>
 #include <machine/sigframe.h>
 
+#include <sys/machintr.h>
+
 #define PHYSMAP_ENTRIES		10
 
 extern void init386(int first);
@@ -172,6 +174,8 @@ SYSCTL_INT(_debug, OID_AUTO, tlb_flush_count,
 
 int physmem = 0;
 
+u_long ebda_addr = 0;
+
 static int
 sysctl_hw_physmem(SYSCTL_HANDLER_ARGS)
 {
@@ -204,7 +208,8 @@ sysctl_hw_availpages(SYSCTL_HANDLER_ARGS)
 SYSCTL_PROC(_hw, OID_AUTO, availpages, CTLTYPE_INT|CTLFLAG_RD,
 	0, 0, sysctl_hw_availpages, "I", "");
 
-vm_paddr_t Maxmem = 0;
+vm_paddr_t Maxmem;
+vm_paddr_t Realmem;
 
 /*
  * The number of PHYSMAP entries must be one less than the number of
@@ -247,8 +252,8 @@ cpu_startup(void *dummy)
 	perfmon_init();
 #endif
 	kprintf("real memory  = %ju (%ju MB)\n",
-		(intmax_t)ptoa(Maxmem),
-		(intmax_t)ptoa(Maxmem) / 1024 / 1024);
+		(intmax_t)Realmem,
+		(intmax_t)Realmem / 1024 / 1024);
 	/*
 	 * Display any holes after the first chunk of extended memory.
 	 */
@@ -437,7 +442,7 @@ sendsig(sig_t catcher, int sig, sigset_t *mask, u_long code)
 	}
 
 	/* Align to 16 bytes */
-	sfp = (struct sigframe *)((intptr_t)sp & ~0xFUL);
+	sfp = (struct sigframe *)((intptr_t)sp & ~(intptr_t)0xF);
 
 	/* Translate the signal is appropriate */
 	if (p->p_sysent->sv_sigtbl) {
@@ -778,7 +783,7 @@ sendupcall(struct vmupcall *vu, int morepending)
 	 */
 	vu->vu_pending = 0;
 	upcall.upc_pending = morepending;
-	crit_count += TDPRI_CRIT;
+	++crit_count;
 	copyout(&upcall.upc_pending, &lp->lwp_upcall->upc_pending, 
 		sizeof(upcall.upc_pending));
 	copyout(&crit_count, (char *)upcall.upc_uthread + upcall.upc_critoff,
@@ -836,7 +841,7 @@ fetchupcall(struct vmupcall *vu, int morepending, void *rsp)
 		crit_count = 0;
 		if (error == 0)
 			error = copyin((char *)upcall.upc_uthread + upcall.upc_critoff, &crit_count, sizeof(int));
-		crit_count += TDPRI_CRIT;
+		++crit_count;
 		if (error == 0)
 			error = copyout(&crit_count, (char *)upcall.upc_uthread + upcall.upc_critoff, sizeof(int));
 		regs->tf_rax = (register_t)vu->vu_func;
@@ -894,12 +899,15 @@ cpu_halt(void)
  * check for pending interrupts due to entering and exiting its own 
  * critical section.
  *
- * Note on cpu_idle_hlt:  On an SMP system we rely on a scheduler IPI
- * to wake a HLTed cpu up.  However, there are cases where the idlethread
- * will be entered with the possibility that no IPI will occur and in such
- * cases lwkt_switch() sets TDF_IDLE_NOHLT.
+ * NOTE: On an SMP system we rely on a scheduler IPI to wake a HLTed cpu up.
+ *	 However, there are cases where the idlethread will be entered with
+ *	 the possibility that no IPI will occur and in such cases
+ *	 lwkt_switch() sets TDF_IDLE_NOHLT.
+ *
+ * NOTE: cpu_idle_hlt again defaults to 2 (use ACPI sleep states).  Set to
+ *	 1 to just use hlt and for debugging purposes.
  */
-static int	cpu_idle_hlt = 1;
+static int	cpu_idle_hlt = 2;
 static int	cpu_idle_hltcnt;
 static int	cpu_idle_spincnt;
 SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_hlt, CTLFLAG_RW,
@@ -928,7 +936,7 @@ cpu_idle(void)
 	struct thread *td = curthread;
 
 	crit_exit();
-	KKASSERT(td->td_pri < TDPRI_CRIT);
+	KKASSERT(td->td_critcount == 0);
 	for (;;) {
 		/*
 		 * See if there are any LWKTs ready to go.
@@ -944,18 +952,24 @@ cpu_idle(void)
 		    (td->td_flags & TDF_IDLE_NOHLT) == 0) {
 			__asm __volatile("cli");
 			splz();
-			if (!lwkt_runnable())
-			    cpu_idle_hook();
+			if (!lwkt_runnable()) {
+				if (cpu_idle_hlt == 1)
+					cpu_idle_default_hook();
+				else
+					cpu_idle_hook();
+			}
 #ifdef SMP
 			else
-			    __asm __volatile("pause");
+				handle_cpu_contention_mask();
 #endif
+			__asm __volatile("sti");
 			++cpu_idle_hltcnt;
 		} else {
 			td->td_flags &= ~TDF_IDLE_NOHLT;
 			splz();
 #ifdef SMP
-			__asm __volatile("sti; pause");
+			__asm __volatile("sti");
+			handle_cpu_contention_mask();
 #else
 			__asm __volatile("sti");
 #endif
@@ -972,9 +986,14 @@ cpu_idle(void)
  * we let the scheduler spin.
  */
 void
-cpu_mplock_contested(void)
+handle_cpu_contention_mask(void)
 {
-	cpu_pause();
+        cpumask_t mask;
+
+        mask = cpu_contention_mask;
+        cpu_ccfence();
+        if (mask && bsfl(mask) != mycpu->gd_cpuid)
+                DELAY(2);
 }
 
 /*
@@ -1138,8 +1157,6 @@ struct region_descriptor r_gdt, r_idt;
 #if defined(I586_CPU) && !defined(NO_F00F_HACK)
 extern int has_f00f_bug;
 #endif
-
-static char dblfault_stack[PAGE_SIZE] __aligned(16);
 
 /* JG proc0paddr is a virtual address */
 void *proc0paddr;
@@ -1364,12 +1381,15 @@ getmemsize(caddr_t kmdp, u_int64_t first)
 
 		for (i = 0; i <= physmap_idx; i += 2) {
 			if (smap->base < physmap[i + 1]) {
-				if (boothowto & RB_VERBOSE)
-					kprintf(
-	"Overlapping or non-monotonic memory region, ignoring second region\n");
+				if (boothowto & RB_VERBOSE) {
+					kprintf("Overlapping or non-monotonic "
+						"memory region, ignoring "
+						"second region\n");
+				}
 				continue;
 			}
 		}
+		Realmem += smap->length;
 
 		if (smap->base == physmap[physmap_idx + 1]) {
 			physmap[physmap_idx + 1] += smap->length;
@@ -1378,8 +1398,8 @@ getmemsize(caddr_t kmdp, u_int64_t first)
 
 		physmap_idx += 2;
 		if (physmap_idx == PHYSMAP_SIZE) {
-			kprintf(
-		"Too many segments in the physical address map, giving up\n");
+			kprintf("Too many segments in the physical "
+				"address map, giving up\n");
 			break;
 		}
 		physmap[physmap_idx] = smap->base;
@@ -1403,8 +1423,9 @@ getmemsize(caddr_t kmdp, u_int64_t first)
 	/* make hole for AP bootstrap code */
 	physmap[1] = mp_bootaddress(physmap[1] / 1024);
 
-	/* look for the MP hardware - needed for apic addresses */
-	mp_probe();
+	/* Save EBDA address, if any */
+	ebda_addr = (u_long)(*(u_short *)(KERNBASE + 0x40e));
+	ebda_addr <<= 4;
 #endif
 
 	/*
@@ -1598,6 +1619,19 @@ do_next:
 		    off);
 }
 
+#ifdef SMP
+#ifdef APIC_IO
+int apic_io_enable = 1; /* Enabled by default for kernels compiled w/APIC_IO */
+#else
+int apic_io_enable = 0; /* Disabled by default for kernels compiled without */
+#endif
+TUNABLE_INT("hw.apic_io_enable", &apic_io_enable);
+extern struct machintr_abi MachIntrABI_APIC;
+#endif
+
+extern struct machintr_abi MachIntrABI_ICU;
+struct machintr_abi MachIntrABI;
+
 /*
  * IDT VECTORS:
  *	0	Divide by zero
@@ -1633,15 +1667,6 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 #endif
 	struct mdglobaldata *gd;
 	u_int64_t msr;
-	char *env;
-
-#if JG
-	/*
-	 * This must be done before the first references
-	 * to CPU_prvspace[0] are made.
-	 */
-	init_paging(&physfree);
-#endif
 
 	/*
 	 * Prevent lowering of the ipl if we call tsleep() early.
@@ -1682,6 +1707,17 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 #ifdef DDB
 	ksym_start = MD_FETCH(kmdp, MODINFOMD_SSYM, uintptr_t);
 	ksym_end = MD_FETCH(kmdp, MODINFOMD_ESYM, uintptr_t);
+#endif
+
+	/*
+	 * Setup MachIntrABI
+	 * XXX: Where is the correct place for it?
+	 */
+	MachIntrABI = MachIntrABI_ICU;
+#ifdef SMP
+	TUNABLE_INT_FETCH("hw.apic_io_enable", &apic_io_enable);
+	if (apic_io_enable)
+		MachIntrABI = MachIntrABI_APIC;
 #endif
 
 	/*
@@ -1776,8 +1812,8 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 
 #if JG
 	finishidentcpu();	/* Final stage of CPU initialization */
-	setidt(6, &IDTVEC(ill),  SDT_SYS386TGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
-	setidt(13, &IDTVEC(prot),  SDT_SYS386TGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
+	setidt(6, &IDTVEC(ill),  SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
+	setidt(13, &IDTVEC(prot),  SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
 #endif
 	identify_cpu();		/* Final stage of CPU initialization */
 	initializecpu();	/* Initialize CPU registers */
@@ -1787,11 +1823,12 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 		(register_t)(thread0.td_kstack +
 			     KSTACK_PAGES * PAGE_SIZE - sizeof(struct pcb));
 	/* Ensure the stack is aligned to 16 bytes */
-	gd->gd_common_tss.tss_rsp0 &= ~0xFul;
-	gd->gd_rsp0 = gd->gd_common_tss.tss_rsp0;
+	gd->gd_common_tss.tss_rsp0 &= ~(register_t)0xF;
 
-	/* doublefault stack space, runs on ist1 */
-	gd->gd_common_tss.tss_ist1 = (long)&dblfault_stack[sizeof(dblfault_stack)];
+	/* double fault stack */
+	gd->gd_common_tss.tss_ist1 =
+		(long)&gd->mi.gd_prvspace->idlestack[
+			sizeof(gd->mi.gd_prvspace->idlestack)];
 
 	/* Set the IO permission bitmap (empty due to tss seg limit) */
 	gd->gd_common_tss.tss_iobase = sizeof(struct x86_64tss);
@@ -1839,10 +1876,7 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 	thread0.td_pcb->pcb_flags = 0;
 	thread0.td_pcb->pcb_cr3 = KPML4phys;
 	thread0.td_pcb->pcb_ext = 0;
-	lwp0.lwp_md.md_regs = &proc0_tf;
-        env = kgetenv("kernelname");
-	if (env != NULL)
-		strlcpy(kernelname, env, sizeof(kernelname));
+	lwp0.lwp_md.md_regs = &proc0_tf;	/* XXX needed? */
 
 	/* Location of kernel stack for locore */
 	return ((u_int64_t)thread0.td_pcb);
@@ -1866,7 +1900,7 @@ cpu_gdinit(struct mdglobaldata *gd, int cpu)
 	lwkt_init_thread(&gd->mi.gd_idlethread, 
 			gd->mi.gd_prvspace->idlestack, 
 			sizeof(gd->mi.gd_prvspace->idlestack), 
-			TDF_MPSAFE, &gd->mi);
+			0, &gd->mi);
 	lwkt_set_comm(&gd->mi.gd_idlethread, "idle_%d", cpu);
 	gd->mi.gd_idlethread.td_switch = cpu_lwkt_switch;
 	gd->mi.gd_idlethread.td_sp -= sizeof(void *);
@@ -2300,9 +2334,6 @@ outb(u_int port, u_char data)
 /* critical region when masking or unmasking interupts */
 struct spinlock_deprecated imen_spinlock;
 
-/* Make FAST_INTR() routines sequential */
-struct spinlock_deprecated fast_intr_spinlock;
-
 /* critical region for old style disable_intr/enable_intr */
 struct spinlock_deprecated mpintr_spinlock;
 
@@ -2315,14 +2346,8 @@ struct spinlock_deprecated mcount_spinlock;
 /* locks com (tty) data/hardware accesses: a FASTINTR() */
 struct spinlock_deprecated com_spinlock;
 
-/* locks kernel kprintfs */
-struct spinlock_deprecated cons_spinlock;
-
 /* lock regions around the clock hardware */
 struct spinlock_deprecated clock_spinlock;
-
-/* lock around the MP rendezvous */
-struct spinlock_deprecated smp_rv_spinlock;
 
 static void
 init_locks(void)
@@ -2339,14 +2364,11 @@ init_locks(void)
 #endif
 	/* DEPRECATED */
 	spin_lock_init(&mcount_spinlock);
-	spin_lock_init(&fast_intr_spinlock);
 	spin_lock_init(&intr_spinlock);
 	spin_lock_init(&mpintr_spinlock);
 	spin_lock_init(&imen_spinlock);
-	spin_lock_init(&smp_rv_spinlock);
 	spin_lock_init(&com_spinlock);
 	spin_lock_init(&clock_spinlock);
-	spin_lock_init(&cons_spinlock);
 
 	/* our token pool needs to work early */
 	lwkt_token_pool_init();

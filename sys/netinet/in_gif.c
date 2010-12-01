@@ -76,12 +76,20 @@ static int gif_validate4 (const struct ip *, struct gif_softc *,
 
 extern  struct domain inetdomain;
 const struct protosw in_gif_protosw =
-{ SOCK_RAW,	&inetdomain,	0/*IPPROTO_IPV[46]*/,	PR_ATOMIC|PR_ADDR,
-  in_gif_input, rip_output,	0,	rip_ctloutput,
-  cpu0_soport,	NULL,
-  0,		0,		0,		0,
-  &rip_usrreqs
-};
+    {
+	.pr_type = SOCK_RAW,
+	.pr_domain = &inetdomain,
+	.pr_protocol = 0 /*IPPROTO_IPV[46]*/,
+	.pr_flags = PR_ATOMIC|PR_ADDR,
+
+	.pr_input = in_gif_input,
+	.pr_output = rip_output,
+	.pr_ctlinput = NULL,
+	.pr_ctloutput = rip_ctloutput,
+
+	.pr_ctlport = NULL,
+	.pr_usrreqs = &rip_usrreqs
+    };
 
 int ip_gif_ttl = GIF_TTL;
 SYSCTL_INT(_net_inet_ip, IPCTL_GIF_TTL, gifttl, CTLFLAG_RW,
@@ -91,7 +99,8 @@ int
 in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 {
 	struct gif_softc *sc = (struct gif_softc*)ifp;
-	struct sockaddr_in *dst = (struct sockaddr_in *)&sc->gif_ro.ro_dst;
+	struct route *ro = &sc->gif_ro[mycpu->gd_cpuid];
+	struct sockaddr_in *dst = (struct sockaddr_in *)&ro->ro_dst;
 	struct sockaddr_in *sin_src = (struct sockaddr_in *)sc->gif_psrc;
 	struct sockaddr_in *sin_dst = (struct sockaddr_in *)sc->gif_pdst;
 	struct ip iphdr;	/* capsule IP header, host byte ordered */
@@ -180,51 +189,48 @@ in_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 		dst->sin_family = sin_dst->sin_family;
 		dst->sin_len = sizeof(struct sockaddr_in);
 		dst->sin_addr = sin_dst->sin_addr;
-		if (sc->gif_ro.ro_rt != NULL) {
-			RTFREE(sc->gif_ro.ro_rt);
-			sc->gif_ro.ro_rt = NULL;
+		if (ro->ro_rt != NULL) {
+			RTFREE(ro->ro_rt);
+			ro->ro_rt = NULL;
 		}
 #if 0
 		sc->gif_if.if_mtu = GIF_MTU;
 #endif
 	}
 
-	if (sc->gif_ro.ro_rt == NULL) {
-		rtalloc(&sc->gif_ro);
-		if (sc->gif_ro.ro_rt == NULL) {
+	if (ro->ro_rt == NULL) {
+		rtalloc(ro);
+		if (ro->ro_rt == NULL) {
 			m_freem(m);
 			return ENETUNREACH;
 		}
 
 		/* if it constitutes infinite encapsulation, punt. */
-		if (sc->gif_ro.ro_rt->rt_ifp == ifp) {
+		if (ro->ro_rt->rt_ifp == ifp) {
 			m_freem(m);
 			return ENETUNREACH;	/* XXX */
 		}
 #if 0
-		ifp->if_mtu = sc->gif_ro.ro_rt->rt_ifp->if_mtu -
-		    sizeof(struct ip);
+		ifp->if_mtu = ro->ro_rt->rt_ifp->if_mtu - sizeof(struct ip);
 #endif
 	}
 
-	error = ip_output(m, NULL, &sc->gif_ro, 0, NULL, NULL);
+	error = ip_output(m, NULL, ro, 0, NULL, NULL);
 	return(error);
 }
 
-void
-in_gif_input(struct mbuf *m, ...)
+int
+in_gif_input(struct mbuf **mp, int *offp, int proto)
 {
+	struct mbuf *m = *mp;
 	struct ifnet *gifp = NULL;
 	struct ip *ip;
 	int af;
 	u_int8_t otos;
-	int off, proto;
-	__va_list ap;
+	int off;
 
-	__va_start(ap, m);
-	off = __va_arg(ap, int);
-	proto = __va_arg(ap, int);
-	__va_end(ap);
+	off = *offp;
+	*mp = NULL;
 
 	ip = mtod(m, struct ip *);
 
@@ -233,7 +239,7 @@ in_gif_input(struct mbuf *m, ...)
 	if (gifp == NULL || (gifp->if_flags & IFF_UP) == 0) {
 		m_freem(m);
 		ipstat.ips_nogif++;
-		return;
+		return(IPPROTO_DONE);
 	}
 
 	otos = ip->ip_tos;
@@ -248,7 +254,7 @@ in_gif_input(struct mbuf *m, ...)
 		if (m->m_len < sizeof *ip) {
 			m = m_pullup(m, sizeof *ip);
 			if (!m)
-				return;
+				return(IPPROTO_DONE);
 		}
 		ip = mtod(m, struct ip *);
 		if (gifp->if_flags & IFF_LINK1)
@@ -267,7 +273,7 @@ in_gif_input(struct mbuf *m, ...)
 		if (m->m_len < sizeof *ip6) {
 			m = m_pullup(m, sizeof *ip6);
 			if (!m)
-				return;
+				return(IPPROTO_DONE);
 		}
 		ip6 = mtod(m, struct ip6_hdr *);
 		itos = (ntohl(ip6->ip6_flow) >> 20) & 0xff;
@@ -283,10 +289,10 @@ in_gif_input(struct mbuf *m, ...)
 	default:
 		ipstat.ips_nogif++;
 		m_freem(m);
-		return;
+		return(IPPROTO_DONE);
 	}
 	gif_input(m, af, gifp);
-	return;
+	return(IPPROTO_DONE);
 }
 
 /*

@@ -441,13 +441,13 @@ state_configure_menu(struct i_fn_args *a)
 		    _("Set date and time"),
 		    _("Set the Time and Date of your machine"), "",
 
+		    "a", "set_kbdmap",
+		    _("Set keyboard map"),
+		    _("Set what kind of keyboard layout you have"), "",
 		    "a", "root_passwd",	_("Set root password"),
 		    _("Set the password that the root (superuser) account will use"), "",
 		    "a", "add_user", _("Add a user"),
 		    _("Add a user to the system"), "",
-		    /*
-		    "a",	"cvsup_sources","Synchronize system sources", "", "",
-		    */
 		    "a", "assign_ip", _("Configure network interfaces"),
 		    _("Set up network interfaces (NICs, ethernet, TCP/IP, etc)"), "",
 		    "a", "assign_hostname_domain",
@@ -457,9 +457,6 @@ state_configure_menu(struct i_fn_args *a)
 		    "a", "select_services", "Select Services",
 		    "Enable/Disable system services (servers, daemons, etc.)", "",
 		    */
-		    "a", "set_kbdmap",
-		    _("Set keyboard map"),
-		    _("Set what kind of keyboard layout you have"), "",
 		    "a", "set_vidfont",
 		    _("Set console font"),
 		    _("Set how the characters on your video console look"), "",
@@ -488,8 +485,6 @@ state_configure_menu(struct i_fn_args *a)
 			fn_root_passwd(a);
 		} else if (strcmp(dfui_response_get_action_id(r), "add_user") == 0) {
 			fn_add_user(a);
-		} else if (strcmp(dfui_response_get_action_id(r), "cvsup_sources") == 0) {
-			fn_cvsup_sources(a);
 		} else if (strcmp(dfui_response_get_action_id(r), "install_pkgs") == 0) {
 			fn_install_packages(a);
 		} else if (strcmp(dfui_response_get_action_id(r), "remove_pkgs") == 0) {
@@ -532,12 +527,15 @@ state_configure_menu(struct i_fn_args *a)
 	rc_conf = config_vars_new();
 
 	/*
-	 * Finally, unmount the system we mounted on /mnt.
+	 * Finally, unmount the system we mounted on /mnt and remove mappings.
 	 */
 	cmds = commands_new();
 	unmount_all_under(a, cmds, "%smnt", a->os_root);
 	commands_execute(a, cmds);
 	commands_free(cmds);
+
+	if (remove_all_mappings(a) == NULL)
+		inform(a->c, _("Warning: mappings could not be removed."));
 }
 
 void
@@ -714,20 +712,6 @@ state_diagnostics_menu(struct i_fn_args *a)
 		    NULL
 		);
 
-		if (is_file("%sboot/memtest86.flp.bz2", a->os_root)) {
-			dfui_form_action_add(f, "memtest86",
-			    dfui_info_new(_("Create memtest86 Floppy"),
-			    _("Create a floppy which boots into a dedicated memory-test"),
-			    ""));
-		}
-
-		if (is_program("%susr/local/bin/memtest", a->os_root)) {
-			dfui_form_action_add(f, "memtest",
-			    dfui_info_new(_("Run On-Line Memory Test"),
-			    _("Test the memory in the machine while running"),
-			    ""));
-		}
-
 		k = dfui_form_action_add(f, "cancel",
 		    dfui_info_new(_("Return to Utilities Menu"), "", ""));
 		dfui_action_property_set(k, "accelerator", "ESC");
@@ -744,10 +728,6 @@ state_diagnostics_menu(struct i_fn_args *a)
 			fn_show_pnpinfo(a);
 		} else if (strcmp(dfui_response_get_action_id(r), "natacontrol") == 0) {
 			fn_show_natacontrol(a);
-		} else if (strcmp(dfui_response_get_action_id(r), "memtest") == 0) {
-			fn_memtest(a);
-		} else if (strcmp(dfui_response_get_action_id(r), "memtest86") == 0) {
-			fn_create_memtest86_floppy(a);
 		} else if (strcmp(dfui_response_get_action_id(r), "cancel") == 0) {
 			state = state_utilities_menu;
 			done = 1;
@@ -1043,7 +1023,6 @@ state_ask_fs(struct i_fn_args *a)
 void
 state_format_disk(struct i_fn_args *a)
 {
-
 	switch (dfui_be_present_dialog(a->c, _("How Much Disk?"),
 	    _("Use Entire Disk|Use Part of Disk|Return to Select Disk"),
 	    _("Select how much of this disk you want to use for %s.\n\n%s"),
@@ -1052,24 +1031,10 @@ state_format_disk(struct i_fn_args *a)
 	case 1:
 		/* Entire Disk */
 		if (measure_activated_swap_from_disk(a, storage_get_selected_disk(a->s)) > 0) {
-			switch(dfui_be_present_dialog(a->c,
-			    _("Swap already active"),
-			    _("Reboot|Return to Select Disk"),
-			    _("Some subpartitions on the primary partition "
-			    "of this disk are already activated as swap. "
-			    "Since there is no way to deactivate swap in "
-			    "%s once it is activated, in order "
-			    "to edit the subpartition layout of this "
-			    "primary partition, you must first reboot."),
-			    OPERATING_SYSTEM_NAME)) {
-			case 1:
-				state = state_reboot;
-				return;
-			case 2:
+			if (swapoff_all(a) == NULL) {
+				inform(a->c, _("Warning: swap could not be turned off."));
 				state = state_select_disk;
 				return;
-			default:
-				abort_backend();
 			}
 		}
 
@@ -1124,24 +1089,10 @@ state_select_slice(struct i_fn_args *a)
 	} else {
 		if (measure_activated_swap_from_slice(a, storage_get_selected_disk(a->s),
 		    storage_get_selected_slice(a->s)) > 0) {
-			switch(dfui_be_present_dialog(a->c,
-			    _("Swap already active"),
-			    _("Reboot|Return to Select Primary Partition"),
-			    _("Some subpartitions on the selected primary "
-			    "partition are already activated as swap. "
-			    "Since there is no way to deactivate swap in "
-			    "%s once it is activated, in order "
-			    "to edit the subpartition layout of this "
-			    "primary partition, you must first reboot."),
-			    OPERATING_SYSTEM_NAME)) {
-			case 1:
-				state = state_reboot;
-				return;
-			case 2:
+			if (swapoff_all(a) == NULL) {
+				inform(a->c, _("Warning: swap could not be turned off."));
 				state = state_select_slice;
 				return;
-			default:
-				abort_backend();
 			}
 		}
 
@@ -1186,33 +1137,15 @@ state_select_slice(struct i_fn_args *a)
 void
 state_create_subpartitions(struct i_fn_args *a)
 {
-	char msg_buf[1][1024];
 	struct commands *cmds;
 
 	if (measure_activated_swap_from_slice(a, storage_get_selected_disk(a->s),
 	    storage_get_selected_slice(a->s)) > 0) {
-		snprintf(msg_buf[0], sizeof(msg_buf[0]),
-		    _("Some subpartitions on the selected primary "
-		    "partition are already activated as swap. "
-		    "Since there is no way to deactivate swap in "
-		    "%s once it is activated, in order "
-		    "to edit the subpartition layout of this "
-		    "primary partition, you must first reboot."),
-		    OPERATING_SYSTEM_NAME);
-		switch(dfui_be_present_dialog(a->c, _("Swap already active"),
-		    disk_get_formatted(storage_get_selected_disk(a->s)) ?
-		    _("Reboot|Return to Select Disk") :
-		    _("Reboot|Return to Select Primary Partition"),
-		    msg_buf[0])) {
-		case 1:
-			state = state_reboot;
-			return;
-		case 2:
+		if (swapoff_all(a) == NULL) {
+			inform(a->c, _("Warning: swap could not be turned off."));
 			state = disk_get_formatted(storage_get_selected_disk(a->s)) ?
 			    state_select_disk : state_select_slice;
 			return;
-		default:
-			abort_backend();
 		}
 	}
 

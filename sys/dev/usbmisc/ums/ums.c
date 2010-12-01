@@ -1,6 +1,5 @@
 /*
  * $FreeBSD: src/sys/dev/usb/ums.c,v 1.64 2003/11/09 09:17:22 tanimura Exp $
- * $DragonFly: src/sys/dev/usbmisc/ums/ums.c,v 1.31 2008/08/14 20:55:54 hasso Exp $
  */
 
 /*
@@ -56,6 +55,7 @@
 #include <sys/vnode.h>
 #include <sys/event.h>
 #include <sys/sysctl.h>
+#include <sys/devfs.h>
 #include <sys/thread2.h>
 
 #include <bus/usb/usb.h>
@@ -66,7 +66,7 @@
 #include <bus/usb/usb_quirks.h>
 #include <bus/usb/hid.h>
 
-#include <machine/mouse.h>
+#include <sys/mouse.h>
 
 #ifdef USB_DEBUG
 #define DPRINTF(x)	if (umsdebug) kprintf x
@@ -88,6 +88,7 @@ SYSCTL_INT(_hw_usb_ums, OID_AUTO, debug, CTLFLAG_RW,
 
 struct ums_softc {
 	device_t sc_dev;		/* base device */
+	cdev_t	 sc_cdev;
 	usbd_interface_handle sc_iface;	/* interface */
 	usbd_pipe_handle sc_intrpipe;	/* interrupt pipe */
 	int sc_ep_addr;
@@ -143,10 +144,8 @@ static d_kqfilter_t ums_kqfilter;
 static void ums_filt_detach(struct knote *);
 static int ums_filt(struct knote *, long);
 
-#define UMS_CDEV_MAJOR	111
-
 static struct dev_ops ums_ops = {
-	{ "ums", UMS_CDEV_MAJOR, D_KQFILTER },
+	{ "ums", 0, 0 },
 	.d_open =	ums_open,
 	.d_close =	ums_close,
 	.d_read =	ums_read,
@@ -341,9 +340,10 @@ ums_attach(device_t self)
 	sc->status.button = sc->status.obutton = 0;
 	sc->status.dx = sc->status.dy = sc->status.dz = 0;
 
-	make_dev(&ums_ops, device_get_unit(self),
-		 UID_ROOT, GID_OPERATOR,
-		 0644, "ums%d", device_get_unit(self));
+	sc->sc_cdev = make_dev(&ums_ops, device_get_unit(self),
+		 	       UID_ROOT, GID_OPERATOR,
+		 	       0644, "ums%d", device_get_unit(self));
+	reference_dev(sc->sc_cdev);
 
 	if (usbd_get_quirks(uaa->device)->uq_flags & UQ_SPUR_BUT_UP) {
 		DPRINTF(("%s: Spurious button up events\n",
@@ -380,9 +380,11 @@ ums_detach(device_t self)
 		sc->state &= ~UMS_ASLEEP;
 		wakeup(sc);
 	}
-	KNOTE(&sc->rkq.ki_note, 0);
 
 	dev_ops_remove_minor(&ums_ops, /*-1, */device_get_unit(self));
+	devfs_assume_knotes(sc->sc_cdev, &sc->rkq);
+	release_dev(sc->sc_cdev);
+        sc->sc_cdev = NULL;
 
 	return 0;
 }

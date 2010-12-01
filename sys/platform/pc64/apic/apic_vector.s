@@ -1,11 +1,9 @@
 /*
  *	from: vector.s, 386BSD 0.1 unknown origin
  * $FreeBSD: src/sys/i386/isa/apic_vector.s,v 1.47.2.5 2001/09/01 22:33:38 tegge Exp $
- * $DragonFly: src/sys/platform/pc32/apic/apic_vector.s,v 1.39 2008/08/02 01:14:43 dillon Exp $
  */
 
 #if 0
-#include "use_npx.h"
 #include "opt_auto_eoi.h"
 #endif
 
@@ -53,21 +51,23 @@
  */
 #define APIC_POP_FRAME POP_FRAME
 
-/* sizeof(struct apic_intmapinfo) == 24 */
-#define IOAPICADDR(irq_num) CNAME(int_to_apicintpin) + 24 * (irq_num) + 8
-#define REDIRIDX(irq_num) CNAME(int_to_apicintpin) + 24 * (irq_num) + 16
-
+#define IOAPICADDR(irq_num) \
+	CNAME(int_to_apicintpin) + AIMI_SIZE * (irq_num) + AIMI_APIC_ADDRESS
+#define REDIRIDX(irq_num) \
+	CNAME(int_to_apicintpin) + AIMI_SIZE * (irq_num) + AIMI_REDIRINDEX
+#define IOAPICFLAGS(irq_num) \
+	CNAME(int_to_apicintpin) + AIMI_SIZE * (irq_num) + AIMI_FLAGS
+ 
 #define MASK_IRQ(irq_num)						\
 	APIC_IMASK_LOCK ;			/* into critical reg */	\
-	testl	$IRQ_LBIT(irq_num), apic_imen ;				\
+	testl	$AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
 	jne	7f ;			/* masked, don't mask */	\
-	orl	$IRQ_LBIT(irq_num), apic_imen ;	/* set the mask bit */	\
+	orl	$AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
+						/* set the mask bit */	\
 	movq	IOAPICADDR(irq_num), %rcx ;	/* ioapic addr */	\
 	movl	REDIRIDX(irq_num), %eax ;	/* get the index */	\
 	movl	%eax, (%rcx) ;			/* write the index */	\
-	movl	IOAPIC_WINDOW(%rcx), %eax ;	/* current value */	\
-	orl	$IOART_INTMASK, %eax ;		/* set the mask */	\
-	movl	%eax, IOAPIC_WINDOW(%rcx) ;	/* new value */		\
+	orl	$IOART_INTMASK,IOAPIC_WINDOW(%rcx) ;/* set the mask */	\
 7: ;						/* already masked */	\
 	APIC_IMASK_UNLOCK ;						\
 
@@ -77,7 +77,7 @@
  *  and the EOI cycle would cause redundant INTs to occur.
  */
 #define MASK_LEVEL_IRQ(irq_num)						\
-	testl	$IRQ_LBIT(irq_num), apic_pin_trigger ;			\
+	testl	$AIMI_FLAG_LEVEL, IOAPICFLAGS(irq_num) ;		\
 	jz	9f ;				/* edge, don't mask */	\
 	MASK_IRQ(irq_num) ;						\
 9: ;									\
@@ -89,20 +89,19 @@
 	cmpl	$0,%eax ;						\
 	jnz	8f ;							\
 	APIC_IMASK_LOCK ;			/* into critical reg */	\
-	testl	$IRQ_LBIT(irq_num), apic_imen ;				\
+	testl	$AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
 	je	7f ;			/* bit clear, not masked */	\
-	andl	$~IRQ_LBIT(irq_num), apic_imen ;/* clear mask bit */	\
+	andl	$~AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
+						/* clear mask bit */	\
 	movq	IOAPICADDR(irq_num),%rcx ;	/* ioapic addr */	\
 	movl	REDIRIDX(irq_num), %eax ;	/* get the index */	\
 	movl	%eax,(%rcx) ;			/* write the index */	\
-	movl	IOAPIC_WINDOW(%rcx),%eax ;	/* current value */	\
-	andl	$~IOART_INTMASK,%eax ;		/* clear the mask */	\
-	movl	%eax,IOAPIC_WINDOW(%rcx) ;	/* new value */		\
+	andl	$~IOART_INTMASK,IOAPIC_WINDOW(%rcx) ;/* clear the mask */ \
 7: ;									\
 	APIC_IMASK_UNLOCK ;						\
 8: ;									\
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 
 /*
  * Fast interrupt call handlers run in the following sequence:
@@ -123,15 +122,15 @@
 	SUPERALIGN_TEXT ;						\
 IDTVEC(vec_name) ;							\
 	APIC_PUSH_FRAME ;						\
-	FAKE_MCOUNT(15*4(%esp)) ;					\
+	FAKE_MCOUNT(TF_RIP(%rsp)) ;					\
 	MASK_LEVEL_IRQ(irq_num) ;					\
 	movq	lapic, %rax ;						\
 	movl	$0, LA_EOI(%rax) ;					\
 	movq	PCPU(curthread),%rbx ;					\
 	testl	$-1,TD_NEST_COUNT(%rbx) ;				\
 	jne	1f ;							\
-	cmpl	$TDPRI_CRIT,TD_PRI(%rbx) ;				\
-	jl	2f ;							\
+	testl	$-1,TD_CRITCOUNT(%rbx) ;				\
+	je	2f ;							\
 1: ;									\
 	/* in critical section, make interrupt pending */		\
 	/* set the pending bit and return, leave interrupt masked */	\
@@ -143,9 +142,10 @@ IDTVEC(vec_name) ;							\
 	andl	$~IRQ_LBIT(irq_num),PCPU(fpending) ;			\
 	pushq	$irq_num ;		/* trapframe -> intrframe */	\
 	movq	%rsp, %rdi ;		/* pass frame by reference */	\
-	addl	$TDPRI_CRIT,TD_PRI(%rbx) ;				\
+	incl	TD_CRITCOUNT(%rbx) ;					\
+	sti ;								\
 	call	ithread_fast_handler ;	/* returns 0 to unmask */	\
-	subl	$TDPRI_CRIT,TD_PRI(%rbx) ;				\
+	decl	TD_CRITCOUNT(%rbx) ;					\
 	addq	$8, %rsp ;		/* intrframe -> trapframe */	\
 	UNMASK_IRQ(irq_num) ;						\
 5: ;									\
@@ -168,31 +168,34 @@ Xspuriousint:
 
 	/* No EOI cycle used here */
 
-	iretq
+	jmp	doreti_iret
 
 
 /*
  * Handle TLB shootdowns.
+ *
+ * NOTE: interrupts are left disabled.
  */
 	.text
 	SUPERALIGN_TEXT
 	.globl	Xinvltlb
 Xinvltlb:
-	pushq	%rax
-
-	movq	%cr3, %rax		/* invalidate the TLB */
-	movq	%rax, %cr3
-
+	APIC_PUSH_FRAME
 	movq	lapic, %rax
 	movl	$0, LA_EOI(%rax)	/* End Of Interrupt to APIC */
-
-	popq	%rax
-	iretq
-
+	FAKE_MCOUNT(TF_RIP(%rsp))
+	subq	$8,%rsp			/* make same as interrupt frame */
+	movq	%rsp,%rdi		/* pass frame by reference */
+	call	smp_invltlb_intr
+	addq	$8,%rsp			/* turn into trapframe */
+	MEXITCOUNT
+	APIC_POP_FRAME
+	jmp	doreti_iret
 
 /*
  * Executed by a CPU when it receives an Xcpustop IPI from another CPU,
  *
+ *  - We cannot call doreti
  *  - Signals its receipt.
  *  - Waits for permission to restart.
  *  - Processing pending IPIQ events while waiting.
@@ -203,56 +206,35 @@ Xinvltlb:
 	SUPERALIGN_TEXT
 	.globl Xcpustop
 Xcpustop:
-	pushq	%rbp
-	movq	%rsp, %rbp
-	/* We save registers that are not preserved across function calls. */
-	/* JG can be re-written with mov's */
-	pushq	%rax
-	pushq	%rcx
-	pushq	%rdx
-	pushq	%rsi
-	pushq	%rdi
-	pushq	%r8
-	pushq	%r9
-	pushq	%r10
-	pushq	%r11
-
-#if JG
-	/* JGXXX switch to kernel %gs? */
-	pushl	%ds			/* save current data segment */
-	pushl	%fs
-
-	movl	$KDSEL, %eax
-	mov	%ax, %ds		/* use KERNEL data segment */
-	movl	$KPSEL, %eax
-	mov	%ax, %fs
-#endif
-
+	APIC_PUSH_FRAME
 	movq	lapic, %rax
 	movl	$0, LA_EOI(%rax)	/* End Of Interrupt to APIC */
 
-	/* JG */
 	movl	PCPU(cpuid), %eax
 	imull	$PCB_SIZE, %eax
 	leaq	CNAME(stoppcbs), %rdi
 	addq	%rax, %rdi
 	call	CNAME(savectx)		/* Save process context */
-	
-		
+
 	movl	PCPU(cpuid), %eax
 
 	/*
 	 * Indicate that we have stopped and loop waiting for permission
 	 * to start again.  We must still process IPI events while in a
 	 * stopped state.
+	 *
+	 * Interrupts must remain enabled for non-IPI'd per-cpu interrupts
+	 * (e.g. Xtimer, Xinvltlb).
 	 */
 	MPLOCKED
 	btsl	%eax, stopped_cpus	/* stopped_cpus |= (1<<id) */
+	sti
 1:
 	andl	$~RQF_IPIQ,PCPU(reqflags)
 	pushq	%rax
 	call	lwkt_smp_stopped
 	popq	%rax
+	pause
 	btl	%eax, started_cpus	/* while (!(started_cpus & (1<<id))) */
 	jnc	1b
 
@@ -271,23 +253,9 @@ Xcpustop:
 
 	call	*%rax
 2:
-	popq	%r11
-	popq	%r10
-	popq	%r9
-	popq	%r8
-	popq	%rdi
-	popq	%rsi
-	popq	%rdx
-	popq	%rcx
-	popq	%rax
-
-#if JG
-	popl	%fs
-	popl	%ds			/* restore previous data segment */
-#endif
-	movq	%rbp, %rsp
-	popq	%rbp
-	iretq
+	MEXITCOUNT
+	APIC_POP_FRAME
+	jmp	doreti_iret
 
 	/*
 	 * For now just have one ipiq IPI, but what we really want is
@@ -301,18 +269,19 @@ Xipiq:
 	APIC_PUSH_FRAME
 	movq	lapic, %rax
 	movl	$0, LA_EOI(%rax)	/* End Of Interrupt to APIC */
-	FAKE_MCOUNT(15*4(%esp))
+	FAKE_MCOUNT(TF_RIP(%rsp))
 
 	incl    PCPU(cnt) + V_IPI
 	movq	PCPU(curthread),%rbx
-	cmpl	$TDPRI_CRIT,TD_PRI(%rbx)
-	jge	1f
+	testl	$-1,TD_CRITCOUNT(%rbx)
+	jne	1f
 	subq	$8,%rsp			/* make same as interrupt frame */
 	movq	%rsp,%rdi		/* pass frame by reference */
 	incl	PCPU(intr_nesting_level)
-	addl	$TDPRI_CRIT,TD_PRI(%rbx)
+	incl	TD_CRITCOUNT(%rbx)
+	sti
 	call	lwkt_process_ipiq_frame
-	subl	$TDPRI_CRIT,TD_PRI(%rbx)
+	decl	TD_CRITCOUNT(%rbx)
 	decl	PCPU(intr_nesting_level)
 	addq	$8,%rsp			/* turn into trapframe */
 	MEXITCOUNT
@@ -321,7 +290,7 @@ Xipiq:
 	orl	$RQF_IPIQ,PCPU(reqflags)
 	MEXITCOUNT
 	APIC_POP_FRAME
-	iretq
+	jmp	doreti_iret
 
 	.text
 	SUPERALIGN_TEXT
@@ -330,20 +299,21 @@ Xtimer:
 	APIC_PUSH_FRAME
 	movq	lapic, %rax
 	movl	$0, LA_EOI(%rax)	/* End Of Interrupt to APIC */
-	FAKE_MCOUNT(15*4(%esp))
+	FAKE_MCOUNT(TF_RIP(%rsp))
 
 	incl    PCPU(cnt) + V_TIMER
 	movq	PCPU(curthread),%rbx
-	cmpl	$TDPRI_CRIT,TD_PRI(%rbx)
-	jge	1f
+	testl	$-1,TD_CRITCOUNT(%rbx)
+	jne	1f
 	testl	$-1,TD_NEST_COUNT(%rbx)
 	jne	1f
 	subq	$8,%rsp			/* make same as interrupt frame */
 	movq	%rsp,%rdi		/* pass frame by reference */
 	incl	PCPU(intr_nesting_level)
-	addl	$TDPRI_CRIT,TD_PRI(%rbx)
+	incl	TD_CRITCOUNT(%rbx)
+	sti
 	call	lapic_timer_process_frame
-	subl	$TDPRI_CRIT,TD_PRI(%rbx)
+	decl	TD_CRITCOUNT(%rbx)
 	decl	PCPU(intr_nesting_level)
 	addq	$8,%rsp			/* turn into trapframe */
 	MEXITCOUNT
@@ -352,9 +322,9 @@ Xtimer:
 	orl	$RQF_TIMER,PCPU(reqflags)
 	MEXITCOUNT
 	APIC_POP_FRAME
-	iretq
+	jmp	doreti_iret
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 
 MCOUNT_LABEL(bintr)
 	FAST_INTR(0,apic_fastintr0)
@@ -398,9 +368,5 @@ started_cpus:
 CNAME(cpustop_restartfunc):
 	.quad 0
 		
-	.globl	apic_pin_trigger
-apic_pin_trigger:
-	.long	0
-
 	.text
 

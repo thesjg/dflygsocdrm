@@ -85,7 +85,9 @@
 #include <sys/proc.h>
 #include <sys/priv.h>
 #include <sys/jail.h>
+
 #include <sys/thread2.h>
+#include <sys/msgport2.h>
 
 #include <vm/vm_zone.h>
 
@@ -685,7 +687,8 @@ in6_pcbdetach(struct inpcb *inp)
 	inp->inp_gencnt = ++ipi->ipi_gencnt;
 	in_pcbremlists(inp);
 	so->so_pcb = NULL;
-	sofree(so);
+	KKASSERT((so->so_state & SS_ASSERTINPROG) == 0);
+	sofree(so);		/* remove pcb ref */
 
 	if (inp->in6p_options)
 		m_freem(inp->in6p_options);
@@ -712,6 +715,15 @@ in6_pcbdetach(struct inpcb *inp)
  * (or in this case trap) if the PCB is invalid.  (Actually, we don't trap
  * because there actually /is/ a programming error somewhere... XXX)
  */
+void
+in6_setsockaddr_dispatch(netmsg_t msg)
+{
+	int error;
+
+	error = in6_setsockaddr(msg->sockaddr.base.nm_so, msg->sockaddr.nm_nam);
+	lwkt_replymsg(&msg->sockaddr.base.lmsg, error);
+}
+
 int
 in6_setsockaddr(struct socket *so, struct sockaddr **nam)
 {
@@ -747,6 +759,15 @@ in6_setsockaddr(struct socket *so, struct sockaddr **nam)
 	return 0;
 }
 
+void
+in6_setpeeraddr_dispatch(netmsg_t msg)
+{
+	int error;
+
+	error = in6_setpeeraddr(msg->peeraddr.base.nm_so, msg->peeraddr.nm_nam);
+	lwkt_replymsg(&msg->peeraddr.base.lmsg, error);
+}
+
 int
 in6_setpeeraddr(struct socket *so, struct sockaddr **nam)
 {
@@ -780,6 +801,16 @@ in6_setpeeraddr(struct socket *so, struct sockaddr **nam)
 
 	*nam = (struct sockaddr *)sin6;
 	return 0;
+}
+
+void
+in6_mapped_sockaddr_dispatch(netmsg_t msg)
+{
+	int error;
+
+	error = in6_mapped_sockaddr(msg->sockaddr.base.nm_so,
+				    msg->sockaddr.nm_nam);
+	lwkt_replymsg(&msg->sockaddr.base.lmsg, error);
 }
 
 int
@@ -818,6 +849,15 @@ in6_mapped_peeraddr(struct socket *so, struct sockaddr **nam)
 	error = in6_setpeeraddr(so, nam);
 
 	return error;
+}
+
+void
+in6_mapped_peeraddr_dispatch(netmsg_t msg)
+{
+	int error;
+
+	error = in6_mapped_peeraddr(msg->base.nm_so, msg->peeraddr.nm_nam);
+	lwkt_replymsg(&msg->base.lmsg, error);
 }
 
 /*
@@ -940,17 +980,25 @@ in6_pcblookup_local(struct inpcbinfo *pcbinfo, struct in6_addr *laddr,
 	struct inpcb *match = NULL;
 
 	/*
+	 * If the porthashbase is shared across several cpus we need
+	 * to lock.
+	 */
+	if (pcbinfo->porttoken)
+		lwkt_gettoken(pcbinfo->porttoken);
+
+	/*
 	 * Best fit PCB lookup.
 	 *
 	 * First see if this local port is in use by looking on the
 	 * port hash list.
 	 */
-	porthash = &pcbinfo->porthashbase[INP_PCBPORTHASH(lport,
-	    pcbinfo->porthashmask)];
+	porthash = &pcbinfo->porthashbase[
+				INP_PCBPORTHASH(lport, pcbinfo->porthashmask)];
 	LIST_FOREACH(phd, porthash, phd_hash) {
 		if (phd->phd_port == lport)
 			break;
 	}
+
 	if (phd != NULL) {
 		/*
 		 * Port is in use by one or more PCBs. Look for best
@@ -987,6 +1035,9 @@ in6_pcblookup_local(struct inpcbinfo *pcbinfo, struct in6_addr *laddr,
 			}
 		}
 	}
+	if (pcbinfo->porttoken)
+		lwkt_reltoken(pcbinfo->porttoken);
+
 	return (match);
 }
 

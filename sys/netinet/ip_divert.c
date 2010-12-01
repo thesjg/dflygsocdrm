@@ -52,22 +52,19 @@
 #include <sys/socket.h>
 #include <sys/protosw.h>
 #include <sys/socketvar.h>
+#include <sys/socketvar2.h>
 #include <sys/sysctl.h>
 #include <sys/systm.h>
 #include <sys/proc.h>
 #include <sys/priv.h>
 #include <sys/in_cksum.h>
 #include <sys/lock.h>
-#ifdef SMP
 #include <sys/msgport.h>
-#endif
 
 #include <net/if.h>
 #include <net/route.h>
 
-#ifdef SMP
 #include <net/netmsg2.h>
-#endif
 #include <sys/thread2.h>
 #include <sys/mplock2.h>
 
@@ -126,6 +123,8 @@ static u_long	div_recvspace = DIVRCVQ;	/* XXX sysctl ? */
 
 static struct mbuf *ip_divert(struct mbuf *, int, int);
 
+static struct lwkt_token div_token = LWKT_TOKEN_MP_INITIALIZER(div_token);
+
 /*
  * Initialize divert connection block queue.
  */
@@ -150,72 +149,14 @@ div_init(void)
  * IPPROTO_DIVERT is not a real IP protocol; don't allow any packets
  * with that protocol number to enter the system from the outside.
  */
-void
-div_input(struct mbuf *m, ...)
+int
+div_input(struct mbuf **mp, int *offp, int proto)
 {
+	struct mbuf *m = *mp;
+
 	ipstat.ips_noproto++;
 	m_freem(m);
-}
-
-struct lwkt_port *
-div_soport(struct socket *so, struct sockaddr *nam, struct mbuf **mptr)
-{
-	struct sockaddr_in *sin;
-	struct mbuf *m;
-	int dir;
-
-	sin = (struct sockaddr_in *)nam;
-	m = *mptr;
-	M_ASSERTPKTHDR(m);
-
-	m->m_pkthdr.rcvif = NULL;
-	dir = DIV_IS_OUTPUT(sin) ? IP_MPORT_OUT : IP_MPORT_IN;
-
-	if (sin != NULL) {
-		int i;
-
-		/*
-		 * Try locating the interface, if we originally had one.
-		 * This is done even for outgoing packets, since for a
-		 * forwarded packet, there must be an interface attached.
-		 *
-		 * Find receive interface with the given name, stuffed
-		 * (if it exists) in the sin_zero[] field.
-		 * The name is user supplied data so don't trust its size
-		 * or that it is zero terminated.
-		 */
-		for (i = 0; sin->sin_zero[i] && i < sizeof(sin->sin_zero); i++)
-			;
-		if (i > 0 && i < sizeof(sin->sin_zero))
-			m->m_pkthdr.rcvif = ifunit(sin->sin_zero);
-	}
-
-	if (dir == IP_MPORT_IN && m->m_pkthdr.rcvif == NULL) {
-		/*
-		 * No luck with the name, check by IP address.
-		 * Clear the port and the ifname to make sure
-		 * there are no distractions for ifa_ifwithaddr.
-		 *
-		 * Be careful not to trash sin->sin_port; it will
-		 * be used later in div_output().
-		 */
-		struct ifaddr *ifa;
-		u_short sin_port;
-
-		bzero(sin->sin_zero, sizeof(sin->sin_zero));
-		sin_port = sin->sin_port; /* save */
-		sin->sin_port = 0;
-		ifa = ifa_ifwithaddr((struct sockaddr *)sin);
-		if (ifa == NULL) {
-			m_freem(m);
-			*mptr = NULL;
-			return NULL;
-		}
-		sin->sin_port = sin_port; /* restore */
-		m->m_pkthdr.rcvif = ifa->ifa_ifp;
-	}
-
-	return ip_mport(mptr, dir);
+	return(IPPROTO_DONE);
 }
 
 /*
@@ -298,7 +239,7 @@ div_packet(struct mbuf *m, int incoming, int port)
 	 * saving/testing the socket pointer is not MPSAFE.  So we still
 	 * need to hold BGL here.
 	 */
-	get_mplock();
+	lwkt_gettoken(&div_token);
 	LIST_FOREACH(inp, &divcbinfo.pcblisthead, inp_list) {
 		if (inp->inp_flags & INP_PLACEMARKER)
 			continue;
@@ -306,39 +247,37 @@ div_packet(struct mbuf *m, int incoming, int port)
 			sa = inp->inp_socket;
 	}
 	if (sa) {
-		if (ssb_appendaddr(&sa->so_rcv, (struct sockaddr *)&divsrc, m,
-				 NULL) == 0)
+		lwkt_gettoken(&sa->so_rcv.ssb_token);
+		if (ssb_appendaddr(&sa->so_rcv, (struct sockaddr *)&divsrc, m, NULL) == 0)
 			m_freem(m);
 		else
 			sorwakeup(sa);
-		rel_mplock();
+		lwkt_reltoken(&sa->so_rcv.ssb_token);
 	} else {
-		rel_mplock();
 		m_freem(m);
 		ipstat.ips_noproto++;
 		ipstat.ips_delivered--;
 	}
+	lwkt_reltoken(&div_token);
 }
 
 #ifdef SMP
+
 static void
-div_packet_handler(struct netmsg *nmsg)
+div_packet_handler(netmsg_t msg)
 {
-	struct netmsg_packet *nmp;
-	struct lwkt_msg *msg;
 	struct mbuf *m;
 	int port, incoming = 0;
 
-	nmp = (struct netmsg_packet *)nmsg;
-	m = nmp->nm_packet;
+	m = msg->packet.nm_packet;
 
-	msg = &nmsg->nm_lmsg;
-	port = msg->u.ms_result32 & 0xffff;
-	if (msg->u.ms_result32 & DIV_INPUT)
+	port = msg->lmsg.u.ms_result32 & 0xffff;
+	if (msg->lmsg.u.ms_result32 & DIV_INPUT)
 		incoming = 1;
-
 	div_packet(m, incoming, port);
+	/* no reply, msg embedded in mbuf */
 }
+
 #endif	/* SMP */
 
 static void
@@ -365,24 +304,25 @@ divert_packet(struct mbuf *m, int incoming)
 #ifdef SMP
 	if (mycpuid != 0) {
 		struct netmsg_packet *nmp;
-		struct lwkt_msg *msg;
 
 		nmp = &m->m_hdr.mh_netmsg;
-		netmsg_init(&nmp->nm_netmsg, NULL, &netisr_apanic_rport,
-		    MSGF_MPSAFE, div_packet_handler);
+		netmsg_init(&nmp->base, NULL, &netisr_apanic_rport,
+			    0, div_packet_handler);
 		nmp->nm_packet = m;
 
-		msg = &nmp->nm_netmsg.nm_lmsg;
-		msg->u.ms_result32 = port; /* port is 16bits */
+		nmp->base.lmsg.u.ms_result32 = port; /* port is 16bits */
 		if (incoming)
-			msg->u.ms_result32 |= DIV_INPUT;
+			nmp->base.lmsg.u.ms_result32 |= DIV_INPUT;
 		else
-			msg->u.ms_result32 |= DIV_OUTPUT;
+			nmp->base.lmsg.u.ms_result32 |= DIV_OUTPUT;
 
-		lwkt_sendmsg(cpu_portfn(0), &nmp->nm_netmsg.nm_lmsg);
-	} else
-#endif
+		lwkt_sendmsg(cpu_portfn(0), &nmp->base.lmsg);
+	} else {
+		div_packet(m, incoming, port);
+	}
+#else
 	div_packet(m, incoming, port);
+#endif
 }
 
 /*
@@ -452,24 +392,32 @@ cantsend:
 	return error;
 }
 
-static int
-div_attach(struct socket *so, int proto, struct pru_attach_info *ai)
+static void
+div_attach(netmsg_t msg)
 {
+	struct socket *so = msg->attach.base.nm_so;
+	int proto = msg->attach.nm_proto;
+	struct pru_attach_info *ai = msg->attach.nm_ai;
 	struct inpcb *inp;
 	int error;
 
 	inp  = so->so_pcb;
 	if (inp)
 		panic("div_attach");
-	if ((error = priv_check_cred(ai->p_ucred, PRIV_ROOT, NULL_CRED_OKAY)) != 0)
-		return error;
+	error = priv_check_cred(ai->p_ucred, PRIV_ROOT, NULL_CRED_OKAY);
+	if (error)
+		goto out;
 
 	error = soreserve(so, div_sendspace, div_recvspace, ai->sb_rlimit);
 	if (error)
-		return error;
+		goto out;
+	lwkt_gettoken(&div_token);
+	sosetport(so, cpu_portfn(0));
 	error = in_pcballoc(so, &divcbinfo);
-	if (error)
-		return error;
+	if (error) {
+		lwkt_reltoken(&div_token);
+		goto out;
+	}
 	inp = (struct inpcb *)so->so_pcb;
 	inp->inp_ip_p = proto;
 	inp->inp_vflag |= INP_IPV4;
@@ -478,41 +426,62 @@ div_attach(struct socket *so, int proto, struct pru_attach_info *ai)
 	 * The socket is always "connected" because
 	 * we always know "where" to send the packet.
 	 */
-	so->so_port = cpu0_soport(so, NULL, NULL);
-	so->so_state |= SS_ISCONNECTED;
-	return 0;
+	sosetstate(so, SS_ISCONNECTED);
+	lwkt_reltoken(&div_token);
+	error = 0;
+out:
+	lwkt_replymsg(&msg->attach.base.lmsg, error);
 }
 
-static int
-div_detach(struct socket *so)
+static void
+div_detach(netmsg_t msg)
 {
+	struct socket *so = msg->detach.base.nm_so;
 	struct inpcb *inp;
 
 	inp = so->so_pcb;
 	if (inp == NULL)
 		panic("div_detach");
 	in_pcbdetach(inp);
-	return 0;
+	lwkt_replymsg(&msg->detach.base.lmsg, 0);
 }
 
-static int
-div_abort(struct socket *so)
+/*
+ * NOTE: (so) is referenced from soabort*() and netmsg_pru_abort()
+ *	 will sofree() it when we return.
+ */
+static void
+div_abort(netmsg_t msg)
 {
+	struct socket *so = msg->abort.base.nm_so;
+
 	soisdisconnected(so);
-	return div_detach(so);
+	div_detach(msg);
+	/* msg invalid now */
 }
 
-static int
-div_disconnect(struct socket *so)
+static void
+div_disconnect(netmsg_t msg)
 {
-	if (!(so->so_state & SS_ISCONNECTED))
-		return ENOTCONN;
-	return div_abort(so);
+	struct socket *so = msg->disconnect.base.nm_so;
+	int error;
+
+	if (so->so_state & SS_ISCONNECTED) {
+		soreference(so);
+		div_abort(msg);
+		/* msg invalid now */
+		sofree(so);
+		return;
+	}
+	error = ENOTCONN;
+	lwkt_replymsg(&msg->disconnect.base.lmsg, error);
 }
 
-static int
-div_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
+static void
+div_bind(netmsg_t msg)
 {
+	struct socket *so = msg->bind.base.nm_so;
+	struct sockaddr *nam = msg->bind.nm_nam;
 	int error;
 
 	/*
@@ -527,27 +496,36 @@ div_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
 		error = EAFNOSUPPORT;
 	} else {
 		((struct sockaddr_in *)nam)->sin_addr.s_addr = INADDR_ANY;
-		error = in_pcbbind(so->so_pcb, nam, td);
+		error = in_pcbbind(so->so_pcb, nam, msg->bind.nm_td);
 	}
-	return error;
+	lwkt_replymsg(&msg->bind.base.lmsg, error);
 }
 
-static int
-div_shutdown(struct socket *so)
+static void
+div_shutdown(netmsg_t msg)
 {
+	struct socket *so = msg->shutdown.base.nm_so;
+
 	socantsendmore(so);
-	return 0;
+
+	lwkt_replymsg(&msg->shutdown.base.lmsg, 0);
 }
 
-static int
-div_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
-	 struct mbuf *control, struct thread *td)
+static void
+div_send(netmsg_t msg)
 {
-	/* Length check already done in ip_mport() */
+	struct socket *so = msg->send.base.nm_so;
+	struct mbuf *m = msg->send.nm_m;
+	struct sockaddr *nam = msg->send.nm_addr;
+	struct mbuf *control = msg->send.nm_control;
+	int error;
+
+	/* Length check already done in ip_cpufn() */
 	KASSERT(m->m_len >= sizeof(struct ip), ("IP header not in one mbuf"));
 
 	/* Send packet */
-	return div_output(so, m, (struct sockaddr_in *)nam, control);
+	error = div_output(so, m, (struct sockaddr_in *)nam, control);
+	lwkt_replymsg(&msg->send.base.lmsg, error);
 }
 
 SYSCTL_DECL(_net_inet_divert);
@@ -556,22 +534,22 @@ SYSCTL_PROC(_net_inet_divert, OID_AUTO, pcblist, CTLFLAG_RD, &divcbinfo, 0,
 
 struct pr_usrreqs div_usrreqs = {
 	.pru_abort = div_abort,
-	.pru_accept = pru_accept_notsupp,
+	.pru_accept = pr_generic_notsupp,
 	.pru_attach = div_attach,
 	.pru_bind = div_bind,
-	.pru_connect = pru_connect_notsupp,
-	.pru_connect2 = pru_connect2_notsupp,
-	.pru_control = in_control,
+	.pru_connect = pr_generic_notsupp,
+	.pru_connect2 = pr_generic_notsupp,
+	.pru_control = in_control_dispatch,
 	.pru_detach = div_detach,
 	.pru_disconnect = div_disconnect,
-	.pru_listen = pru_listen_notsupp,
-	.pru_peeraddr = in_setpeeraddr,
-	.pru_rcvd = pru_rcvd_notsupp,
-	.pru_rcvoob = pru_rcvoob_notsupp,
+	.pru_listen = pr_generic_notsupp,
+	.pru_peeraddr = in_setpeeraddr_dispatch,
+	.pru_rcvd = pr_generic_notsupp,
+	.pru_rcvoob = pr_generic_notsupp,
 	.pru_send = div_send,
 	.pru_sense = pru_sense_null,
 	.pru_shutdown = div_shutdown,
-	.pru_sockaddr = in_setsockaddr,
+	.pru_sockaddr = in_setsockaddr_dispatch,
 	.pru_sosend = sosend,
 	.pru_soreceive = soreceive
 };

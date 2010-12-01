@@ -112,7 +112,6 @@ options 	ROOTDEVNAME=\"ufs:da0s2e\"
 # SMP OPTIONS:
 #
 # SMP enables building of a Symmetric MultiProcessor Kernel.
-# APIC_IO enables the use of the IO APIC for Symmetric I/O.
 #
 # Notes:
 #
@@ -124,13 +123,12 @@ options 	ROOTDEVNAME=\"ufs:da0s2e\"
 #   are required by your hardware.
 #
 
-# To make an SMP kernel both SMP and APIC_IO are usually
-# specified.  SMP boxes with severely broken BIOSes which
+# SMP boxes with severely broken BIOSes which
 # boot fine for non-SMP builds *might* work in SMP mode
-# if you define SMP and leave APIC_IO turned off.
+# if you disable APIC_IO by setting the loader tunable
+# hw.apic_io_enable to 0.
 #
 options 	SMP			# Symmetric MultiProcessor Kernel
-options 	APIC_IO			# Symmetric (APIC) I/O
 
 #
 # Rogue SMP hardware:
@@ -633,7 +631,6 @@ options 	IPFILTER_LOG		#ipfilter logging
 options 	IPFILTER_DEFAULT_BLOCK	#block all packets by default
 options 	IPSTEALTH		#support for stealth forwarding
 options 	TCPDEBUG
-options		NS			# NETNS support
 
 device		pf
 device		pfsync
@@ -652,6 +649,14 @@ options         MBUF_STRESS_TEST
 # Statically link in accept filters
 options                ACCEPT_FILTER_DATA
 options                ACCEPT_FILTER_HTTP
+
+# TCP_SIGNATURE adds support for RFC 2385 (TCP-MD5) digests. These are
+# carried in TCP option 19. This option is commonly used to protect
+# TCP sessions (e.g. BGP) where IPSEC is not available nor desirable.
+# This is enabled on a per-socket basis using the TCP_MD5SIG socket option.
+# This requires the use of 'device crypto', 'options IPSEC'
+# or 'device cryptodev'.
+options   TCP_SIGNATURE   #include support for RFC 2385
 
 #
 # TCP_DROP_SYNFIN adds support for ignoring TCP packets with SYN+FIN. This
@@ -1250,6 +1255,14 @@ device		aacp	# SCSI Passthrough interface (optional, CAM required)
 device		ida		# Compaq Smart RAID
 device		mlx		# Mylex DAC960
 device		amr		# AMI MegaRAID
+device		mfi		# LSI MegaRAID SAS
+device		mfip		# LSI MegaRAID SAS passthrough, requires CAM
+options 	MFI_DEBUG
+
+#
+# Areca RAID (CAM is required).
+#
+device		arcmsr		# Areca SATA II RAID
 
 #
 # 3ware ATA RAID
@@ -1469,6 +1482,9 @@ device		iwifw
 device		iwnfw
 device		ralfw
 device		wpifw
+
+# Bluetooth Protocols
+device		bluetooth
 
 #
 # ATM related options
@@ -2073,6 +2089,7 @@ device		sdhci
 # ichsmb	Intel ICH SMBus controller chips (82801AA, 82801AB, 82801BA)
 # viapm		VIA VT82C586B,596,686A and VT8233 SMBus controllers
 # amdpm		AMD 756 Power Management Unit
+# amdsmb	AMD 8111 SMBus 2.0 Controller
 #
 device		smbus		# Bus support, required for smb below.
 
@@ -2081,6 +2098,7 @@ device		alpm
 device		ichsmb
 device		viapm
 device		amdpm
+device		amdsmb
 
 device		smb
 
@@ -2131,6 +2149,7 @@ device		nsclpcsio1 at isa? port 0x4e
 device		wbsio0	at isa? port 0x2e
 device		wbsio1	at isa? port 0x4e
 device		lm#3	at wbsio?
+device		uguru0	at isa? port 0xe0	# ABIT uGuru
 
 #---------------------------------------------------------------------------
 # ISDN4BSD
@@ -2570,6 +2589,8 @@ device 		ehci
 # General USB code (mandatory for USB)
 device		usb
 #
+# USB Bluetooth
+device		ubt
 # Fm Radio
 device		ufm
 # Generic USB device driver
@@ -2687,6 +2708,7 @@ options		UBSEC_DEBUG	# enable debugging support: hw.ubsec.debug
 #options	UBSEC_NO_RNG	# for devices without RNG
 options		UBSEC_RNDTEST	# enable rndtest support
 
+device		aesni		# hardware crypto/RNG for AES-NI
 device		glxsb		# Geode LX Security Block
 device		padlock		# hardware crypto/RNG for VIA C3/C7/Eden
 
@@ -2776,6 +2798,7 @@ options 	INIT_PATH="/sbin/init:/sbin/oinit"
 # Debug options
 options 	BUS_DEBUG       # enable newbus debugging
 options 	NPX_DEBUG       # enable npx debugging (FPU/math emu)
+options		RSS_DEBUG	# enable RSS (Receive Side Scaling) debugging
 
 # Record the program counter of the code interrupted by the statistics
 # clock interrupt.  Use pctrack(8) to dump this information.
@@ -2898,10 +2921,6 @@ options		SCTP_MAP_LOGGING
 
 # DSCHED stuff
 options		DSCHED_FQ
-
-# Receive Side Scaling
-options		RSS
-options		RSS_DEBUG
 
 # WATCHDOG
 options		WATCHDOG_ENABLE		# Enable watchdog support framework

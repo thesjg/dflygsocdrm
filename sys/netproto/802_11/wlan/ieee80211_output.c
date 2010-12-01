@@ -148,7 +148,6 @@ ieee80211_start(struct ifnet *ifp)
 	 * for CSA).
 	 */
 	if (vap->iv_state != IEEE80211_S_RUN) {
-		IEEE80211_LOCK(ic);
 		/* re-check under the com lock to avoid races */
 		if (vap->iv_state != IEEE80211_S_RUN) {
 			IEEE80211_DPRINTF(vap, IEEE80211_MSG_OUTPUT,
@@ -156,10 +155,8 @@ ieee80211_start(struct ifnet *ifp)
 			    __func__, ieee80211_state_name[vap->iv_state]);
 			vap->iv_stats.is_tx_badstate++;
 			ifp->if_flags |= IFF_OACTIVE;
-			IEEE80211_UNLOCK(ic);
 			return;
 		}
-		IEEE80211_UNLOCK(ic);
 	}
 	for (;;) {
 		m = ifq_dequeue(&ifp->if_snd, NULL);
@@ -1412,6 +1409,7 @@ ieee80211_fragment(struct ieee80211vap *vap, struct mbuf *m0,
 		m->m_len = hdrsize + payload;
 		m->m_pkthdr.len = hdrsize + payload;
 		m->m_flags |= M_FRAG;
+		m->m_pkthdr.rcvif = m0->m_pkthdr.rcvif;
 
 		/* chain up the fragment */
 		prev->m_nextpkt = m;
@@ -1806,7 +1804,7 @@ ieee80211_send_probereq(struct ieee80211_node *ni,
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_DEBUG | IEEE80211_MSG_DUMPPKTS,
 	    "send probe req on channel %u bssid %6D ssid \"%.*s\"\n",
 	    ieee80211_chan2ieee(ic, ic->ic_curchan), bssid, ":",
-	    ssidlen, ssid);
+	    (int)ssidlen, ssid);
 
 	memset(&params, 0, sizeof(params));
 	params.ibp_pri = M_WME_GETAC(m);
@@ -2479,11 +2477,13 @@ ieee80211_alloc_cts(struct ieee80211com *ic,
 }
 
 static void
-ieee80211_tx_mgt_timeout(void *arg)
+ieee80211_tx_mgt_timeout_callout(void *arg)
 {
 	struct ieee80211_node *ni = arg;
-	struct ieee80211vap *vap = ni->ni_vap;
+	struct ieee80211vap *vap;
 
+	wlan_serialize_enter();
+	vap = ni->ni_vap;
 	if (vap->iv_state != IEEE80211_S_INIT &&
 	    (vap->iv_ic->ic_flags & IEEE80211_F_SCAN) == 0) {
 		/*
@@ -2493,6 +2493,7 @@ ieee80211_tx_mgt_timeout(void *arg)
 		ieee80211_new_state(vap, IEEE80211_S_SCAN,
 			IEEE80211_SCAN_FAIL_TIMEOUT);
 	}
+	wlan_serialize_exit();
 }
 
 static void
@@ -2515,7 +2516,7 @@ ieee80211_tx_mgt_cb(struct ieee80211_node *ni, void *arg, int status)
 	if (vap->iv_state == ostate)
 		callout_reset(&vap->iv_mgtsend,
 			status == 0 ? IEEE80211_TRANS_WAIT*hz : 0,
-			ieee80211_tx_mgt_timeout, ni);
+			ieee80211_tx_mgt_timeout_callout, ni);
 }
 
 static void
@@ -2789,7 +2790,6 @@ ieee80211_beacon_update(struct ieee80211_node *ni,
 	int len_changed = 0;
 	uint16_t capinfo;
 
-	IEEE80211_LOCK(ic);
 	/*
 	 * Handle 11h channel change when we've reached the count.
 	 * We must recalculate the beacon frame contents to account
@@ -2815,7 +2815,6 @@ ieee80211_beacon_update(struct ieee80211_node *ni,
 		    mtod(m, uint8_t*) + sizeof(struct ieee80211_frame), bo, ni);
 
 		/* XXX do WME aggressive mode processing? */
-		IEEE80211_UNLOCK(ic);
 		return 1;		/* just assume length changed */
 	}
 
@@ -3042,7 +3041,6 @@ ieee80211_beacon_update(struct ieee80211_node *ni,
 			frm  = add_appie(frm, aie);
 		clrbit(bo->bo_flags, IEEE80211_BEACON_APPIE);
 	}
-	IEEE80211_UNLOCK(ic);
 
 	return len_changed;
 }

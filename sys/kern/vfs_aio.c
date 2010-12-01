@@ -436,8 +436,10 @@ aio_proc_rundown(struct proc *p)
 			so = (struct socket *)fp->f_data;
 			TAILQ_REMOVE(&so->so_aiojobq, aiocbe, list);
 			if (TAILQ_EMPTY(&so->so_aiojobq)) {
-				so->so_snd.ssb_flags &= ~SSB_AIO;
-				so->so_rcv.ssb_flags &= ~SSB_AIO;
+				atomic_clear_int(&so->so_snd.ssb_flags,
+						 SSB_AIO);
+				atomic_clear_int(&so->so_rcv.ssb_flags,
+						 SSB_AIO);
 			}
 		}
 		TAILQ_REMOVE(&ki->kaio_sockqueue, aiocbe, plist);
@@ -610,8 +612,6 @@ aio_process(struct aiocblist *aiocbe)
 /*
  * The AIO daemon, most of the actual work is done in aio_process,
  * but the setup (and address space mgmt) is done in this routine.
- *
- * The MP lock is held on entry.
  */
 static void
 aio_daemon(void *uproc, struct trapframe *frame)
@@ -625,6 +625,11 @@ aio_daemon(void *uproc, struct trapframe *frame)
 	struct vmspace *curvm;
 	struct lwp *mylwp;
 	struct ucred *cr;
+
+	/*
+	 * mplock not held on entry but we aren't mpsafe yet.
+	 */
+	get_mplock();
 
 	mylwp = curthread->td_lwp;
 	mycp = mylwp->lwp_proc;
@@ -1045,10 +1050,10 @@ aio_swake(struct socket *so, struct signalsockbuf *ssb)
 
 	if (ssb == &so->so_snd) {
 		opcode = LIO_WRITE;
-		so->so_snd.ssb_flags &= ~SSB_AIO;
+		atomic_clear_int(&so->so_snd.ssb_flags, SSB_AIO);
 	} else {
 		opcode = LIO_READ;
-		so->so_rcv.ssb_flags &= ~SSB_AIO;
+		atomic_clear_int(&so->so_rcv.ssb_flags, SSB_AIO);
 	}
 
 	for (cb = TAILQ_FIRST(&so->so_aiojobq); cb; cb = cbn) {
@@ -1252,9 +1257,9 @@ no_kqueue:
 			TAILQ_INSERT_TAIL(&so->so_aiojobq, aiocbe, list);
 			TAILQ_INSERT_TAIL(&ki->kaio_sockqueue, aiocbe, plist);
 			if (opcode == LIO_READ)
-				so->so_rcv.ssb_flags |= SSB_AIO;
+				atomic_set_int(&so->so_rcv.ssb_flags, SSB_AIO);
 			else
-				so->so_snd.ssb_flags |= SSB_AIO;
+				atomic_set_int(&so->so_snd.ssb_flags, SSB_AIO);
 			aiocbe->jobstate = JOBST_JOBQGLOBAL; /* XXX */
 			ki->kaio_queue_count++;
 			num_queue_count++;
@@ -2026,6 +2031,7 @@ aio_physwakeup(struct bio *bio)
 	struct aio_liojob *lj;
 
 	aiocbe = bio->bio_caller_info2.ptr;
+	get_mplock();
 
 	if (aiocbe) {
 		p = bio->bio_caller_info1.ptr;
@@ -2081,6 +2087,7 @@ aio_physwakeup(struct bio *bio)
 		}
 	}
 	biodone_sync(bio);
+	rel_mplock();
 }
 #endif /* VFS_AIO */
 

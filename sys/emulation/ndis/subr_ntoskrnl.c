@@ -52,6 +52,8 @@
 #include <sys/bus.h>
 #include <sys/rman.h>
 
+#include <sys/mplock2.h>
+
 #include <machine/atomic.h>
 #include <machine/clock.h>
 #include <machine/stdarg.h>
@@ -184,7 +186,7 @@ static MALLOC_DEFINE(M_NDIS, "ndis", "ndis emulation");
 int
 ntoskrnl_libinit(void)
 {
-	lwkt_token_init(&ntoskrnl_dispatchtoken, 1);
+	lwkt_token_init(&ntoskrnl_dispatchtoken, 1, "ndiskrnl");
 	ntoskrnl_init_lock(&ntoskrnl_global);
 	TAILQ_INIT(&ntoskrnl_reflist);
 	return(0);
@@ -1382,15 +1384,16 @@ ntoskrnl_thrfunc(void *arg)
 	void			*tctx;
 	uint32_t		rval;
 
+	get_mplock();
+
 	thrctx = arg;
 	tfunc = thrctx->tc_thrfunc;
 	tctx = thrctx->tc_thrctx;
 	kfree(thrctx, M_TEMP);
 
 	rval = tfunc(tctx);
-
 	ntoskrnl_thread_exit(rval);
-	return; /* notreached */
+	/* not reached */
 }
 
 __stdcall static ndis_status
@@ -1440,7 +1443,9 @@ ntoskrnl_thread_exit(ndis_status status)
 
 	ntoskrnl_kth--;
 
-	kthread_exit();
+	rel_mplock();
+	kthread_exit();	/* call explicitly */
+
 	return(0);	/* notreached */
 }
 

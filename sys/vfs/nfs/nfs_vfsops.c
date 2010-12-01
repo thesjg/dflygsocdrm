@@ -252,9 +252,16 @@ nfs_convert_diskless(void)
 		sizeof(struct ifaliasreq));
 	bcopy(&nfs_diskless.mygateway, &nfsv3_diskless.mygateway,
 		sizeof(struct sockaddr_in));
-	nfs_convert_oargs(&nfsv3_diskless.swap_args,&nfs_diskless.swap_args);
+	nfs_convert_oargs(&nfsv3_diskless.swap_args, &nfs_diskless.swap_args);
 
-	bcopy(nfs_diskless.swap_fh,nfsv3_diskless.swap_fh,NFSX_V2FH);
+	/*
+	 * Copy the NFS handle passed from the diskless code.
+	 *
+	 * XXX CURRENTLY DISABLED - bootp passes us a NFSv2 handle which
+	 * will fail utterly with HAMMER due to limitations with NFSv2
+	 * directory cookies.
+	 */
+	bcopy(nfs_diskless.swap_fh, nfsv3_diskless.swap_fh, NFSX_V2FH);
 	nfsv3_diskless.swap_fhsize = NFSX_V2FH;
 	for (i = NFSX_V2FH - 1; i >= 0; --i) {
 		if (nfs_diskless.swap_fh[i])
@@ -262,6 +269,7 @@ nfs_convert_diskless(void)
 	}
 	if (i < 0)
 		nfsv3_diskless.swap_fhsize = 0;
+	nfsv3_diskless.swap_fhsize = 0;		/* FORCE DISABLE */
 
 	bcopy(&nfs_diskless.swap_saddr,&nfsv3_diskless.swap_saddr,
 		sizeof(struct sockaddr_in));
@@ -269,9 +277,16 @@ nfs_convert_diskless(void)
 	nfsv3_diskless.swap_nblks = nfs_diskless.swap_nblks;
 	bcopy(&nfs_diskless.swap_ucred, &nfsv3_diskless.swap_ucred,
 		sizeof(struct ucred));
-	nfs_convert_oargs(&nfsv3_diskless.root_args,&nfs_diskless.root_args);
+	nfs_convert_oargs(&nfsv3_diskless.root_args, &nfs_diskless.root_args);
 
-	bcopy(nfs_diskless.root_fh,nfsv3_diskless.root_fh,NFSX_V2FH);
+	/*
+	 * Copy the NFS handle passed from the diskless code.
+	 *
+	 * XXX CURRENTLY DISABLED - bootp passes us a NFSv2 handle which
+	 * will fail utterly with HAMMER due to limitations with NFSv2
+	 * directory cookies.
+	 */
+	bcopy(nfs_diskless.root_fh, nfsv3_diskless.root_fh, NFSX_V2FH);
 	nfsv3_diskless.root_fhsize = NFSX_V2FH;
 	for (i = NFSX_V2FH - 1; i >= 0; --i) {
 		if (nfs_diskless.root_fh[i])
@@ -279,6 +294,7 @@ nfs_convert_diskless(void)
 	}
 	if (i < 0)
 		nfsv3_diskless.root_fhsize = 0;
+	nfsv3_diskless.root_fhsize = 0;		/* FORCE DISABLE */
 
 	bcopy(&nfs_diskless.root_saddr,&nfsv3_diskless.root_saddr,
 		sizeof(struct sockaddr_in));
@@ -307,12 +323,16 @@ nfs_statfs(struct mount *mp, struct statfs *sbp, struct ucred *cred)
 	info.mrep = NULL;
 	info.v3 = (nmp->nm_flag & NFSMNT_NFSV3);
 
+	lwkt_gettoken(&nmp->nm_token);
+
 #ifndef nolint
 	sfp = NULL;
 #endif
 	error = nfs_nget(mp, (nfsfh_t *)nmp->nm_fh, nmp->nm_fhsize, &np);
-	if (error)
+	if (error) {
+		lwkt_reltoken(&nmp->nm_token);
 		return (error);
+	}
 	vp = NFSTOV(np);
 	/* ignore the passed cred */
 	cred = crget();
@@ -371,6 +391,7 @@ nfs_statfs(struct mount *mp, struct statfs *sbp, struct ucred *cred)
 nfsmout:
 	vput(vp);
 	crfree(cred);
+	lwkt_reltoken(&nmp->nm_token);
 	return (error);
 }
 
@@ -387,13 +408,16 @@ nfs_statvfs(struct mount *mp, struct statvfs *sbp, struct ucred *cred)
 
 	info.mrep = NULL;
 	info.v3 = (nmp->nm_flag & NFSMNT_NFSV3);
+	lwkt_gettoken(&nmp->nm_token);
 
 #ifndef nolint
 	sfp = NULL;
 #endif
 	error = nfs_nget(mp, (nfsfh_t *)nmp->nm_fh, nmp->nm_fhsize, &np);
-	if (error)
+	if (error) {
+		lwkt_reltoken(&nmp->nm_token);
 		return (error);
+	}
 	vp = NFSTOV(np);
 	/* ignore the passed cred */
 	cred = crget();
@@ -449,6 +473,7 @@ nfs_statvfs(struct mount *mp, struct statvfs *sbp, struct ucred *cred)
 nfsmout:
 	vput(vp);
 	crfree(cred);
+	lwkt_reltoken(&nmp->nm_token);
 	return (error);
 }
 
@@ -558,8 +583,15 @@ nfs_mountroot(struct mount *mp)
 	/*
 	 * The boot code may have passed us a diskless structure.
 	 */
+	kprintf("DISKLESS %d\n", nfs_diskless_valid);
 	if (nfs_diskless_valid == 1)
 		nfs_convert_diskless();
+
+	/*
+	 * NFSv3 is required.
+	 */
+	nd->root_args.flags |= NFSMNT_NFSV3 | NFSMNT_RDIRPLUS;
+	nd->swap_args.flags |= NFSMNT_NFSV3;
 
 #define SINP(sockaddr)	((struct sockaddr_in *)(sockaddr))
 	kprintf("nfs_mountroot: interface %s ip %s",
@@ -626,8 +658,9 @@ nfs_mountroot(struct mount *mp)
 		(l >> 24) & 0xff, (l >> 16) & 0xff,
 		(l >>  8) & 0xff, (l >>  0) & 0xff,nd->root_hostnam);
 	kprintf("NFS_ROOT: %s\n",buf);
-	if ((error = nfs_mountdiskless(buf, "/", MNT_RDONLY,
-	    &nd->root_saddr, &nd->root_args, td, &vp, &mp)) != 0) {
+	error = nfs_mountdiskless(buf, "/", MNT_RDONLY, &nd->root_saddr,
+				  &nd->root_args, td, &vp, &mp);
+	if (error) {
 		mp->mnt_vfc->vfc_refcount--;
 		crit_exit();
 		return (error);
@@ -650,8 +683,9 @@ nfs_mountroot(struct mount *mp)
 			(l >> 24) & 0xff, (l >> 16) & 0xff,
 			(l >>  8) & 0xff, (l >>  0) & 0xff,nd->swap_hostnam);
 		kprintf("NFS SWAP: %s\n",buf);
-		if ((error = nfs_mountdiskless(buf, "/swap", 0,
-		    &nd->swap_saddr, &nd->swap_args, td, &vp, &swap_mp)) != 0) {
+		error = nfs_mountdiskless(buf, "/swap", 0, &nd->swap_saddr,
+					  &nd->swap_args, td, &vp, &swap_mp);
+		if (error) {
 			crit_exit();
 			return (error);
 		}
@@ -718,7 +752,8 @@ nfs_mountdiskless(char *path, char *which, int mountflag,
 	if (args->fhsize == 0) {
 		char *xpath = path;
 
-		kprintf("NFS_ROOT: No FH passed from loader, attempting mount rpc...");
+		kprintf("NFS_ROOT: No FH passed from loader, attempting "
+			"mount rpc...");
 		while (*xpath && *xpath != ':')
 			++xpath;
 		if (*xpath)
@@ -760,12 +795,18 @@ nfs_decode_args(struct nfsmount *nmp, struct nfs_args *argp)
 	 * Silently clear NFSMNT_NOCONN if it's a TCP mount, it makes
 	 * no sense in that context.
 	 */
-	if (nmp->nm_sotype == SOCK_STREAM)
+	if (nmp->nm_sotype == SOCK_STREAM) {
 		nmp->nm_flag &= ~NFSMNT_NOCONN;
+		argp->flags &= ~NFSMNT_NOCONN;
+	}
 
-	/* Also clear RDIRPLUS if not NFSv3, it crashes some servers */
-	if ((argp->flags & NFSMNT_NFSV3) == 0)
+	/*
+	 * readdirplus is NFSv3 only.
+	 */
+	if ((argp->flags & NFSMNT_NFSV3) == 0) {
 		nmp->nm_flag &= ~NFSMNT_RDIRPLUS;
+		argp->flags &= ~NFSMNT_RDIRPLUS;
+	}
 
 	/*
 	 * Re-bind if rsrvd port flag has changed
@@ -1003,9 +1044,13 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct sockaddr *nam,
 		TAILQ_INIT(&nmp->nm_reqtxq);
 		TAILQ_INIT(&nmp->nm_reqrxq);
 		mp->mnt_data = (qaddr_t)nmp;
+		lwkt_token_init(&nmp->nm_token, 1, "nfs_token");
 	}
 	vfs_getnewfsid(mp);
 	nmp->nm_mountp = mp;
+	mp->mnt_kern_flag |= MNTK_ALL_MPSAFE;
+
+	lwkt_gettoken(&nmp->nm_token);
 
 	/*
 	 * V2 can only handle 32 bit filesizes.  A 4GB-1 limit may be too
@@ -1094,7 +1139,9 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct sockaddr *nam,
 	 * Lose the lock but keep the ref.
 	 */
 	vn_unlock(*vpp);
+	lwkt_gettoken(&nfs_token);
 	TAILQ_INSERT_TAIL(&nfs_mountq, nmp, nm_entry);
+	lwkt_reltoken(&nfs_token);
 
 #ifdef SMP
 	switch(ncpus) {
@@ -1124,10 +1171,11 @@ mountnfs(struct nfs_args *argp, struct mount *mp, struct sockaddr *nam,
 		    NULL, 0, rxcpu, "nfsiod_rx");
 	lwkt_create(nfssvc_iod_writer, nmp, &nmp->nm_txthread,
 		    NULL, 0, txcpu, "nfsiod_tx");
-
+	lwkt_reltoken(&nmp->nm_token);
 	return (0);
 bad:
 	nfs_disconnect(nmp);
+	lwkt_reltoken(&nmp->nm_token);
 	nfs_free_mount(nmp);
 	return (error);
 }
@@ -1142,6 +1190,7 @@ nfs_unmount(struct mount *mp, int mntflags)
 	int error, flags = 0;
 
 	nmp = VFSTONFS(mp);
+	lwkt_gettoken(&nmp->nm_token);
 	if (mntflags & MNT_FORCE) {
 		flags |= FORCECLOSE;
 		nmp->nm_flag |= NFSMNT_FORCE;
@@ -1177,8 +1226,10 @@ nfs_unmount(struct mount *mp, int mntflags)
 	error = vflush(mp, 1, flags);
 	if (error) {
 		nmp->nm_state &= ~NFSSTA_DISMINPROG;
-		if ((flags & FORCECLOSE) == 0)
+		if ((flags & FORCECLOSE) == 0) {
+			lwkt_reltoken(&nmp->nm_token);
 			return (error);
+		}
 	}
 
 	/*
@@ -1190,7 +1241,12 @@ nfs_unmount(struct mount *mp, int mntflags)
 	nfssvc_iod_stop1(nmp);
 	nfs_disconnect(nmp);
 	nfssvc_iod_stop2(nmp);
+
+	lwkt_gettoken(&nfs_token);
 	TAILQ_REMOVE(&nfs_mountq, nmp, nm_entry);
+	lwkt_reltoken(&nfs_token);
+
+	lwkt_reltoken(&nmp->nm_token);
 
 	if ((nmp->nm_flag & NFSMNT_KERB) == 0) {
 		nfs_free_mount(nmp);
@@ -1225,9 +1281,12 @@ nfs_root(struct mount *mp, struct vnode **vpp)
 	int error;
 
 	nmp = VFSTONFS(mp);
+	lwkt_gettoken(&nmp->nm_token);
 	error = nfs_nget(mp, (nfsfh_t *)nmp->nm_fh, nmp->nm_fhsize, &np);
-	if (error)
+	if (error) {
+		lwkt_reltoken(&nmp->nm_token);
 		return (error);
+	}
 	vp = NFSTOV(np);
 
 	/*
@@ -1263,6 +1322,7 @@ nfs_root(struct mount *mp, struct vnode **vpp)
 		vput(vp);
 	else
 		*vpp = vp;
+	lwkt_reltoken(&nmp->nm_token);
 	return (error);
 }
 
@@ -1282,6 +1342,7 @@ static int nfs_sync_scan2(struct mount *mp, struct vnode *vp, void *data);
 static int
 nfs_sync(struct mount *mp, int waitfor)
 {
+	struct nfsmount *nmp = VFSTONFS(mp);
 	struct scaninfo scaninfo;
 	int error;
 
@@ -1292,12 +1353,14 @@ nfs_sync(struct mount *mp, int waitfor)
 	/*
 	 * Force stale buffer cache information to be flushed.
 	 */
+	lwkt_gettoken(&nmp->nm_token);
 	error = 0;
 	while (error == 0 && scaninfo.rescan) {
 		scaninfo.rescan = 0;
 		error = vmntvnodescan(mp, VMSC_GETVP, nfs_sync_scan1,
 					nfs_sync_scan2, &scaninfo);
 	}
+	lwkt_reltoken(&nmp->nm_token);
 	return(error);
 }
 

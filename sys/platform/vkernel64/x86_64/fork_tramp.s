@@ -51,12 +51,12 @@
  * it before calling the initial function (typically fork_return()) and/or
  * returning to user mode.
  *
- * The MP lock is held on entry, but for processes fork_return(esi)
- * releases it.  'doreti' always runs without the MP lock.
+ * The MP lock is not held at any point but the critcount is bumped
+ * on entry to prevent interruption of the trampoline at a bad point.
  */
 ENTRY(fork_trampoline)
 	movq	PCPU(curthread),%rax
-	subl	$TDPRI_CRIT,TD_PRI(%rax)
+	decl	TD_CRITCOUNT(%rax)
 
 	/*
 	 * cpu_set_fork_handler intercepts this function call to

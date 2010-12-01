@@ -53,6 +53,8 @@
 #include <sys/bus.h>
 #include <sys/rman.h>
 
+#include <sys/mplock2.h>
+
 #include <net/if.h>
 #include <net/if_arp.h>
 #include <net/ethernet.h>
@@ -199,6 +201,7 @@ ndis_runq(void *arg)
 	struct ndisproc		*p;
 
 	p = arg;
+	get_mplock();
 
 	while (1) {
 
@@ -237,7 +240,7 @@ ndis_runq(void *arg)
 	}
 
 	wakeup(die);
-	kthread_exit();
+	rel_mplock();
 }
 
 static int
@@ -246,7 +249,7 @@ ndis_create_kthreads(void)
 	struct ndis_req		*r;
 	int			i, error = 0;
 
-	lwkt_token_init(&ndis_thr_token, 1);
+	lwkt_token_init(&ndis_thr_token, 1, "ndis");
 
 	STAILQ_INIT(&ndis_ttodo);
 	STAILQ_INIT(&ndis_itodo);

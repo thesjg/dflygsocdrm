@@ -69,6 +69,7 @@
  */
 
 #include "opt_ipfw.h"		/* for ipfw_fwd		*/
+#include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
 #include "opt_tcpdebug.h"
@@ -86,6 +87,8 @@
 #include <sys/socketvar.h>
 #include <sys/syslog.h>
 #include <sys/in_cksum.h>
+
+#include <sys/socketvar2.h>
 
 #include <machine/cpu.h>	/* before tcp_seq.h, for tcp_random18() */
 #include <machine/stdarg.h>
@@ -307,7 +310,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 		tp->reportblk.rblk_start = tp->reportblk.rblk_end;
 		return (0);
 	}
-	tcp_reass_qsize++;
+	atomic_add_int(&tcp_reass_qsize, 1);
 
 	/*
 	 * Find a segment which begins after this one does.
@@ -340,7 +343,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 				tcpstat.tcps_rcvdupbyte += *tlenp;
 				m_freem(m);
 				kfree(te, M_TSEGQ);
-				tcp_reass_qsize--;
+				atomic_add_int(&tcp_reass_qsize, -1);
 				/*
 				 * Try to present any queued data
 				 * at the left window edge to the user.
@@ -395,7 +398,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 		LIST_REMOVE(q, tqe_q);
 		m_freem(q->tqe_m);
 		kfree(q, M_TSEGQ);
-		tcp_reass_qsize--;
+		atomic_add_int(&tcp_reass_qsize, -1);
 		q = nq;
 	}
 
@@ -421,7 +424,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 			tp->reportblk.rblk_end = tend;
 		LIST_REMOVE(q, tqe_q);
 		kfree(q, M_TSEGQ);
-		tcp_reass_qsize--;
+		atomic_add_int(&tcp_reass_qsize, -1);
 	}
 
 	if (p == NULL) {
@@ -439,9 +442,10 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 			if (!(tp->t_flags & TF_DUPSEG))
 				tp->reportblk.rblk_start = p->tqe_th->th_seq;
 			kfree(te, M_TSEGQ);
-			tcp_reass_qsize--;
-		} else
+			atomic_add_int(&tcp_reass_qsize, -1);
+		} else {
 			LIST_INSERT_AFTER(p, te, tqe_q);
+		}
 	}
 
 present:
@@ -466,12 +470,15 @@ present:
 	KASSERT(LIST_EMPTY(&tp->t_segq) ||
 		LIST_FIRST(&tp->t_segq)->tqe_th->th_seq != tp->rcv_nxt,
 		("segment not coalesced"));
-	if (so->so_state & SS_CANTRCVMORE)
+	if (so->so_state & SS_CANTRCVMORE) {
 		m_freem(q->tqe_m);
-	else
+	} else {
+		lwkt_gettoken(&so->so_rcv.ssb_token);
 		ssb_appendstream(&so->so_rcv, q->tqe_m);
+		lwkt_reltoken(&so->so_rcv.ssb_token);
+	}
 	kfree(q, M_TSEGQ);
-	tcp_reass_qsize--;
+	atomic_add_int(&tcp_reass_qsize, -1);
 	ND6_HINT(tp);
 	sorwakeup(so);
 	return (flags);
@@ -504,23 +511,23 @@ tcp6_input(struct mbuf **mp, int *offp, int proto)
 		return (IPPROTO_DONE);
 	}
 
-	tcp_input(m, *offp, proto);
+	tcp_input(mp, offp, proto);
 	return (IPPROTO_DONE);
 }
 #endif
 
-void
-tcp_input(struct mbuf *m, ...)
+int
+tcp_input(struct mbuf **mp, int *offp, int proto)
 {
-	__va_list ap;
-	int off0, proto;
+	int off0;
 	struct tcphdr *th;
 	struct ip *ip = NULL;
 	struct ipovly *ipov;
 	struct inpcb *inp = NULL;
 	u_char *optp = NULL;
 	int optlen = 0;
-	int len, tlen, off;
+	int tlen, off;
+	int len = 0;
 	int drop_hdrlen;
 	struct tcpcb *tp = NULL;
 	int thflags;
@@ -534,6 +541,7 @@ tcp_input(struct mbuf *m, ...)
 	int rstreason; /* For badport_bandlim accounting purposes */
 	int cpu;
 	struct ip6_hdr *ip6 = NULL;
+	struct mbuf *m;
 #ifdef INET6
 	boolean_t isipv6;
 #else
@@ -543,10 +551,9 @@ tcp_input(struct mbuf *m, ...)
 	short ostate = 0;
 #endif
 
-	__va_start(ap, m);
-	off0 = __va_arg(ap, int);
-	proto = __va_arg(ap, int);
-	__va_end(ap);
+	off0 = *offp;
+	m = *mp;
+	*mp = NULL;
 
 	tcpstat.tcps_rcvtotal++;
 
@@ -642,7 +649,7 @@ tcp_input(struct mbuf *m, ...)
 	tlen -= off;	/* tlen is used instead of ti->ti_len */
 	if (off > sizeof(struct tcphdr)) {
 		if (isipv6) {
-			IP6_EXTHDR_CHECK(m, off0, off, );
+			IP6_EXTHDR_CHECK(m, off0, off, IPPROTO_DONE);
 			ip6 = mtod(m, struct ip6_hdr *);
 			th = (struct tcphdr *)((caddr_t)ip6 + off0);
 		} else {
@@ -892,13 +899,21 @@ findpcb:
 					rstreason = BANDLIM_RST_OPENPORT;
 					goto dropwithreset;
 				}
+
+				/*
+				 * Could not complete 3-way handshake,
+				 * connection is being closed down, and
+				 * syncache will free mbuf.
+				 */
 				if (so == NULL)
-					/*
-					 * Could not complete 3-way handshake,
-					 * connection is being closed down, and
-					 * syncache will free mbuf.
-					 */
-					return;
+					return(IPPROTO_DONE);
+
+				/*
+				 * We must be in the correct protocol thread
+				 * for this connection.
+				 */
+				KKASSERT(so->so_port == &curthread->td_msgport);
+
 				/*
 				 * Socket is created in state SYN_RECEIVED.
 				 * Continue processing segment.
@@ -1022,12 +1037,20 @@ findpcb:
 			tcp_dooptions(&to, optp, optlen, TRUE);
 			if (!syncache_add(&inc, &to, th, &so, m))
 				goto drop;
+
+			/*
+			 * Entry added to syncache, mbuf used to
+			 * send SYN,ACK packet.
+			 */
 			if (so == NULL)
-				/*
-				 * Entry added to syncache, mbuf used to
-				 * send SYN,ACK packet.
-				 */
-				return;
+				return(IPPROTO_DONE);
+
+			/*
+			 * We must be in the correct protocol thread for
+			 * this connection.
+			 */
+			KKASSERT(so->so_port == &curthread->td_msgport);
+
 			inp = so->so_pcb;
 			tp = intotcpcb(inp);
 			tp->snd_wnd = tiwin;
@@ -1059,10 +1082,16 @@ findpcb:
 		}
 		goto drop;
 	}
-after_listen:
 
-	/* should not happen - syncache should pick up these connections */
+after_listen:
+	/*
+	 * Should not happen - syncache should pick up these connections.
+	 *
+	 * Once we are past handling listen sockets we must be in the
+	 * correct protocol processing thread.
+	 */
 	KASSERT(tp->t_state != TCPS_LISTEN, ("tcp_input: TCPS_LISTEN state"));
+	KKASSERT(so->so_port == &curthread->td_msgport);
 
 	/*
 	 * This is the second part of the MSS DoS prevention code (after
@@ -1078,27 +1107,10 @@ after_listen:
 	 * Segment received on connection.
 	 *
 	 * Reset idle time and keep-alive timer.  Don't waste time if less
-	 * then a second has elapsed.  Only update t_rcvtime for non-SYN
-	 * packets.
-	 *
-	 * Handle the case where one side thinks the connection is established
-	 * but the other side has, say, rebooted without cleaning out the
-	 * connection.   The SYNs could be construed as an attack and wind
-	 * up ignored, but in case it isn't an attack we can validate the
-	 * connection by forcing a keepalive.
+	 * then a second has elapsed.
 	 */
-	if (TCPS_HAVEESTABLISHED(tp->t_state) && (ticks - tp->t_rcvtime) > hz) {
-		if ((thflags & (TH_SYN | TH_ACK)) == TH_SYN) {
-			tp->t_flags |= TF_KEEPALIVE;
-			tcp_callout_reset(tp, tp->tt_keep, hz / 2,
-					  tcp_timer_keep);
-		} else {
-			tp->t_rcvtime = ticks;
-			tp->t_flags &= ~TF_KEEPALIVE;
-			tcp_callout_reset(tp, tp->tt_keep, tcp_keepidle,
-					  tcp_timer_keep);
-		}
-	}
+	if ((int)(ticks - tp->t_rcvtime) > hz)
+		tcp_timer_keep_activity(tp, thflags);
 
 	/*
 	 * Process options.
@@ -1254,7 +1266,7 @@ after_listen:
 				sowwakeup(so);
 				if (so->so_snd.ssb_cc > 0)
 					tcp_output(tp);
-				return;
+				return(IPPROTO_DONE);
 			}
 		} else if (tiwin == tp->snd_wnd &&
 		    th->th_ack == tp->snd_una &&
@@ -1339,19 +1351,21 @@ after_listen:
 				 * being avoided (which is the default),
 				 * so force an ack.
 				 */
+				lwkt_gettoken(&so->so_rcv.ssb_token);
 				if (newsize) {
 					tp->t_flags |= TF_RXRESIZED;
 					if (!ssb_reserve(&so->so_rcv, newsize,
 							 so, NULL)) {
-						so->so_rcv.ssb_flags &= ~SSB_AUTOSIZE;
+						atomic_clear_int(&so->so_rcv.ssb_flags, SSB_AUTOSIZE);
 					}
 					if (newsize >=
 					    (TCP_MAXWIN << tp->rcv_scale)) {
-						so->so_rcv.ssb_flags &= ~SSB_AUTOSIZE;
+						atomic_clear_int(&so->so_rcv.ssb_flags, SSB_AUTOSIZE);
 					}
 				}
 				m_adj(m, drop_hdrlen); /* delayed header drop */
 				ssb_appendstream(&so->so_rcv, m);
+				lwkt_reltoken(&so->so_rcv.ssb_token);
 			}
 			sorwakeup(so);
 			/*
@@ -1393,7 +1407,7 @@ after_listen:
 				tp->t_flags |= TF_ACKNOW;
 				tcp_output(tp);
 			}
-			return;
+			return(IPPROTO_DONE);
 		}
 	}
 
@@ -1492,8 +1506,9 @@ after_listen:
 				thflags &= ~TH_SYN;
 			} else {
 				tp->t_state = TCPS_ESTABLISHED;
-				tcp_callout_reset(tp, tp->tt_keep, tcp_keepidle,
-				    tcp_timer_keep);
+				tcp_callout_reset(tp, tp->tt_keep,
+						  tcp_getkeepidle(tp),
+						  tcp_timer_keep);
 			}
 		} else {
 			/*
@@ -1865,8 +1880,9 @@ trimthenstep6:
 			tp->t_flags &= ~TF_NEEDFIN;
 		} else {
 			tp->t_state = TCPS_ESTABLISHED;
-			tcp_callout_reset(tp, tp->tt_keep, tcp_keepidle,
-			    tcp_timer_keep);
+			tcp_callout_reset(tp, tp->tt_keep,
+					  tcp_getkeepidle(tp),
+					  tcp_timer_keep);
 		}
 		/*
 		 * If segment contains data or ACK, will call tcp_reass()
@@ -2370,7 +2386,7 @@ step6:
 			so->so_oobmark = so->so_rcv.ssb_cc +
 			    (tp->rcv_up - tp->rcv_nxt) - 1;
 			if (so->so_oobmark == 0)
-				so->so_state |= SS_RCVATMARK;
+				sosetstate(so, SS_RCVATMARK);
 			sohasoutofband(so);
 			tp->t_oobflags &= ~(TCPOOB_HAVEDATA | TCPOOB_HADDATA);
 		}
@@ -2432,10 +2448,13 @@ dodata:							/* XXX */
 			tcpstat.tcps_rcvpack++;
 			tcpstat.tcps_rcvbyte += tlen;
 			ND6_HINT(tp);
-			if (so->so_state & SS_CANTRCVMORE)
+			if (so->so_state & SS_CANTRCVMORE) {
 				m_freem(m);
-			else
+			} else {
+				lwkt_gettoken(&so->so_rcv.ssb_token);
 				ssb_appendstream(&so->so_rcv, m);
+				lwkt_reltoken(&so->so_rcv.ssb_token);
+			}
 			sorwakeup(so);
 		} else {
 			if (!(tp->t_flags & TF_DUPSEG)) {
@@ -2535,7 +2554,7 @@ dodata:							/* XXX */
 	 */
 	if (needoutput || (tp->t_flags & TF_ACKNOW))
 		tcp_output(tp);
-	return;
+	return(IPPROTO_DONE);
 
 dropafterack:
 	/*
@@ -2566,7 +2585,7 @@ dropafterack:
 	m_freem(m);
 	tp->t_flags |= TF_ACKNOW;
 	tcp_output(tp);
-	return;
+	return(IPPROTO_DONE);
 
 dropwithreset:
 	/*
@@ -2612,7 +2631,7 @@ dropwithreset:
 		tcp_respond(tp, mtod(m, void *), th, m, th->th_seq + tlen,
 			    (tcp_seq)0, TH_RST | TH_ACK);
 	}
-	return;
+	return(IPPROTO_DONE);
 
 drop:
 	/*
@@ -2623,7 +2642,7 @@ drop:
 		tcp_trace(TA_DROP, ostate, tp, tcp_saveipgen, &tcp_savetcp, 0);
 #endif
 	m_freem(m);
-	return;
+	return(IPPROTO_DONE);
 }
 
 /*
@@ -2701,6 +2720,19 @@ tcp_dooptions(struct tcpopt *to, u_char *cp, int cnt, boolean_t is_syn)
 				r->rblk_end = ntohl(r->rblk_end);
 			}
 			break;
+#ifdef TCP_SIGNATURE
+		/*
+		 * XXX In order to reply to a host which has set the
+		 * TCP_SIGNATURE option in its initial SYN, we have to
+		 * record the fact that the option was observed here
+		 * for the syncache code to perform the correct response.
+		 */
+		case TCPOPT_SIGNATURE:
+			if (optlen != TCPOLEN_SIGNATURE)
+				continue;
+			to->to_flags |= (TOF_SIGNATURE | TOF_SIGLEN);
+			break;
+#endif /* TCP_SIGNATURE */
 		default:
 			continue;
 		}
@@ -3003,8 +3035,11 @@ tcp_mss(struct tcpcb *tp, int offer)
 		bufsize = roundup(bufsize, mss);
 		if (bufsize > sb_max)
 			bufsize = sb_max;
-		if (bufsize > so->so_rcv.ssb_hiwat)
+		if (bufsize > so->so_rcv.ssb_hiwat) {
+			lwkt_gettoken(&so->so_rcv.ssb_token);
 			ssb_reserve(&so->so_rcv, bufsize, so, NULL);
+			lwkt_reltoken(&so->so_rcv.ssb_token);
+		}
 	}
 
 	/*
@@ -3135,4 +3170,35 @@ tcp_sack_rexmt(struct tcpcb *tp, struct tcphdr *th)
 	if (SEQ_GT(old_snd_nxt, tp->snd_nxt))
 		tp->snd_nxt = old_snd_nxt;
 	tp->snd_cwnd = ocwnd;
+}
+
+/*
+ * Reset idle time and keep-alive timer, typically called when a valid
+ * tcp packet is received but may also be called when FASTKEEP is set
+ * to prevent the previous long-timeout from calculating to a drop.
+ *
+ * Only update t_rcvtime for non-SYN packets.
+ *
+ * Handle the case where one side thinks the connection is established
+ * but the other side has, say, rebooted without cleaning out the
+ * connection.   The SYNs could be construed as an attack and wind
+ * up ignored, but in case it isn't an attack we can validate the
+ * connection by forcing a keepalive.
+ */
+void
+tcp_timer_keep_activity(struct tcpcb *tp, int thflags)
+{
+	if (TCPS_HAVEESTABLISHED(tp->t_state)) {
+		if ((thflags & (TH_SYN | TH_ACK)) == TH_SYN) {
+			tp->t_flags |= TF_KEEPALIVE;
+			tcp_callout_reset(tp, tp->tt_keep, hz / 2,
+					  tcp_timer_keep);
+		} else {
+			tp->t_rcvtime = ticks;
+			tp->t_flags &= ~TF_KEEPALIVE;
+			tcp_callout_reset(tp, tp->tt_keep,
+					  tcp_getkeepidle(tp),
+					  tcp_timer_keep);
+		}
+	}
 }

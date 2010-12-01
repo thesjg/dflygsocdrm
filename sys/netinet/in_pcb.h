@@ -276,11 +276,15 @@ struct inpcbport {
 	u_short phd_port;
 };
 
+struct lwkt_token;
+
 struct inpcbinfo {		/* XXX documentation, prefixes */
 	struct	inpcbhead *hashbase;
 	u_long	hashmask;
 	struct	inpcbporthead *porthashbase;
 	u_long	porthashmask;
+	struct  lwkt_token *porttoken;	/* if porthashbase is shared */
+	struct 	inpcbport *portsave;	/* port allocation cache */
 	struct	inpcontainerhead *wildcardhashbase;
 	u_long	wildcardhashmask;
 	struct	inpcbhead pcblisthead;	/* head of queue of active pcb's */
@@ -375,11 +379,15 @@ extern int	ipport_lastauto;
 extern int	ipport_hifirstauto;
 extern int	ipport_hilastauto;
 
+union netmsg;
+
 void	in_pcbpurgeif0 (struct inpcb *, struct ifnet *);
 void	in_losing (struct inpcb *);
 void	in_rtchange (struct inpcb *, int);
 void	in_pcbinfo_init (struct inpcbinfo *);
 int	in_pcballoc (struct socket *, struct inpcbinfo *);
+void	in_pcbunlink (struct inpcb *, struct inpcbinfo *);
+void	in_pcblink (struct inpcb *, struct inpcbinfo *);
 int	in_pcbbind (struct inpcb *, struct sockaddr *, struct thread *);
 int	in_pcbconnect (struct inpcb *, struct sockaddr *, struct thread *);
 void	in_pcbdetach (struct inpcb *);
@@ -400,7 +408,9 @@ struct inpcb *
 void	in_pcbnotifyall (struct inpcbhead *, struct in_addr,
 	    int, void (*)(struct inpcb *, int));
 int	in_setpeeraddr (struct socket *so, struct sockaddr **nam);
+void	in_setpeeraddr_dispatch(union netmsg *);
 int	in_setsockaddr (struct socket *so, struct sockaddr **nam);
+void	in_setsockaddr_dispatch(netmsg_t msg);
 void	in_pcbremwildcardhash(struct inpcb *inp);
 void	in_pcbremwildcardhash_oncpu(struct inpcb *, struct inpcbinfo *);
 void	in_pcbremconnhash(struct inpcb *inp);

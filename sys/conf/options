@@ -95,6 +95,7 @@ LIBICONV
 MD_NSECT	opt_md.h
 MD_ROOT		opt_md.h
 MD_ROOT_SIZE	opt_md.h
+MFI_DEBUG	opt_mfi.h
 NSWAPDEV	opt_swap.h
 NSWBUF_MIN	opt_swap.h
 PPS_SYNC	opt_ntp.h
@@ -316,6 +317,7 @@ PPP_DEFLATE		opt_ppp.h
 PPP_FILTER		opt_ppp.h
 SLIP_IFF_OPTS		opt_slip.h
 TCPDEBUG
+TCP_SIGNATURE		opt_inet.h
 TCP_DROP_SYNFIN		opt_tcp_input.h
 
 XBONEHACK
@@ -657,8 +659,7 @@ SYSLINK			opt_syslink.h
 # DSCHED stuff
 DSCHED_FQ		opt_dsched.h
 
-# Receive Side Scaling
-RSS			opt_rss.h
+# Receive Side Scaling (now basecode)
 RSS_DEBUG		opt_rss.h
 
 # Enable watchdogs

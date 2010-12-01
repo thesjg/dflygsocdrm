@@ -96,7 +96,7 @@
 #endif /* COMPAT_43 */
 
 struct netmsg_ifaddr {
-	struct netmsg	netmsg;
+	struct netmsg_base base;
 	struct ifaddr	*ifa;
 	struct ifnet	*ifp;
 	int		tail;
@@ -171,7 +171,6 @@ struct callout		if_slowtimo_timer;
 int			if_index = 0;
 struct ifnet		**ifindex2ifnet = NULL;
 static struct thread	ifnet_threads[MAXCPU];
-static int		ifnet_mpsafe_thread = NETMSG_SERVICE_MPSAFE;
 
 #define IFQ_KTR_STRING		"ifq=%p"
 #define IFQ_KTR_ARG_SIZE	(sizeof(void *))
@@ -202,6 +201,8 @@ KTR_INFO(KTR_IF_START, if_start, chase_sched, 4,
 	 IF_START_KTR_STRING, IF_START_KTR_ARG_SIZE);
 #endif
 #define logifstart(name, arg)	KTR_LOG(if_start_ ## name, arg)
+
+TAILQ_HEAD(, ifg_group) ifg_head = TAILQ_HEAD_INITIALIZER(ifg_head);
 
 /*
  * Network interface utility routines.
@@ -252,7 +253,7 @@ static void
 if_start_ipifunc(void *arg)
 {
 	struct ifnet *ifp = arg;
-	struct lwkt_msg *lmsg = &ifp->if_start_nmsg[mycpuid].nm_lmsg;
+	struct lwkt_msg *lmsg = &ifp->if_start_nmsg[mycpuid].lmsg;
 
 	crit_enter();
 	if (lmsg->ms_flags & MSGF_DONE)
@@ -321,9 +322,9 @@ if_start_need_schedule(struct ifaltq *ifq, int running)
 }
 
 static void
-if_start_dispatch(struct netmsg *nmsg)
+if_start_dispatch(netmsg_t msg)
 {
-	struct lwkt_msg *lmsg = &nmsg->nm_lmsg;
+	struct lwkt_msg *lmsg = &msg->base.lmsg;
 	struct ifnet *ifp = lmsg->u.ms_resultp;
 	struct ifaltq *ifq = &ifp->if_snd;
 	int running = 0;
@@ -517,12 +518,12 @@ if_attach(struct ifnet *ifp, lwkt_serialize_t serializer)
 		ifp->if_start_cpuid = if_start_cpuid_poll;
 #endif
 
-	ifp->if_start_nmsg = kmalloc(ncpus * sizeof(struct netmsg),
+	ifp->if_start_nmsg = kmalloc(ncpus * sizeof(*ifp->if_start_nmsg),
 				     M_LWKTMSG, M_WAITOK);
 	for (i = 0; i < ncpus; ++i) {
 		netmsg_init(&ifp->if_start_nmsg[i], NULL, &netisr_adone_rport,
 			    0, if_start_dispatch);
-		ifp->if_start_nmsg[i].nm_lmsg.u.ms_resultp = ifp;
+		ifp->if_start_nmsg[i].lmsg.u.ms_resultp = ifp;
 	}
 
 	TAILQ_INSERT_TAIL(&ifnet, ifp, if_link);
@@ -542,6 +543,7 @@ if_attach(struct ifnet *ifp, lwkt_serialize_t serializer)
 
 	TAILQ_INIT(&ifp->if_prefixhead);
 	TAILQ_INIT(&ifp->if_multiaddrs);
+	TAILQ_INIT(&ifp->if_groups);
 	getmicrotime(&ifp->if_lastchange);
 	if (ifindex2ifnet == NULL || if_index >= if_indexlim) {
 		unsigned int n;
@@ -808,6 +810,201 @@ if_detach(struct ifnet *ifp)
 	kfree(ifp->if_addrheads, M_IFADDR);
 	kfree(ifp->if_start_nmsg, M_LWKTMSG);
 	crit_exit();
+}
+
+/*
+ * Create interface group without members
+ */
+struct ifg_group *
+if_creategroup(const char *groupname)
+{
+        struct ifg_group        *ifg = NULL;
+
+        if ((ifg = (struct ifg_group *)kmalloc(sizeof(struct ifg_group),
+            M_TEMP, M_NOWAIT)) == NULL)
+                return (NULL);
+
+        strlcpy(ifg->ifg_group, groupname, sizeof(ifg->ifg_group));
+        ifg->ifg_refcnt = 0;
+        ifg->ifg_carp_demoted = 0;
+        TAILQ_INIT(&ifg->ifg_members);
+#if NPF > 0
+        pfi_attach_ifgroup(ifg);
+#endif
+        TAILQ_INSERT_TAIL(&ifg_head, ifg, ifg_next);
+
+        return (ifg);
+}
+
+/*
+ * Add a group to an interface
+ */
+int
+if_addgroup(struct ifnet *ifp, const char *groupname)
+{
+	struct ifg_list		*ifgl;
+	struct ifg_group	*ifg = NULL;
+	struct ifg_member	*ifgm;
+
+	if (groupname[0] && groupname[strlen(groupname) - 1] >= '0' &&
+	    groupname[strlen(groupname) - 1] <= '9')
+		return (EINVAL);
+
+	TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next)
+		if (!strcmp(ifgl->ifgl_group->ifg_group, groupname))
+			return (EEXIST);
+
+	if ((ifgl = kmalloc(sizeof(*ifgl), M_TEMP, M_NOWAIT)) == NULL)
+		return (ENOMEM);
+
+	if ((ifgm = kmalloc(sizeof(*ifgm), M_TEMP, M_NOWAIT)) == NULL) {
+		kfree(ifgl, M_TEMP);
+		return (ENOMEM);
+	}
+
+	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
+		if (!strcmp(ifg->ifg_group, groupname))
+			break;
+
+	if (ifg == NULL && (ifg = if_creategroup(groupname)) == NULL) {
+		kfree(ifgl, M_TEMP);
+		kfree(ifgm, M_TEMP);
+		return (ENOMEM);
+	}
+
+	ifg->ifg_refcnt++;
+	ifgl->ifgl_group = ifg;
+	ifgm->ifgm_ifp = ifp;
+
+	TAILQ_INSERT_TAIL(&ifg->ifg_members, ifgm, ifgm_next);
+	TAILQ_INSERT_TAIL(&ifp->if_groups, ifgl, ifgl_next);
+
+#if NPF > 0
+	pfi_group_change(groupname);
+#endif
+
+	return (0);
+}
+
+/*
+ * Remove a group from an interface
+ */
+int
+if_delgroup(struct ifnet *ifp, const char *groupname)
+{
+	struct ifg_list		*ifgl;
+	struct ifg_member	*ifgm;
+
+	TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next)
+		if (!strcmp(ifgl->ifgl_group->ifg_group, groupname))
+			break;
+	if (ifgl == NULL)
+		return (ENOENT);
+
+	TAILQ_REMOVE(&ifp->if_groups, ifgl, ifgl_next);
+
+	TAILQ_FOREACH(ifgm, &ifgl->ifgl_group->ifg_members, ifgm_next)
+		if (ifgm->ifgm_ifp == ifp)
+			break;
+
+	if (ifgm != NULL) {
+		TAILQ_REMOVE(&ifgl->ifgl_group->ifg_members, ifgm, ifgm_next);
+		kfree(ifgm, M_TEMP);
+	}
+
+	if (--ifgl->ifgl_group->ifg_refcnt == 0) {
+		TAILQ_REMOVE(&ifg_head, ifgl->ifgl_group, ifg_next);
+#if NPF > 0
+		pfi_detach_ifgroup(ifgl->ifgl_group);
+#endif
+		kfree(ifgl->ifgl_group, M_TEMP);
+	}
+
+	kfree(ifgl, M_TEMP);
+
+#if NPF > 0
+	pfi_group_change(groupname);
+#endif
+
+	return (0);
+}
+
+/*
+ * Stores all groups from an interface in memory pointed
+ * to by data
+ */
+int
+if_getgroup(caddr_t data, struct ifnet *ifp)
+{
+	int			 len, error;
+	struct ifg_list		*ifgl;
+	struct ifg_req		 ifgrq, *ifgp;
+	struct ifgroupreq	*ifgr = (struct ifgroupreq *)data;
+
+	if (ifgr->ifgr_len == 0) {
+		TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next)
+			ifgr->ifgr_len += sizeof(struct ifg_req);
+		return (0);
+	}
+
+	len = ifgr->ifgr_len;
+	ifgp = ifgr->ifgr_groups;
+	TAILQ_FOREACH(ifgl, &ifp->if_groups, ifgl_next) {
+		if (len < sizeof(ifgrq))
+			return (EINVAL);
+		bzero(&ifgrq, sizeof ifgrq);
+		strlcpy(ifgrq.ifgrq_group, ifgl->ifgl_group->ifg_group,
+		    sizeof(ifgrq.ifgrq_group));
+		if ((error = copyout((caddr_t)&ifgrq, (caddr_t)ifgp,
+		    sizeof(struct ifg_req))))
+			return (error);
+		len -= sizeof(ifgrq);
+		ifgp++;
+	}
+
+	return (0);
+}
+
+/*
+ * Stores all members of a group in memory pointed to by data
+ */
+int
+if_getgroupmembers(caddr_t data)
+{
+	struct ifgroupreq	*ifgr = (struct ifgroupreq *)data;
+	struct ifg_group	*ifg;
+	struct ifg_member	*ifgm;
+	struct ifg_req		 ifgrq, *ifgp;
+	int			 len, error;
+
+	TAILQ_FOREACH(ifg, &ifg_head, ifg_next)
+		if (!strcmp(ifg->ifg_group, ifgr->ifgr_name))
+			break;
+	if (ifg == NULL)
+		return (ENOENT);
+
+	if (ifgr->ifgr_len == 0) {
+		TAILQ_FOREACH(ifgm, &ifg->ifg_members, ifgm_next)
+			ifgr->ifgr_len += sizeof(ifgrq);
+		return (0);
+	}
+
+	len = ifgr->ifgr_len;
+	ifgp = ifgr->ifgr_groups;
+	TAILQ_FOREACH(ifgm, &ifg->ifg_members, ifgm_next) {
+		if (len < sizeof(ifgrq))
+			return (EINVAL);
+		bzero(&ifgrq, sizeof ifgrq);
+		strlcpy(ifgrq.ifgrq_member, ifgm->ifgm_ifp->if_xname,
+		    sizeof(ifgrq.ifgrq_member));
+		if ((error = copyout((caddr_t)&ifgrq, (caddr_t)ifgp,
+		    sizeof(struct ifg_req))))
+			return (error);
+		len -= sizeof(ifgrq);
+		ifgp++;
+	}
+
+	return (0);
 }
 
 /*
@@ -1309,6 +1506,12 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct ucred *cred)
 		ifr->ifr_mtu = ifp->if_mtu;
 		break;
 
+	case SIOCGIFDATA:
+		error = copyout((caddr_t)&ifp->if_data, ifr->ifr_data,
+		    sizeof(ifp->if_data));
+		break;
+
+
 	case SIOCGIFPHYS:
 		ifr->ifr_phys = ifp->if_physical;
 		break;
@@ -1601,15 +1804,16 @@ ifioctl(struct socket *so, u_long cmd, caddr_t data, struct ucred *cred)
 		case OSIOCGIFNETMASK:
 			cmd = SIOCGIFNETMASK;
 		}
-		error =  so_pru_control(so, cmd, data, ifp);
-		switch (ocmd) {
 
+		error = so_pru_control_direct(so, cmd, data, ifp);
+
+		switch (ocmd) {
 		case OSIOCGIFADDR:
 		case OSIOCGIFDSTADDR:
 		case OSIOCGIFBRDADDR:
 		case OSIOCGIFNETMASK:
 			*(u_short *)&ifr->ifr_addr = ifr->ifr_addr.sa_family;
-
+			break;
 		}
 	    }
 #endif /* COMPAT_43 */
@@ -2357,7 +2561,7 @@ ifac_free(struct ifaddr_container *ifac, int cpu_id)
 }
 
 static void
-ifa_iflink_dispatch(struct netmsg *nmsg)
+ifa_iflink_dispatch(netmsg_t nmsg)
 {
 	struct netmsg_ifaddr *msg = (struct netmsg_ifaddr *)nmsg;
 	struct ifaddr *ifa = msg->ifa;
@@ -2380,7 +2584,7 @@ ifa_iflink_dispatch(struct netmsg *nmsg)
 
 	crit_exit();
 
-	ifa_forwardmsg(&nmsg->nm_lmsg, cpu + 1);
+	ifa_forwardmsg(&nmsg->lmsg, cpu + 1);
 }
 
 void
@@ -2388,17 +2592,17 @@ ifa_iflink(struct ifaddr *ifa, struct ifnet *ifp, int tail)
 {
 	struct netmsg_ifaddr msg;
 
-	netmsg_init(&msg.netmsg, NULL, &curthread->td_msgport,
+	netmsg_init(&msg.base, NULL, &curthread->td_msgport,
 		    0, ifa_iflink_dispatch);
 	msg.ifa = ifa;
 	msg.ifp = ifp;
 	msg.tail = tail;
 
-	ifa_domsg(&msg.netmsg.nm_lmsg, 0);
+	ifa_domsg(&msg.base.lmsg, 0);
 }
 
 static void
-ifa_ifunlink_dispatch(struct netmsg *nmsg)
+ifa_ifunlink_dispatch(netmsg_t nmsg)
 {
 	struct netmsg_ifaddr *msg = (struct netmsg_ifaddr *)nmsg;
 	struct ifaddr *ifa = msg->ifa;
@@ -2418,7 +2622,7 @@ ifa_ifunlink_dispatch(struct netmsg *nmsg)
 
 	crit_exit();
 
-	ifa_forwardmsg(&nmsg->nm_lmsg, cpu + 1);
+	ifa_forwardmsg(&nmsg->lmsg, cpu + 1);
 }
 
 void
@@ -2426,21 +2630,21 @@ ifa_ifunlink(struct ifaddr *ifa, struct ifnet *ifp)
 {
 	struct netmsg_ifaddr msg;
 
-	netmsg_init(&msg.netmsg, NULL, &curthread->td_msgport,
+	netmsg_init(&msg.base, NULL, &curthread->td_msgport,
 		    0, ifa_ifunlink_dispatch);
 	msg.ifa = ifa;
 	msg.ifp = ifp;
 
-	ifa_domsg(&msg.netmsg.nm_lmsg, 0);
+	ifa_domsg(&msg.base.lmsg, 0);
 }
 
 static void
-ifa_destroy_dispatch(struct netmsg *nmsg)
+ifa_destroy_dispatch(netmsg_t nmsg)
 {
 	struct netmsg_ifaddr *msg = (struct netmsg_ifaddr *)nmsg;
 
 	IFAFREE(msg->ifa);
-	ifa_forwardmsg(&nmsg->nm_lmsg, mycpuid + 1);
+	ifa_forwardmsg(&nmsg->lmsg, mycpuid + 1);
 }
 
 void
@@ -2448,11 +2652,11 @@ ifa_destroy(struct ifaddr *ifa)
 {
 	struct netmsg_ifaddr msg;
 
-	netmsg_init(&msg.netmsg, NULL, &curthread->td_msgport,
+	netmsg_init(&msg.base, NULL, &curthread->td_msgport,
 		    0, ifa_destroy_dispatch);
 	msg.ifa = ifa;
 
-	ifa_domsg(&msg.netmsg.nm_lmsg, 0);
+	ifa_domsg(&msg.base.lmsg, 0);
 }
 
 struct lwkt_port *
@@ -2486,6 +2690,21 @@ ifnet_sendmsg(struct lwkt_msg *lmsg, int cpu)
 	lwkt_sendmsg(ifnet_portfn(cpu), lmsg);
 }
 
+/*
+ * Generic netmsg service loop.  Some protocols may roll their own but all
+ * must do the basic command dispatch function call done here.
+ */
+static void
+ifnet_service_loop(void *arg __unused)
+{
+	netmsg_t msg;
+
+	while ((msg = lwkt_waitport(&curthread->td_msgport, 0))) {
+		KASSERT(msg->base.nm_dispatch, ("ifnet_service: badmsg"));
+		msg->base.nm_dispatch(msg);
+	}
+}
+
 static void
 ifnetinit(void *dummy __unused)
 {
@@ -2494,9 +2713,10 @@ ifnetinit(void *dummy __unused)
 	for (i = 0; i < ncpus; ++i) {
 		struct thread *thr = &ifnet_threads[i];
 
-		lwkt_create(netmsg_service_loop, &ifnet_mpsafe_thread, NULL,
-			    thr, TDF_NETWORK | TDF_MPSAFE, i, "ifnet %d", i);
+		lwkt_create(ifnet_service_loop, NULL, NULL,
+			    thr, TDF_STOPREQ, i, "ifnet %d", i);
 		netmsg_service_port_init(&thr->td_msgport);
+		lwkt_schedule(thr);
 	}
 }
 

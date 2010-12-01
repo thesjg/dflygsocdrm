@@ -74,6 +74,11 @@ struct kinfo_cputime {
 	uint64_t	cp_sys;
 	uint64_t	cp_intr;
 	uint64_t	cp_idle;
+	uint64_t	cp_unused01;
+	uint64_t	cp_unused02;
+	uint64_t	cp_unused03;
+	uint64_t	cp_stallpc;	/* code stall address */
+	char		cp_msg[32];	/* code stall token or mplock */
 };
 
 /*
@@ -193,6 +198,7 @@ struct kinfo_proc {
 	segsz_t		kp_vm_tsize;		/* text size */
 	segsz_t		kp_vm_dsize;		/* data size */
 	segsz_t		kp_vm_ssize;		/* stack size */
+        u_int 		kp_vm_prssize;		/* proportional rss */
 
 	int		kp_jailid;
 

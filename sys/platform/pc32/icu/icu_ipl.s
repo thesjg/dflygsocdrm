@@ -67,10 +67,7 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/isa/icu_ipl.s,v 1.6 1999/08/28 00:44:42 peter Exp $
- * $DragonFly: src/sys/platform/pc32/icu/icu_ipl.s,v 1.18 2007/07/07 12:25:26 sephe Exp $
  */
-
-#include "use_npx.h"
 
 #include <machine/asmacros.h>
 #include <machine/segments.h>
@@ -85,8 +82,6 @@
 /*
  * WARNING!  SMP builds can use the ICU now so this code must be MP safe.
  */
-
-#ifndef APIC_IO
 
 	.data
 	ALIGN_DATA
@@ -132,5 +127,3 @@ ENTRY(ICU_INTREN)
 	outb	%al,$IO_ICU2+ICU_IMR_OFFSET
 	ICU_IMASK_UNLOCK
 	ret
-
-#endif

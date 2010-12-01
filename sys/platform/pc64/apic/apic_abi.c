@@ -59,7 +59,7 @@
 
 #include "apic_ipl.h"
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 
 extern void APIC_INTREN(int);
 extern void APIC_INTRDIS(int);
@@ -101,7 +101,7 @@ static inthand_t *apic_fastintr[APIC_HWI_VECTORS] = {
 
 static int apic_imcr_present;
 
-struct machintr_abi MachIntrABI = {
+struct machintr_abi MachIntrABI_APIC = {
 	MACHINTR_APIC,
 	.intrdis =	APIC_INTRDIS,
 	.intren =	APIC_INTREN,
@@ -231,6 +231,7 @@ apic_vectorctl(int op, int intr, int flags)
 	    imen_lock();
 	    select = int_to_apicintpin[intr].redirindex;
 	    value = io_apic_read(int_to_apicintpin[intr].ioapic, select);
+	    value |= IOART_INTMSET;
 	    io_apic_write(int_to_apicintpin[intr].ioapic,
 			  select, (value & ~APIC_TRIGMOD_MASK));
 	    io_apic_write(int_to_apicintpin[intr].ioapic,

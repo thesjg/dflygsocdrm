@@ -32,6 +32,7 @@
 #include <machine/globaldata.h>
 #include <machine/smp.h>
 #include <machine/md_var.h>
+#include <machine/pmap.h>
 #include <machine_base/apic/mpapic.h>
 #include <machine/segments.h>
 #include <sys/thread2.h>
@@ -159,14 +160,17 @@ apic_initialize(boolean_t bsp)
 	 */
 	temp = lapic->tpr;
 	temp &= ~APIC_TPR_PRIO;		/* clear priority field */
-#ifndef APIC_IO
-	/*
-	 * If we are NOT running the IO APICs, the LAPIC will only be used
-	 * for IPIs.  Set the TPR to prevent any unintentional interrupts.
-	 */
-	temp |= TPR_IPI_ONLY;
+#ifdef SMP /* APIC-IO */
+if (!apic_io_enable) {
 #endif
-
+	/*
+ 	 * If we are NOT running the IO APICs, the LAPIC will only be used
+	 * for IPIs.  Set the TPR to prevent any unintentional interrupts.
+ 	 */
+	temp |= TPR_IPI_ONLY;
+#ifdef SMP /* APIC-IO */
+}
+#endif
 	lapic->tpr = temp;
 
 	/* 
@@ -405,7 +409,7 @@ apic_dump(char* str)
 }
 
 
-#if defined(APIC_IO)
+#ifdef SMP /* APIC-IO */
 
 /*
  * IO APIC code,
@@ -464,9 +468,6 @@ io_apic_get_id(int apic)
 /*
  * Setup the IO APIC.
  */
-
-extern int	apic_pin_trigger;	/* 'opaque' */
-
 void
 io_apic_setup_intpin(int apic, int pin)
 {
@@ -552,7 +553,7 @@ io_apic_setup_intpin(int apic, int pin)
 		flags = DEFAULT_FLAGS;
 		level = trigger(apic, pin, &flags);
 		if (level == 1)
-			apic_pin_trigger |= (1 << irq);
+			int_to_apicintpin[irq].flags |= AIMI_FLAG_LEVEL;
 		polarity(apic, pin, &flags, level);
 	}
 
@@ -597,9 +598,6 @@ io_apic_setup(int apic)
 {
 	int		maxpin;
 	int		pin;
-
-	if (apic == 0)
-		apic_pin_trigger = 0;	/* default to edge-triggered */
 
 	maxpin = REDIRCNT_IOAPIC(apic);		/* pins in APIC */
 	kprintf("Programming %d pins in IOAPIC #%d\n", maxpin, apic);
@@ -805,19 +803,19 @@ bad:
 
 
 /*
- * Print contents of apic_imen.
+ * Print contents of unmasked IRQs.
  */
-extern	u_int apic_imen;		/* keep apic_imen 'opaque' */
 void
 imen_dump(void)
 {
 	int x;
 
 	kprintf("SMP: enabled INTs: ");
-	for (x = 0; x < 24; ++x)
-		if ((apic_imen & (1 << x)) == 0)
-        		kprintf("%d, ", x);
-	kprintf("apic_imen: 0x%08x\n", apic_imen);
+	for (x = 0; x < APIC_INTMAPSIZE; ++x) {
+		if ((int_to_apicintpin[x].flags & AIMI_FLAG_MASKED) == 0)
+        		kprintf("%d ", x);
+	}
+	kprintf("\n");
 }
 
 
@@ -825,7 +823,7 @@ imen_dump(void)
  * Inter Processor Interrupt functions.
  */
 
-#endif	/* APIC_IO */
+#endif	/* SMP APIC-IO */
 
 /*
  * Send APIC IPI 'vector' to 'destType' via 'deliveryMode'.
@@ -1002,4 +1000,62 @@ u_sleep(int count)
 	set_apic_timer(count);
 	while (read_apic_timer())
 		 /* spin */ ;
+}
+
+/*
+ * XXX: Hack: Used by pmap_init
+ */
+vm_offset_t cpu_apic_addr;
+
+void
+lapic_init(vm_offset_t lapic_addr)
+{
+	/*
+	 * lapic not mapped yet (pmap_init is called too late)
+	 */
+	lapic = pmap_mapdev_uncacheable(lapic_addr, sizeof(struct LAPIC));
+
+#if 0
+	/* Local apic is mapped on last page */
+	SMPpt[NPTEPG - 1] = (pt_entry_t)(PG_V | PG_RW | PG_N |
+	    pmap_get_pgeflag() | (lapic_addr & PG_FRAME));
+#endif
+
+	cpu_apic_addr = lapic_addr;
+
+	kprintf("lapic: at 0x%08lx\n", lapic_addr);
+}
+
+static TAILQ_HEAD(, lapic_enumerator) lapic_enumerators =
+	TAILQ_HEAD_INITIALIZER(lapic_enumerators);
+
+void
+lapic_config(void)
+{
+	struct lapic_enumerator *e;
+	int error;
+
+	TAILQ_FOREACH(e, &lapic_enumerators, lapic_link) {
+		error = e->lapic_probe(e);
+		if (!error)
+			break;
+	}
+	if (e == NULL)
+		panic("can't config lapic\n");
+
+	e->lapic_enumerate(e);
+}
+
+void
+lapic_enumerator_register(struct lapic_enumerator *ne)
+{
+	struct lapic_enumerator *e;
+
+	TAILQ_FOREACH(e, &lapic_enumerators, lapic_link) {
+		if (e->lapic_prio < ne->lapic_prio) {
+			TAILQ_INSERT_BEFORE(e, ne, lapic_link);
+			return;
+		}
+	}
+	TAILQ_INSERT_TAIL(&lapic_enumerators, ne, lapic_link);
 }

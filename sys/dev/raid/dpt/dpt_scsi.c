@@ -25,6 +25,8 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ *
+ * $FreeBSD: src/sys/dev/dpt/dpt_scsi.c,v 1.28.2.3 2003/01/31 02:47:10 grog Exp $
  */
 
 /*
@@ -42,9 +44,6 @@
  *	       NiceTry, M$-Doze, Win-Dog, Slowlaris, etc., in recognizing RAID
  *	       arrays that span controllers (Wow!).
  */
-
-#ident "$FreeBSD: src/sys/dev/dpt/dpt_scsi.c,v 1.28.2.3 2003/01/31 02:47:10 grog Exp $"
-#ident "$DragonFly: src/sys/dev/raid/dpt/dpt_scsi.c,v 1.18 2008/05/18 20:30:23 pavalos Exp $"
 
 #define _DPT_C_
 
@@ -303,7 +302,7 @@ dptallocsgmap(struct dpt_softc *dpt)
 	sg_map = kmalloc(sizeof(*sg_map), M_DEVBUF, M_INTWAIT);
 
 	/* Allocate S/G space for the next batch of CCBS */
-	if (bus_dmamem_alloc(dpt->sg_dmat, (void **)&sg_map->sg_vaddr,
+	if (bus_dmamem_alloc(dpt->sg_dmat, (void *)&sg_map->sg_vaddr,
 			     BUS_DMA_NOWAIT, &sg_map->sg_dmamap) != 0) {
 		kfree(sg_map, M_DEVBUF);
 		return (NULL);
@@ -1403,7 +1402,7 @@ dpt_init(struct dpt_softc *dpt)
 	dpt->init_level++;
 
 	/* Allocation for our ccbs and interrupt status packet */
-	if (bus_dmamem_alloc(dpt->dccb_dmat, (void **)&dpt->dpt_dccbs,
+	if (bus_dmamem_alloc(dpt->dccb_dmat, (void *)&dpt->dpt_dccbs,
 			     BUS_DMA_NOWAIT, &dpt->dccb_dmamap) != 0) {
 		kprintf("dpt: bus_dmamem_alloc(dpt->dccb_dmat,...) failed\n");
 		goto error_exit;

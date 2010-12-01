@@ -76,21 +76,30 @@ static int gif_validate6(const struct ip6_hdr *, struct gif_softc *,
 			 struct ifnet *);
 
 extern  struct domain inet6domain;
-struct ip6protosw in6_gif_protosw =
-{ SOCK_RAW,	&inet6domain,	0/*IPPROTO_IPV[46]*/,	PR_ATOMIC|PR_ADDR,
-  in6_gif_input, rip6_output,	0,		rip6_ctloutput,
-  cpu0_soport,	NULL,
-  0,		0,		0,		0,
-  &rip6_usrreqs
-};
+struct protosw in6_gif_protosw =
+    {
+	.pr_type = SOCK_RAW,
+	.pr_domain = &inet6domain,
+	.pr_protocol = 0/*IPPROTO_IPV[46]*/,
+	.pr_flags = PR_ATOMIC|PR_ADDR,
 
+	.pr_input = in6_gif_input,
+	.pr_output = rip6_output,
+	.pr_ctlinput = NULL,
+	.pr_ctloutput = rip6_ctloutput,
+
+	.pr_usrreqs = &rip6_usrreqs
+    };
+
+/*
+ * family = family of the packet to be encapsulate.
+ */
 int
-in6_gif_output(struct ifnet *ifp,
-	       int family,	/* family of the packet to be encapsulate. */
-	       struct mbuf *m)
+in6_gif_output(struct ifnet *ifp, int family, struct mbuf *m)
 {
 	struct gif_softc *sc = (struct gif_softc*)ifp;
-	struct sockaddr_in6 *dst = (struct sockaddr_in6 *)&sc->gif_ro6.ro_dst;
+	struct route_in6 *ro = &sc->gif_ro6[mycpu->gd_cpuid];
+	struct sockaddr_in6 *dst = (struct sockaddr_in6 *)&ro->ro_dst;
 	struct sockaddr_in6 *sin6_src = (struct sockaddr_in6 *)sc->gif_psrc;
 	struct sockaddr_in6 *sin6_dst = (struct sockaddr_in6 *)sc->gif_pdst;
 	struct ip6_hdr *ip6;
@@ -183,30 +192,30 @@ in6_gif_output(struct ifnet *ifp,
 		dst->sin6_family = sin6_dst->sin6_family;
 		dst->sin6_len = sizeof(struct sockaddr_in6);
 		dst->sin6_addr = sin6_dst->sin6_addr;
-		if (sc->gif_ro6.ro_rt != NULL) {
-			RTFREE(sc->gif_ro6.ro_rt);
-			sc->gif_ro6.ro_rt = NULL;
+		if (ro->ro_rt != NULL) {
+			RTFREE(ro->ro_rt);
+			ro->ro_rt = NULL;
 		}
 #if 0
 		sc->gif_if.if_mtu = GIF_MTU;
 #endif
 	}
 
-	if (sc->gif_ro6.ro_rt == NULL) {
-		rtalloc((struct route *)&sc->gif_ro6);
-		if (sc->gif_ro6.ro_rt == NULL) {
+	if (ro->ro_rt == NULL) {
+		rtalloc((struct route *)ro);
+		if (ro->ro_rt == NULL) {
 			m_freem(m);
 			return ENETUNREACH;
 		}
 
 		/* if it constitutes infinite encapsulation, punt. */
-		if (sc->gif_ro.ro_rt->rt_ifp == ifp) {
+		if (ro->ro_rt->rt_ifp == ifp) {
 			m_freem(m);
 			return ENETUNREACH;	/*XXX*/
 		}
 #if 0
-		ifp->if_mtu = sc->gif_ro6.ro_rt->rt_ifp->if_mtu
-			- sizeof(struct ip6_hdr);
+		ifp->if_mtu = ro->ro_rt->rt_ifp->if_mtu -
+			      sizeof(struct ip6_hdr);
 #endif
 	}
 	
@@ -216,9 +225,9 @@ in6_gif_output(struct ifnet *ifp,
 	 * it is too painful to ask for resend of inner packet, to achieve
 	 * path MTU discovery for encapsulated packets.
 	 */
-	return (ip6_output(m, 0, &sc->gif_ro6, IPV6_MINMTU, 0, NULL, NULL));
+	return (ip6_output(m, 0, ro, IPV6_MINMTU, 0, NULL, NULL));
 #else
-	return (ip6_output(m, 0, &sc->gif_ro6, 0, 0, NULL, NULL));
+	return (ip6_output(m, 0, ro, 0, 0, NULL, NULL));
 #endif
 }
 

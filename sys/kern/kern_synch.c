@@ -82,6 +82,7 @@ int	ncpus2, ncpus2_shift, ncpus2_mask;
 int	ncpus_fit, ncpus_fit_mask;
 int	safepri;
 int	tsleep_now_works;
+int	tsleep_crypto_dump = 0;
 
 static struct callout loadav_callout;
 static struct callout schedcpu_callout;
@@ -477,7 +478,7 @@ tsleep(const volatile void *ident, int flags, const char *wmesg, int timo)
 	 * NOTE: removed KTRPOINT, it could cause races due to blocking
 	 * even in stable.  Just scrap it for now.
 	 */
-	if (tsleep_now_works == 0 || panicstr) {
+	if (!tsleep_crypto_dump && (tsleep_now_works == 0 || panicstr)) {
 		/*
 		 * After a panic, or before we actually have an operational
 		 * softclock, just give interrupts a chance, then just return;
@@ -486,7 +487,7 @@ tsleep(const volatile void *ident, int flags, const char *wmesg, int timo)
 		 * in case this is the idle process and already asleep.
 		 */
 		splz();
-		oldpri = td->td_pri & TDPRI_MASK;
+		oldpri = td->td_pri;
 		lwkt_setpri_self(safepri);
 		lwkt_switch();
 		lwkt_setpri_self(oldpri);
@@ -654,13 +655,16 @@ tsleep(const volatile void *ident, int flags, const char *wmesg, int timo)
 	/*
 	 * Make sure we have been removed from the sleepq.  This should
 	 * have been done for us already.
+	 *
+	 * However, it is possible for a scheduling IPI to be in flight
+	 * from a previous tsleep/tsleep_interlock or due to a straight-out
+	 * call to lwkt_schedule() (in the case of an interrupt thread).
+	 * So don't complain if DESCHEDULED is still set.
 	 */
 	_tsleep_remove(td);
 	td->td_wmesg = NULL;
 	if (td->td_flags & TDF_TSLEEP_DESCHEDULED) {
 		td->td_flags &= ~TDF_TSLEEP_DESCHEDULED;
-		kprintf("td %p (%s) unexpectedly rescheduled\n",
-			td, td->td_comm);
 	}
 
 	/*
@@ -710,9 +714,9 @@ ssleep(const volatile void *ident, struct spinlock *spin, int flags,
 	int error;
 
 	_tsleep_interlock(gd, ident, flags);
-	spin_unlock_wr_quick(gd, spin);
+	spin_unlock_quick(gd, spin);
 	error = tsleep(ident, flags | PINTERLOCKED, wmesg, timo);
-	spin_lock_wr_quick(gd, spin);
+	spin_lock_quick(gd, spin);
 
 	return (error);
 }
@@ -830,8 +834,8 @@ endtsleep(void *arg)
 	thread_t td = arg;
 	struct lwp *lp;
 
-	ASSERT_MP_LOCK_HELD(curthread);
 	crit_enter();
+	lwkt_gettoken(&proc_token);
 
 	/*
 	 * cpu interlock.  Thread flags are only manipulated on
@@ -849,6 +853,7 @@ endtsleep(void *arg)
 			_tsleep_wakeup(td);
 		}
 	}
+	lwkt_reltoken(&proc_token);
 	crit_exit();
 }
 
@@ -1032,7 +1037,7 @@ wakeup_domain_one(const volatile void *ident, int domain)
 /*
  * setrunnable()
  *
- * Make a process runnable.  The MP lock must be held on call.  This only
+ * Make a process runnable.  The proc_token must be held on call.  This only
  * has an effect if we are in SSLEEP.  We only break out of the
  * tsleep if LWP_BREAKTSLEEP is set, otherwise we just fix-up the state.
  *
@@ -1042,8 +1047,8 @@ wakeup_domain_one(const volatile void *ident, int domain)
 void
 setrunnable(struct lwp *lp)
 {
+	ASSERT_LWKT_TOKEN_HELD(&proc_token);
 	crit_enter();
-	ASSERT_MP_LOCK_HELD(curthread);
 	if (lp->lwp_stat == LSSTOP)
 		lp->lwp_stat = LSSLEEP;
 	if (lp->lwp_stat == LSSLEEP && (lp->lwp_flag & LWP_BREAKTSLEEP))
@@ -1100,41 +1105,6 @@ tstop(void)
 	p->p_nstopped--;
 	lp->lwp_flag &= ~LWP_WSTOP;
 	crit_exit();
-}
-
-/*
- * Yield / synchronous reschedule.  This is a bit tricky because the trap
- * code might have set a lazy release on the switch function.   Setting
- * P_PASSIVE_ACQ will ensure that the lazy release executes when we call
- * switch, and that we are given a greater chance of affinity with our
- * current cpu.
- *
- * We call lwkt_setpri_self() to rotate our thread to the end of the lwkt
- * run queue.  lwkt_switch() will also execute any assigned passive release
- * (which usually calls release_curproc()), allowing a same/higher priority
- * process to be designated as the current process.  
- *
- * While it is possible for a lower priority process to be designated,
- * it's call to lwkt_maybe_switch() in acquire_curproc() will likely
- * round-robin back to us and we will be able to re-acquire the current
- * process designation.
- *
- * MPSAFE
- */
-void
-uio_yield(void)
-{
-	struct thread *td = curthread;
-	struct proc *p = td->td_proc;
-
-	lwkt_setpri_self(td->td_pri & TDPRI_MASK);
-	if (p) {
-		p->p_flag |= P_PASSIVE_ACQ;
-		lwkt_switch();
-		p->p_flag &= ~P_PASSIVE_ACQ;
-	} else {
-		lwkt_switch();
-	}
 }
 
 /*

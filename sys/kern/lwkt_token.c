@@ -81,10 +81,6 @@
 #endif
 #define LWKT_MASK_POOL_TOKENS	(LWKT_NUM_POOL_TOKENS - 1)
 
-#ifdef INVARIANTS
-static int token_debug = 0;
-#endif
-
 static lwkt_token	pool_tokens[LWKT_NUM_POOL_TOKENS];
 
 #define TOKEN_STRING	"REF=%p TOK=%p TD=%p"
@@ -110,10 +106,6 @@ KTR_INFO(KTR_TOKENS, tokens, contention_stop, 7, UNCONTENDED_STRING, sizeof(void
 #define logtoken(name, ref)						\
 	KTR_LOG(tokens_ ## name, ref, ref->tr_tok, curthread)
 
-#ifdef INVARIANTS
-SYSCTL_INT(_lwkt, OID_AUTO, token_debug, CTLFLAG_RW, &token_debug, 0, "");
-#endif
-
 /*
  * Global tokens.  These replace the MP lock for major subsystem locking.
  * These tokens are initially used to lockup both global and individual
@@ -128,53 +120,56 @@ SYSCTL_INT(_lwkt, OID_AUTO, token_debug, CTLFLAG_RW, &token_debug, 0, "");
  * any time, the MP state is copied to the tokref when the token is acquired
  * and will not race against sysctl changes.
  */
-struct lwkt_token pmap_token = LWKT_TOKEN_UP_INITIALIZER;
-struct lwkt_token dev_token = LWKT_TOKEN_UP_INITIALIZER;
-struct lwkt_token vm_token = LWKT_TOKEN_UP_INITIALIZER;
-struct lwkt_token vmspace_token = LWKT_TOKEN_UP_INITIALIZER;
-struct lwkt_token kvm_token = LWKT_TOKEN_UP_INITIALIZER;
-struct lwkt_token proc_token = LWKT_TOKEN_UP_INITIALIZER;
-struct lwkt_token tty_token = LWKT_TOKEN_UP_INITIALIZER;
-struct lwkt_token vnode_token = LWKT_TOKEN_UP_INITIALIZER;
+struct lwkt_token pmap_token = LWKT_TOKEN_UP_INITIALIZER(pmap_token);
+struct lwkt_token dev_token = LWKT_TOKEN_UP_INITIALIZER(dev_token);
+struct lwkt_token vm_token = LWKT_TOKEN_UP_INITIALIZER(vm_token);
+struct lwkt_token vmspace_token = LWKT_TOKEN_UP_INITIALIZER(vmspace_token);
+struct lwkt_token kvm_token = LWKT_TOKEN_UP_INITIALIZER(kvm_token);
+struct lwkt_token proc_token = LWKT_TOKEN_UP_INITIALIZER(proc_token);
+struct lwkt_token tty_token = LWKT_TOKEN_UP_INITIALIZER(tty_token);
+struct lwkt_token vnode_token = LWKT_TOKEN_UP_INITIALIZER(vnode_token);
+struct lwkt_token vmobj_token = LWKT_TOKEN_UP_INITIALIZER(vmobj_token);
 
-SYSCTL_INT(_lwkt, OID_AUTO, pmap_mpsafe,
-	   CTLFLAG_RW, &pmap_token.t_flags, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, dev_mpsafe,
-	   CTLFLAG_RW, &dev_token.t_flags, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, vm_mpsafe,
-	   CTLFLAG_RW, &vm_token.t_flags, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, vmspace_mpsafe,
-	   CTLFLAG_RW, &vmspace_token.t_flags, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, kvm_mpsafe,
-	   CTLFLAG_RW, &kvm_token.t_flags, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, proc_mpsafe,
-	   CTLFLAG_RW, &proc_token.t_flags, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, tty_mpsafe,
-	   CTLFLAG_RW, &tty_token.t_flags, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, vnode_mpsafe,
-	   CTLFLAG_RW, &vnode_token.t_flags, 0, "");
+SYSCTL_INT(_lwkt, OID_AUTO, pmap_mpsafe, CTLFLAG_RW,
+    &pmap_token.t_flags, 0, "Require MP lock for pmap_token");
+SYSCTL_INT(_lwkt, OID_AUTO, dev_mpsafe, CTLFLAG_RW,
+    &dev_token.t_flags, 0, "Require MP lock for dev_token");
+SYSCTL_INT(_lwkt, OID_AUTO, vm_mpsafe, CTLFLAG_RW,
+    &vm_token.t_flags, 0, "Require MP lock for vm_token");
+SYSCTL_INT(_lwkt, OID_AUTO, vmspace_mpsafe, CTLFLAG_RW,
+    &vmspace_token.t_flags, 0, "Require MP lock for vmspace_token");
+SYSCTL_INT(_lwkt, OID_AUTO, kvm_mpsafe, CTLFLAG_RW,
+    &kvm_token.t_flags, 0, "Require MP lock for kvm_token");
+SYSCTL_INT(_lwkt, OID_AUTO, proc_mpsafe, CTLFLAG_RW,
+    &proc_token.t_flags, 0, "Require MP lock for proc_token");
+SYSCTL_INT(_lwkt, OID_AUTO, tty_mpsafe, CTLFLAG_RW,
+    &tty_token.t_flags, 0, "Require MP lock for tty_token");
+SYSCTL_INT(_lwkt, OID_AUTO, vnode_mpsafe, CTLFLAG_RW,
+    &vnode_token.t_flags, 0, "Require MP lock for vnode_token");
+SYSCTL_INT(_lwkt, OID_AUTO, vmobj_mpsafe, CTLFLAG_RW,
+    &vmobj_token.t_flags, 0, "Require MP lock for vmobj_token");
 
 /*
  * The collision count is bumped every time the LWKT scheduler fails
  * to acquire needed tokens in addition to a normal lwkt_gettoken()
  * stall.
  */
-SYSCTL_LONG(_lwkt, OID_AUTO, pmap_collisions,
-	    CTLFLAG_RW, &pmap_token.t_collisions, 0, "");
-SYSCTL_LONG(_lwkt, OID_AUTO, dev_collisions,
-	    CTLFLAG_RW, &dev_token.t_collisions, 0, "");
-SYSCTL_LONG(_lwkt, OID_AUTO, vm_collisions,
-	    CTLFLAG_RW, &vm_token.t_collisions, 0, "");
-SYSCTL_LONG(_lwkt, OID_AUTO, vmspace_collisions,
-	    CTLFLAG_RW, &vmspace_token.t_collisions, 0, "");
-SYSCTL_LONG(_lwkt, OID_AUTO, kvm_collisions,
-	    CTLFLAG_RW, &kvm_token.t_collisions, 0, "");
-SYSCTL_LONG(_lwkt, OID_AUTO, proc_collisions,
-	    CTLFLAG_RW, &proc_token.t_collisions, 0, "");
-SYSCTL_LONG(_lwkt, OID_AUTO, tty_collisions,
-	    CTLFLAG_RW, &tty_token.t_collisions, 0, "");
-SYSCTL_LONG(_lwkt, OID_AUTO, vnode_collisions,
-	    CTLFLAG_RW, &vnode_token.t_collisions, 0, "");
+SYSCTL_LONG(_lwkt, OID_AUTO, pmap_collisions, CTLFLAG_RW,
+    &pmap_token.t_collisions, 0, "Collision counter of pmap_token");
+SYSCTL_LONG(_lwkt, OID_AUTO, dev_collisions, CTLFLAG_RW,
+    &dev_token.t_collisions, 0, "Collision counter of dev_token");
+SYSCTL_LONG(_lwkt, OID_AUTO, vm_collisions, CTLFLAG_RW,
+    &vm_token.t_collisions, 0, "Collision counter of vm_token");
+SYSCTL_LONG(_lwkt, OID_AUTO, vmspace_collisions, CTLFLAG_RW,
+    &vmspace_token.t_collisions, 0, "Collision counter of vmspace_token");
+SYSCTL_LONG(_lwkt, OID_AUTO, kvm_collisions, CTLFLAG_RW,
+    &kvm_token.t_collisions, 0, "Collision counter of kvm_token");
+SYSCTL_LONG(_lwkt, OID_AUTO, proc_collisions, CTLFLAG_RW,
+    &proc_token.t_collisions, 0, "Collision counter of proc_token");
+SYSCTL_LONG(_lwkt, OID_AUTO, tty_collisions, CTLFLAG_RW,
+    &tty_token.t_collisions, 0, "Collision counter of tty_token");
+SYSCTL_LONG(_lwkt, OID_AUTO, vnode_collisions, CTLFLAG_RW,
+    &vnode_token.t_collisions, 0, "Collision counter of vnode_token");
 
 /*
  * Return a pool token given an address
@@ -197,6 +192,10 @@ _lwkt_token_pool_lookup(void *ptr)
  * holding the MP lock.  This bypasses unncessary calls to get_mplock() and
  * rel_mplock() on tokens which are not normally MPSAFE when the thread
  * is already holding the MP lock.
+ *
+ * WARNING: The inherited td_xpcount does not count here because a switch
+ *	    could schedule the preempted thread and blow away the inherited
+ *	    mplock.
  */
 static __inline
 void
@@ -227,7 +226,7 @@ _lwkt_tokref_init(lwkt_tokref_t ref, lwkt_token_t tok, thread_t td)
  * Called from a critical section.
  */
 int
-lwkt_getalltokens(thread_t td)
+lwkt_getalltokens(thread_t td, const char **msgp, const void **addrp)
 {
 	lwkt_tokref_t scan;
 	lwkt_tokref_t ref;
@@ -268,6 +267,8 @@ lwkt_getalltokens(thread_t td)
 			 * Otherwise we failed to acquire all the tokens.
 			 * Undo and return.
 			 */
+			*msgp = tok->t_desc;
+			*addrp = scan->tr_stallpc;
 			atomic_add_long(&tok->t_collisions, 1);
 			lwkt_relalltokens(td);
 			return(FALSE);
@@ -312,12 +313,10 @@ lwkt_relalltokens(thread_t td)
  */
 static __inline
 int
-_lwkt_trytokref2(lwkt_tokref_t nref, thread_t td)
+_lwkt_trytokref2(lwkt_tokref_t nref, thread_t td, int blocking)
 {
 	lwkt_token_t tok;
 	lwkt_tokref_t ref;
-
-	KKASSERT(td->td_gd->gd_intr_nesting_level == 0);
 
 	/*
 	 * Make sure the compiler does not reorder prior instructions
@@ -332,10 +331,17 @@ _lwkt_trytokref2(lwkt_tokref_t nref, thread_t td)
 	for (;;) {
 		/*
 		 * Try to acquire the token if we do not already have
-		 * it.
+		 * it.  This is not allowed if we are in a hard code
+		 * section (because it 'might' have blocked).
 		 */
 		ref = tok->t_ref;
 		if (ref == NULL) {
+			KASSERT((blocking == 0 ||
+				td->td_gd->gd_intr_nesting_level == 0 ||
+				panic_cpu_gd == mycpu),
+				("Attempt to acquire token %p not already "
+				 "held in hard code section", tok));
+
 			/*
 			 * NOTE: If atomic_cmpset_ptr() fails we have to
 			 *	 loop and try again.  It just means we
@@ -352,13 +358,22 @@ _lwkt_trytokref2(lwkt_tokref_t nref, thread_t td)
 		 * (it might belong to another thread and is thus
 		 * unstable), but we don't have to. We can simply
 		 * range-check it.
+		 *
+		 * It is ok to acquire a token that is already held
+		 * by the current thread when in a hard code section.
 		 */
 		if (ref >= &td->td_toks_base && ref < td->td_toks_stop)
 			return(TRUE);
 
 		/*
-		 * Otherwise we failed.
+		 * Otherwise we failed, and it is not ok to attempt to
+		 * acquire a token in a hard code section.
 		 */
+		KASSERT((blocking == 0 ||
+			td->td_gd->gd_intr_nesting_level == 0),
+			("Attempt to acquire token %p not already "
+			 "held in hard code section", tok));
+
 		return(FALSE);
 	}
 }
@@ -371,16 +386,18 @@ int
 _lwkt_trytokref(lwkt_tokref_t ref, thread_t td)
 {
 	if ((ref->tr_flags & LWKT_TOKEN_MPSAFE) == 0) {
-		if (try_mplock() == 0)
+		if (try_mplock() == 0) {
+			--td->td_toks_stop;
 			return (FALSE);
+		}
 	}
-	if (_lwkt_trytokref2(ref, td) == FALSE) {
+	if (_lwkt_trytokref2(ref, td, 0) == FALSE) {
 		/*
 		 * Cleanup, deactivate the failed token.
 		 */
-		--td->td_toks_stop;
 		if ((ref->tr_flags & LWKT_TOKEN_MPSAFE) == 0)
 			rel_mplock();
+		--td->td_toks_stop;
 		return (FALSE);
 	}
 	return (TRUE);
@@ -391,25 +408,26 @@ _lwkt_trytokref(lwkt_tokref_t ref, thread_t td)
  */
 static __inline
 void
-_lwkt_gettokref(lwkt_tokref_t ref, thread_t td)
+_lwkt_gettokref(lwkt_tokref_t ref, thread_t td, const void **stkframe)
 {
 	if ((ref->tr_flags & LWKT_TOKEN_MPSAFE) == 0)
 		get_mplock();
-	if (_lwkt_trytokref2(ref, td) == FALSE) {
+	if (_lwkt_trytokref2(ref, td, 1) == FALSE) {
 		/*
 		 * Give up running if we can't acquire the token right now.
 		 *
 		 * Since the tokref is already active the scheduler now
 		 * takes care of acquisition, so we need only call
-		 * lwkt_yield().
+		 * lwkt_switch().
 		 *
 		 * Since we failed this was not a recursive token so upon
 		 * return tr_tok->t_ref should be assigned to this specific
 		 * ref.
 		 */
+		ref->tr_stallpc = stkframe[-1];
 		atomic_add_long(&ref->tr_tok->t_collisions, 1);
 		logtoken(fail, ref);
-		lwkt_yield();
+		lwkt_switch();
 		logtoken(succ, ref);
 		KKASSERT(ref->tr_tok->t_ref == ref);
 	}
@@ -423,9 +441,25 @@ lwkt_gettoken(lwkt_token_t tok)
 
 	ref = td->td_toks_stop;
 	KKASSERT(ref < &td->td_toks_end);
-	_lwkt_tokref_init(ref, tok, td);
 	++td->td_toks_stop;
-	_lwkt_gettokref(ref, td);
+	cpu_ccfence();
+	_lwkt_tokref_init(ref, tok, td);
+	_lwkt_gettokref(ref, td, (const void **)&tok);
+}
+
+void
+lwkt_gettoken_hard(lwkt_token_t tok)
+{
+	thread_t td = curthread;
+	lwkt_tokref_t ref;
+
+	ref = td->td_toks_stop;
+	KKASSERT(ref < &td->td_toks_end);
+	++td->td_toks_stop;
+	cpu_ccfence();
+	_lwkt_tokref_init(ref, tok, td);
+	_lwkt_gettokref(ref, td, (const void **)&tok);
+	crit_enter_hard_gd(td->td_gd);
 }
 
 lwkt_token_t
@@ -437,13 +471,17 @@ lwkt_getpooltoken(void *ptr)
 
 	ref = td->td_toks_stop;
 	KKASSERT(ref < &td->td_toks_end);
+	++td->td_toks_stop;
+	cpu_ccfence();
 	tok = _lwkt_token_pool_lookup(ptr);
 	_lwkt_tokref_init(ref, tok, td);
-	++td->td_toks_stop;
-	_lwkt_gettokref(ref, td);
+	_lwkt_gettokref(ref, td, (const void **)&ptr);
 	return(tok);
 }
 
+/*
+ * Attempt to acquire a token, return TRUE on success, FALSE on failure.
+ */
 int
 lwkt_trytoken(lwkt_token_t tok)
 {
@@ -452,8 +490,9 @@ lwkt_trytoken(lwkt_token_t tok)
 
 	ref = td->td_toks_stop;
 	KKASSERT(ref < &td->td_toks_end);
-	_lwkt_tokref_init(ref, tok, td);
 	++td->td_toks_stop;
+	cpu_ccfence();
+	_lwkt_tokref_init(ref, tok, td);
 	return(_lwkt_trytokref(ref, td));
 }
 
@@ -475,27 +514,52 @@ lwkt_reltoken(lwkt_token_t tok)
 	 */
 	ref = td->td_toks_stop - 1;
 	KKASSERT(ref >= &td->td_toks_base && ref->tr_tok == tok);
-	td->td_toks_stop = ref;
-
-	/*
-	 * If the token was not MPSAFE release the MP lock.
-	 */
-	if ((ref->tr_flags & LWKT_TOKEN_MPSAFE) == 0)
-		rel_mplock();
-
-	/*
-	 * Make sure the compiler does not reorder the clearing of
-	 * tok->t_ref.
-	 */
-	cpu_ccfence();
 
 	/*
 	 * Only clear the token if it matches ref.  If ref was a recursively
 	 * acquired token it may not match.
+	 *
+	 * If the token was not MPSAFE release the MP lock.
+	 *
+	 * NOTE: We have to do this before adjust td_toks_stop, otherwise
+	 *	 a fast interrupt can come along and reuse our ref while
+	 *	 tok is still attached to it.
 	 */
 	if (tok->t_ref == ref)
 		tok->t_ref = NULL;
+	cpu_ccfence();
+	if ((ref->tr_flags & LWKT_TOKEN_MPSAFE) == 0)
+		rel_mplock();
+
+	/*
+	 * Finally adjust td_toks_stop, be very sure that the compiler
+	 * does not reorder the clearing of tok->t_ref with the
+	 * decrementing of td->td_toks_stop.
+	 */
+	cpu_ccfence();
+	td->td_toks_stop = ref;
+	KKASSERT(tok->t_ref != ref);
 }
+
+void
+lwkt_reltoken_hard(lwkt_token_t tok)
+{
+	lwkt_reltoken(tok);
+	crit_exit_hard();
+}
+
+/*
+ * It is faster for users of lwkt_getpooltoken() to use the returned
+ * token and just call lwkt_reltoken(), but for convenience we provide
+ * this function which looks the token up based on the ident.
+ */
+void
+lwkt_relpooltoken(void *ptr)
+{
+	lwkt_token_t tok = _lwkt_token_pool_lookup(ptr);
+	lwkt_reltoken(tok);
+}
+
 
 /*
  * Pool tokens are used to provide a type-stable serializing token
@@ -510,7 +574,7 @@ lwkt_token_pool_init(void)
 	int i;
 
 	for (i = 0; i < LWKT_NUM_POOL_TOKENS; ++i)
-		lwkt_token_init(&pool_tokens[i], 1);
+		lwkt_token_init(&pool_tokens[i], 1, "pool");
 }
 
 lwkt_token_t
@@ -524,11 +588,12 @@ lwkt_token_pool_lookup(void *ptr)
  * acquiring the token and released after releasing the token.
  */
 void
-lwkt_token_init(lwkt_token_t tok, int mpsafe)
+lwkt_token_init(lwkt_token_t tok, int mpsafe, const char *desc)
 {
 	tok->t_ref = NULL;
 	tok->t_flags = mpsafe ? LWKT_TOKEN_MPSAFE : 0;
 	tok->t_collisions = 0;
+	tok->t_desc = desc;
 }
 
 void

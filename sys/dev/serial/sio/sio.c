@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1991 The Regents of the University of California.
  * All rights reserved.
  *
@@ -31,7 +33,6 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/isa/sio.c,v 1.291.2.35 2003/05/18 08:51:15 murray Exp $
- * $DragonFly: src/sys/dev/serial/sio/sio.c,v 1.44 2008/07/23 16:39:33 dillon Exp $
  *	from: @(#)com.c	7.5 (Berkeley) 5/16/91
  *	from: i386/isa sio.c,v 1.234
  */
@@ -44,7 +45,6 @@
 #ifdef __i386__
 #include "use_puc.h"
 #endif
-#include "use_sio.h"
 
 /*
  * Serial driver, based on 386BSD-0.1 com driver.
@@ -249,9 +249,8 @@ static	d_read_t	sioread;
 static	d_write_t	siowrite;
 static	d_ioctl_t	sioioctl;
 
-#define	CDEV_MAJOR	28
 static struct dev_ops sio_ops = {
-	{ driver_name, CDEV_MAJOR, D_TTY | D_KQFILTER },
+	{ driver_name, 0, D_TTY },
 	.d_open =	sioopen,
 	.d_close =	sioclose,
 	.d_read =	sioread,
@@ -300,20 +299,27 @@ sysctl_machdep_comdefaultrate(SYSCTL_HANDLER_ARGS)
 	struct com_s *com;
 	struct tty *tp;
 
+	lwkt_gettoken(&tty_token);
 	newspeed = comdefaultrate;
 
 	error = sysctl_handle_opaque(oidp, &newspeed, sizeof newspeed, req);
-	if (error || !req->newptr)
+	if (error || !req->newptr) {
+		lwkt_reltoken(&tty_token);
 		return (error);
+	}
 
 	comdefaultrate = newspeed;
 
-	if (comconsole < 0)		/* serial console not selected? */
+	if (comconsole < 0) {	/* serial console not selected? */
+		lwkt_reltoken(&tty_token);
 		return (0);
+	}
 
 	com = com_addr(comconsole);
-	if (com == NULL)
+	if (com == NULL) {
+		lwkt_reltoken(&tty_token);
 		return (ENXIO);
+	}
 
 	/*
 	 * set the initial and lock rates for /dev/ttydXX and /dev/cuaXX
@@ -336,6 +342,7 @@ sysctl_machdep_comdefaultrate(SYSCTL_HANDLER_ARGS)
 		error = comparam(tp, &tp->t_termios);
 		crit_exit();
 	}
+	lwkt_reltoken(&tty_token);
 	return error;
 }
 
@@ -570,6 +577,7 @@ sioprobe(device_t dev, int xrid, u_long rclk)
 	if (!port)
 		return (ENXIO);
 
+	lwkt_gettoken(&tty_token);
 	com = device_get_softc(dev);
 	com->bst = rman_get_bustag(port);
 	com->bsh = rman_get_bushandle(port);
@@ -612,6 +620,7 @@ sioprobe(device_t dev, int xrid, u_long rclk)
 		kprintf("sio%d: reserved for low-level i/o\n",
 		       device_get_unit(dev));
 		bus_release_resource(dev, SYS_RES_IOPORT, rid, port);
+		lwkt_reltoken(&tty_token);
 		return (ENXIO);
 	}
 
@@ -719,9 +728,10 @@ sioprobe(device_t dev, int xrid, u_long rclk)
 		(void)sio_getreg(com, com_data);
 	}
 	if (fn == 256) {
+		com_unlock();
+		lwkt_reltoken(&tty_token);
 		kprintf("sio%d: can't drain, serial port might "
 			"not exist, disabling\n", device_get_unit(dev));
-		com_unlock();
 		return (ENXIO);
 	}
 
@@ -803,6 +813,7 @@ sioprobe(device_t dev, int xrid, u_long rclk)
 		sio_setreg(com, com_cfcr, CFCR_8BITS);
 		com_unlock();
 		bus_release_resource(dev, SYS_RES_IOPORT, rid, port);
+		lwkt_reltoken(&tty_token);
 		return (iobase == siocniobase ? 0 : result);
 	}
 
@@ -870,6 +881,7 @@ sioprobe(device_t dev, int xrid, u_long rclk)
 			break;
 		}
 	bus_release_resource(dev, SYS_RES_IOPORT, rid, port);
+	lwkt_reltoken(&tty_token);
 	return (iobase == siocniobase ? 0 : result);
 }
 
@@ -889,6 +901,7 @@ espattach(struct com_s *com, Port_t esp_port)
 		return (0);
 	}
 
+	lwkt_gettoken(&tty_token);
 	/*
 	 * We've got something that claims to be a Hayes ESP card.
 	 * Let's hope so.
@@ -905,6 +918,7 @@ espattach(struct com_s *com, Port_t esp_port)
 		kprintf(" : ESP");
 	else {
 		kprintf(" esp_port has com %d\n", dips & 0x03);
+		lwkt_reltoken(&tty_token);
 		return (0);
 	}
 
@@ -916,6 +930,7 @@ espattach(struct com_s *com, Port_t esp_port)
 	val = inb(esp_port + ESP_STATUS2);
 	if ((val & 0x70) < 0x20) {
 		kprintf("-old (%o)", val & 0x70);
+		lwkt_reltoken(&tty_token);
 		return (0);
 	}
 
@@ -924,6 +939,7 @@ espattach(struct com_s *com, Port_t esp_port)
 	 */
 	if ((dips & 0x80) == 0) {
 		kprintf(" slave");
+		lwkt_reltoken(&tty_token);
 		return (0);
 	}
 
@@ -932,6 +948,7 @@ espattach(struct com_s *com, Port_t esp_port)
 	 */
 	com->esp = TRUE;
 	com->esp_port = esp_port;
+	lwkt_reltoken(&tty_token);
 	return (1);
 }
 #endif /* COM_ESP */
@@ -958,16 +975,19 @@ sioattach(device_t dev, int xrid, u_long rclk)
 	int		ret;
 	static int	did_init;
 
+	lwkt_gettoken(&tty_token);
 	if (did_init == 0) {
 		did_init = 1;
-		callout_init(&sio_timeout_handle);
+		callout_init_mp(&sio_timeout_handle);
 	}
 
 	rid = xrid;
 	port = bus_alloc_resource(dev, SYS_RES_IOPORT, &rid,
 				  0, ~0, IO_COMSIZE, RF_ACTIVE);
-	if (!port)
+	if (!port) {
+		lwkt_reltoken(&tty_token);
 		return (ENXIO);
+	}
 
 	iobase = rman_get_start(port);
 	unit = device_get_unit(dev);
@@ -995,8 +1015,8 @@ sioattach(device_t dev, int xrid, u_long rclk)
 	com->bsh = rman_get_bushandle(port);
 	com->cfcr_image = CFCR_8BITS;
 	com->dtr_wait = 3 * hz;
-	callout_init(&com->dtr_ch);
-	callout_init(&com->busy_ch);
+	callout_init_mp(&com->dtr_ch);
+	callout_init_mp(&com->busy_ch);
 	com->loses_outints = COM_LOSESOUTINTS(flags) != 0;
 	com->no_irq = bus_get_resource(dev, SYS_RES_IRQ, 0, NULL, NULL) != 0;
 	com->tx_fifo_size = 1;
@@ -1037,16 +1057,15 @@ sioattach(device_t dev, int xrid, u_long rclk)
 	} else
 		com->it_in.c_ispeed = com->it_in.c_ospeed = TTYDEF_SPEED;
 	if (siosetwater(com, com->it_in.c_ispeed) != 0) {
-		com_unlock();
 		/*
 		 * Leave i/o resources allocated if this is a `cn'-level
 		 * console, so that other devices can't snarf them.
 		 */
 		if (iobase != siocniobase)
 			bus_release_resource(dev, SYS_RES_IOPORT, rid, port);
+		lwkt_reltoken(&tty_token);
 		return (ENOMEM);
 	}
-	com_unlock();
 	termioschars(&com->it_in);
 	com->it_out = com->it_in;
 
@@ -1198,7 +1217,7 @@ determined_type: ;
 	    RF_ACTIVE);
 	if (com->irqres) {
 		ret = BUS_SETUP_INTR(device_get_parent(dev), dev,
-				     com->irqres, 0, siointr, com,
+				     com->irqres, INTR_MPSAFE, siointr, com,
 				     &com->cookie, NULL);
 		if (ret)
 			device_printf(dev, "could not activate interrupt\n");
@@ -1214,6 +1233,7 @@ determined_type: ;
 #endif
 	}
 
+	lwkt_reltoken(&tty_token);
 	return (0);
 }
 
@@ -1236,6 +1256,7 @@ sioopen(struct dev_open_args *ap)
 		return (ENXIO);
 	if (mynor & CONTROL_MASK)
 		return (0);
+	lwkt_gettoken(&tty_token);
 	tp = dev->si_tty = com->tp = ttymalloc(com->tp);
 	crit_enter();
 	/*
@@ -1247,6 +1268,7 @@ open_top:
 		error = tsleep(&com->dtr_wait, PCATCH, "siodtr", 0);
 		if (com_addr(unit) == NULL) {
 			crit_exit();
+			lwkt_reltoken(&tty_token);
 			return (ENXIO);
 		}
 		if (error != 0 || com->gone)
@@ -1272,6 +1294,7 @@ open_top:
 					       PCATCH, "siobi", 0);
 				if (com_addr(unit) == NULL) {
 					crit_exit();
+					lwkt_reltoken(&tty_token);
 					return (ENXIO);
 				}
 				if (error != 0 || com->gone)
@@ -1381,6 +1404,7 @@ open_top:
 		error = tsleep(TSA_CARR_ON(tp), PCATCH, "siodcd", 0);
 		if (com_addr(unit) == NULL) {
 			crit_exit();
+			lwkt_reltoken(&tty_token);
 			return (ENXIO);
 		}
 		--com->wopeners;
@@ -1397,6 +1421,7 @@ out:
 	crit_exit();
 	if (!(tp->t_state & TS_ISOPEN) && com->wopeners == 0)
 		comhardclose(com);
+	lwkt_reltoken(&tty_token);
 	return (error);
 }
 
@@ -1411,9 +1436,12 @@ sioclose(struct dev_close_args *ap)
 	mynor = minor(dev);
 	if (mynor & CONTROL_MASK)
 		return (0);
+	lwkt_gettoken(&tty_token);
 	com = com_addr(MINOR_TO_UNIT(mynor));
-	if (com == NULL)
+	if (com == NULL) {
+		lwkt_reltoken(&tty_token);
 		return (ENODEV);
+	}
 	tp = com->tp;
 	crit_enter();
 	(*linesw[tp->t_line].l_close)(tp, ap->a_fflag);
@@ -1431,6 +1459,7 @@ sioclose(struct dev_close_args *ap)
 		bzero(tp, sizeof *tp);
 		crit_exit();
 	}
+	lwkt_reltoken(&tty_token);
 	return (0);
 }
 
@@ -1442,6 +1471,7 @@ comhardclose(struct com_s *com)
 
 	unit = com->unit;
 	crit_enter();
+	lwkt_gettoken(&tty_token);
 	com->poll = FALSE;
 	com->poll_output = FALSE;
 	com->do_timestamp = FALSE;
@@ -1492,6 +1522,7 @@ comhardclose(struct com_s *com)
 	com->active_out = FALSE;
 	wakeup(&com->active_out);
 	wakeup(TSA_CARR_ON(tp));	/* restart any wopeners */
+	lwkt_reltoken(&tty_token);
 	crit_exit();
 }
 
@@ -1499,16 +1530,23 @@ static int
 sioread(struct dev_read_args *ap)
 {
 	cdev_t dev = ap->a_head.a_dev;
-	int		mynor;
+	int		mynor, ret;
 	struct com_s	*com;
 
+	lwkt_gettoken(&tty_token);
 	mynor = minor(dev);
-	if (mynor & CONTROL_MASK)
+	if (mynor & CONTROL_MASK) {
+		lwkt_reltoken(&tty_token);
 		return (ENODEV);
+	}
 	com = com_addr(MINOR_TO_UNIT(mynor));
-	if (com == NULL || com->gone)
+	if (com == NULL || com->gone) {
+		lwkt_reltoken(&tty_token);
 		return (ENODEV);
-	return ((*linesw[com->tp->t_line].l_read)(com->tp, ap->a_uio, ap->a_ioflag));
+	}
+	ret = ((*linesw[com->tp->t_line].l_read)(com->tp, ap->a_uio, ap->a_ioflag));
+	lwkt_reltoken(&tty_token);
+	return ret;
 }
 
 static int
@@ -1517,16 +1555,21 @@ siowrite(struct dev_write_args *ap)
 	cdev_t dev = ap->a_head.a_dev;
 	int		mynor;
 	struct com_s	*com;
-	int		unit;
+	int		unit, ret;
 
+	lwkt_gettoken(&tty_token);
 	mynor = minor(dev);
-	if (mynor & CONTROL_MASK)
+	if (mynor & CONTROL_MASK) {
+		lwkt_reltoken(&tty_token);
 		return (ENODEV);
+	}
 
 	unit = MINOR_TO_UNIT(mynor);
 	com = com_addr(unit);
-	if (com == NULL || com->gone)
+	if (com == NULL || com->gone) {
+		lwkt_reltoken(&tty_token);
 		return (ENODEV);
+	}
 	/*
 	 * (XXX) We disallow virtual consoles if the physical console is
 	 * a serial port.  This is in case there is a display attached that
@@ -1535,7 +1578,9 @@ siowrite(struct dev_write_args *ap)
 	 */
 	if (constty != NULL && unit == comconsole)
 		constty = NULL;
-	return ((*linesw[com->tp->t_line].l_write)(com->tp, ap->a_uio, ap->a_ioflag));
+	ret = ((*linesw[com->tp->t_line].l_write)(com->tp, ap->a_uio, ap->a_ioflag));
+	lwkt_reltoken(&tty_token);
+	return ret;
 }
 
 static void
@@ -1543,6 +1588,7 @@ siobusycheck(void *chan)
 {
 	struct com_s	*com;
 
+	lwkt_gettoken(&tty_token);
 	com = (struct com_s *)chan;
 
 	/*
@@ -1565,6 +1611,7 @@ siobusycheck(void *chan)
 		callout_reset(&com->busy_ch, hz / 100, siobusycheck, com);
 	}
 	crit_exit();
+	lwkt_reltoken(&tty_token);
 }
 
 static u_int
@@ -1596,11 +1643,19 @@ siodtrwakeup(void *chan)
 {
 	struct com_s	*com;
 
+	lwkt_gettoken(&tty_token);
 	com = (struct com_s *)chan;
 	com->state &= ~CS_DTR_OFF;
 	wakeup(&com->dtr_wait);
+	lwkt_reltoken(&tty_token);
 }
 
+/*
+ * NOTE: Normally called with tty_token held but might not be when
+ *	 operating as the console.
+ *
+ *	 Must be called with com_lock
+ */
 static void
 sioinput(struct com_s *com)
 {
@@ -1685,6 +1740,7 @@ sioinput(struct com_s *com)
 void
 siointr(void *arg)
 {
+	lwkt_gettoken(&tty_token);
 #ifndef COM_MULTIPORT
 	com_lock();
 	siointr1((struct com_s *) arg);
@@ -1722,8 +1778,12 @@ siointr(void *arg)
 	} while (possibly_more_intrs);
 	com_unlock();
 #endif /* COM_MULTIPORT */
+	lwkt_reltoken(&tty_token);
 }
 
+/*
+ * Called with tty_token held and com_lock held.
+ */
 static void
 siointr1(struct com_s *com)
 {
@@ -1777,7 +1837,9 @@ siointr1(struct com_s *com)
 					if (recv_data == KEY_TILDE)
 						brk_state2 = recv_data;
 					else if (brk_state2 == KEY_TILDE && recv_data == KEY_CRTLB) {
+							com_unlock();
 							breakpoint();
+							com_lock();
 							brk_state1 = brk_state2 = 0;
 							goto cont;
 					} else
@@ -1802,7 +1864,9 @@ siointr1(struct com_s *com)
 				if (line_status & LSR_BI) {
 #if defined(DDB) && defined(BREAK_TO_DEBUGGER)
 					if (com->unit == comconsole) {
+						com_unlock();
 						breakpoint();
+						com_lock();
 						goto cont;
 					}
 #endif
@@ -1936,7 +2000,9 @@ cont:
 #ifndef COM_MULTIPORT
 		if ((inb(com->int_id_port) & IIR_IMASK) == IIR_NOPEND)
 #endif /* COM_MULTIPORT */
+		{
 			return;
+		}
 	}
 }
 
@@ -1953,11 +2019,14 @@ sioioctl(struct dev_ioctl_args *ap)
 	u_long		oldcmd;
 	struct termios	term;
 #endif
+	lwkt_gettoken(&tty_token);
 	mynor = minor(dev);
 
 	com = com_addr(MINOR_TO_UNIT(mynor));
-	if (com == NULL || com->gone)
+	if (com == NULL || com->gone) {
+		lwkt_reltoken(&tty_token);
 		return (ENODEV);
+	}
 	if (mynor & CONTROL_MASK) {
 		struct termios	*ct;
 
@@ -1969,6 +2038,7 @@ sioioctl(struct dev_ioctl_args *ap)
 			ct = mynor & CALLOUT_MASK ? &com->lt_out : &com->lt_in;
 			break;
 		default:
+			lwkt_reltoken(&tty_token);
 			return (ENODEV);	/* /dev/nodev */
 		}
 		switch (ap->a_cmd) {
@@ -1977,17 +2047,22 @@ sioioctl(struct dev_ioctl_args *ap)
 			if (error != 0)
 				return (error);
 			*ct = *(struct termios *)data;
+			lwkt_reltoken(&tty_token);
 			return (0);
 		case TIOCGETA:
 			*(struct termios *)data = *ct;
+			lwkt_reltoken(&tty_token);
 			return (0);
 		case TIOCGETD:
 			*(int *)data = TTYDISC;
+			lwkt_reltoken(&tty_token);
 			return (0);
 		case TIOCGWINSZ:
 			bzero(data, sizeof(struct winsize));
+			lwkt_reltoken(&tty_token);
 			return (0);
 		default:
+			lwkt_reltoken(&tty_token);
 			return (ENOTTY);
 		}
 	}
@@ -1996,8 +2071,10 @@ sioioctl(struct dev_ioctl_args *ap)
 	term = tp->t_termios;
 	oldcmd = ap->a_cmd;
 	error = ttsetcompat(tp, &ap->a_cmd, data, &term);
-	if (error != 0)
+	if (error != 0) {
+		lwkt_reltoken(&tty_token);
 		return (error);
+	}
 	if (ap->a_cmd != oldcmd)
 		data = (caddr_t)&term;
 #endif
@@ -2025,13 +2102,16 @@ sioioctl(struct dev_ioctl_args *ap)
 			dt->c_ospeed = tp->t_ospeed;
 	}
 	error = (*linesw[tp->t_line].l_ioctl)(tp, ap->a_cmd, data, ap->a_fflag, ap->a_cred);
-	if (error != ENOIOCTL)
+	if (error != ENOIOCTL) {
+		lwkt_reltoken(&tty_token);
 		return (error);
+	}
 	crit_enter();
 	error = ttioctl(tp, ap->a_cmd, data, ap->a_fflag);
 	disc_optim(tp, &tp->t_termios, com);
 	if (error != ENOIOCTL) {
 		crit_exit();
+		lwkt_reltoken(&tty_token);
 		return (error);
 	}
 	switch (ap->a_cmd) {
@@ -2068,6 +2148,7 @@ sioioctl(struct dev_ioctl_args *ap)
 		error = priv_check_cred(ap->a_cred, PRIV_ROOT, 0);
 		if (error != 0) {
 			crit_exit();
+			lwkt_reltoken(&tty_token);
 			return (error);
 		}
 		com->dtr_wait = *(int *)data * hz / 100;
@@ -2088,9 +2169,11 @@ sioioctl(struct dev_ioctl_args *ap)
 		error = pps_ioctl(ap->a_cmd, data, &com->pps);
 		if (error == ENODEV)
 			error = ENOTTY;
+		lwkt_reltoken(&tty_token);
 		return (error);
 	}
 	crit_exit();
+	lwkt_reltoken(&tty_token);
 	return (0);
 }
 
@@ -2099,8 +2182,12 @@ siopoll(void *dummy, void *frame)
 {
 	int		unit;
 
-	if (com_events == 0)
+	lwkt_gettoken(&tty_token);
+	if (com_events == 0) {
+		lwkt_reltoken(&tty_token);
 		return;
+	}
+
 repeat:
 	for (unit = 0; unit < sio_numunits; ++unit) {
 		struct com_s	*com;
@@ -2164,8 +2251,12 @@ repeat:
 	}
 	if (com_events >= LOTS_OF_EVENTS)
 		goto repeat;
+	lwkt_reltoken(&tty_token);
 }
 
+/*
+ * Called with tty_token held but no com_lock
+ */
 static int
 comparam(struct tty *tp, struct termios *t)
 {
@@ -2179,8 +2270,9 @@ comparam(struct tty *tp, struct termios *t)
 
 	unit = DEV_TO_UNIT(tp->t_dev);
 	com = com_addr(unit);
-	if (com == NULL)
+	if (com == NULL) {
 		return (ENODEV);
+	}
 
 	/* do historical conversions */
 	if (t->c_ispeed == 0)
@@ -2345,10 +2437,11 @@ comparam(struct tty *tp, struct termios *t)
 	 * unconditionally, but that defeated the careful discarding of
 	 * stale input in sioopen().
 	 */
-	if (com->state >= (CS_BUSY | CS_TTGO))
+	if (com->state >= (CS_BUSY | CS_TTGO)) {
+		com_lock();
 		siointr1(com);
-
-	com_unlock();
+		com_unlock();
+	}
 	crit_exit();
 	comstart(tp);
 	if (com->ibufold != NULL) {
@@ -2358,6 +2451,9 @@ comparam(struct tty *tp, struct termios *t)
 	return (0);
 }
 
+/*
+ * called with tty_token held
+ */
 static int
 siosetwater(struct com_s *com, speed_t speed)
 {
@@ -2375,10 +2471,8 @@ siosetwater(struct com_s *com, speed_t speed)
 	cp4ticks = speed / 10 / hz * 4;
 	for (ibufsize = 128; ibufsize < cp4ticks;)
 		ibufsize <<= 1;
-	if (ibufsize == com->ibufsize) {
-		com_lock();
+	if (ibufsize == com->ibufsize)
 		return (0);
-	}
 
 	/*
 	 * Allocate input buffer.  The extra factor of 2 in the size is
@@ -2397,8 +2491,7 @@ siosetwater(struct com_s *com, speed_t speed)
 	}
 
 	/*
-	 * Read current input buffer, if any.  Continue with interrupts
-	 * disabled.
+	 * Read current input buffer.
 	 */
 	com_lock();
 	if (com->iptr != com->ibuf)
@@ -2419,6 +2512,7 @@ siosetwater(struct com_s *com, speed_t speed)
 	com->ibufend = ibuf + ibufsize;
 	com->ierroff = ibufsize;
 	com->ihighwater = ibuf + 3 * ibufsize / 4;
+	com_unlock();
 	return (0);
 }
 
@@ -2428,10 +2522,13 @@ comstart(struct tty *tp)
 	struct com_s	*com;
 	int		unit;
 
+	lwkt_gettoken(&tty_token);
 	unit = DEV_TO_UNIT(tp->t_dev);
 	com = com_addr(unit);
-	if (com == NULL)
+	if (com == NULL) {
+		lwkt_reltoken(&tty_token);
 		return;
+	}
 	crit_enter();
 	com_lock();
 	if (tp->t_state & TS_TTSTOP)
@@ -2450,6 +2547,7 @@ comstart(struct tty *tp)
 	if (tp->t_state & (TS_TIMEOUT | TS_TTSTOP)) {
 		ttwwakeup(tp);
 		crit_exit();
+		lwkt_reltoken(&tty_token);
 		return;
 	}
 	if (tp->t_outq.c_cc != 0) {
@@ -2504,6 +2602,7 @@ comstart(struct tty *tp)
 	com_unlock();
 	ttwwakeup(tp);
 	crit_exit();
+	lwkt_reltoken(&tty_token);
 }
 
 static void
@@ -2511,9 +2610,12 @@ comstop(struct tty *tp, int rw)
 {
 	struct com_s	*com;
 
+	lwkt_gettoken(&tty_token);
 	com = com_addr(DEV_TO_UNIT(tp->t_dev));
-	if (com == NULL || com->gone)
+	if (com == NULL || com->gone) {
+		lwkt_reltoken(&tty_token);
 		return;
+	}
 	com_lock();
 	if (rw & FWRITE) {
 		if (com->hasfifo)
@@ -2543,6 +2645,7 @@ comstop(struct tty *tp, int rw)
 	}
 	com_unlock();
 	comstart(tp);
+	lwkt_reltoken(&tty_token);
 }
 
 static int
@@ -2551,6 +2654,7 @@ commctl(struct com_s *com, int bits, int how)
 	int	mcr;
 	int	msr;
 
+	lwkt_gettoken(&tty_token);
 	if (how == DMGET) {
 		bits = TIOCM_LE;	/* XXX - always enabled while open */
 		mcr = com->mcr_image;
@@ -2572,6 +2676,7 @@ commctl(struct com_s *com, int bits, int how)
 		 */
 		if (msr & (MSR_RI | MSR_TERI))
 			bits |= TIOCM_RI;
+		lwkt_reltoken(&tty_token);
 		return (bits);
 	}
 	mcr = 0;
@@ -2579,8 +2684,10 @@ commctl(struct com_s *com, int bits, int how)
 		mcr |= MCR_DTR;
 	if (bits & TIOCM_RTS)
 		mcr |= MCR_RTS;
-	if (com->gone)
+	if (com->gone) {
+		lwkt_reltoken(&tty_token);
 		return(0);
+	}
 	com_lock();
 	switch (how) {
 	case DMSET:
@@ -2595,9 +2702,13 @@ commctl(struct com_s *com, int bits, int how)
 		break;
 	}
 	com_unlock();
+	lwkt_reltoken(&tty_token);
 	return (0);
 }
 
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static void
 siosettimeout(void)
 {
@@ -2605,6 +2716,7 @@ siosettimeout(void)
 	bool_t		someopen;
 	int		unit;
 
+	ASSERT_LWKT_TOKEN_HELD(&tty_token);
 	/*
 	 * Set our timeout period to 1 second if no polled devices are open.
 	 * Otherwise set it to max(1/200, 1/hz).
@@ -2636,12 +2748,19 @@ siosettimeout(void)
 	}
 }
 
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static void
 comwakeup(void *chan)
 {
 	struct com_s	*com;
 	int		unit;
 
+	/*
+	 * Can be called from a callout too so just get the token
+	 */
+	lwkt_gettoken(&tty_token);
 	callout_reset(&sio_timeout_handle, sio_timeout, comwakeup, NULL);
 
 	/*
@@ -2661,8 +2780,10 @@ comwakeup(void *chan)
 	/*
 	 * Check for and log errors, but not too often.
 	 */
-	if (--sio_timeouts_until_log > 0)
+	if (--sio_timeouts_until_log > 0) {
+		lwkt_reltoken(&tty_token);
 		return;
+	}
 	sio_timeouts_until_log = hz / sio_timeout;
 	for (unit = 0; unit < sio_numunits; ++unit) {
 		int	errnum;
@@ -2688,11 +2809,13 @@ comwakeup(void *chan)
 			    delta == 1 ? "" : "s", total);
 		}
 	}
+	lwkt_reltoken(&tty_token);
 }
 
 static void
 disc_optim(struct tty *tp, struct termios *t, struct com_s *com)
 {
+	lwkt_gettoken(&tty_token);
 	if (!(t->c_iflag & (ICRNL | IGNCR | IMAXBEL | INLCR | ISTRIP | IXON))
 	    && (!(t->c_iflag & BRKINT) || (t->c_iflag & IGNBRK))
 	    && (!(t->c_iflag & PARMRK)
@@ -2703,6 +2826,7 @@ disc_optim(struct tty *tp, struct termios *t, struct com_s *com)
 	else
 		tp->t_state &= ~TS_CAN_BYPASS_L_RINT;
 	com->hotchar = linesw[tp->t_line].l_hotchar;
+	lwkt_reltoken(&tty_token);
 }
 
 /*
@@ -2764,7 +2888,9 @@ siocntxwait(Port_t iobase)
  *
  * If the value read from the serial port doesn't make sense, return 0.
  */
-
+/*
+ * NOTE: Must be called with tty_token held
+ */
 static speed_t
 siocngetspeed(Port_t iobase, u_long rclk)
 {
@@ -2909,6 +3035,7 @@ siocnprobe(struct consdev *cp)
 			 * need to set the speed in hardware so that
 			 * switching it later is null.
 			 */
+			com_lock();
 			cfcr = inb(iobase + com_cfcr);
 			outb(iobase + com_cfcr, CFCR_DLAB | cfcr);
 			divisor = siodivisor(comdefaultrclk, comdefaultrate);
@@ -2917,6 +3044,7 @@ siocnprobe(struct consdev *cp)
 			outb(iobase + com_cfcr, cfcr);
 
 			siocnopen(&sp, iobase, comdefaultrate);
+			com_unlock();
 
 			crit_exit();
 			if (COM_CONSOLE(flags) && !COM_LLCONSOLE(flags)) {
@@ -3000,6 +3128,7 @@ siocncheckc(void *private)
 		iobase = siogdbiobase;
 	else
 		iobase = siocniobase;
+	com_lock();
 	crit_enter();
 	siocnopen(&sp, iobase, comdefaultrate);
 	if (inb(iobase + com_lsr) & LSR_RXRDY)
@@ -3008,6 +3137,7 @@ siocncheckc(void *private)
 		c = -1;
 	siocnclose(&sp, iobase);
 	crit_exit();
+	com_unlock();
 	return (c);
 }
 
@@ -3024,6 +3154,7 @@ siocngetc(void *private)
 		iobase = siogdbiobase;
 	else
 		iobase = siocniobase;
+	com_lock();
 	crit_enter();
 	siocnopen(&sp, iobase, comdefaultrate);
 	while (!(inb(iobase + com_lsr) & LSR_RXRDY))
@@ -3031,6 +3162,7 @@ siocngetc(void *private)
 	c = inb(iobase + com_data);
 	siocnclose(&sp, iobase);
 	crit_exit();
+	com_unlock();
 	return (c);
 }
 
@@ -3045,12 +3177,14 @@ siocnputc(void *private, int c)
 		iobase = siogdbiobase;
 	else
 		iobase = siocniobase;
+	com_lock();
 	crit_enter();
 	siocnopen(&sp, iobase, comdefaultrate);
 	siocntxwait(iobase);
 	outb(iobase + com_data, c);
 	siocnclose(&sp, iobase);
 	crit_exit();
+	com_unlock();
 }
 
 DRIVER_MODULE(sio, isa, sio_isa_driver, sio_devclass, 0, 0);

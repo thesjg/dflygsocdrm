@@ -126,11 +126,11 @@ static void	ath_start(struct ifnet *);
 static int	ath_reset(struct ifnet *);
 static int	ath_reset_vap(struct ieee80211vap *, u_long);
 static int	ath_media_change(struct ifnet *);
-static void	ath_watchdog(void *);
+static void	ath_watchdog_callout(void *);
 static int	ath_ioctl(struct ifnet *, u_long, caddr_t, struct ucred *);
 static void	ath_fatal_proc(void *, int);
 static void	ath_bmiss_vap(struct ieee80211vap *);
-static void	ath_bmiss_proc(void *, int);
+static void	ath_bmiss_task(void *, int);
 static int	ath_keyset(struct ath_softc *, const struct ieee80211_key *,
 			struct ieee80211_node *);
 static int	ath_key_alloc(struct ieee80211vap *,
@@ -154,7 +154,7 @@ static void	ath_beacon_setup(struct ath_softc *, struct ath_buf *);
 static void	ath_beacon_proc(void *, int);
 static struct ath_buf *ath_beacon_generate(struct ath_softc *,
 			struct ieee80211vap *);
-static void	ath_bstuck_proc(void *, int);
+static void	ath_bstuck_task(void *, int);
 static void	ath_beacon_return(struct ath_softc *, struct ath_buf *);
 static void	ath_beacon_free(struct ath_softc *);
 static void	ath_beacon_config(struct ath_softc *, struct ieee80211vap *);
@@ -171,7 +171,7 @@ static int	ath_rxbuf_init(struct ath_softc *, struct ath_buf *);
 static void	ath_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m,
 			int subtype, int rssi, int nf);
 static void	ath_setdefantenna(struct ath_softc *, u_int);
-static void	ath_rx_proc(void *, int);
+static void	ath_rx_task(void *, int);
 static void	ath_txq_init(struct ath_softc *sc, struct ath_txq *, int);
 static struct ath_txq *ath_txq_setup(struct ath_softc*, int qtype, int subtype);
 static int	ath_tx_setup(struct ath_softc *, int, int);
@@ -181,9 +181,9 @@ static void	ath_tx_cleanup(struct ath_softc *);
 static void	ath_freetx(struct mbuf *);
 static int	ath_tx_start(struct ath_softc *, struct ieee80211_node *,
 			     struct ath_buf *, struct mbuf *);
-static void	ath_tx_proc_q0(void *, int);
-static void	ath_tx_proc_q0123(void *, int);
-static void	ath_tx_proc(void *, int);
+static void	ath_tx_task_q0(void *, int);
+static void	ath_tx_task_q0123(void *, int);
+static void	ath_tx_task(void *, int);
 static void	ath_tx_draintxq(struct ath_softc *, struct ath_txq *);
 static int	ath_chan_set(struct ath_softc *, struct ieee80211_channel *);
 static void	ath_draintxq(struct ath_softc *);
@@ -193,7 +193,7 @@ static void	ath_chan_change(struct ath_softc *, struct ieee80211_channel *);
 static void	ath_scan_start(struct ieee80211com *);
 static void	ath_scan_end(struct ieee80211com *);
 static void	ath_set_channel(struct ieee80211com *);
-static void	ath_calibrate(void *);
+static void	ath_calibrate_callout(void *);
 static int	ath_newstate(struct ieee80211vap *, enum ieee80211_state, int);
 static void	ath_setup_stationkey(struct ieee80211_node *);
 static void	ath_newassoc(struct ieee80211_node *, int);
@@ -212,6 +212,7 @@ static void	ath_sysctlattach(struct ath_softc *);
 static int	ath_raw_xmit(struct ieee80211_node *,
 			struct mbuf *, const struct ieee80211_bpf_params *);
 static void	ath_announce(struct ath_softc *);
+static void	ath_sysctl_stats_attach(struct ath_softc *sc);
 
 #ifdef IEEE80211_SUPPORT_TDMA
 static void	ath_tdma_settimers(struct ath_softc *sc, u_int32_t nexttbtt,
@@ -450,7 +451,10 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	/*
 	 * Allocate tx+rx descriptors and populate the lists.
 	 */
+	wlan_assert_serialized();
+	wlan_serialize_exit();
 	error = ath_desc_alloc(sc);
+	wlan_serialize_enter();
 	if (error != 0) {
 		if_printf(ifp, "failed to allocate descriptors: %d\n", error);
 		goto bad;
@@ -458,16 +462,14 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	callout_init(&sc->sc_cal_ch);
 	callout_init(&sc->sc_wd_ch);
 
-	ATH_TXBUF_LOCK_INIT(sc);
-
 	sc->sc_tq = taskqueue_create("ath_taskq", M_INTWAIT,
 		taskqueue_thread_enqueue, &sc->sc_tq);
 	taskqueue_start_threads(&sc->sc_tq, 1, TDPRI_KERN_DAEMON, -1,
 		"%s taskq", ifp->if_xname);
 
-	TASK_INIT(&sc->sc_rxtask, 0, ath_rx_proc, sc);
-	TASK_INIT(&sc->sc_bmisstask, 0, ath_bmiss_proc, sc);
-	TASK_INIT(&sc->sc_bstucktask,0, ath_bstuck_proc, sc);
+	TASK_INIT(&sc->sc_rxtask, 0, ath_rx_task, sc);
+	TASK_INIT(&sc->sc_bmisstask, 0, ath_bmiss_task, sc);
+	TASK_INIT(&sc->sc_bstucktask,0, ath_bstuck_task, sc);
 
 	/*
 	 * Allocate hardware transmit queues: one queue for
@@ -522,13 +524,13 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	 */
 	switch (sc->sc_txqsetup &~ (1<<sc->sc_cabq->axq_qnum)) {
 	case 0x01:
-		TASK_INIT(&sc->sc_txtask, 0, ath_tx_proc_q0, sc);
+		TASK_INIT(&sc->sc_txtask, 0, ath_tx_task_q0, sc);
 		break;
 	case 0x0f:
-		TASK_INIT(&sc->sc_txtask, 0, ath_tx_proc_q0123, sc);
+		TASK_INIT(&sc->sc_txtask, 0, ath_tx_task_q0123, sc);
 		break;
 	default:
-		TASK_INIT(&sc->sc_txtask, 0, ath_tx_proc, sc);
+		TASK_INIT(&sc->sc_txtask, 0, ath_tx_task, sc);
 		break;
 	}
 
@@ -737,6 +739,7 @@ ath_attach(u_int16_t devid, struct ath_softc *sc)
 	 * regdomain are available from the hal.
 	 */
 	ath_sysctlattach(sc);
+	ath_sysctl_stats_attach(sc);
 
 	if (bootverbose)
 		ieee80211_announce(ic);
@@ -879,7 +882,6 @@ ath_vap_create(struct ieee80211com *ic,
 	needbeacon = 0;
 	IEEE80211_ADDR_COPY(mac, mac0);
 
-	ATH_LOCK(sc);
 	ic_opmode = opmode;		/* default to opmode of new vap */
 	switch (opmode) {
 	case IEEE80211_M_STA:
@@ -974,10 +976,8 @@ ath_vap_create(struct ieee80211com *ic,
 
 	vap = &avp->av_vap;
 	/* XXX can't hold mutex across if_alloc */
-	ATH_UNLOCK(sc);
 	error = ieee80211_vap_setup(ic, vap, name, unit, opmode, flags,
 	    bssid, mac);
-	ATH_LOCK(sc);
 	if (error != 0) {
 		device_printf(sc->sc_dev, "%s: error %d creating vap\n",
 		    __func__, error);
@@ -1083,7 +1083,6 @@ ath_vap_create(struct ieee80211com *ic,
 		 */
 		sc->sc_swbmiss = 1;
 	}
-	ATH_UNLOCK(sc);
 
 	/* complete setup */
 	ieee80211_vap_attach(vap, ath_media_change, ieee80211_media_status);
@@ -1093,7 +1092,6 @@ bad2:
 	ath_hal_setbssidmask(sc->sc_ah, sc->sc_hwbssidmask);
 bad:
 	kfree(avp, M_80211_VAP);
-	ATH_UNLOCK(sc);
 	return NULL;
 }
 
@@ -1118,7 +1116,6 @@ ath_vap_delete(struct ieee80211vap *vap)
 	}
 
 	ieee80211_vap_detach(vap);
-	ATH_LOCK(sc);
 	/*
 	 * Reclaim beacon state.  Note this must be done before
 	 * the vap instance is reclaimed as we may have a reference
@@ -1140,7 +1137,6 @@ ath_vap_delete(struct ieee80211vap *vap)
 		 * Reclaim any pending mcast frames for the vap.
 		 */
 		ath_tx_draintxq(sc, &avp->av_mcastq);
-		ATH_TXQ_LOCK_DESTROY(&avp->av_mcastq);
 	}
 	/*
 	 * Update bookkeeping.
@@ -1165,7 +1161,6 @@ ath_vap_delete(struct ieee80211vap *vap)
 		sc->sc_swbmiss = 0;
 	}
 #endif
-	ATH_UNLOCK(sc);
 	kfree(avp, M_80211_VAP);
 
 	if (ifp->if_flags & IFF_RUNNING) {
@@ -1292,6 +1287,7 @@ ath_intr(void *arg)
 	struct ifnet *ifp = sc->sc_ifp;
 	struct ath_hal *ah = sc->sc_ah;
 	HAL_INT status;
+	HAL_INT ostatus;
 
 	if (sc->sc_invalid) {
 		/*
@@ -1301,6 +1297,7 @@ ath_intr(void *arg)
 		DPRINTF(sc, ATH_DEBUG_ANY, "%s: invalid; ignored\n", __func__);
 		return;
 	}
+
 	if (!ath_hal_intrpend(ah))		/* shared irq, not for us */
 		return;
 	if ((ifp->if_flags & IFF_UP) == 0 ||
@@ -1319,9 +1316,9 @@ ath_intr(void *arg)
 	 * bits we haven't explicitly enabled so we mask the
 	 * value to insure we only process bits we requested.
 	 */
-	ath_hal_getisr(ah, &status);		/* NB: clears ISR too */
-	DPRINTF(sc, ATH_DEBUG_INTR, "%s: status 0x%x\n", __func__, status);
-	status &= sc->sc_imask;			/* discard unasked for bits */
+	ath_hal_getisr(ah, &ostatus);		/* NB: clears ISR too */
+	DPRINTF(sc, ATH_DEBUG_INTR, "%s: status 0x%x\n", __func__, ostatus);
+	status = ostatus & sc->sc_imask;	/* discard unasked for bits */
 	if (status & HAL_INT_FATAL) {
 		sc->sc_stats.ast_hardware++;
 		ath_hal_intrset(ah, 0);		/* disable intr's until reset */
@@ -1359,28 +1356,34 @@ ath_intr(void *arg)
 #endif
 			}
 		}
+
+		/*
+		 * NB: The hardware should re-read the link when the RXE
+		 *     bit is written, but it doesn't work at least on
+		 *     older chipsets.
+		 */
 		if (status & HAL_INT_RXEOL) {
-			/*
-			 * NB: the hardware should re-read the link when
-			 *     RXE bit is written, but it doesn't work at
-			 *     least on older hardware revs.
-			 */
 			sc->sc_stats.ast_rxeol++;
 			sc->sc_rxlink = NULL;
 		}
+
 		if (status & HAL_INT_TXURN) {
 			sc->sc_stats.ast_txurn++;
 			/* bump tx trigger level */
 			ath_hal_updatetxtriglevel(ah, AH_TRUE);
 		}
+
 		if (status & HAL_INT_RX)
 			taskqueue_enqueue(sc->sc_tq, &sc->sc_rxtask);
+
 		if (status & HAL_INT_TX)
 			taskqueue_enqueue(sc->sc_tq, &sc->sc_txtask);
+
 		if (status & HAL_INT_BMISS) {
 			sc->sc_stats.ast_bmiss++;
 			taskqueue_enqueue(sc->sc_tq, &sc->sc_bmisstask);
 		}
+
 		if (status & HAL_INT_MIB) {
 			sc->sc_stats.ast_mib++;
 			/*
@@ -1395,6 +1398,7 @@ ath_intr(void *arg)
 			ath_hal_mibevent(ah, &sc->sc_halstats);
 			ath_hal_intrset(ah, sc->sc_imask);
 		}
+
 		if (status & HAL_INT_RXORN) {
 			/* NB: hal marks HAL_INT_FATAL when RXORN is fatal */
 			sc->sc_stats.ast_rxorn++;
@@ -1474,19 +1478,22 @@ ath_hal_gethangstate(struct ath_hal *ah, uint32_t mask, uint32_t *hangs)
 }
 
 static void
-ath_bmiss_proc(void *arg, int pending)
+ath_bmiss_task(void *arg, int pending)
 {
 	struct ath_softc *sc = arg;
 	struct ifnet *ifp = sc->sc_ifp;
 	uint32_t hangs;
 
+	wlan_serialize_enter();
 	DPRINTF(sc, ATH_DEBUG_ANY, "%s: pending %u\n", __func__, pending);
 
 	if (ath_hal_gethangstate(sc->sc_ah, 0xff, &hangs) && hangs != 0) {
 		if_printf(ifp, "bb hang detected (0x%x), reseting\n", hangs); 
 		ath_reset(ifp);
-	} else
+	} else {
 		ieee80211_beacon_miss(ifp->if_l2com);
+	}
+	wlan_serialize_exit();
 }
 
 /*
@@ -1524,7 +1531,6 @@ ath_init(void *arg)
 	DPRINTF(sc, ATH_DEBUG_ANY, "%s: if_flags 0x%x\n",
 		__func__, ifp->if_flags);
 
-	ATH_LOCK(sc);
 	/*
 	 * Stop anything previously setup.  This is safe
 	 * whether this is the first time through or not.
@@ -1542,7 +1548,6 @@ ath_init(void *arg)
 	if (!ath_hal_reset(ah, sc->sc_opmode, ic->ic_curchan, AH_FALSE, &status)) {
 		if_printf(ifp, "unable to reset hardware; hal status %u\n",
 			status);
-		ATH_UNLOCK(sc);
 		return;
 	}
 	ath_chan_change(sc, ic->ic_curchan);
@@ -1565,7 +1570,6 @@ ath_init(void *arg)
 	 */
 	if (ath_startrecv(sc) != 0) {
 		if_printf(ifp, "unable to start recv logic\n");
-		ATH_UNLOCK(sc);
 		return;
 	}
 
@@ -1583,10 +1587,9 @@ ath_init(void *arg)
 		sc->sc_imask |= HAL_INT_MIB;
 
 	ifp->if_flags |= IFF_RUNNING;
-	callout_reset(&sc->sc_wd_ch, hz, ath_watchdog, sc);
+	callout_reset(&sc->sc_wd_ch, hz, ath_watchdog_callout, sc);
 	ath_hal_intrset(ah, sc->sc_imask);
 
-	ATH_UNLOCK(sc);
 
 #ifdef ATH_TX99_DIAG
 	if (sc->sc_tx99 != NULL)
@@ -1605,7 +1608,6 @@ ath_stop_locked(struct ifnet *ifp)
 	DPRINTF(sc, ATH_DEBUG_ANY, "%s: invalid %u if_flags 0x%x\n",
 		__func__, sc->sc_invalid, ifp->if_flags);
 
-	ATH_LOCK_ASSERT(sc);
 	if (ifp->if_flags & IFF_RUNNING) {
 		/*
 		 * Shutdown the hardware and driver:
@@ -1651,11 +1653,9 @@ ath_stop_locked(struct ifnet *ifp)
 static void
 ath_stop(struct ifnet *ifp)
 {
-	struct ath_softc *sc = ifp->if_softc;
+	struct ath_softc *sc __unused = ifp->if_softc;
 
-	ATH_LOCK(sc);
 	ath_stop_locked(ifp);
-	ATH_UNLOCK(sc);
 }
 
 /*
@@ -1673,6 +1673,7 @@ ath_reset(struct ifnet *ifp)
 	struct ath_hal *ah = sc->sc_ah;
 	HAL_STATUS status;
 
+	kprintf("ath_reset\n");
 	ath_hal_intrset(ah, 0);		/* disable interrupts */
 	ath_draintxq(sc);		/* stop xmit side */
 	ath_stoprecv(sc);		/* stop recv side */
@@ -1731,14 +1732,13 @@ _ath_getbuf_locked(struct ath_softc *sc)
 {
 	struct ath_buf *bf;
 
-	ATH_TXBUF_LOCK_ASSERT(sc);
-
 	bf = STAILQ_FIRST(&sc->sc_txbuf);
 	if (bf != NULL && (bf->bf_flags & ATH_BUF_BUSY) == 0)
 		STAILQ_REMOVE_HEAD(&sc->sc_txbuf, bf_list);
 	else
 		bf = NULL;
 	if (bf == NULL) {
+		kprintf("ath: ran out of descriptors\n");
 		DPRINTF(sc, ATH_DEBUG_XMIT, "%s: %s\n", __func__,
 		    STAILQ_FIRST(&sc->sc_txbuf) == NULL ?
 			"out of xmit buffers" : "xmit buffer busy");
@@ -1751,7 +1751,6 @@ ath_getbuf(struct ath_softc *sc)
 {
 	struct ath_buf *bf;
 
-	ATH_TXBUF_LOCK(sc);
 	bf = _ath_getbuf_locked(sc);
 	if (bf == NULL) {
 		struct ifnet *ifp = sc->sc_ifp;
@@ -1760,7 +1759,6 @@ ath_getbuf(struct ath_softc *sc)
 		sc->sc_stats.ast_tx_qstop++;
 		ifp->if_flags |= IFF_OACTIVE;
 	}
-	ATH_TXBUF_UNLOCK(sc);
 	return bf;
 }
 
@@ -1774,8 +1772,6 @@ ath_txfrag_cleanup(struct ath_softc *sc,
 	ath_bufhead *frags, struct ieee80211_node *ni)
 {
 	struct ath_buf *bf, *next;
-
-	ATH_TXBUF_LOCK_ASSERT(sc);
 
 	STAILQ_FOREACH_MUTABLE(bf, frags, bf_list, next) {
 		/* NB: bf assumed clean */
@@ -1797,7 +1793,6 @@ ath_txfrag_setup(struct ath_softc *sc, ath_bufhead *frags,
 	struct mbuf *m;
 	struct ath_buf *bf;
 
-	ATH_TXBUF_LOCK(sc);
 	for (m = m0->m_nextpkt; m != NULL; m = m->m_nextpkt) {
 		bf = _ath_getbuf_locked(sc);
 		if (bf == NULL) {	/* out of buffers, cleanup */
@@ -1807,7 +1802,6 @@ ath_txfrag_setup(struct ath_softc *sc, ath_bufhead *frags,
 		ieee80211_node_incref(ni);
 		STAILQ_INSERT_TAIL(frags, bf, bf_list);
 	}
-	ATH_TXBUF_UNLOCK(sc);
 
 	return !STAILQ_EMPTY(frags);
 }
@@ -1835,9 +1829,7 @@ ath_start(struct ifnet *ifp)
 
 		IF_DEQUEUE(&ifp->if_snd, m);
 		if (m == NULL) {
-			ATH_TXBUF_LOCK(sc);
 			STAILQ_INSERT_HEAD(&sc->sc_txbuf, bf, bf_list);
-			ATH_TXBUF_UNLOCK(sc);
 			break;
 		}
 		ni = (struct ieee80211_node *) m->m_pkthdr.rcvif;
@@ -1878,10 +1870,8 @@ ath_start(struct ifnet *ifp)
 	reclaim:
 			bf->bf_m = NULL;
 			bf->bf_node = NULL;
-			ATH_TXBUF_LOCK(sc);
 			STAILQ_INSERT_HEAD(&sc->sc_txbuf, bf, bf_list);
 			ath_txfrag_cleanup(sc, &frags, ni);
-			ATH_TXBUF_UNLOCK(sc);
 			if (ni != NULL)
 				ieee80211_free_node(ni);
 			continue;
@@ -2350,7 +2340,6 @@ ath_key_update_begin(struct ieee80211vap *vap)
 
 	DPRINTF(sc, ATH_DEBUG_KEYCACHE, "%s:\n", __func__);
 	taskqueue_block(sc->sc_tq);
-	IF_LOCK(&ifp->if_snd);		/* NB: doesn't block mgmt frames */
 }
 
 static void
@@ -2360,7 +2349,6 @@ ath_key_update_end(struct ieee80211vap *vap)
 	struct ath_softc *sc = ifp->if_softc;
 
 	DPRINTF(sc, ATH_DEBUG_KEYCACHE, "%s:\n", __func__);
-	IF_UNLOCK(&ifp->if_snd);
 	taskqueue_unblock(sc->sc_tq);
 }
 
@@ -2806,7 +2794,8 @@ static void
 ath_txqmove(struct ath_txq *dst, struct ath_txq *src)
 {
 	STAILQ_CONCAT(&dst->axq_q, &src->axq_q);
-	dst->axq_link = src->axq_link;
+	if (src->axq_depth)
+		dst->axq_link = src->axq_link;
 	src->axq_link = NULL;
 	dst->axq_depth += src->axq_depth;
 	src->axq_depth = 0;
@@ -2850,6 +2839,15 @@ ath_beacon_proc(void *arg, int pending)
 			"%s: resume beacon xmit after %u misses\n",
 			__func__, sc->sc_bmisscount);
 		sc->sc_bmisscount = 0;
+	}
+
+	/*
+	 * Stop any current dma before messing with the beacon linkages.
+	 */
+	if (!ath_hal_stoptxdma(ah, sc->sc_bhalq)) {
+		DPRINTF(sc, ATH_DEBUG_ANY,
+			"%s: beacon queue %u did not stop?\n",
+			__func__, sc->sc_bhalq);
 	}
 
 	if (sc->sc_stagbeacons) {			/* staggered beacons */
@@ -2910,22 +2908,12 @@ ath_beacon_proc(void *arg, int pending)
 	}
 
 	if (bfaddr != 0) {
-		/*
-		 * Stop any current dma and put the new frame on the queue.
-		 * This should never fail since we check above that no frames
-		 * are still pending on the queue.
-		 */
-		if (!ath_hal_stoptxdma(ah, sc->sc_bhalq)) {
-			DPRINTF(sc, ATH_DEBUG_ANY,
-				"%s: beacon queue %u did not stop?\n",
-				__func__, sc->sc_bhalq);
-		}
 		/* NB: cabq traffic should already be queued and primed */
 		ath_hal_puttxbuf(ah, sc->sc_bhalq, bfaddr);
-		ath_hal_txstart(ah, sc->sc_bhalq);
-
 		sc->sc_stats.ast_be_xmit++;
+		ath_hal_txstart(ah, sc->sc_bhalq);
 	}
+	/* else no beacon will be generated */
 }
 
 static struct ath_buf *
@@ -2990,29 +2978,39 @@ ath_beacon_generate(struct ath_softc *sc, struct ieee80211vap *vap)
 		struct ath_hal *ah = sc->sc_ah;
 
 		/* NB: only at DTIM */
-		ATH_TXQ_LOCK(cabq);
-		ATH_TXQ_LOCK(&avp->av_mcastq);
 		if (nmcastq) {
 			struct ath_buf *bfm;
+			int qbusy;
 
 			/*
 			 * Move frames from the s/w mcast q to the h/w cab q.
 			 * XXX MORE_DATA bit
 			 */
 			bfm = STAILQ_FIRST(&avp->av_mcastq.axq_q);
-			if (cabq->axq_link != NULL) {
-				*cabq->axq_link = bfm->bf_daddr;
-			} else
-				ath_hal_puttxbuf(ah, cabq->axq_qnum,
-					bfm->bf_daddr);
+			qbusy = ath_hal_txqenabled(ah, cabq->axq_qnum);
+			if (qbusy == 0) {
+				if (cabq->axq_link != NULL) {
+					cpu_sfence();
+					*cabq->axq_link = bfm->bf_daddr;
+					cabq->axq_flags |= ATH_TXQ_PUTPENDING;
+				} else {
+					cpu_sfence();
+					ath_hal_puttxbuf(ah, cabq->axq_qnum,
+						bfm->bf_daddr);
+				}
+			} else {
+				if (cabq->axq_link != NULL) {
+					cpu_sfence();
+					*cabq->axq_link = bfm->bf_daddr;
+				}
+				cabq->axq_flags |= ATH_TXQ_PUTPENDING;
+			}
 			ath_txqmove(cabq, &avp->av_mcastq);
 
 			sc->sc_stats.ast_cabq_xmit += nmcastq;
 		}
 		/* NB: gated by beacon so safe to start here */
 		ath_hal_txstart(ah, cabq->axq_qnum);
-		ATH_TXQ_UNLOCK(cabq);
-		ATH_TXQ_UNLOCK(&avp->av_mcastq);
 	}
 	return bf;
 }
@@ -3061,15 +3059,17 @@ ath_beacon_start_adhoc(struct ath_softc *sc, struct ieee80211vap *vap)
  * Reset the hardware after detecting beacons have stopped.
  */
 static void
-ath_bstuck_proc(void *arg, int pending)
+ath_bstuck_task(void *arg, int pending)
 {
 	struct ath_softc *sc = arg;
 	struct ifnet *ifp = sc->sc_ifp;
 
+	wlan_serialize_enter();
 	if_printf(ifp, "stuck beacon; resetting (bmiss count %u)\n",
-		sc->sc_bmisscount);
+		  sc->sc_bmisscount);
 	sc->sc_stats.ast_bstuck++;
 	ath_reset(ifp);
+	wlan_serialize_exit();
 }
 
 /*
@@ -3566,8 +3566,9 @@ ath_rxbuf_init(struct ath_softc *sc, struct ath_buf *bf)
 		 * multiple of the cache line size.  Not doing this
 		 * causes weird stuff to happen (for the 5210 at least).
 		 */
-		m = m_getcl(MB_DONTWAIT, MT_DATA, M_PKTHDR);
+		m = m_getcl(MB_WAIT, MT_DATA, M_PKTHDR);
 		if (m == NULL) {
+			kprintf("ath_rxbuf_init: no mbuf\n");
 			DPRINTF(sc, ATH_DEBUG_ANY,
 				"%s: no mbuf/cluster\n", __func__);
 			sc->sc_stats.ast_rx_nombuf++;
@@ -3768,16 +3769,16 @@ ath_handle_micerror(struct ieee80211com *ic,
 }
 
 static void
-ath_rx_proc(void *arg, int npending)
+ath_rx_task(void *arg, int npending)
 {
 #define	PA2DESC(_sc, _pa) \
 	((struct ath_desc *)((caddr_t)(_sc)->sc_rxdma.dd_desc + \
 		((_pa) - (_sc)->sc_rxdma.dd_desc_paddr)))
 	struct ath_softc *sc = arg;
 	struct ath_buf *bf;
-	struct ifnet *ifp = sc->sc_ifp;
-	struct ieee80211com *ic = ifp->if_l2com;
-	struct ath_hal *ah = sc->sc_ah;
+	struct ifnet *ifp;
+	struct ieee80211com *ic;
+	struct ath_hal *ah;
 	struct ath_desc *ds;
 	struct ath_rx_status *rs;
 	struct mbuf *m;
@@ -3787,6 +3788,11 @@ ath_rx_proc(void *arg, int npending)
 	HAL_STATUS status;
 	int16_t nf;
 	u_int64_t tsf;
+
+	wlan_serialize_enter();
+	ifp = sc->sc_ifp;
+	ic = ifp->if_l2com;
+	ah = sc->sc_ah;
 
 	DPRINTF(sc, ATH_DEBUG_RX_PROC, "%s: pending %u\n", __func__, npending);
 	ngood = 0;
@@ -4073,6 +4079,7 @@ rx_next:
 		if (!ifq_is_empty(&ifp->if_snd))
 			ath_start(ifp);
 	}
+	wlan_serialize_exit();
 #undef PA2DESC
 }
 
@@ -4085,7 +4092,6 @@ ath_txq_init(struct ath_softc *sc, struct ath_txq *txq, int qnum)
 	txq->axq_intrcnt = 0;
 	txq->axq_link = NULL;
 	STAILQ_INIT(&txq->axq_q);
-	ATH_TXQ_LOCK_INIT(sc, txq);
 }
 
 /*
@@ -4264,7 +4270,6 @@ ath_tx_cleanupq(struct ath_softc *sc, struct ath_txq *txq)
 {
 
 	ath_hal_releasetxqueue(sc->sc_ah, txq->axq_qnum);
-	ATH_TXQ_LOCK_DESTROY(txq);
 	sc->sc_txqsetup &= ~(1<<txq->axq_qnum);
 }
 
@@ -4276,7 +4281,6 @@ ath_tx_cleanup(struct ath_softc *sc)
 {
 	int i;
 
-	ATH_TXBUF_LOCK_DESTROY(sc);
 	for (i = 0; i < HAL_NUM_TX_QUEUES; i++)
 		if (ATH_TXQ_SETUP(sc, i))
 			ath_tx_cleanupq(sc, &sc->sc_txq[i]);
@@ -4381,64 +4385,64 @@ ath_tx_handoff(struct ath_softc *sc, struct ath_txq *txq, struct ath_buf *bf)
 	 * the SWBA handler since frames only go out on DTIM and
 	 * to avoid possible races.
 	 */
-	ATH_TXQ_LOCK(txq);
 	KASSERT((bf->bf_flags & ATH_BUF_BUSY) == 0,
 	     ("busy status 0x%x", bf->bf_flags));
 	if (txq->axq_qnum != ATH_TXQ_SWQ) {
 #ifdef IEEE80211_SUPPORT_TDMA
+		/*
+		 * Supporting transmit dma.  If the queue is busy it is
+		 * impossible to determine if we've won the race against
+		 * the chipset checking the link field or not, so we don't
+		 * try.  Instead we let the TX interrupt detect the case
+		 * and restart the transmitter.
+		 *
+		 * If the queue is not busy we can start things rolling
+		 * right here.
+		 */
 		int qbusy;
 
 		ATH_TXQ_INSERT_TAIL(txq, bf, bf_list);
 		qbusy = ath_hal_txqenabled(ah, txq->axq_qnum);
-		if (txq->axq_link == NULL) {
-			/*
-			 * Be careful writing the address to TXDP.  If
-			 * the tx q is enabled then this write will be
-			 * ignored.  Normally this is not an issue but
-			 * when tdma is in use and the q is beacon gated
-			 * this race can occur.  If the q is busy then
-			 * defer the work to later--either when another
-			 * packet comes along or when we prepare a beacon
-			 * frame at SWBA.
-			 */
-			if (!qbusy) {
-				ath_hal_puttxbuf(ah, txq->axq_qnum, bf->bf_daddr);
-				txq->axq_flags &= ~ATH_TXQ_PUTPENDING;
-				DPRINTF(sc, ATH_DEBUG_XMIT,
-				    "%s: TXDP[%u] = %p (%p) depth %d\n",
-				    __func__, txq->axq_qnum,
-				    (caddr_t)bf->bf_daddr, bf->bf_desc,
-				    txq->axq_depth);
-			} else {
+
+		if (qbusy == 0) {
+			if (txq->axq_link != NULL) {
+				/*
+				 * We had already started one previously but
+				 * not yet processed the TX interrupt.  Don't
+				 * try to race a restart because we do not
+				 * know where it stopped, let the TX interrupt
+				 * restart us when it figures out where we
+				 * stopped.
+				 */
+				cpu_sfence();
+				*txq->axq_link = bf->bf_daddr;
 				txq->axq_flags |= ATH_TXQ_PUTPENDING;
-				DPRINTF(sc, ATH_DEBUG_TDMA | ATH_DEBUG_XMIT,
-				    "%s: Q%u busy, defer enable\n", __func__,
-				    txq->axq_qnum);
+			} else {
+				/*
+				 * We are first in line, we can safely start
+				 * at this address.
+				 */
+				cpu_sfence();
+				ath_hal_puttxbuf(ah, txq->axq_qnum,
+						 bf->bf_daddr);
 			}
 		} else {
-			*txq->axq_link = bf->bf_daddr;
-			DPRINTF(sc, ATH_DEBUG_XMIT,
-			    "%s: link[%u](%p)=%p (%p) depth %d\n", __func__,
-			    txq->axq_qnum, txq->axq_link,
-			    (caddr_t)bf->bf_daddr, bf->bf_desc, txq->axq_depth);
-			if ((txq->axq_flags & ATH_TXQ_PUTPENDING) && !qbusy) {
-				/*
-				 * The q was busy when we previously tried
-				 * to write the address of the first buffer
-				 * in the chain.  Since it's not busy now
-				 * handle this chore.  We are certain the
-				 * buffer at the front is the right one since
-				 * axq_link is NULL only when the buffer list
-				 * is/was empty.
-				 */
+			/*
+			 * The queue is busy, go ahead and link us in but
+			 * do not try to start/restart the tx.  We just
+			 * don't know whether it will pick up our link
+			 * or not and we don't want to double-xmit.
+			 */
+			if (txq->axq_link != NULL) {
+				cpu_sfence();
+				*txq->axq_link = bf->bf_daddr;
+			}
+			txq->axq_flags |= ATH_TXQ_PUTPENDING;
+		}
+#if 0
 				ath_hal_puttxbuf(ah, txq->axq_qnum,
 					STAILQ_FIRST(&txq->axq_q)->bf_daddr);
-				txq->axq_flags &= ~ATH_TXQ_PUTPENDING;
-				DPRINTF(sc, ATH_DEBUG_TDMA | ATH_DEBUG_XMIT,
-				    "%s: Q%u restarted\n", __func__,
-				    txq->axq_qnum);
-			}
-		}
+#endif
 #else
 		ATH_TXQ_INSERT_TAIL(txq, bf, bf_list);
 		if (txq->axq_link == NULL) {
@@ -4475,7 +4479,6 @@ ath_tx_handoff(struct ath_softc *sc, struct ath_txq *txq, struct ath_buf *bf)
 		ATH_TXQ_INSERT_TAIL(txq, bf, bf_list);
 		txq->axq_link = &bf->bf_desc[bf->bf_nseg - 1].ds_link;
 	}
-	ATH_TXQ_UNLOCK(txq);
 }
 
 static int
@@ -4912,16 +4915,16 @@ ath_tx_processq(struct ath_softc *sc, struct ath_txq *txq)
 		txq->axq_link);
 	nacked = 0;
 	for (;;) {
-		ATH_TXQ_LOCK(txq);
+		int qbusy;
+
 		txq->axq_intrcnt = 0;	/* reset periodic desc intr count */
 		bf = STAILQ_FIRST(&txq->axq_q);
-		if (bf == NULL) {
-			ATH_TXQ_UNLOCK(txq);
+		if (bf == NULL)
 			break;
-		}
 		ds0 = &bf->bf_desc[0];
 		ds = &bf->bf_desc[bf->bf_nseg - 1];
 		ts = &bf->bf_status.ds_txstat;
+		qbusy = ath_hal_txqenabled(ah, txq->axq_qnum);
 		status = ath_hal_txprocdesc(ah, ds, ts);
 #ifdef ATH_DEBUG
 		if (sc->sc_debug & ATH_DEBUG_XMIT_DESC)
@@ -4929,7 +4932,19 @@ ath_tx_processq(struct ath_softc *sc, struct ath_txq *txq)
 			    status == HAL_OK);
 #endif
 		if (status == HAL_EINPROGRESS) {
-			ATH_TXQ_UNLOCK(txq);
+#ifdef IEEE80211_SUPPORT_TDMA
+			/*
+			 * If not done and the queue is not busy then the
+			 * transmitter raced the hardware on the link field
+			 * and we have to restart it.
+			 */
+			if (!qbusy) {
+				cpu_sfence();
+				ath_hal_puttxbuf(ah, txq->axq_qnum,
+						 bf->bf_daddr);
+				ath_hal_txstart(ah, txq->axq_qnum);
+			}
+#endif
 			break;
 		}
 		ATH_TXQ_REMOVE_HEAD(txq, bf_list);
@@ -4946,7 +4961,6 @@ ath_tx_processq(struct ath_softc *sc, struct ath_txq *txq)
 		if (txq->axq_depth == 0)
 #endif
 			txq->axq_link = NULL;
-		ATH_TXQ_UNLOCK(txq);
 
 		ni = bf->bf_node;
 		if (ni != NULL) {
@@ -5012,12 +5026,10 @@ ath_tx_processq(struct ath_softc *sc, struct ath_txq *txq)
 		bf->bf_m = NULL;
 		bf->bf_node = NULL;
 
-		ATH_TXBUF_LOCK(sc);
 		last = STAILQ_LAST(&sc->sc_txbuf, ath_buf, bf_list);
 		if (last != NULL)
 			last->bf_flags &= ~ATH_BUF_BUSY;
 		STAILQ_INSERT_TAIL(&sc->sc_txbuf, bf, bf_list);
-		ATH_TXBUF_UNLOCK(sc);
 	}
 #ifdef IEEE80211_SUPPORT_SUPERG
 	/*
@@ -5042,11 +5054,12 @@ txqactive(struct ath_hal *ah, int qnum)
  * for a single hardware transmit queue (e.g. 5210 and 5211).
  */
 static void
-ath_tx_proc_q0(void *arg, int npending)
+ath_tx_task_q0(void *arg, int npending)
 {
 	struct ath_softc *sc = arg;
 	struct ifnet *ifp = sc->sc_ifp;
 
+	wlan_serialize_enter();
 	if (txqactive(sc->sc_ah, 0) && ath_tx_processq(sc, &sc->sc_txq[0]))
 		sc->sc_lastrx = ath_hal_gettsf64(sc->sc_ah);
 	if (txqactive(sc->sc_ah, sc->sc_cabq->axq_qnum))
@@ -5058,6 +5071,7 @@ ath_tx_proc_q0(void *arg, int npending)
 		ath_led_event(sc, sc->sc_txrix);
 
 	ath_start(ifp);
+	wlan_serialize_exit();
 }
 
 /*
@@ -5065,12 +5079,13 @@ ath_tx_proc_q0(void *arg, int npending)
  * for four hardware queues, 0-3 (e.g. 5212 w/ WME support).
  */
 static void
-ath_tx_proc_q0123(void *arg, int npending)
+ath_tx_task_q0123(void *arg, int npending)
 {
 	struct ath_softc *sc = arg;
 	struct ifnet *ifp = sc->sc_ifp;
 	int nacked;
 
+	wlan_serialize_enter();
 	/*
 	 * Process each active queue.
 	 */
@@ -5095,25 +5110,29 @@ ath_tx_proc_q0123(void *arg, int npending)
 		ath_led_event(sc, sc->sc_txrix);
 
 	ath_start(ifp);
+	wlan_serialize_exit();
 }
 
 /*
  * Deferred processing of transmit interrupt.
  */
 static void
-ath_tx_proc(void *arg, int npending)
+ath_tx_task(void *arg, int npending)
 {
 	struct ath_softc *sc = arg;
 	struct ifnet *ifp = sc->sc_ifp;
 	int i, nacked;
 
+	wlan_serialize_enter();
+
 	/*
 	 * Process each active queue.
 	 */
 	nacked = 0;
-	for (i = 0; i < HAL_NUM_TX_QUEUES; i++)
+	for (i = 0; i < HAL_NUM_TX_QUEUES; i++) {
 		if (ATH_TXQ_SETUP(sc, i) && txqactive(sc->sc_ah, i))
 			nacked += ath_tx_processq(sc, &sc->sc_txq[i]);
+	}
 	if (nacked)
 		sc->sc_lastrx = ath_hal_gettsf64(sc->sc_ah);
 
@@ -5124,6 +5143,7 @@ ath_tx_proc(void *arg, int npending)
 		ath_led_event(sc, sc->sc_txrix);
 
 	ath_start(ifp);
+	wlan_serialize_exit();
 }
 
 static void
@@ -5140,21 +5160,16 @@ ath_tx_draintxq(struct ath_softc *sc, struct ath_txq *txq)
 	 * NB: this assumes output has been stopped and
 	 *     we do not need to block ath_tx_proc
 	 */
-	ATH_TXBUF_LOCK(sc);
 	bf = STAILQ_LAST(&sc->sc_txbuf, ath_buf, bf_list);
 	if (bf != NULL)
 		bf->bf_flags &= ~ATH_BUF_BUSY;
-	ATH_TXBUF_UNLOCK(sc);
 	for (ix = 0;; ix++) {
-		ATH_TXQ_LOCK(txq);
 		bf = STAILQ_FIRST(&txq->axq_q);
 		if (bf == NULL) {
 			txq->axq_link = NULL;
-			ATH_TXQ_UNLOCK(txq);
 			break;
 		}
 		ATH_TXQ_REMOVE_HEAD(txq, bf_list);
-		ATH_TXQ_UNLOCK(txq);
 #ifdef ATH_DEBUG
 		if (sc->sc_debug & ATH_DEBUG_RESET) {
 			struct ieee80211com *ic = sc->sc_ifp->if_l2com;
@@ -5181,9 +5196,7 @@ ath_tx_draintxq(struct ath_softc *sc, struct ath_txq *txq)
 		bf->bf_m = NULL;
 		bf->bf_flags &= ~ATH_BUF_BUSY;
 
-		ATH_TXBUF_LOCK(sc);
 		STAILQ_INSERT_TAIL(&sc->sc_txbuf, bf, bf_list);
-		ATH_TXBUF_UNLOCK(sc);
 	}
 }
 
@@ -5394,7 +5407,7 @@ ath_chan_set(struct ath_softc *sc, struct ieee80211_channel *chan)
  * for temperature/environment changes.
  */
 static void
-ath_calibrate(void *arg)
+ath_calibrate_callout(void *arg)
 {
 	struct ath_softc *sc = arg;
 	struct ath_hal *ah = sc->sc_ah;
@@ -5403,13 +5416,14 @@ ath_calibrate(void *arg)
 	HAL_BOOL longCal, isCalDone;
 	int nextcal;
 
-	ATH_LOCK(sc);
+	wlan_serialize_enter();
 
 	if (ic->ic_flags & IEEE80211_F_SCAN)	/* defer, off channel */
 		goto restart;
 	longCal = (ticks - sc->sc_lastlongcal >= ath_longcalinterval*hz);
 	if (longCal) {
 		sc->sc_stats.ast_per_cal++;
+		sc->sc_lastlongcal = ticks;
 		if (ath_hal_getrfgain(ah) == HAL_RFGAIN_NEED_CHANGE) {
 			/*
 			 * Rfgain is out of bounds, reset the chip
@@ -5458,7 +5472,6 @@ restart:
 			nextcal *= 10;
 	} else {
 		nextcal = ath_longcalinterval*hz;
-		sc->sc_lastlongcal = ticks;
 		if (sc->sc_lastcalreset == 0)
 			sc->sc_lastcalreset = sc->sc_lastlongcal;
 		else if (ticks - sc->sc_lastcalreset >= ath_resetcalinterval*hz)
@@ -5468,14 +5481,14 @@ restart:
 	if (nextcal != 0) {
 		DPRINTF(sc, ATH_DEBUG_CALIBRATE, "%s: next +%u (%sisCalDone)\n",
 		    __func__, nextcal, isCalDone ? "" : "!");
-		callout_reset(&sc->sc_cal_ch, nextcal, ath_calibrate, sc);
+		callout_reset(&sc->sc_cal_ch, nextcal,
+			      ath_calibrate_callout, sc);
 	} else {
 		DPRINTF(sc, ATH_DEBUG_CALIBRATE, "%s: calibration disabled\n",
 		    __func__);
 		/* NB: don't rearm timer */
 	}
-
-	ATH_UNLOCK(sc);
+	wlan_serialize_exit();
 }
 
 static void
@@ -5543,8 +5556,6 @@ ath_isanyrunningvaps(struct ieee80211vap *this)
 {
 	struct ieee80211com *ic = this->iv_ic;
 	struct ieee80211vap *vap;
-
-	IEEE80211_LOCK_ASSERT(ic);
 
 	TAILQ_FOREACH(vap, &ic->ic_vaps, iv_next) {
 		if (vap != this && vap->iv_state >= IEEE80211_S_RUN)
@@ -5717,7 +5728,8 @@ ath_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 		 */
 		if (ath_longcalinterval != 0) {
 			/* start periodic recalibration timer */
-			callout_reset(&sc->sc_cal_ch, 1, ath_calibrate, sc);
+			callout_reset(&sc->sc_cal_ch, 1,
+				      ath_calibrate_callout, sc);
 		} else {
 			DPRINTF(sc, ATH_DEBUG_CALIBRATE,
 			    "%s: calibration disabled\n", __func__);
@@ -5881,11 +5893,13 @@ ath_getchannels(struct ath_softc *sc)
 }
 
 static void
-ath_led_done(void *arg)
+ath_led_done_callout(void *arg)
 {
 	struct ath_softc *sc = arg;
 
+	wlan_serialize_enter();
 	sc->sc_blinking = 0;
+	wlan_serialize_exit();
 }
 
 /*
@@ -5893,12 +5907,15 @@ ath_led_done(void *arg)
  * update will happen for the specified duration.
  */
 static void
-ath_led_off(void *arg)
+ath_led_off_callout(void *arg)
 {
 	struct ath_softc *sc = arg;
 
+	wlan_serialize_enter();
 	ath_hal_gpioset(sc->sc_ah, sc->sc_ledpin, !sc->sc_ledon);
-	callout_reset(&sc->sc_ledtimer, sc->sc_ledoff, ath_led_done, sc);
+	callout_reset(&sc->sc_ledtimer, sc->sc_ledoff,
+			ath_led_done_callout, sc);
+	wlan_serialize_exit();
 }
 
 /*
@@ -5911,7 +5928,7 @@ ath_led_blink(struct ath_softc *sc, int on, int off)
 	ath_hal_gpioset(sc->sc_ah, sc->sc_ledpin, sc->sc_ledon);
 	sc->sc_blinking = 1;
 	sc->sc_ledoff = off;
-	callout_reset(&sc->sc_ledtimer, on, ath_led_off, sc);
+	callout_reset(&sc->sc_ledtimer, on, ath_led_off_callout, sc);
 }
 
 static void
@@ -6106,12 +6123,11 @@ ath_printtxbuf(struct ath_softc *sc, const struct ath_buf *bf,
 #endif /* ATH_DEBUG */
 
 static void
-ath_watchdog(void *arg)
+ath_watchdog_callout(void *arg)
 {
 	struct ath_softc *sc = arg;
 
-	ATH_LOCK(sc);
-
+	wlan_serialize_enter();
 	if (sc->sc_wd_timer != 0 && --sc->sc_wd_timer == 0) {
 		struct ifnet *ifp = sc->sc_ifp;
 		uint32_t hangs;
@@ -6126,9 +6142,8 @@ ath_watchdog(void *arg)
 		ifp->if_oerrors++;
 		sc->sc_stats.ast_watchdog++;
 	}
-	callout_reset(&sc->sc_wd_ch, hz, ath_watchdog, sc);
-
-	ATH_UNLOCK(sc);
+	callout_reset(&sc->sc_wd_ch, hz, ath_watchdog_callout, sc);
+	wlan_serialize_exit();
 }
 
 #ifdef ATH_DIAGAPI
@@ -6207,7 +6222,6 @@ ath_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data, struct ucred *ucred)
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
-		ATH_LOCK(sc);
 		if (IS_RUNNING(ifp)) {
 			/*
 			 * To avoid rescanning another access point,
@@ -6235,7 +6249,6 @@ ath_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data, struct ucred *ucred)
 				ath_hal_setpower(sc->sc_ah, HAL_PM_FULL_SLEEP);
 #endif
 		}
-		ATH_UNLOCK(sc);
 		break;
 	case SIOCGIFMEDIA:
 	case SIOCSIFMEDIA:
@@ -6282,39 +6295,54 @@ static int
 ath_sysctl_slottime(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	u_int slottime = ath_hal_getslottime(sc->sc_ah);
+	u_int slottime;
 	int error;
 
+	wlan_serialize_enter();
+	slottime = ath_hal_getslottime(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &slottime, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_setslottime(sc->sc_ah, slottime) ? EINVAL : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_setslottime(sc->sc_ah, slottime))
+			error = EINVAL;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
 ath_sysctl_acktimeout(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	u_int acktimeout = ath_hal_getacktimeout(sc->sc_ah);
+	u_int acktimeout;
 	int error;
 
+	wlan_serialize_enter();
+	acktimeout = ath_hal_getacktimeout(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &acktimeout, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_setacktimeout(sc->sc_ah, acktimeout) ? EINVAL : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_setacktimeout(sc->sc_ah, acktimeout))
+			error = EINVAL;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
 ath_sysctl_ctstimeout(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	u_int ctstimeout = ath_hal_getctstimeout(sc->sc_ah);
+	u_int ctstimeout;
 	int error;
 
+	wlan_serialize_enter();
+	ctstimeout = ath_hal_getctstimeout(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &ctstimeout, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_setctstimeout(sc->sc_ah, ctstimeout) ? EINVAL : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_setctstimeout(sc->sc_ah, ctstimeout))
+			error = EINVAL;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
@@ -6327,6 +6355,7 @@ ath_sysctl_softled(SYSCTL_HANDLER_ARGS)
 	error = sysctl_handle_int(oidp, &softled, 0, req);
 	if (error || !req->newptr)
 		return error;
+	wlan_serialize_enter();
 	softled = (softled != 0);
 	if (softled != sc->sc_softled) {
 		if (softled) {
@@ -6338,6 +6367,7 @@ ath_sysctl_softled(SYSCTL_HANDLER_ARGS)
 		}
 		sc->sc_softled = softled;
 	}
+	wlan_serialize_exit();
 	return 0;
 }
 
@@ -6351,6 +6381,7 @@ ath_sysctl_ledpin(SYSCTL_HANDLER_ARGS)
 	error = sysctl_handle_int(oidp, &ledpin, 0, req);
 	if (error || !req->newptr)
 		return error;
+	wlan_serialize_enter();
 	if (ledpin != sc->sc_ledpin) {
 		sc->sc_ledpin = ledpin;
 		if (sc->sc_softled) {
@@ -6360,6 +6391,7 @@ ath_sysctl_ledpin(SYSCTL_HANDLER_ARGS)
 				!sc->sc_ledon);
 		}
 	}
+	wlan_serialize_exit();
 	return 0;
 }
 
@@ -6367,22 +6399,29 @@ static int
 ath_sysctl_txantenna(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	u_int txantenna = ath_hal_getantennaswitch(sc->sc_ah);
+	u_int txantenna;
 	int error;
 
+	wlan_serialize_enter();
+	txantenna = ath_hal_getantennaswitch(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &txantenna, 0, req);
+
 	if (!error && req->newptr) {
 		/* XXX assumes 2 antenna ports */
-		if (txantenna < HAL_ANT_VARIABLE || txantenna > HAL_ANT_FIXED_B)
-			return EINVAL;
-		ath_hal_setantennaswitch(sc->sc_ah, txantenna);
-		/*
-		 * NB: with the switch locked this isn't meaningful,
-		 *     but set it anyway so things like radiotap get
-		 *     consistent info in their data.
-		 */
-		sc->sc_txantenna = txantenna;
+		if (txantenna < HAL_ANT_VARIABLE ||
+		    txantenna > HAL_ANT_FIXED_B) {
+			error = EINVAL;
+		} else {
+			ath_hal_setantennaswitch(sc->sc_ah, txantenna);
+			/*
+			 * NB: with the switch locked this isn't meaningful,
+			 *     but set it anyway so things like radiotap get
+			 *     consistent info in their data.
+			 */
+			sc->sc_txantenna = txantenna;
+		}
 	}
+	wlan_serialize_exit();
 	return error;
 }
 
@@ -6390,12 +6429,15 @@ static int
 ath_sysctl_rxantenna(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	u_int defantenna = ath_hal_getdefantenna(sc->sc_ah);
+	u_int defantenna;
 	int error;
 
+	wlan_serialize_enter();
+	defantenna = ath_hal_getdefantenna(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &defantenna, 0, req);
-	if (!error && req->newptr)
+	if (error == 0 && req->newptr)
 		ath_hal_setdefantenna(sc->sc_ah, defantenna);
+	wlan_serialize_exit();
 	return error;
 }
 
@@ -6403,16 +6445,20 @@ static int
 ath_sysctl_diversity(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	u_int diversity = ath_hal_getdiversity(sc->sc_ah);
+	u_int diversity;
 	int error;
 
+	wlan_serialize_enter();
+	diversity = ath_hal_getdiversity(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &diversity, 0, req);
-	if (error || !req->newptr)
-		return error;
-	if (!ath_hal_setdiversity(sc->sc_ah, diversity))
-		return EINVAL;
-	sc->sc_diversity = diversity;
-	return 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_setdiversity(sc->sc_ah, diversity))
+			error = EINVAL;
+		else
+			sc->sc_diversity = diversity;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
@@ -6422,12 +6468,18 @@ ath_sysctl_diag(SYSCTL_HANDLER_ARGS)
 	u_int32_t diag;
 	int error;
 
-	if (!ath_hal_getdiag(sc->sc_ah, &diag))
-		return EINVAL;
-	error = sysctl_handle_int(oidp, &diag, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_setdiag(sc->sc_ah, diag) ? EINVAL : 0;
+	wlan_serialize_enter();
+	if (!ath_hal_getdiag(sc->sc_ah, &diag)) {
+		error = EINVAL;
+	} else {
+		error = sysctl_handle_int(oidp, &diag, 0, req);
+		if (error == 0 && req->newptr) {
+			if (!ath_hal_setdiag(sc->sc_ah, diag))
+				error = EINVAL;
+		}
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
@@ -6438,44 +6490,62 @@ ath_sysctl_tpscale(SYSCTL_HANDLER_ARGS)
 	u_int32_t scale;
 	int error;
 
-	(void) ath_hal_gettpscale(sc->sc_ah, &scale);
+	wlan_serialize_enter();
+	(void)ath_hal_gettpscale(sc->sc_ah, &scale);
 	error = sysctl_handle_int(oidp, &scale, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_settpscale(sc->sc_ah, scale) ? EINVAL :
-	    (ifp->if_flags & IFF_RUNNING) ? ath_reset(ifp) : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_settpscale(sc->sc_ah, scale))
+			error = EINVAL;
+		else if (ifp->if_flags & IFF_RUNNING)
+			error = ath_reset(ifp);
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
 ath_sysctl_tpc(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	u_int tpc = ath_hal_gettpc(sc->sc_ah);
+	u_int tpc;
 	int error;
 
+	wlan_serialize_enter();
+	tpc = ath_hal_gettpc(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &tpc, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_settpc(sc->sc_ah, tpc) ? EINVAL : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_settpc(sc->sc_ah, tpc))
+			error = EINVAL;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
 ath_sysctl_rfkill(SYSCTL_HANDLER_ARGS)
 {
 	struct ath_softc *sc = arg1;
-	struct ifnet *ifp = sc->sc_ifp;
-	struct ath_hal *ah = sc->sc_ah;
-	u_int rfkill = ath_hal_getrfkill(ah);
+	struct ifnet *ifp;
+	struct ath_hal *ah;
+	u_int rfkill;
 	int error;
 
+	wlan_serialize_enter();
+	ifp = sc->sc_ifp;
+	ah = sc->sc_ah;
+	rfkill = ath_hal_getrfkill(ah);
+
 	error = sysctl_handle_int(oidp, &rfkill, 0, req);
-	if (error || !req->newptr)
-		return error;
-	if (rfkill == ath_hal_getrfkill(ah))	/* unchanged */
-		return 0;
-	if (!ath_hal_setrfkill(ah, rfkill))
-		return EINVAL;
-	return (ifp->if_flags & IFF_RUNNING) ? ath_reset(ifp) : 0;
+	if (error == 0 && req->newptr) {
+		if (rfkill != ath_hal_getrfkill(ah)) {
+			if (!ath_hal_setrfkill(ah, rfkill))
+				error = EINVAL;
+			else if (ifp->if_flags & IFF_RUNNING)
+				error = ath_reset(ifp);
+		}
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
@@ -6485,15 +6555,19 @@ ath_sysctl_rfsilent(SYSCTL_HANDLER_ARGS)
 	u_int rfsilent;
 	int error;
 
-	(void) ath_hal_getrfsilent(sc->sc_ah, &rfsilent);
+	wlan_serialize_enter();
+	(void)ath_hal_getrfsilent(sc->sc_ah, &rfsilent);
 	error = sysctl_handle_int(oidp, &rfsilent, 0, req);
-	if (error || !req->newptr)
-		return error;
-	if (!ath_hal_setrfsilent(sc->sc_ah, rfsilent))
-		return EINVAL;
-	sc->sc_rfsilentpin = rfsilent & 0x1c;
-	sc->sc_rfsilentpol = (rfsilent & 0x2) != 0;
-	return 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_setrfsilent(sc->sc_ah, rfsilent)) {
+			error = EINVAL;
+		} else {
+			sc->sc_rfsilentpin = rfsilent & 0x1c;
+			sc->sc_rfsilentpol = (rfsilent & 0x2) != 0;
+		}
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
@@ -6503,11 +6577,15 @@ ath_sysctl_tpack(SYSCTL_HANDLER_ARGS)
 	u_int32_t tpack;
 	int error;
 
-	(void) ath_hal_gettpack(sc->sc_ah, &tpack);
+	wlan_serialize_enter();
+	(void)ath_hal_gettpack(sc->sc_ah, &tpack);
 	error = sysctl_handle_int(oidp, &tpack, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_settpack(sc->sc_ah, tpack) ? EINVAL : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_settpack(sc->sc_ah, tpack))
+			error = EINVAL;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
@@ -6517,11 +6595,15 @@ ath_sysctl_tpcts(SYSCTL_HANDLER_ARGS)
 	u_int32_t tpcts;
 	int error;
 
-	(void) ath_hal_gettpcts(sc->sc_ah, &tpcts);
+	wlan_serialize_enter();
+	(void)ath_hal_gettpcts(sc->sc_ah, &tpcts);
 	error = sysctl_handle_int(oidp, &tpcts, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_settpcts(sc->sc_ah, tpcts) ? EINVAL : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_settpcts(sc->sc_ah, tpcts))
+			error = EINVAL;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 static int
@@ -6530,11 +6612,15 @@ ath_sysctl_intmit(SYSCTL_HANDLER_ARGS)
 	struct ath_softc *sc = arg1;
 	int intmit, error;
 
+	wlan_serialize_enter();
 	intmit = ath_hal_getintmit(sc->sc_ah);
 	error = sysctl_handle_int(oidp, &intmit, 0, req);
-	if (error || !req->newptr)
-		return error;
-	return !ath_hal_setintmit(sc->sc_ah, intmit) ? EINVAL : 0;
+	if (error == 0 && req->newptr) {
+		if (!ath_hal_setintmit(sc->sc_ah, intmit))
+			error = EINVAL;
+	}
+	wlan_serialize_exit();
+	return error;
 }
 
 #ifdef IEEE80211_SUPPORT_TDMA
@@ -6544,12 +6630,13 @@ ath_sysctl_setcca(SYSCTL_HANDLER_ARGS)
 	struct ath_softc *sc = arg1;
 	int setcca, error;
 
+	wlan_serialize_enter();
 	setcca = sc->sc_setcca;
 	error = sysctl_handle_int(oidp, &setcca, 0, req);
-	if (error || !req->newptr)
-		return error;
-	sc->sc_setcca = (setcca != 0);
-	return 0;
+	if (error == 0 && req->newptr)
+		sc->sc_setcca = (setcca != 0);
+	wlan_serialize_exit();
+	return error;
 }
 #endif /* IEEE80211_SUPPORT_TDMA */
 
@@ -6930,9 +7017,7 @@ ath_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 
 	return 0;
 bad2:
-	ATH_TXBUF_LOCK(sc);
 	STAILQ_INSERT_HEAD(&sc->sc_txbuf, bf, bf_list);
-	ATH_TXBUF_UNLOCK(sc);
 bad:
 	ifp->if_oerrors++;
 	sc->sc_stats.ast_tx_raw_fail++;
@@ -7306,19 +7391,20 @@ ath_tdma_beacon_send(struct ath_softc *sc, struct ieee80211vap *vap)
 		sc->sc_ant_tx[1] = sc->sc_ant_tx[2] = 0;
 	}
 
+	/*
+	 * Stop any current dma before messing with the beacon linkages.
+	 *
+	 * This should never fail since we check above that no frames
+	 * are still pending on the queue.
+	 */
+	if (!ath_hal_stoptxdma(ah, sc->sc_bhalq)) {
+		DPRINTF(sc, ATH_DEBUG_ANY,
+			"%s: beacon queue %u did not stop?\n",
+			__func__, sc->sc_bhalq);
+		/* NB: the HAL still stops DMA, so proceed */
+	}
 	bf = ath_beacon_generate(sc, vap);
 	if (bf != NULL) {
-		/*
-		 * Stop any current dma and put the new frame on the queue.
-		 * This should never fail since we check above that no frames
-		 * are still pending on the queue.
-		 */
-		if (!ath_hal_stoptxdma(ah, sc->sc_bhalq)) {
-			DPRINTF(sc, ATH_DEBUG_ANY,
-				"%s: beacon queue %u did not stop?\n",
-				__func__, sc->sc_bhalq);
-			/* NB: the HAL still stops DMA, so proceed */
-		}
 		ath_hal_puttxbuf(ah, sc->sc_bhalq, bf->bf_daddr);
 		ath_hal_txstart(ah, sc->sc_bhalq);
 
@@ -7329,6 +7415,200 @@ ath_tdma_beacon_send(struct ath_softc *sc, struct ieee80211vap *vap)
 		 * in arbitrating slot collisions.
 		 */
 		vap->iv_bss->ni_tstamp.tsf = ath_hal_gettsf64(ah);
+	} else {
+		device_printf(sc->sc_dev, "tdma beacon gen failed!\n");
 	}
 }
 #endif /* IEEE80211_SUPPORT_TDMA */
+
+static int
+ath_sysctl_clearstats(SYSCTL_HANDLER_ARGS)
+{
+	struct ath_softc *sc = arg1;
+	int val = 0;
+	int error;
+
+	error = sysctl_handle_int(oidp, &val, 0, req);
+	if (error || !req->newptr)
+		return error;
+	if (val == 0)
+		return 0;       /* Not clearing the stats is still valid */
+	memset(&sc->sc_stats, 0, sizeof(sc->sc_stats));
+	val = 0;
+	return 0;
+}
+
+static void
+ath_sysctl_stats_attach(struct ath_softc *sc)
+{
+	struct sysctl_oid *tree;
+	struct sysctl_ctx_list *ctx;
+	struct sysctl_oid_list *child;
+
+	ctx = &sc->sc_sysctl_ctx;
+	tree = sc->sc_sysctl_tree;
+	child = SYSCTL_CHILDREN(tree);
+
+	/* Create "clear" node */
+	SYSCTL_ADD_PROC(ctx, SYSCTL_CHILDREN(tree), OID_AUTO,
+	    "clear_stats", CTLTYPE_INT | CTLFLAG_RW, sc, 0,
+	    ath_sysctl_clearstats, "I", "clear stats");
+
+	/* Create stats node */
+	tree = SYSCTL_ADD_NODE(ctx, child, OID_AUTO, "stats", CTLFLAG_RD,
+	    NULL, "Statistics");
+	child = SYSCTL_CHILDREN(tree);
+
+	/* This was generated from if_athioctl.h */
+
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_watchdog", CTLFLAG_RD,
+	    &sc->sc_stats.ast_watchdog, 0, "device reset by watchdog");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_hardware", CTLFLAG_RD,
+	    &sc->sc_stats.ast_hardware, 0, "fatal hardware error interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_bmiss", CTLFLAG_RD,
+	    &sc->sc_stats.ast_bmiss, 0, "beacon miss interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_bmiss_phantom", CTLFLAG_RD,
+	    &sc->sc_stats.ast_bmiss_phantom, 0, "beacon miss interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_bstuck", CTLFLAG_RD,
+	    &sc->sc_stats.ast_bstuck, 0, "beacon stuck interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rxorn", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rxorn, 0, "rx overrun interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rxeol", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rxeol, 0, "rx eol interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_txurn", CTLFLAG_RD,
+	    &sc->sc_stats.ast_txurn, 0, "tx underrun interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_mib", CTLFLAG_RD,
+	    &sc->sc_stats.ast_mib, 0, "mib interrupts");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_intrcoal", CTLFLAG_RD,
+	    &sc->sc_stats.ast_intrcoal, 0, "interrupts coalesced");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_packets", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_packets, 0, "packet sent on the interface");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_mgmt", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_mgmt, 0, "management frames transmitted");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_discard", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_discard, 0, "frames discarded prior to assoc");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_qstop", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_qstop, 0, "output stopped 'cuz no buffer");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_encap", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_encap, 0, "tx encapsulation failed");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_nonode", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_nonode, 0, "tx failed 'cuz no node");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_nombuf", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_nombuf, 0, "tx failed 'cuz no mbuf");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_nomcl", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_nomcl, 0, "tx failed 'cuz no cluster");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_linear", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_linear, 0, "tx linearized to cluster");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_nodata", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_nodata, 0, "tx discarded empty frame");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_busdma", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_busdma, 0, "tx failed for dma resrcs");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_xretries", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_xretries, 0, "tx failed 'cuz too many retries");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_fifoerr", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_fifoerr, 0, "tx failed 'cuz FIFO underrun");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_filtered", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_filtered, 0, "tx failed 'cuz xmit filtered");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_shortretry", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_shortretry, 0, "tx on-chip retries (short)");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_longretry", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_longretry, 0, "tx on-chip retries (long)");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_badrate", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_badrate, 0, "tx failed 'cuz bogus xmit rate");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_noack", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_noack, 0, "tx frames with no ack marked");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_rts", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_rts, 0, "tx frames with rts enabled");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_cts", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_cts, 0, "tx frames with cts enabled");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_shortpre", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_shortpre, 0, "tx frames with short preamble");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_altrate", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_altrate, 0, "tx frames with alternate rate");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_protect", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_protect, 0, "tx frames with protection");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_ctsburst", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_ctsburst, 0, "tx frames with cts and bursting");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_ctsext", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_ctsext, 0, "tx frames with cts extension");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_nombuf", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_nombuf, 0, "rx setup failed 'cuz no mbuf");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_busdma", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_busdma, 0, "rx setup failed for dma resrcs");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_orn", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_orn, 0, "rx failed 'cuz of desc overrun");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_crcerr", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_crcerr, 0, "rx failed 'cuz of bad CRC");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_fifoerr", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_fifoerr, 0, "rx failed 'cuz of FIFO overrun");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_badcrypt", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_badcrypt, 0, "rx failed 'cuz decryption");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_badmic", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_badmic, 0, "rx failed 'cuz MIC failure");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_phyerr", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_phyerr, 0, "rx failed 'cuz of PHY err");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_tooshort", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_tooshort, 0, "rx discarded 'cuz frame too short");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_toobig", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_toobig, 0, "rx discarded 'cuz frame too large");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_packets", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_packets, 0, "packet recv on the interface");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_mgt", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_mgt, 0, "management frames received");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rx_ctl", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rx_ctl, 0, "rx discarded 'cuz ctl frame");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_be_xmit", CTLFLAG_RD,
+	    &sc->sc_stats.ast_be_xmit, 0, "beacons transmitted");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_be_nombuf", CTLFLAG_RD,
+	    &sc->sc_stats.ast_be_nombuf, 0, "beacon setup failed 'cuz no mbuf");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_per_cal", CTLFLAG_RD,
+	    &sc->sc_stats.ast_per_cal, 0, "periodic calibration calls");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_per_calfail", CTLFLAG_RD,
+	    &sc->sc_stats.ast_per_calfail, 0, "periodic calibration failed");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_per_rfgain", CTLFLAG_RD,
+	    &sc->sc_stats.ast_per_rfgain, 0, "periodic calibration rfgain reset");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rate_calls", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rate_calls, 0, "rate control checks");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rate_raise", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rate_raise, 0, "rate control raised xmit rate");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_rate_drop", CTLFLAG_RD,
+	    &sc->sc_stats.ast_rate_drop, 0, "rate control dropped xmit rate");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_ant_defswitch", CTLFLAG_RD,
+	    &sc->sc_stats.ast_ant_defswitch, 0, "rx/default antenna switches");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_ant_txswitch", CTLFLAG_RD,
+	    &sc->sc_stats.ast_ant_txswitch, 0, "tx antenna switches");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_cabq_xmit", CTLFLAG_RD,
+	    &sc->sc_stats.ast_cabq_xmit, 0, "cabq frames transmitted");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_cabq_busy", CTLFLAG_RD,
+	    &sc->sc_stats.ast_cabq_busy, 0, "cabq found busy");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_raw", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_raw, 0, "tx frames through raw api");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_ff_txok", CTLFLAG_RD,
+	    &sc->sc_stats.ast_ff_txok, 0, "fast frames tx'd successfully");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_ff_txerr", CTLFLAG_RD,
+	    &sc->sc_stats.ast_ff_txerr, 0, "fast frames tx'd w/ error");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_ff_rx", CTLFLAG_RD,
+	    &sc->sc_stats.ast_ff_rx, 0, "fast frames rx'd");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_ff_flush", CTLFLAG_RD,
+	    &sc->sc_stats.ast_ff_flush, 0, "fast frames flushed from staging q");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_qfull", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_qfull, 0, "tx dropped 'cuz of queue limit");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_nobuf", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_nobuf, 0, "tx dropped 'cuz no ath buffer");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tdma_update", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tdma_update, 0, "TDMA slot timing updates");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tdma_timers", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tdma_timers, 0, "TDMA slot update set beacon timers");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tdma_tsf", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tdma_tsf, 0, "TDMA slot update set TSF");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tdma_ack", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tdma_ack, 0, "TDMA tx failed 'cuz ACK required");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_raw_fail", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_raw_fail, 0, "raw tx failed 'cuz h/w down");
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_tx_nofrag", CTLFLAG_RD,
+	    &sc->sc_stats.ast_tx_nofrag, 0, "tx dropped 'cuz no ath frag buffer");
+#if 0
+	SYSCTL_ADD_UINT(ctx, child, OID_AUTO, "ast_be_missed", CTLFLAG_RD,
+	    &sc->sc_stats.ast_be_missed, 0, "number of -missed- beacons");
+#endif
+}

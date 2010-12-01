@@ -111,6 +111,7 @@ extern int RootVolNo;
 extern struct volume_list VolList;
 extern int UseReadBehind;
 extern int UseReadAhead;
+extern int AssertOnFailure;
 
 uint32_t crc32(const void *buf, size_t size);
 uint32_t crc32_ext(const void *buf, size_t size, uint32_t ocrc);
@@ -118,6 +119,7 @@ uint32_t crc32_ext(const void *buf, size_t size, uint32_t ocrc);
 struct volume_info *setup_volume(int32_t vol_no, const char *filename,
 				int isnew, int oflags);
 struct volume_info *get_volume(int32_t vol_no);
+struct volume_info *test_volume(int32_t vol_no);
 struct buffer_info *get_buffer(hammer_off_t buf_offset, int isnew);
 void *get_buffer_data(hammer_off_t buf_offset, struct buffer_info **bufferp,
 				int isnew);

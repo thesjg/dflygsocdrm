@@ -88,7 +88,7 @@ struct	ifaddr_container;
 struct	ifaddr;
 struct	lwkt_port;
 struct	lwkt_msg;
-struct	netmsg;
+union	netmsg;
 struct	pktinfo;
 struct	ifpoll_info;
 
@@ -273,8 +273,14 @@ struct ifnet {
 	struct lwkt_serialize *if_serializer;	/* serializer or MP lock */
 	struct lwkt_serialize if_default_serializer; /* if not supplied */
 	int	if_cpuid;
-	struct netmsg *if_start_nmsg; /* percpu messages to schedule if_start */
+	struct netmsg_base *if_start_nmsg; /* percpu msgs to sched if_start */
 	void	*if_pf_kif; /* pf interface abstraction */
+ 	union {
+ 		void *carp_s;		/* carp structure (used by !carp ifs) */
+ 		struct ifnet *carp_d;	/* ptr to carpdev (used by carp ifs) */
+ 	} if_carp_ptr;
+	#define if_carp		if_carp_ptr.carp_s
+	#define if_carpdev	if_carp_ptr.carp_d
 };
 typedef void if_init_f_t (void *);
 
@@ -609,6 +615,7 @@ struct ifg_group {
 	char				 ifg_group[IFNAMSIZ];
 	u_int				 ifg_refcnt;
 	void				*ifg_pf_kif;
+	int				 ifg_carp_demoted;
 	TAILQ_HEAD(, ifg_member)	 ifg_members;
 	TAILQ_ENTRY(ifg_group)		 ifg_next;
 };
@@ -721,7 +728,6 @@ void	ether_ifattach_bpf(struct ifnet *, uint8_t *, u_int, u_int,
 			struct lwkt_serialize *);
 void	ether_ifdetach(struct ifnet *);
 void	ether_demux_oncpu(struct ifnet *, struct mbuf *);
-void	ether_input_oncpu(struct ifnet *, struct mbuf *);
 void	ether_reinput_oncpu(struct ifnet *, struct mbuf *, int);
 void	ether_input_chain(struct ifnet *, struct mbuf *,
 			  const struct pktinfo *, struct mbuf_chain *);
@@ -755,6 +761,12 @@ int	ifioctl(struct socket *, u_long, caddr_t, struct ucred *);
 int	ifpromisc(struct ifnet *, int);
 struct	ifnet *ifunit(const char *);
 struct	ifnet *if_withname(struct sockaddr *);
+
+struct	ifg_group *if_creategroup(const char *);
+int     if_addgroup(struct ifnet *, const char *);
+int     if_delgroup(struct ifnet *, const char *);
+int     if_getgroup(caddr_t, struct ifnet *);
+int     if_getgroupmembers(caddr_t);
 
 struct	ifaddr *ifa_ifwithaddr(struct sockaddr *);
 struct	ifaddr *ifa_ifwithdstaddr(struct sockaddr *);

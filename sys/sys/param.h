@@ -69,13 +69,16 @@
  * 200204 - suser() & suser_cred() removal
  * 200205 - devfs import
  * 200206 - *sleep() renames
- * 200400 - 2.4 branch
+ * 200400 - 2.4 release
  * 200500 - 2.5 master
- * 200600 - 2.6 branch
+ * 200600 - 2.6 release
  * 200700 - 2.7 master
+ * 200800 - 2.8 release			October 2010
+ * 200900 - 2.9 master
+ * 200901 - prototype changes for alphasort(3) and scandir(3)
  */
 #undef __DragonFly_version
-#define __DragonFly_version 200700	/* propagated to newvers */
+#define __DragonFly_version 200901	/* propagated to newvers */
 
 #include <sys/_null.h>
 
@@ -200,6 +203,7 @@
 #define howmany(x, y)	(((x)+((y)-1))/(y))
 #endif
 #define rounddown(x, y)	(((x)/(y))*(y))
+#define rounddown2(x, y) ((x) & ~((y) - 1))	   /* y power of two */
 #define roundup(x, y)	((((x)+((y)-1))/(y))*(y))  /* to any y */
 #define roundup2(x, y)	(((x)+((y)-1))&(~((y)-1))) /* if y is powers of two */
 #define powerof2(x)	((((x)-1)&(x))==0)
@@ -256,6 +260,30 @@
 #define MJUMPAGESIZE	PAGE_SIZE	/* jumbo cluster 4k */
 #define MJUM9BYTES	(9 * 1024)	/* jumbo cluster 9k */
 #define MJUM16BYTES	(16 * 1024)	/* jumbo cluster 16k */
+
+/*
+ * MBUF Management.
+ *
+ * Because many drivers can't deal with multiple DMA segments all mbufs
+ * must avoid crossing a page boundary.  While we can accomodate mbufs
+ * which are not a power-of-2 sized kmalloc() will only guarantee
+ * non-crossing alignment if we use a power-of-2.  256 is no longer large
+ * enough due to m_hdr and m_pkthdr bloat.
+ *
+ * MCLBYTES must be a power of 2 and is typically significantly larger
+ * than MSIZE, sufficient to hold a standard-mtu packet.  2K is considered
+ * reasonable.
+ */
+#ifndef MSIZE
+#define MSIZE		512		/* size of an mbuf */
+#endif
+
+#ifndef MCLSHIFT
+#define MCLSHIFT        12              /* convert bytes to m_buf clusters */
+#endif
+#define MCLBYTES        (1 << MCLSHIFT) /* size of an m_buf cluster */
+#define MCLOFSET        (MCLBYTES - 1)  /* offset within an m_buf cluster */
+
 /*
  * Make this available for most of the kernel.  There were too many
  * things that included sys/systm.h just for panic().

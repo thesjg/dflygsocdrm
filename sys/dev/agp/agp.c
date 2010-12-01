@@ -24,7 +24,6 @@
  * SUCH DAMAGE.
  *
  *	$FreeBSD: src/sys/dev/agp/agp.c,v 1.58 2007/11/12 21:51:36 jhb Exp $
- *	$DragonFly: src/sys/dev/agp/agp.c,v 1.30 2008/01/07 01:34:58 corecode Exp $
  */
 
 #include "opt_bus.h"
@@ -59,15 +58,13 @@ MODULE_VERSION(agp, 1);
 
 MALLOC_DEFINE(M_AGP, "agp", "AGP data structures");
 
-#define CDEV_MAJOR	148
-				/* agp_drv.c */
 static d_open_t agp_open;
 static d_close_t agp_close;
 static d_ioctl_t agp_ioctl;
 static d_mmap_t agp_mmap;
 
 static struct dev_ops agp_ops = {
-	{ "agp", CDEV_MAJOR, D_TTY },
+	{ "agp", 0, D_TTY },
 	.d_open =	agp_open,
 	.d_close =	agp_close,
 	.d_ioctl =	agp_ioctl,
@@ -569,11 +566,13 @@ agp_generic_bind_memory(device_t dev, struct agp_memory *mem,
 				vm_page_wakeup(m);
 				for (k = 0; k < i + j; k += AGP_PAGE_SIZE)
 					AGP_UNBIND_PAGE(dev, offset + k);
+				lwkt_gettoken(&vm_token);
 				for (k = 0; k <= i; k += PAGE_SIZE) {
 					m = vm_page_lookup(mem->am_obj,
 							   OFF_TO_IDX(k));
 					vm_page_unwire(m, 0);
 				}
+				lwkt_reltoken(&vm_token);
 				lockmgr(&sc->as_lock, LK_RELEASE);
 				return error;
 			}
@@ -622,10 +621,12 @@ agp_generic_unbind_memory(device_t dev, struct agp_memory *mem)
 	 */
 	for (i = 0; i < mem->am_size; i += AGP_PAGE_SIZE)
 		AGP_UNBIND_PAGE(dev, mem->am_offset + i);
+	lwkt_gettoken(&vm_token);
 	for (i = 0; i < mem->am_size; i += PAGE_SIZE) {
 		m = vm_page_lookup(mem->am_obj, atop(i));
 		vm_page_unwire(m, 0);
 	}
+	lwkt_reltoken(&vm_token);
 		
 	agp_flush_cache();
 	AGP_FLUSH_TLB(dev);

@@ -91,7 +91,8 @@
 static MALLOC_DEFINE(M_NETADDR, "Export Host", "Export host address structure");
 
 int numvnodes;
-SYSCTL_INT(_debug, OID_AUTO, numvnodes, CTLFLAG_RD, &numvnodes, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, numvnodes, CTLFLAG_RD, &numvnodes, 0,
+    "Number of vnodes allocated");
 
 enum vtype iftovt_tab[16] = {
 	VNON, VFIFO, VCHR, VNON, VDIR, VNON, VBLK, VNON,
@@ -153,16 +154,22 @@ rb_buf_compare(struct buf *b1, struct buf *b2)
 
 /*
  * Returns non-zero if the vnode is a candidate for lazy msyncing.
+ *
+ * NOTE: v_object is not stable (this scan can race), however the
+ *	 mntvnodescan code holds vmobj_token so any VM object we
+ *	 do find will remain stable storage.
  */
 static __inline int
 vshouldmsync(struct vnode *vp)
 {
+	vm_object_t object;
+
 	if (vp->v_auxrefs != 0 || vp->v_sysref.refcnt > 0)
 		return (0);		/* other holders */
-	if (vp->v_object &&
-	    (vp->v_object->ref_count || vp->v_object->resident_page_count)) {
-		return (0);
-	}
+	object = vp->v_object;
+	cpu_ccfence();
+	if (object && (object->ref_count || object->resident_page_count))
+		return(0);
 	return (1);
 }
 
@@ -195,7 +202,7 @@ vfs_subr_init(void)
 		     KvaSize / factor2);
 	desiredvnodes = imax(desiredvnodes, maxproc * 8);
 
-	lwkt_token_init(&spechash_token, 1);
+	lwkt_token_init(&spechash_token, 1, "spechash");
 }
 
 /*
@@ -283,6 +290,7 @@ struct vinvalbuf_bp_info {
 	int slptimeo;
 	int lkflags;
 	int flags;
+	int clean;
 };
 
 int
@@ -331,9 +339,11 @@ vinvalbuf(struct vnode *vp, int flags, int slpflag, int slptimeo)
 	 */
 	while (!RB_EMPTY(&vp->v_rbclean_tree) || 
 	       !RB_EMPTY(&vp->v_rbdirty_tree)) {
+		info.clean = 1;
 		error = RB_SCAN(buf_rb_tree, &vp->v_rbclean_tree, NULL,
 				vinvalbuf_bp, &info);
 		if (error == 0) {
+			info.clean = 0;
 			error = RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, NULL,
 					vinvalbuf_bp, &info);
 		}
@@ -376,8 +386,10 @@ vinvalbuf_bp(struct buf *bp, void *data)
 	int error;
 
 	if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT)) {
+		atomic_add_int(&bp->b_refs, 1);
 		error = BUF_TIMELOCK(bp, info->lkflags,
 				     "vinvalbuf", info->slptimeo);
+		atomic_subtract_int(&bp->b_refs, 1);
 		if (error == 0) {
 			BUF_UNLOCK(bp);
 			error = ENOLCK;
@@ -386,32 +398,32 @@ vinvalbuf_bp(struct buf *bp, void *data)
 			return(0);
 		return (-error);
 	}
-
 	KKASSERT(bp->b_vp == info->vp);
 
 	/*
-	 * XXX Since there are no node locks for NFS, I
-	 * believe there is a slight chance that a delayed
-	 * write will occur while sleeping just above, so
-	 * check for it.  Note that vfs_bio_awrite expects
-	 * buffers to reside on a queue, while bwrite() and
-	 * brelse() do not.
+	 * Must check clean/dirty status after successfully locking as
+	 * it may race.
+	 */
+	if ((info->clean && (bp->b_flags & B_DELWRI)) ||
+	    (info->clean == 0 && (bp->b_flags & B_DELWRI) == 0)) {
+		BUF_UNLOCK(bp);
+		return(0);
+	}
+
+	/*
+	 * Note that vfs_bio_awrite expects buffers to reside
+	 * on a queue, while bwrite() and brelse() do not.
 	 *
 	 * NOTE:  NO B_LOCKED CHECK.  Also no buf_checkwrite()
 	 * check.  This code will write out the buffer, period.
 	 */
 	if (((bp->b_flags & (B_DELWRI | B_INVAL)) == B_DELWRI) &&
 	    (info->flags & V_SAVE)) {
-		if (bp->b_vp == info->vp) {
-			if (bp->b_flags & B_CLUSTEROK) {
-				vfs_bio_awrite(bp);
-			} else {
-				bremfree(bp);
-				bawrite(bp);
-			}
+		if (bp->b_flags & B_CLUSTEROK) {
+			vfs_bio_awrite(bp);
 		} else {
 			bremfree(bp);
-			bwrite(bp);
+			bawrite(bp);
 		}
 	} else if (info->flags & V_SAVE) {
 		/*
@@ -442,10 +454,16 @@ static int vtruncbuf_bp_trunc(struct buf *bp, void *data);
 static int vtruncbuf_bp_metasync_cmp(struct buf *bp, void *data);
 static int vtruncbuf_bp_metasync(struct buf *bp, void *data);
 
+struct vtruncbuf_info {
+	struct vnode *vp;
+	off_t	truncloffset;
+	int	clean;
+};
+
 int
 vtruncbuf(struct vnode *vp, off_t length, int blksize)
 {
-	off_t truncloffset;
+	struct vtruncbuf_info info;
 	const char *filename;
 	int count;
 
@@ -455,18 +473,21 @@ vtruncbuf(struct vnode *vp, off_t length, int blksize)
 	 * scan count to determine whether a loop is necessary.
 	 */
 	if ((count = (int)(length % blksize)) != 0)
-		truncloffset = length + (blksize - count);
+		info.truncloffset = length + (blksize - count);
 	else
-		truncloffset = length;
+		info.truncloffset = length;
+	info.vp = vp;
 
 	lwkt_gettoken(&vp->v_token);
 	do {
+		info.clean = 1;
 		count = RB_SCAN(buf_rb_tree, &vp->v_rbclean_tree, 
 				vtruncbuf_bp_trunc_cmp,
-				vtruncbuf_bp_trunc, &truncloffset);
+				vtruncbuf_bp_trunc, &info);
+		info.clean = 0;
 		count += RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree,
 				vtruncbuf_bp_trunc_cmp,
-				vtruncbuf_bp_trunc, &truncloffset);
+				vtruncbuf_bp_trunc, &info);
 	} while(count);
 
 	/*
@@ -479,7 +500,7 @@ vtruncbuf(struct vnode *vp, off_t length, int blksize)
 		do {
 			count = RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree,
 					vtruncbuf_bp_metasync_cmp,
-					vtruncbuf_bp_metasync, vp);
+					vtruncbuf_bp_metasync, &info);
 		} while (count);
 	}
 
@@ -496,10 +517,10 @@ vtruncbuf(struct vnode *vp, off_t length, int blksize)
 	/*
 	 * Debugging only
 	 */
-	spin_lock_wr(&vp->v_spinlock);
+	spin_lock(&vp->v_spinlock);
 	filename = TAILQ_FIRST(&vp->v_namecache) ?
 		   TAILQ_FIRST(&vp->v_namecache)->nc_name : "?";
-	spin_unlock_wr(&vp->v_spinlock);
+	spin_unlock(&vp->v_spinlock);
 
 	/*
 	 * Make sure no buffers were instantiated while we were trying
@@ -507,12 +528,14 @@ vtruncbuf(struct vnode *vp, off_t length, int blksize)
 	 * to busy dirty VM pages being flushed out to disk.
 	 */
 	do {
+		info.clean = 1;
 		count = RB_SCAN(buf_rb_tree, &vp->v_rbclean_tree, 
 				vtruncbuf_bp_trunc_cmp,
-				vtruncbuf_bp_trunc, &truncloffset);
+				vtruncbuf_bp_trunc, &info);
+		info.clean = 0;
 		count += RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree,
 				vtruncbuf_bp_trunc_cmp,
-				vtruncbuf_bp_trunc, &truncloffset);
+				vtruncbuf_bp_trunc, &info);
 		if (count) {
 			kprintf("Warning: vtruncbuf():  Had to re-clean %d "
 			       "left over buffers in %s\n", count, filename);
@@ -532,7 +555,9 @@ static
 int
 vtruncbuf_bp_trunc_cmp(struct buf *bp, void *data)
 {
-	if (bp->b_loffset >= *(off_t *)data)
+	struct vtruncbuf_info *info = data;
+
+	if (bp->b_loffset >= info->truncloffset)
 		return(0);
 	return(-1);
 }
@@ -541,14 +566,26 @@ static
 int 
 vtruncbuf_bp_trunc(struct buf *bp, void *data)
 {
+	struct vtruncbuf_info *info = data;
+
 	/*
 	 * Do not try to use a buffer we cannot immediately lock, but sleep
 	 * anyway to prevent a livelock.  The code will loop until all buffers
 	 * can be acted upon.
+	 *
+	 * We must always revalidate the buffer after locking it to deal
+	 * with MP races.
 	 */
 	if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT)) {
+		atomic_add_int(&bp->b_refs, 1);
 		if (BUF_LOCK(bp, LK_EXCLUSIVE|LK_SLEEPFAIL) == 0)
 			BUF_UNLOCK(bp);
+		atomic_subtract_int(&bp->b_refs, 1);
+	} else if ((info->clean && (bp->b_flags & B_DELWRI)) ||
+		   (info->clean == 0 && (bp->b_flags & B_DELWRI) == 0) ||
+		   bp->b_vp != info->vp ||
+		   vtruncbuf_bp_trunc_cmp(bp, data)) {
+		BUF_UNLOCK(bp);
 	} else {
 		bremfree(bp);
 		bp->b_flags |= (B_INVAL | B_RELBUF | B_NOCACHE);
@@ -563,7 +600,7 @@ vtruncbuf_bp_trunc(struct buf *bp, void *data)
  * Note that the compare function must conform to the RB_SCAN's requirements.
  */
 static int
-vtruncbuf_bp_metasync_cmp(struct buf *bp, void *data)
+vtruncbuf_bp_metasync_cmp(struct buf *bp, void *data __unused)
 {
 	if (bp->b_loffset < 0)
 		return(0);
@@ -573,28 +610,25 @@ vtruncbuf_bp_metasync_cmp(struct buf *bp, void *data)
 static int
 vtruncbuf_bp_metasync(struct buf *bp, void *data)
 {
-	struct vnode *vp = data;
+	struct vtruncbuf_info *info = data;
 
-	if (bp->b_flags & B_DELWRI) {
-		/*
-		 * Do not try to use a buffer we cannot immediately lock,
-		 * but sleep anyway to prevent a livelock.  The code will
-		 * loop until all buffers can be acted upon.
-		 */
-		if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT)) {
-			if (BUF_LOCK(bp, LK_EXCLUSIVE|LK_SLEEPFAIL) == 0)
-				BUF_UNLOCK(bp);
-		} else {
-			bremfree(bp);
-			if (bp->b_vp == vp)
-				bawrite(bp);
-			else
-				bwrite(bp);
-		}
-		return(1);
+	if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT)) {
+		atomic_add_int(&bp->b_refs, 1);
+		if (BUF_LOCK(bp, LK_EXCLUSIVE|LK_SLEEPFAIL) == 0)
+			BUF_UNLOCK(bp);
+		atomic_subtract_int(&bp->b_refs, 1);
+	} else if ((bp->b_flags & B_DELWRI) == 0 ||
+		   bp->b_vp != info->vp ||
+		   vtruncbuf_bp_metasync_cmp(bp, data)) {
+		BUF_UNLOCK(bp);
 	} else {
-		return(0);
+		bremfree(bp);
+		if (bp->b_vp == info->vp)
+			bawrite(bp);
+		else
+			bwrite(bp);
 	}
+	return(1);
 }
 
 /*
@@ -611,6 +645,7 @@ vtruncbuf_bp_metasync(struct buf *bp, void *data)
  */
 static int vfsync_wait_output(struct vnode *vp, 
 			    int (*waitoutput)(struct vnode *, struct thread *));
+static int vfsync_dummy_cmp(struct buf *bp __unused, void *data __unused);
 static int vfsync_data_only_cmp(struct buf *bp, void *data);
 static int vfsync_meta_only_cmp(struct buf *bp, void *data);
 static int vfsync_lazy_range_cmp(struct buf *bp, void *data);
@@ -624,6 +659,7 @@ struct vfsync_info {
 	int lazylimit;
 	int skippedbufs;
 	int (*checkdef)(struct buf *);
+	int (*cmpfunc)(struct buf *, void *);
 };
 
 int
@@ -650,14 +686,16 @@ vfsync(struct vnode *vp, int waitfor, int passes,
 		 */
 		info.lazylimit = 1024 * 1024;
 		info.syncdeps = 1;
+		info.cmpfunc = vfsync_lazy_range_cmp;
 		error = RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, 
 				vfsync_lazy_range_cmp, vfsync_bp, &info);
+		info.cmpfunc = vfsync_meta_only_cmp;
 		RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, 
-				vfsync_meta_only_cmp, vfsync_bp, &info);
+			vfsync_meta_only_cmp, vfsync_bp, &info);
 		if (error == 0)
 			vp->v_lazyw = 0;
 		else if (!RB_EMPTY(&vp->v_rbdirty_tree))
-			vn_syncer_add_to_worklist(vp, 1);
+			vn_syncer_add(vp, 1);
 		error = 0;
 		break;
 	case MNT_NOWAIT:
@@ -665,8 +703,10 @@ vfsync(struct vnode *vp, int waitfor, int passes,
 		 * Asynchronous.  Do a data-only pass and a meta-only pass.
 		 */
 		info.syncdeps = 1;
+		info.cmpfunc = vfsync_data_only_cmp;
 		RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, vfsync_data_only_cmp, 
 			vfsync_bp, &info);
+		info.cmpfunc = vfsync_meta_only_cmp;
 		RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, vfsync_meta_only_cmp, 
 			vfsync_bp, &info);
 		error = 0;
@@ -677,16 +717,20 @@ vfsync(struct vnode *vp, int waitfor, int passes,
 		 * pass, then additional integrated passes to try to get
 		 * all the dependancies flushed.
 		 */
+		info.cmpfunc = vfsync_data_only_cmp;
 		RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, vfsync_data_only_cmp,
 			vfsync_bp, &info);
 		error = vfsync_wait_output(vp, waitoutput);
 		if (error == 0) {
 			info.skippedbufs = 0;
+			info.cmpfunc = vfsync_dummy_cmp;
 			RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, NULL,
 				vfsync_bp, &info);
 			error = vfsync_wait_output(vp, waitoutput);
-			if (info.skippedbufs)
-				kprintf("Warning: vfsync skipped %d dirty bufs in pass2!\n", info.skippedbufs);
+			if (info.skippedbufs) {
+				kprintf("Warning: vfsync skipped %d dirty "
+					"bufs in pass2!\n", info.skippedbufs);
+			}
 		}
 		while (error == 0 && passes > 0 &&
 		       !RB_EMPTY(&vp->v_rbdirty_tree)
@@ -695,8 +739,9 @@ vfsync(struct vnode *vp, int waitfor, int passes,
 				info.synchronous = 1;
 				info.syncdeps = 1;
 			}
+			info.cmpfunc = vfsync_dummy_cmp;
 			error = RB_SCAN(buf_rb_tree, &vp->v_rbdirty_tree, NULL,
-				vfsync_bp, &info);
+					vfsync_bp, &info);
 			if (error < 0)
 				error = -error;
 			info.syncdeps = 1;
@@ -722,6 +767,12 @@ vfsync_wait_output(struct vnode *vp,
 }
 
 static int
+vfsync_dummy_cmp(struct buf *bp __unused, void *data __unused)
+{
+	return(0);
+}
+
+static int
 vfsync_data_only_cmp(struct buf *bp, void *data)
 {
 	if (bp->b_loffset < 0)
@@ -741,6 +792,7 @@ static int
 vfsync_lazy_range_cmp(struct buf *bp, void *data)
 {
 	struct vfsync_info *info = data;
+
 	if (bp->b_loffset < info->vp->v_lazyw)
 		return(-1);
 	return(0);
@@ -754,24 +806,31 @@ vfsync_bp(struct buf *bp, void *data)
 	int error;
 
 	/*
-	 * if syncdeps is not set we do not try to write buffers which have
-	 * dependancies.
-	 */
-	if (!info->synchronous && info->syncdeps == 0 && info->checkdef(bp))
-		return(0);
-
-	/*
-	 * Ignore buffers that we cannot immediately lock.  XXX
+	 * Ignore buffers that we cannot immediately lock.
 	 */
 	if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT)) {
-		kprintf("Warning: vfsync_bp skipping dirty buffer %p\n", bp);
 		++info->skippedbufs;
 		return(0);
 	}
-	if ((bp->b_flags & B_DELWRI) == 0)
-		panic("vfsync_bp: buffer not dirty");
-	if (vp != bp->b_vp)
-		panic("vfsync_bp: buffer vp mismatch");
+
+	/*
+	 * We must revalidate the buffer after locking.
+	 */
+	if ((bp->b_flags & B_DELWRI) == 0 ||
+	    bp->b_vp != info->vp ||
+	    info->cmpfunc(bp, data)) {
+		BUF_UNLOCK(bp);
+		return(0);
+	}
+
+	/*
+	 * If syncdeps is not set we do not try to write buffers which have
+	 * dependancies.
+	 */
+	if (!info->synchronous && info->syncdeps == 0 && info->checkdef(bp)) {
+		BUF_UNLOCK(bp);
+		return(0);
+	}
 
 	/*
 	 * B_NEEDCOMMIT (primarily used by NFS) is a state where the buffer
@@ -785,7 +844,8 @@ vfsync_bp(struct buf *bp, void *data)
 	}
 
 	/*
-	 * Ask bioops if it is ok to sync 
+	 * Ask bioops if it is ok to sync.  If not the VFS may have
+	 * set B_LOCKED so we have to cycle the buffer.
 	 */
 	if (LIST_FIRST(&bp->b_dep) != NULL && buf_checkwrite(bp)) {
 		bremfree(bp);
@@ -813,6 +873,7 @@ vfsync_bp(struct buf *bp, void *data)
 			bremfree(bp);
 			bawrite(bp);
 		}
+		waitrunningbufspace();
 		if (info->lazylimit && info->lazycount >= info->lazylimit)
 			error = 1;
 		else
@@ -836,6 +897,7 @@ bgetvp(struct vnode *vp, struct buf *bp, int testsize)
 	 * Insert onto list for new vnode.
 	 */
 	lwkt_gettoken(&vp->v_token);
+
 	if (buf_rb_hash_RB_INSERT(&vp->v_rbhash_tree, bp)) {
 		lwkt_reltoken(&vp->v_token);
 		return (EEXIST);
@@ -886,6 +948,8 @@ bgetvp(struct vnode *vp, struct buf *bp, int testsize)
 
 /*
  * Disassociate a buffer from a vnode.
+ *
+ * MPSAFE
  */
 void
 brelvp(struct buf *bp)
@@ -910,11 +974,10 @@ brelvp(struct buf *bp)
 		buf_rb_hash_RB_REMOVE(&vp->v_rbhash_tree, bp);
 		bp->b_flags &= ~B_HASHED;
 	}
-	if ((vp->v_flag & VONWORKLST) && RB_EMPTY(&vp->v_rbdirty_tree)) {
-		vclrflags(vp, VONWORKLST);
-		LIST_REMOVE(vp, v_synclist);
-	}
+	if ((vp->v_flag & VONWORKLST) && RB_EMPTY(&vp->v_rbdirty_tree))
+		vn_syncer_remove(vp);
 	bp->b_vp = NULL;
+
 	lwkt_reltoken(&vp->v_token);
 
 	vdrop(vp);
@@ -924,6 +987,7 @@ brelvp(struct buf *bp)
  * Reassign the buffer to the proper clean/dirty list based on B_DELWRI.
  * This routine is called when the state of the B_DELWRI bit is changed.
  *
+ * Must be called with vp->v_token held.
  * MPSAFE
  */
 void
@@ -932,7 +996,7 @@ reassignbuf(struct buf *bp)
 	struct vnode *vp = bp->b_vp;
 	int delay;
 
-	KKASSERT(vp != NULL);
+	ASSERT_LWKT_TOKEN_HELD(&vp->v_token);
 	++reassignbufcalls;
 
 	/*
@@ -942,7 +1006,6 @@ reassignbuf(struct buf *bp)
 	if (bp->b_flags & B_PAGING)
 		panic("cannot reassign paging buffer");
 
-	lwkt_gettoken(&vp->v_token);
 	if (bp->b_flags & B_DELWRI) {
 		/*
 		 * Move to the dirty list, add the vnode to the worklist
@@ -974,7 +1037,7 @@ reassignbuf(struct buf *bp)
 			default:
 				delay = filedelay;
 			}
-			vn_syncer_add_to_worklist(vp, delay);
+			vn_syncer_add(vp, delay);
 		}
 	} else {
 		/*
@@ -994,11 +1057,9 @@ reassignbuf(struct buf *bp)
 		}
 		if ((vp->v_flag & VONWORKLST) &&
 		    RB_EMPTY(&vp->v_rbdirty_tree)) {
-			vclrflags(vp, VONWORKLST);
-			LIST_REMOVE(vp, v_synclist);
+			vn_syncer_remove(vp);
 		}
 	}
-	lwkt_reltoken(&vp->v_token);
 }
 
 /*
@@ -1182,8 +1243,8 @@ vclean_vxlocked(struct vnode *vp, int flags)
 	/*
 	 * If the vnode has an object, destroy it.
 	 */
+	lwkt_gettoken(&vmobj_token);
 	if ((object = vp->v_object) != NULL) {
-		lwkt_gettoken(&vm_token);
 		KKASSERT(object == vp->v_object);
 		if (object->ref_count == 0) {
 			if ((object->flags & OBJ_DEAD) == 0)
@@ -1192,8 +1253,8 @@ vclean_vxlocked(struct vnode *vp, int flags)
 			vm_pager_deallocate(object);
 		}
 		vclrflags(vp, VOBJBUF);
-		lwkt_reltoken(&vm_token);
 	}
+	lwkt_reltoken(&vmobj_token);
 	KKASSERT((vp->v_flag & VOBJBUF) == 0);
 
 	/*
@@ -1437,6 +1498,7 @@ vinitvmio(struct vnode *vp, off_t filesize, int blksize, int boff)
 	vm_object_t object;
 	int error = 0;
 
+	lwkt_gettoken(&vmobj_token);
 retry:
 	if ((object = vp->v_object) == NULL) {
 		object = vnode_pager_alloc(vp, filesize, 0, 0, blksize, boff);
@@ -1449,13 +1511,16 @@ retry:
 	} else {
 		if (object->flags & OBJ_DEAD) {
 			vn_unlock(vp);
-			vm_object_dead_sleep(object, "vodead");
+			if (vp->v_object == object)
+				vm_object_dead_sleep(object, "vodead");
 			vn_lock(vp, LK_EXCLUSIVE | LK_RETRY);
 			goto retry;
 		}
 	}
 	KASSERT(vp->v_object != NULL, ("vinitvmio: NULL object"));
 	vsetflags(vp, VOBJBUF);
+	lwkt_reltoken(&vmobj_token);
+
 	return (error);
 }
 

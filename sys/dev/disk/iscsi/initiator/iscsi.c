@@ -54,7 +54,6 @@
 #include <sys/mbuf.h>
 #include <sys/syslog.h>
 #include <sys/eventhandler.h>
-#include <sys/mutex.h>
 #include <sys/mutex2.h>
 #include <sys/devfs.h>
 #include <sys/udev.h>
@@ -108,7 +107,7 @@ static d_read_t iscsi_read;
 #endif
 
 static struct dev_ops iscsi_ops = {
-     .head	= { "iscsi", ISCSI_CDEV_MAJOR, D_DISK},
+     .head	= { "iscsi", 0, D_DISK},
      .d_open	= iscsi_open,
      .d_close	= iscsi_close,
      .d_ioctl	= iscsi_ioctl,

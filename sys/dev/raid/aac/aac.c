@@ -27,7 +27,6 @@
  * SUCH DAMAGE.
  *
  *	$FreeBSD: src/sys/dev/aac/aac.c,v 1.9.2.14 2003/04/08 13:22:08 scottl Exp $
- *	$DragonFly: src/sys/dev/raid/aac/aac.c,v 1.34 2008/01/20 03:40:35 pavalos Exp $
  */
 
 /*
@@ -79,7 +78,7 @@ static void	aac_complete(void *context, int pending);
 static int	aac_bio_command(struct aac_softc *sc, struct aac_command **cmp);
 static void	aac_bio_complete(struct aac_command *cm);
 static int	aac_wait_command(struct aac_command *cm);
-static void	aac_command_thread(struct aac_softc *sc);
+static void	aac_command_thread(void *arg);
 
 /* Command Buffer Management */
 static void	aac_map_command_sg(void *arg, bus_dma_segment_t *segs,
@@ -225,11 +224,8 @@ static int		aac_query_disk(struct aac_softc *sc, caddr_t uptr);
 static int		aac_get_pci_info(struct aac_softc *sc, caddr_t uptr);
 static void		aac_ioctl_event(struct aac_softc *sc,
 				        struct aac_event *event, void *arg);
-
-#define AAC_CDEV_MAJOR	150
-
 static struct dev_ops aac_ops = {
-	{ "aac", AAC_CDEV_MAJOR, D_KQFILTER },
+	{ "aac", 0, 0 },
 	.d_open =	aac_open,
 	.d_close =	aac_close,
 	.d_ioctl =	aac_ioctl,
@@ -360,7 +356,7 @@ aac_attach(struct aac_softc *sc)
 	reference_dev(sc->aac_dev_t);
 
 	/* Create the AIF thread */
-	if (kthread_create((void(*)(void *))aac_command_thread, sc,
+	if (kthread_create(aac_command_thread, sc,
 			   &sc->aifthread, "aac%daif", unit))
 		panic("Could not create AIF thread\n");
 
@@ -909,12 +905,14 @@ aac_map_command(struct aac_command *cm)
  * Handle notification of one or more FIBs coming from the controller.
  */
 static void
-aac_command_thread(struct aac_softc *sc)
+aac_command_thread(void *arg)
 {
+	struct aac_softc *sc = arg;
 	struct aac_fib *fib;
 	u_int32_t fib_size;
 	int size, retval;
 
+	get_mplock();
 	debug_called(2);
 
 	AAC_LOCK_ACQUIRE(&sc->aac_io_lock);
@@ -1005,7 +1003,7 @@ aac_command_thread(struct aac_softc *sc)
 	AAC_LOCK_RELEASE(&sc->aac_io_lock);
 	wakeup(sc->aac_dev);
 
-	kthread_exit();
+	rel_mplock();
 }
 
 /*

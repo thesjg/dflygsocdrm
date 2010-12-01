@@ -24,7 +24,6 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/dev/sound/pcm/dsp.c,v 1.80.2.6 2006/04/04 17:43:48 ariff Exp $
- * $DragonFly: src/sys/dev/sound/pcm/dsp.c,v 1.17 2008/02/28 17:19:11 tgen Exp $
  */
 
 #include <sys/param.h>
@@ -34,7 +33,6 @@
 #include <dev/sound/pcm/dsp.h>
 #include <dev/sound/pcm/sound.h>
 
-SND_DECLARE_FILE("$DragonFly: src/sys/dev/sound/pcm/dsp.c,v 1.17 2008/02/28 17:19:11 tgen Exp $");
 
 #define OLDPCM_IOCTL
 
@@ -50,8 +48,8 @@ static void dsp_filter_detach(struct knote *);
 static int dsp_filter_read(struct knote *, long);
 static int dsp_filter_write(struct knote *, long);
 
-struct dev_ops dsp_cdevsw = {
-	{ "dsp", SND_CDEV_MAJOR, 0},
+struct dev_ops dsp_ops = {
+	{ "dsp", 0, 0},
 	/*.d_flags =	D_NEEDGIANT,*/
 	.d_open =	dsp_open,
 	.d_close =	dsp_close,
@@ -1263,7 +1261,7 @@ retry_chnalloc:
 		    !(c->flags & CHN_F_BUSY)) {
 			CHN_UNLOCK(c);
 			pcm_lock(pcm_dev);
-			pcm_chan->dsp_dev = make_only_dev(&dsp_cdevsw,
+			pcm_chan->dsp_dev = make_only_dev(&dsp_ops,
 				PCMMKMINOR(PCMUNIT(i_dev), pcm_chan->chan_num),
 				UID_ROOT, GID_WHEEL,
 				0666,

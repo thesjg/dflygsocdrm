@@ -42,6 +42,8 @@
 #include <sys/mbuf.h>
 #include <sys/unistd.h>
 
+#include <sys/mplock2.h>
+
 #include "smb.h"
 #include "smb_conn.h"
 #include "smb_rq.h"
@@ -637,13 +639,18 @@ smb_iod_main(struct smbiod *iod)
 	return;
 }
 
-#define	kthread_create_compat	kthread_create2
-#define kthread_exit_compat	kthread_exit2
+#define	kthread_create_compat	smb_kthread_create
+#define kthread_exit_compat	smb_kthread_exit
 
 void
 smb_iod_thread(void *arg)
 {
 	struct smbiod *iod = arg;
+
+	/*
+	 * mplock not held on entry but we aren't mpsafe yet.
+	 */
+	get_mplock();
 
 	smb_makescred(&iod->iod_scred, iod->iod_td, NULL);
 	while ((iod->iod_flags & SMBIOD_SHUTDOWN) == 0) {

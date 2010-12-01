@@ -31,7 +31,6 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  * 
- * $DragonFly: src/sys/dev/disk/ccd/ccd.c,v 1.50 2007/11/06 03:50:02 dillon Exp $
  */
 /*
  * Copyright (c) 1995 Jason R. Thorpe.
@@ -108,7 +107,6 @@
  * @(#)cd.c	8.2 (Berkeley) 11/16/93
  * $FreeBSD: src/sys/dev/ccd/ccd.c,v 1.73.2.1 2001/09/11 09:49:52 kris Exp $
  * $NetBSD: ccd.c,v 1.22 1995/12/08 19:13:26 thorpej Exp $
- * $DragonFly: src/sys/dev/disk/ccd/ccd.c,v 1.50 2007/11/06 03:50:02 dillon Exp $
  */
 
 /*
@@ -141,7 +139,6 @@
 #include <sys/devicestat.h>
 #include <sys/fcntl.h>
 #include <sys/vnode.h>
-#include <sys/buf2.h>
 #include <sys/ccdvar.h>
 
 #include <vm/vm_zone.h>
@@ -150,6 +147,8 @@
 #include <vfs/ufs/fs.h> 	/* XXX used only to get BBSIZE and SBSIZE */
 
 #include <sys/thread2.h>
+#include <sys/buf2.h>
+#include <sys/mplock2.h>
 
 #if defined(CCDDEBUG) && !defined(DEBUG)
 #define DEBUG
@@ -206,10 +205,8 @@ static d_dump_t ccddump;
 
 #define NCCDFREEHIWAT	16
 
-#define CDEV_MAJOR 74
-
 static struct dev_ops ccd_ops = {
-	{ "ccd", CDEV_MAJOR, D_DISK },
+	{ "ccd", 0, D_DISK },
 	.d_open =	ccdopen,
 	.d_close =	ccdclose,
 	.d_read =	physread,
@@ -276,7 +273,6 @@ getccdbuf(void)
 	 * independant struct buf initialization
 	 */
 	buf_dep_init(&cbp->cb_buf);
-	BUF_LOCKINIT(&cbp->cb_buf);
 	BUF_LOCK(&cbp->cb_buf, LK_EXCLUSIVE);
 	BUF_KERNPROC(&cbp->cb_buf);
 	cbp->cb_buf.b_flags = B_PAGING | B_BNOCLIP;
@@ -295,13 +291,13 @@ void
 putccdbuf(struct ccdbuf *cbp)
 {
 	BUF_UNLOCK(&cbp->cb_buf);
-	BUF_LOCKFREE(&cbp->cb_buf);
 
 	if (numccdfreebufs < NCCDFREEHIWAT) {
 		cbp->cb_freenext = ccdfreebufs;
 		ccdfreebufs = cbp;
 		++numccdfreebufs;
 	} else {
+		uninitbufbio(&cbp->cb_buf);
 		kfree((caddr_t)cbp, M_DEVBUF);
 	}
 }
@@ -1184,6 +1180,7 @@ ccdintr(struct ccd_softc *cs, struct bio *bio)
 
 /*
  * Called at interrupt time.
+ *
  * Mark the component as done and if all components are done,
  * take a ccd interrupt.
  */
@@ -1202,6 +1199,7 @@ ccdiodone(struct bio *bio)
 	 */
 	clearbiocache(bio->bio_next);
 
+	get_mplock();
 	crit_enter();
 #ifdef DEBUG
 	if (ccddebug & CCDB_FOLLOW)
@@ -1272,6 +1270,7 @@ ccdiodone(struct bio *bio)
 				cbp->cb_mirror->cb_pflags |= CCDPF_MIRROR_DONE;
 				putccdbuf(cbp);
 				crit_exit();
+				rel_mplock();
 				return;
 			}
 		} else {
@@ -1290,6 +1289,7 @@ ccdiodone(struct bio *bio)
 					);
 					putccdbuf(cbp);
 					crit_exit();
+					rel_mplock();
 					return;
 				} else {
 					putccdbuf(cbp->cb_mirror);
@@ -1314,6 +1314,7 @@ ccdiodone(struct bio *bio)
 	if (obp->b_resid == 0)
 		ccdintr(&ccd_softc[unit], obio);
 	crit_exit();
+	rel_mplock();
 }
 
 static int

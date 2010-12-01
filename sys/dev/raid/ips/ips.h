@@ -26,7 +26,6 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/dev/ips/ips.h,v 1.10 2004/05/30 20:08:34 phk Exp $
- * $DragonFly: src/sys/dev/raid/ips/ips.h,v 1.13 2006/12/22 23:26:23 swildner Exp $
  */
 
 
@@ -174,7 +173,10 @@ MALLOC_DECLARE(M_IPSBUF);
 #define IPS_ADAPTER_SARASOTA1		0x0D
 #define IPS_ADAPTER_MARCO		0x0E
 #define IPS_ADAPTER_SEBRING		0x0F
-#define IPS_ADAPTER_MAX_T		IPS_ADAPTER_SEBRING
+#define IPS_ADAPTER_7T			0x10
+#define IPS_ADAPTER_7K			0x11
+#define IPS_ADAPTER_7M			0x12
+#define IPS_ADAPTER_MAX_T		IPS_ADAPTER_7M
 
 /* values for ffdc_settime (from gmtime) */
 #define IPS_SECSPERMIN      60
@@ -481,6 +483,3 @@ extern void ips_copperhead_intr(void *sc);
 extern void ips_issue_copperhead_cmd(ips_command_t *command);
 extern void ips_copperhead_poll(ips_command_t *command);
 int ips_timed_wait(ips_command_t *, const char *, int);
-
-#define IPS_CDEV_MAJOR 175
-#define IPSD_CDEV_MAJOR 176

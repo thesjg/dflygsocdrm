@@ -115,7 +115,7 @@
 #include <openssl/rsa.h>
 #include <openssl/rand.h>
 
-#if !defined(RSA_NULL) && !defined(OPENSSL_FIPS)
+#ifndef RSA_NULL
 
 static int RSA_eay_public_encrypt(int flen, const unsigned char *from,
 		unsigned char *to, RSA *rsa,int padding);
@@ -256,6 +256,7 @@ static BN_BLINDING *rsa_get_blinding(RSA *rsa, int *local, BN_CTX *ctx)
 {
 	BN_BLINDING *ret;
 	int got_write_lock = 0;
+	CRYPTO_THREADID cur;
 
 	CRYPTO_r_lock(CRYPTO_LOCK_RSA);
 
@@ -273,7 +274,8 @@ static BN_BLINDING *rsa_get_blinding(RSA *rsa, int *local, BN_CTX *ctx)
 	if (ret == NULL)
 		goto err;
 
-	if (BN_BLINDING_get_thread_id(ret) == CRYPTO_thread_id())
+	CRYPTO_THREADID_current(&cur);
+	if (!CRYPTO_THREADID_cmp(&cur, BN_BLINDING_thread_id(ret)))
 		{
 		/* rsa->blinding is ours! */
 
@@ -673,7 +675,7 @@ static int RSA_eay_public_decrypt(int flen, const unsigned char *from,
 		rsa->_method_mod_n)) goto err;
 
 	if ((padding == RSA_X931_PADDING) && ((ret->d[0] & 0xf) != 12))
-		BN_sub(ret, rsa->n, ret);
+		if (!BN_sub(ret, rsa->n, ret)) goto err;
 
 	p=buf;
 	i=BN_bn2bin(ret,p);

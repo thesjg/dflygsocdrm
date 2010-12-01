@@ -56,15 +56,19 @@
 #include <sys/un.h>
 #include <sys/unpcb.h>
 #include <sys/vnode.h>
+
 #include <sys/file2.h>
 #include <sys/spinlock2.h>
-
+#include <sys/socketvar2.h>
+#include <sys/msgport2.h>
 
 static	MALLOC_DEFINE(M_UNPCB, "unpcb", "unpcb struct");
 static	unp_gen_t unp_gencnt;
 static	u_int unp_count;
 
 static	struct unp_head unp_shead, unp_dhead;
+
+static struct lwkt_token unp_token = LWKT_TOKEN_MP_INITIALIZER(unp_token);
 
 /*
  * Unix communications domain.
@@ -100,149 +104,230 @@ static int     unp_internalize (struct mbuf *, struct thread *);
 static int     unp_listen (struct unpcb *, struct thread *);
 static void    unp_fp_externalize(struct lwp *lp, struct file *fp, int fd);
 
-static int
-uipc_abort(struct socket *so)
+/*
+ * NOTE: (so) is referenced from soabort*() and netmsg_pru_abort()
+ *	 will sofree() it when we return.
+ */
+static void
+uipc_abort(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-	unp_drop(unp, ECONNABORTED);
-	unp_detach(unp);
-	sofree(so);
-	return 0;
-}
-
-static int
-uipc_accept(struct socket *so, struct sockaddr **nam)
-{
-	struct unpcb *unp = so->so_pcb;
-
-	if (unp == NULL)
-		return EINVAL;
-
-	/*
-	 * Pass back name of connected socket,
-	 * if it was bound and we are still connected
-	 * (our peer may have closed already!).
-	 */
-	if (unp->unp_conn && unp->unp_conn->unp_addr) {
-		*nam = dup_sockaddr((struct sockaddr *)unp->unp_conn->unp_addr);
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp) {
+		unp_drop(unp, ECONNABORTED);
+		unp_detach(unp);
+		error = 0;
 	} else {
-		*nam = dup_sockaddr((struct sockaddr *)&sun_noname);
+		error = EINVAL;
 	}
-	return 0;
+	lwkt_reltoken(&unp_token);
+
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_attach(struct socket *so, int proto, struct pru_attach_info *ai)
+static void
+uipc_accept(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp != NULL)
-		return EISCONN;
-	return unp_attach(so, ai);
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp == NULL) {
+		error = EINVAL;
+	} else {
+		/*
+		 * Pass back name of connected socket,
+		 * if it was bound and we are still connected
+		 * (our peer may have closed already!).
+		 */
+		if (unp->unp_conn && unp->unp_conn->unp_addr) {
+			*msg->accept.nm_nam = dup_sockaddr(
+				(struct sockaddr *)unp->unp_conn->unp_addr);
+		} else {
+			*msg->accept.nm_nam = dup_sockaddr(
+				(struct sockaddr *)&sun_noname);
+		}
+		error = 0;
+	}
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
+static void
+uipc_attach(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-	return unp_bind(unp, nam, td);
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp)
+		error = EISCONN;
+	else
+		error = unp_attach(msg->base.nm_so, msg->attach.nm_ai);
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
+static void
+uipc_bind(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-	return unp_connect(so, nam, td);
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp)
+		error = unp_bind(unp, msg->bind.nm_nam, msg->bind.nm_td);
+	else
+		error = EINVAL;
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_connect2(struct socket *so1, struct socket *so2)
+static void
+uipc_connect(netmsg_t msg)
 {
-	struct unpcb *unp = so1->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp) {
+		error = unp_connect(msg->base.nm_so,
+				    msg->connect.nm_nam,
+				    msg->connect.nm_td);
+	} else {
+		error = EINVAL;
+	}
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
+}
 
-	return unp_connect2(so1, so2);
+static void
+uipc_connect2(netmsg_t msg)
+{
+	struct unpcb *unp;
+	int error;
+
+	lwkt_gettoken(&unp_token);
+	unp = msg->connect2.nm_so1->so_pcb;
+	if (unp) {
+		error = unp_connect2(msg->connect2.nm_so1,
+				     msg->connect2.nm_so2);
+	} else {
+		error = EINVAL;
+	}
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 /* control is EOPNOTSUPP */
 
-static int
-uipc_detach(struct socket *so)
+static void
+uipc_detach(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-
-	unp_detach(unp);
-	return 0;
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp) {
+		unp_detach(unp);
+		error = 0;
+	} else {
+		error = EINVAL;
+	}
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_disconnect(struct socket *so)
+static void
+uipc_disconnect(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-	unp_disconnect(unp);
-	return 0;
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp) {
+		unp_disconnect(unp);
+		error = 0;
+	} else {
+		error = EINVAL;
+	}
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_listen(struct socket *so, struct thread *td)
+static void
+uipc_listen(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
 	if (unp == NULL || unp->unp_vnode == NULL)
-		return EINVAL;
-	return unp_listen(unp, td);
+		error = EINVAL;
+	else
+		error = unp_listen(unp, msg->listen.nm_td);
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_peeraddr(struct socket *so, struct sockaddr **nam)
+static void
+uipc_peeraddr(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-	if (unp->unp_conn && unp->unp_conn->unp_addr)
-		*nam = dup_sockaddr((struct sockaddr *)unp->unp_conn->unp_addr);
-	else {
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp == NULL) {
+		error = EINVAL;
+	} else if (unp->unp_conn && unp->unp_conn->unp_addr) {
+		*msg->peeraddr.nm_nam = dup_sockaddr(
+				(struct sockaddr *)unp->unp_conn->unp_addr);
+		error = 0;
+	} else {
 		/*
 		 * XXX: It seems that this test always fails even when
 		 * connection is established.  So, this else clause is
 		 * added as workaround to return PF_LOCAL sockaddr.
 		 */
-		*nam = dup_sockaddr((struct sockaddr *)&sun_noname);
+		*msg->peeraddr.nm_nam = dup_sockaddr(
+				(struct sockaddr *)&sun_noname);
+		error = 0;
 	}
-	return 0;
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_rcvd(struct socket *so, int flags)
+static void
+uipc_rcvd(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	struct socket *so;
 	struct socket *so2;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
+	lwkt_gettoken(&unp_token);
+	so = msg->base.nm_so;
+	unp = so->so_pcb;
+	if (unp == NULL) {
+		error = EINVAL;
+		goto done;
+	}
+
 	switch (so->so_type) {
 	case SOCK_DGRAM:
 		panic("uipc_rcvd DGRAM?");
 		/*NOTREACHED*/
-
 	case SOCK_STREAM:
 	case SOCK_SEQPACKET:
 		if (unp->unp_conn == NULL)
@@ -256,37 +341,48 @@ uipc_rcvd(struct socket *so, int flags)
 		if (so->so_rcv.ssb_cc < so2->so_snd.ssb_hiwat &&
 		    so->so_rcv.ssb_mbcnt < so2->so_snd.ssb_mbmax
 		) {
-			so2->so_snd.ssb_flags &= ~SSB_STOP;
+			atomic_clear_int(&so2->so_snd.ssb_flags, SSB_STOP);
 			sowwakeup(so2);
 		}
 		break;
-
 	default:
 		panic("uipc_rcvd unknown socktype");
+		/*NOTREACHED*/
 	}
-	return 0;
+	error = 0;
+done:
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 /* pru_rcvoob is EOPNOTSUPP */
 
-static int
-uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
-	  struct mbuf *control, struct thread *td)
+static void
+uipc_send(netmsg_t msg)
 {
-	int error = 0;
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	struct socket *so;
 	struct socket *so2;
+	struct mbuf *control;
+	struct mbuf *m;
+	int error = 0;
+
+	lwkt_gettoken(&unp_token);
+	so = msg->base.nm_so;
+	control = msg->send.nm_control;
+	m = msg->send.nm_m;
+	unp = so->so_pcb;
 
 	if (unp == NULL) {
 		error = EINVAL;
 		goto release;
 	}
-	if (flags & PRUS_OOB) {
+	if (msg->send.nm_flags & PRUS_OOB) {
 		error = EOPNOTSUPP;
 		goto release;
 	}
 
-	if (control && (error = unp_internalize(control, td)))
+	if (control && (error = unp_internalize(control, msg->send.nm_td)))
 		goto release;
 
 	switch (so->so_type) {
@@ -294,12 +390,14 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 	{
 		struct sockaddr *from;
 
-		if (nam) {
+		if (msg->send.nm_addr) {
 			if (unp->unp_conn) {
 				error = EISCONN;
 				break;
 			}
-			error = unp_connect(so, nam, td);
+			error = unp_connect(so,
+					    msg->send.nm_addr,
+					    msg->send.nm_td);
 			if (error)
 				break;
 		} else {
@@ -313,6 +411,8 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 			from = (struct sockaddr *)unp->unp_addr;
 		else
 			from = &sun_noname;
+
+		lwkt_gettoken(&so2->so_rcv.ssb_token);
 		if (ssb_appendaddr(&so2->so_rcv, from, m, control)) {
 			sorwakeup(so2);
 			m = NULL;
@@ -320,8 +420,9 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 		} else {
 			error = ENOBUFS;
 		}
-		if (nam)
+		if (msg->send.nm_addr)
 			unp_disconnect(unp);
+		lwkt_reltoken(&so2->so_rcv.ssb_token);
 		break;
 	}
 
@@ -333,8 +434,10 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 		 * if not equal to the peer's address.
 		 */
 		if (!(so->so_state & SS_ISCONNECTED)) {
-			if (nam) {
-				error = unp_connect(so, nam, td);
+			if (msg->send.nm_addr) {
+				error = unp_connect(so,
+						    msg->send.nm_addr,
+						    msg->send.nm_td);
 				if (error)
 					break;	/* XXX */
 			} else {
@@ -355,6 +458,7 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 		 * send buffer hiwater marks to maintain backpressure.
 		 * Wake up readers.
 		 */
+		lwkt_gettoken(&so2->so_rcv.ssb_token);
 		if (control) {
 			if (ssb_appendcontrol(&so2->so_rcv, m, control)) {
 				control = NULL;
@@ -376,8 +480,9 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 		if (so2->so_rcv.ssb_cc >= so->so_snd.ssb_hiwat ||
 		    so2->so_rcv.ssb_mbcnt >= so->so_snd.ssb_mbmax
 		) {
-			so->so_snd.ssb_flags |= SSB_STOP;
+			atomic_set_int(&so->so_snd.ssb_flags, SSB_STOP);
 		}
+		lwkt_reltoken(&so2->so_rcv.ssb_token);
 		sorwakeup(so2);
 		break;
 
@@ -388,7 +493,7 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 	/*
 	 * SEND_EOF is equivalent to a SEND followed by a SHUTDOWN.
 	 */
-	if (flags & PRUS_EOF) {
+	if (msg->send.nm_flags & PRUS_EOF) {
 		socantsendmore(so);
 		unp_shutdown(unp);
 	}
@@ -397,56 +502,88 @@ uipc_send(struct socket *so, int flags, struct mbuf *m, struct sockaddr *nam,
 		unp_dispose(control);
 
 release:
+	lwkt_reltoken(&unp_token);
+
 	if (control)
 		m_freem(control);
 	if (m)
 		m_freem(m);
-	return error;
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 /*
  * MPSAFE
  */
-static int
-uipc_sense(struct socket *so, struct stat *sb)
+static void
+uipc_sense(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	struct socket *so;
+	struct stat *sb;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
+	lwkt_gettoken(&unp_token);
+	so = msg->base.nm_so;
+	sb = msg->sense.nm_stat;
+	unp = so->so_pcb;
+	if (unp == NULL) {
+		error = EINVAL;
+		goto done;
+	}
 	sb->st_blksize = so->so_snd.ssb_hiwat;
 	sb->st_dev = NOUDEV;
 	if (unp->unp_ino == 0) {	/* make up a non-zero inode number */
-		spin_lock_wr(&unp_ino_spin);
+		spin_lock(&unp_ino_spin);
 		unp->unp_ino = unp_ino++;
-		spin_unlock_wr(&unp_ino_spin);
+		spin_unlock(&unp_ino_spin);
 	}
 	sb->st_ino = unp->unp_ino;
-	return (0);
+	error = 0;
+done:
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_shutdown(struct socket *so)
+static void
+uipc_shutdown(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct socket *so;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-	socantsendmore(so);
-	unp_shutdown(unp);
-	return 0;
+	lwkt_gettoken(&unp_token);
+	so = msg->base.nm_so;
+	unp = so->so_pcb;
+	if (unp) {
+		socantsendmore(so);
+		unp_shutdown(unp);
+		error = 0;
+	} else {
+		error = EINVAL;
+	}
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
-static int
-uipc_sockaddr(struct socket *so, struct sockaddr **nam)
+static void
+uipc_sockaddr(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
+	int error;
 
-	if (unp == NULL)
-		return EINVAL;
-	if (unp->unp_addr)
-		*nam = dup_sockaddr((struct sockaddr *)unp->unp_addr);
-	return 0;
+	lwkt_gettoken(&unp_token);
+	unp = msg->base.nm_so->so_pcb;
+	if (unp) {
+		if (unp->unp_addr) {
+			*msg->sockaddr.nm_nam =
+				dup_sockaddr((struct sockaddr *)unp->unp_addr);
+		}
+		error = 0;
+	} else {
+		error = EINVAL;
+	}
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 struct pr_usrreqs uipc_usrreqs = {
@@ -456,13 +593,13 @@ struct pr_usrreqs uipc_usrreqs = {
 	.pru_bind = uipc_bind,
 	.pru_connect = uipc_connect,
 	.pru_connect2 = uipc_connect2,
-	.pru_control = pru_control_notsupp,
+	.pru_control = pr_generic_notsupp,
 	.pru_detach = uipc_detach,
 	.pru_disconnect = uipc_disconnect,
 	.pru_listen = uipc_listen,
 	.pru_peeraddr = uipc_peeraddr,
 	.pru_rcvd = uipc_rcvd,
-	.pru_rcvoob = pru_rcvoob_notsupp,
+	.pru_rcvoob = pr_generic_notsupp,
 	.pru_send = uipc_send,
 	.pru_sense = uipc_sense,
 	.pru_shutdown = uipc_shutdown,
@@ -471,11 +608,18 @@ struct pr_usrreqs uipc_usrreqs = {
 	.pru_soreceive = soreceive
 };
 
-int
-uipc_ctloutput(struct socket *so, struct sockopt *sopt)
+void
+uipc_ctloutput(netmsg_t msg)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct socket *so;
+	struct sockopt *sopt;
+	struct unpcb *unp;
 	int error = 0;
+
+	lwkt_gettoken(&unp_token);
+	so = msg->base.nm_so;
+	sopt = msg->ctloutput.nm_sopt;
+	unp = so->so_pcb;
 
 	switch (sopt->sopt_dir) {
 	case SOPT_GET:
@@ -503,7 +647,8 @@ uipc_ctloutput(struct socket *so, struct sockopt *sopt)
 		error = EOPNOTSUPP;
 		break;
 	}
-	return (error);
+	lwkt_reltoken(&unp_token);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 	
 /*
@@ -551,6 +696,8 @@ unp_attach(struct socket *so, struct pru_attach_info *ai)
 	struct unpcb *unp;
 	int error;
 
+	lwkt_gettoken(&unp_token);
+
 	if (so->so_snd.ssb_hiwat == 0 || so->so_rcv.ssb_hiwat == 0) {
 		switch (so->so_type) {
 
@@ -569,11 +716,13 @@ unp_attach(struct socket *so, struct pru_attach_info *ai)
 			panic("unp_attach");
 		}
 		if (error)
-			return (error);
+			goto failed;
 	}
 	unp = kmalloc(sizeof(*unp), M_UNPCB, M_NOWAIT|M_ZERO);
-	if (unp == NULL)
-		return (ENOBUFS);
+	if (unp == NULL) {
+		error = ENOBUFS;
+		goto failed;
+	}
 	unp->unp_gencnt = ++unp_gencnt;
 	unp_count++;
 	LIST_INIT(&unp->unp_refs);
@@ -582,13 +731,20 @@ unp_attach(struct socket *so, struct pru_attach_info *ai)
 	LIST_INSERT_HEAD(so->so_type == SOCK_DGRAM ? &unp_dhead
 			 : &unp_shead, unp, unp_link);
 	so->so_pcb = (caddr_t)unp;
-	so->so_port = sync_soport(so, NULL, NULL);
-	return (0);
+	soreference(so);
+	error = 0;
+failed:
+	lwkt_reltoken(&unp_token);
+	return error;
 }
 
 static void
 unp_detach(struct unpcb *unp)
 {
+	struct socket *so;
+
+	lwkt_gettoken(&unp_token);
+
 	LIST_REMOVE(unp, unp_link);
 	unp->unp_gencnt = ++unp_gencnt;
 	--unp_count;
@@ -602,7 +758,12 @@ unp_detach(struct unpcb *unp)
 	while (!LIST_EMPTY(&unp->unp_refs))
 		unp_drop(LIST_FIRST(&unp->unp_refs), ECONNRESET);
 	soisdisconnected(unp->unp_socket);
-	unp->unp_socket->so_pcb = NULL;
+	so = unp->unp_socket;
+	soreference(so);	/* for delayed sorflush */
+	so->so_pcb = NULL;
+	unp->unp_socket = NULL;
+	sofree(so);		/* remove pcb ref */
+
 	if (unp_rights) {
 		/*
 		 * Normally the receive buffer is flushed later,
@@ -611,9 +772,12 @@ unp_detach(struct unpcb *unp)
 		 * of those descriptor references after the garbage collector
 		 * gets them (resulting in a "panic: closef: count < 0").
 		 */
-		sorflush(unp->unp_socket);
+		sorflush(so);
 		unp_gc();
 	}
+	sofree(so);
+	lwkt_reltoken(&unp_token);
+
 	if (unp->unp_addr)
 		kfree(unp->unp_addr, M_SONAME);
 	kfree(unp, M_UNPCB);
@@ -630,11 +794,16 @@ unp_bind(struct unpcb *unp, struct sockaddr *nam, struct thread *td)
 	struct nlookupdata nd;
 	char buf[SOCK_MAXADDRLEN];
 
-	if (unp->unp_vnode != NULL)
-		return (EINVAL);
+	lwkt_gettoken(&unp_token);
+	if (unp->unp_vnode != NULL) {
+		error = EINVAL;
+		goto failed;
+	}
 	namelen = soun->sun_len - offsetof(struct sockaddr_un, sun_path);
-	if (namelen <= 0)
-		return (EINVAL);
+	if (namelen <= 0) {
+		error = EINVAL;
+		goto failed;
+	}
 	strncpy(buf, soun->sun_path, namelen);
 	buf[namelen] = 0;	/* null-terminate the string */
 	error = nlookup_init(&nd, buf, UIO_SYSSPACE,
@@ -658,6 +827,8 @@ unp_bind(struct unpcb *unp, struct sockaddr *nam, struct thread *td)
 	}
 done:
 	nlookup_done(&nd);
+failed:
+	lwkt_reltoken(&unp_token);
 	return (error);
 }
 
@@ -673,11 +844,13 @@ unp_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 	struct nlookupdata nd;
 	char buf[SOCK_MAXADDRLEN];
 
-	KKASSERT(p);
+	lwkt_gettoken(&unp_token);
 
 	len = nam->sa_len - offsetof(struct sockaddr_un, sun_path);
-	if (len <= 0)
-		return EINVAL;
+	if (len <= 0) {
+		error = EINVAL;
+		goto failed;
+	}
 	strncpy(buf, soun->sun_path, len);
 	buf[len] = 0;
 
@@ -689,13 +862,13 @@ unp_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 		error = cache_vget(&nd.nl_nch, nd.nl_cred, LK_EXCLUSIVE, &vp);
 	nlookup_done(&nd);
 	if (error)
-		return (error);
+		goto failed;
 
 	if (vp->v_type != VSOCK) {
 		error = ENOTSOCK;
 		goto bad;
 	}
-	error = VOP_ACCESS(vp, VWRITE, p->p_ucred);
+	error = VOP_EACCESS(vp, VWRITE, p->p_ucred);
 	if (error)
 		goto bad;
 	so2 = vp->v_socket;
@@ -747,21 +920,27 @@ unp_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 	error = unp_connect2(so, so2);
 bad:
 	vput(vp);
+failed:
+	lwkt_reltoken(&unp_token);
 	return (error);
 }
 
 int
 unp_connect2(struct socket *so, struct socket *so2)
 {
-	struct unpcb *unp = so->so_pcb;
+	struct unpcb *unp;
 	struct unpcb *unp2;
 
-	if (so2->so_type != so->so_type)
+	lwkt_gettoken(&unp_token);
+	unp = so->so_pcb;
+	if (so2->so_type != so->so_type) {
+		lwkt_reltoken(&unp_token);
 		return (EPROTOTYPE);
+	}
 	unp2 = so2->so_pcb;
 	unp->unp_conn = unp2;
-	switch (so->so_type) {
 
+	switch (so->so_type) {
 	case SOCK_DGRAM:
 		LIST_INSERT_HEAD(&unp2->unp_refs, unp, unp_reflink);
 		soisconnected(so);
@@ -777,23 +956,29 @@ unp_connect2(struct socket *so, struct socket *so2)
 	default:
 		panic("unp_connect2");
 	}
+	lwkt_reltoken(&unp_token);
 	return (0);
 }
 
 static void
 unp_disconnect(struct unpcb *unp)
 {
-	struct unpcb *unp2 = unp->unp_conn;
+	struct unpcb *unp2;
 
-	if (unp2 == NULL)
+	lwkt_gettoken(&unp_token);
+
+	unp2 = unp->unp_conn;
+	if (unp2 == NULL) {
+		lwkt_reltoken(&unp_token);
 		return;
+	}
 
 	unp->unp_conn = NULL;
 
 	switch (unp->unp_socket->so_type) {
 	case SOCK_DGRAM:
 		LIST_REMOVE(unp, unp_reflink);
-		unp->unp_socket->so_state &= ~SS_ISCONNECTED;
+		soclrstate(unp->unp_socket, SS_ISCONNECTED);
 		break;
 	case SOCK_STREAM:
 	case SOCK_SEQPACKET:
@@ -802,14 +987,16 @@ unp_disconnect(struct unpcb *unp)
 		soisdisconnected(unp2->unp_socket);
 		break;
 	}
+	lwkt_reltoken(&unp_token);
 }
 
 #ifdef notdef
 void
 unp_abort(struct unpcb *unp)
 {
-
+	lwkt_gettoken(&unp_token);
 	unp_detach(unp);
+	lwkt_reltoken(&unp_token);
 }
 #endif
 
@@ -854,6 +1041,8 @@ unp_pcblist(SYSCTL_HANDLER_ARGS)
 	if (req->newptr != NULL)
 		return EPERM;
 
+	lwkt_gettoken(&unp_token);
+
 	/*
 	 * OK, now we're committed to doing something.
 	 */
@@ -892,7 +1081,9 @@ unp_pcblist(SYSCTL_HANDLER_ARGS)
 			error = SYSCTL_OUT(req, &xu, sizeof xu);
 		}
 	}
+	lwkt_reltoken(&unp_token);
 	kfree(unp_list, M_TEMP);
+
 	return error;
 }
 
@@ -931,7 +1122,8 @@ unp_drop(struct unpcb *unp, int err)
 void
 unp_drain(void)
 {
-
+	lwkt_gettoken(&unp_token);
+	lwkt_reltoken(&unp_token);
 }
 #endif
 
@@ -950,6 +1142,8 @@ unp_externalize(struct mbuf *rights)
 		/ sizeof (struct file *);
 	int f;
 
+	lwkt_gettoken(&unp_token);
+
 	/*
 	 * if the new FD's will not fit, then we free them all
 	 */
@@ -964,6 +1158,7 @@ unp_externalize(struct mbuf *rights)
 			*rp++ = 0;
 			unp_discard(fp, NULL);
 		}
+		lwkt_reltoken(&unp_token);
 		return (EMSGSIZE);
 	}
 
@@ -1006,6 +1201,8 @@ unp_externalize(struct mbuf *rights)
 	 */
 	cm->cmsg_len = CMSG_LEN(newfds * sizeof(int));
 	rights->m_len = cm->cmsg_len;
+
+	lwkt_reltoken(&unp_token);
 	return (0);
 }
 
@@ -1014,6 +1211,8 @@ unp_fp_externalize(struct lwp *lp, struct file *fp, int fd)
 {
 	struct file *fx;
 	int error;
+
+	lwkt_gettoken(&unp_token);
 
 	if (lp) {
 		KKASSERT(fd >= 0);
@@ -1030,11 +1229,13 @@ unp_fp_externalize(struct lwp *lp, struct file *fp, int fd)
 			fsetfd(lp->lwp_proc->p_fd, fp, fd);
 		}
 	}
-	spin_lock_wr(&unp_spin);
+	spin_lock(&unp_spin);
 	fp->f_msgcount--;
 	unp_rights--;
-	spin_unlock_wr(&unp_spin);
+	spin_unlock(&unp_spin);
 	fdrop(fp);
+
+	lwkt_reltoken(&unp_token);
 }
 
 
@@ -1058,13 +1259,17 @@ unp_internalize(struct mbuf *control, struct thread *td)
 	struct cmsgcred *cmcred;
 	int oldfds;
 	u_int newlen;
+	int error;
 
 	KKASSERT(p);
+	lwkt_gettoken(&unp_token);
+
 	fdescp = p->p_fd;
 	if ((cm->cmsg_type != SCM_RIGHTS && cm->cmsg_type != SCM_CREDS) ||
 	    cm->cmsg_level != SOL_SOCKET ||
 	    CMSG_ALIGN(cm->cmsg_len) != control->m_len) {
-		return (EINVAL);
+		error = EINVAL;
+		goto done;
 	}
 
 	/*
@@ -1080,15 +1285,18 @@ unp_internalize(struct mbuf *control, struct thread *td)
 							CMGROUP_MAX);
 		for (i = 0; i < cmcred->cmcred_ngroups; i++)
 			cmcred->cmcred_groups[i] = p->p_ucred->cr_groups[i];
-		return(0);
+		error = 0;
+		goto done;
 	}
 
 	/*
 	 * cmsghdr may not be aligned, do not allow calculation(s) to
 	 * go negative.
 	 */
-	if (cm->cmsg_len < CMSG_LEN(0))
-		return(EINVAL);
+	if (cm->cmsg_len < CMSG_LEN(0)) {
+		error = EINVAL;
+		goto done;
+	}
 
 	oldfds = (cm->cmsg_len - CMSG_LEN(0)) / sizeof (int);
 
@@ -1100,10 +1308,14 @@ unp_internalize(struct mbuf *control, struct thread *td)
 	for (i = 0; i < oldfds; i++) {
 		fd = *fdp++;
 		if ((unsigned)fd >= fdescp->fd_nfiles ||
-		    fdescp->fd_files[fd].fp == NULL)
-			return (EBADF);
-		if (fdescp->fd_files[fd].fp->f_type == DTYPE_KQUEUE)
-			return (EOPNOTSUPP);
+		    fdescp->fd_files[fd].fp == NULL) {
+			error = EBADF;
+			goto done;
+		}
+		if (fdescp->fd_files[fd].fp->f_type == DTYPE_KQUEUE) {
+			error = EOPNOTSUPP;
+			goto done;
+		}
 	}
 	/*
 	 * Now replace the integer FDs with pointers to
@@ -1112,14 +1324,20 @@ unp_internalize(struct mbuf *control, struct thread *td)
 	 * enough, return E2BIG.
 	 */
 	newlen = CMSG_LEN(oldfds * sizeof(struct file *));
-	if (newlen > MCLBYTES)
-		return (E2BIG);
+	if (newlen > MCLBYTES) {
+		error = E2BIG;
+		goto done;
+	}
 	if (newlen - control->m_len > M_TRAILINGSPACE(control)) {
-		if (control->m_flags & M_EXT)
-			return (E2BIG);
+		if (control->m_flags & M_EXT) {
+			error = E2BIG;
+			goto done;
+		}
 		MCLGET(control, MB_WAIT);
-		if (!(control->m_flags & M_EXT))
-			return (ENOBUFS);
+		if (!(control->m_flags & M_EXT)) {
+			error = ENOBUFS;
+			goto done;
+		}
 
 		/* copy the data to the cluster */
 		memcpy(mtod(control, char *), cm, cm->cmsg_len);
@@ -1148,10 +1366,10 @@ unp_internalize(struct mbuf *control, struct thread *td)
 			fp = fdescp->fd_files[*fdp--].fp;
 			*rp-- = fp;
 			fhold(fp);
-			spin_lock_wr(&unp_spin);
+			spin_lock(&unp_spin);
 			fp->f_msgcount++;
 			unp_rights++;
-			spin_unlock_wr(&unp_spin);
+			spin_unlock(&unp_spin);
 		}
 	} else {
 		fdp = (int *)CMSG_DATA(cm);
@@ -1160,13 +1378,16 @@ unp_internalize(struct mbuf *control, struct thread *td)
 			fp = fdescp->fd_files[*fdp++].fp;
 			*rp++ = fp;
 			fhold(fp);
-			spin_lock_wr(&unp_spin);
+			spin_lock(&unp_spin);
 			fp->f_msgcount++;
 			unp_rights++;
-			spin_unlock_wr(&unp_spin);
+			spin_unlock(&unp_spin);
 		}
 	}
-	return (0);
+	error = 0;
+done:
+	lwkt_reltoken(&unp_token);
+	return error;
 }
 
 /*
@@ -1193,22 +1414,35 @@ unp_gc(void)
 	struct file **fpp;
 	int i;
 
-	spin_lock_wr(&unp_spin);
+	/*
+	 * Only one gc can be in-progress at any given moment
+	 */
+	spin_lock(&unp_spin);
 	if (unp_gcing) {
-		spin_unlock_wr(&unp_spin);
+		spin_unlock(&unp_spin);
 		return;
 	}
 	unp_gcing = TRUE;
-	spin_unlock_wr(&unp_spin);
+	spin_unlock(&unp_spin);
+
+	lwkt_gettoken(&unp_token);
 
 	/* 
-	 * before going through all this, set all FDs to 
-	 * be NOT defered and NOT externally accessible
+	 * Before going through all this, set all FDs to be NOT defered
+	 * and NOT externally accessible (not marked).  During the scan
+	 * a fd can be marked externally accessible but we may or may not
+	 * be able to immediately process it (controlled by FDEFER).
+	 *
+	 * If we loop sleep a bit.  The complexity of the topology can cause
+	 * multiple loops.  Also failure to acquire the socket's so_rcv
+	 * token can cause us to loop.
 	 */
-	info.defer = 0;
 	allfiles_scan_exclusive(unp_gc_clearmarks, NULL);
 	do {
+		info.defer = 0;
 		allfiles_scan_exclusive(unp_gc_checkmarks, &info);
+		if (info.defer)
+			tsleep(&info, 0, "gcagain", 1);
 	} while (info.defer);
 
 	/*
@@ -1271,6 +1505,9 @@ unp_gc(void)
 		for (i = info.index, fpp = info.extra_ref; --i >= 0; ++fpp)
 			closef(*fpp, NULL);
 	} while (info.index == info.maxindex);
+
+	lwkt_reltoken(&unp_token);
+
 	kfree((caddr_t)info.extra_ref, M_FILE);
 	unp_gcing = FALSE;
 }
@@ -1321,10 +1558,15 @@ unp_gc_checkmarks(struct file *fp, void *data)
 	struct socket *so;
 
 	/*
-	 * If the file is not open, skip it
+	 * If the file is not open, skip it.  Make sure it isn't marked
+	 * defered or we could loop forever, in case we somehow race
+	 * something.
 	 */
-	if (fp->f_count == 0)
+	if (fp->f_count == 0) {
+		if (fp->f_flag & FDEFER)
+			atomic_clear_int(&fp->f_flag, FDEFER);
 		return(0);
+	}
 	/*
 	 * If we already marked it as 'defer'  in a
 	 * previous pass, then try process it this time
@@ -1332,7 +1574,6 @@ unp_gc_checkmarks(struct file *fp, void *data)
 	 */
 	if (fp->f_flag & FDEFER) {
 		atomic_clear_int(&fp->f_flag, FDEFER);
-		--info->defer;
 	} else {
 		/*
 		 * if it's not defered, then check if it's
@@ -1360,38 +1601,31 @@ unp_gc_checkmarks(struct file *fp, void *data)
 	 * Now check if it is possibly one of OUR sockets.
 	 */ 
 	if (fp->f_type != DTYPE_SOCKET ||
-	    (so = (struct socket *)fp->f_data) == NULL)
+	    (so = (struct socket *)fp->f_data) == NULL) {
 		return(0);
-	if (so->so_proto->pr_domain != &localdomain ||
-	    !(so->so_proto->pr_flags & PR_RIGHTS))
-		return(0);
-#ifdef notdef
-	if (so->so_rcv.ssb_flags & SSB_LOCK) {
-		/*
-		 * This is problematical; it's not clear
-		 * we need to wait for the sockbuf to be
-		 * unlocked (on a uniprocessor, at least),
-		 * and it's also not clear what to do
-		 * if sbwait returns an error due to receipt
-		 * of a signal.  If sbwait does return
-		 * an error, we'll go into an infinite
-		 * loop.  Delete all of this for now.
-		 */
-		sbwait(&so->so_rcv);
-		goto restart;
 	}
-#endif
+	if (so->so_proto->pr_domain != &localdomain ||
+	    !(so->so_proto->pr_flags & PR_RIGHTS)) {
+		return(0);
+	}
+
 	/*
-	 * So, Ok, it's one of our sockets and it IS externally
-	 * accessible (or was defered). Now we look
-	 * to see if we hold any file descriptors in its
-	 * message buffers. Follow those links and mark them 
-	 * as accessible too.
+	 * So, Ok, it's one of our sockets and it IS externally accessible
+	 * (or was defered).  Now we look to see if we hold any file
+	 * descriptors in its message buffers.  Follow those links and mark
+	 * them as accessible too.
+	 *
+	 * We are holding multiple spinlocks here, if we cannot get the
+	 * token non-blocking defer until the next loop.
 	 */
 	info->locked_fp = fp;
-/*	spin_lock_wr(&so->so_rcv.sb_spin); */
-	unp_scan(so->so_rcv.ssb_mb, unp_mark, info);
-/*	spin_unlock_wr(&so->so_rcv.sb_spin);*/
+	if (lwkt_trytoken(&so->so_rcv.ssb_token)) {
+		unp_scan(so->so_rcv.ssb_mb, unp_mark, info);
+		lwkt_reltoken(&so->so_rcv.ssb_token);
+	} else {
+		atomic_set_int(&fp->f_flag, FDEFER);
+		++info->defer;
+	}
 	return (0);
 }
 
@@ -1416,6 +1650,7 @@ unp_revoke_gc(struct file *fx)
 	struct unp_revoke_gc_info info;
 	int i;
 
+	lwkt_gettoken(&unp_token);
 	info.fx = fx;
 	do {
 		info.fcount = 0;
@@ -1423,6 +1658,7 @@ unp_revoke_gc(struct file *fx)
 		for (i = 0; i < info.fcount; ++i)
 			unp_fp_externalize(NULL, info.fary[i], -1);
 	} while (info.fcount == REVOKE_GC_MAXFILES);
+	lwkt_reltoken(&unp_token);
 }
 
 /*
@@ -1459,6 +1695,7 @@ unp_revoke_gc_check(struct file *fps, void *vinfo)
 	 * Scan the mbufs for control messages and replace any revoked
 	 * descriptors we find.
 	 */
+	lwkt_gettoken(&so->so_rcv.ssb_token);
 	m0 = so->so_rcv.ssb_mb;
 	while (m0) {
 		for (m = m0; m; m = m->m_next) {
@@ -1493,6 +1730,7 @@ unp_revoke_gc_check(struct file *fps, void *vinfo)
 		if (info->fcount == REVOKE_GC_MAXFILES)
 			break;
 	}
+	lwkt_reltoken(&so->so_rcv.ssb_token);
 
 	/*
 	 * Stop the scan if we filled up our array.
@@ -1505,8 +1743,10 @@ unp_revoke_gc_check(struct file *fps, void *vinfo)
 void
 unp_dispose(struct mbuf *m)
 {
+	lwkt_gettoken(&unp_token);
 	if (m)
 		unp_scan(m, unp_discard, NULL);
+	lwkt_reltoken(&unp_token);
 }
 
 static int
@@ -1515,8 +1755,10 @@ unp_listen(struct unpcb *unp, struct thread *td)
 	struct proc *p = td->td_proc;
 
 	KKASSERT(p);
+	lwkt_gettoken(&unp_token);
 	cru2x(p->p_ucred, &unp->unp_peercred);
 	unp->unp_flags |= UNP_HAVEPCCACHED;
+	lwkt_reltoken(&unp_token);
 	return (0);
 }
 
@@ -1549,6 +1791,9 @@ unp_scan(struct mbuf *m0, void (*op)(struct file *, void *), void *data)
 	}
 }
 
+/*
+ * Mark visibility.  info->defer is recalculated on every pass.
+ */
 static void
 unp_mark(struct file *fp, void *data)
 {
@@ -1557,16 +1802,18 @@ unp_mark(struct file *fp, void *data)
 	if ((fp->f_flag & FMARK) == 0) {
 		++info->defer;
 		atomic_set_int(&fp->f_flag, FMARK | FDEFER);
+	} else if (fp->f_flag & FDEFER) {
+		++info->defer;
 	}
 }
 
 static void
 unp_discard(struct file *fp, void *data __unused)
 {
-	spin_lock_wr(&unp_spin);
+	spin_lock(&unp_spin);
 	fp->f_msgcount--;
 	unp_rights--;
-	spin_unlock_wr(&unp_spin);
+	spin_unlock(&unp_spin);
 	closef(fp, NULL);
 }
 

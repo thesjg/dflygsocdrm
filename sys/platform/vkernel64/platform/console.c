@@ -1,4 +1,6 @@
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 2006 The DragonFly Project.  All rights reserved.
  *
  * This code is derived from software contributed to The DragonFly Project
@@ -31,7 +33,6 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $DragonFly: src/sys/platform/vkernel/platform/console.c,v 1.17 2007/07/02 04:19:14 dillon Exp $
  */
 
 #include <sys/systm.h>
@@ -52,26 +53,11 @@
 static int console_stolen_by_kernel;
 static struct kqueue_info *kqueue_console_info;
 
-/*
- * Global console locking functions
- */
-void
-cons_lock(void)
-{
-}
-
-void
-cons_unlock(void)
-{
-}
-
 /************************************************************************
  *			    CONSOLE DEVICE				*
  ************************************************************************
  *
  */
-
-#define CDEV_MAJOR	12	/* steal the same major as /dev/ttyv* */
 
 static int vcons_tty_param(struct tty *tp, struct termios *tio);
 static void vcons_tty_start(struct tty *tp);
@@ -82,7 +68,7 @@ static d_close_t        vcons_close;
 static d_ioctl_t        vcons_ioctl;
 
 static struct dev_ops vcons_ops = {
-	{ "vcons", CDEV_MAJOR, D_TTY | D_KQFILTER },
+	{ "vcons", 0, D_TTY },
 	.d_open =	vcons_open,
 	.d_close =	vcons_close,
 	.d_read =	ttyread,
@@ -98,6 +84,7 @@ vcons_open(struct dev_open_args *ap)
 	struct tty *tp;
 	int error;
 
+	lwkt_gettoken(&tty_token);
 	tp = dev->si_tty = ttymalloc(dev->si_tty);
 
 #define	ISSET(t, f)	((t) & (f))
@@ -128,6 +115,7 @@ vcons_open(struct dev_open_args *ap)
 		/* dummy up other minors so the installer will run */
 		error = 0;
 	}
+	lwkt_reltoken(&tty_token);
 	return(error);
 }
 
@@ -137,9 +125,11 @@ vcons_close(struct dev_close_args *ap)
 	cdev_t dev = ap->a_head.a_dev;
 	struct tty *tp;
 
+	lwkt_gettoken(&tty_token);
 	tp = dev->si_tty;
 	(*linesw[tp->t_line].l_close)(tp, ap->a_fflag);
 	ttyclose(tp);
+	lwkt_reltoken(&tty_token);
 	return(0);
 }
 
@@ -150,23 +140,31 @@ vcons_ioctl(struct dev_ioctl_args *ap)
 	struct tty *tp;
 	int error;
 
+	lwkt_gettoken(&tty_token);
 	tp = dev->si_tty;
 	error = (*linesw[tp->t_line].l_ioctl)(tp, ap->a_cmd, ap->a_data,
 					      ap->a_fflag, ap->a_cred);
-	if (error != ENOIOCTL)
+	if (error != ENOIOCTL) {
+		lwkt_reltoken(&tty_token);
 		return (error);
+	}
 	error = ttioctl(tp, ap->a_cmd, ap->a_data, ap->a_fflag);
-	if (error != ENOIOCTL)
+	if (error != ENOIOCTL) {
+		lwkt_reltoken(&tty_token);
 		return (error);
+	}
+	lwkt_reltoken(&tty_token);
 	return (ENOTTY);
 }
 
 static int
 vcons_tty_param(struct tty *tp, struct termios *tio)
 {
+	lwkt_gettoken(&tty_token);
 	tp->t_ispeed = tio->c_ispeed;
 	tp->t_ospeed = tio->c_ospeed;
 	tp->t_cflag = tio->c_cflag;
+	lwkt_reltoken(&tty_token);
 	return(0);
 }
 
@@ -176,8 +174,10 @@ vcons_tty_start(struct tty *tp)
 	int n;
 	char buf[64];
 
+	lwkt_gettoken(&tty_token);
 	if (tp->t_state & (TS_TIMEOUT | TS_TTSTOP)) {
 		ttwwakeup(tp);
+		lwkt_reltoken(&tty_token);
 		return;
 	}
 	tp->t_state |= TS_BUSY;
@@ -190,6 +190,7 @@ vcons_tty_start(struct tty *tp)
 		}
 	}
 	tp->t_state &= ~TS_BUSY;
+	lwkt_reltoken(&tty_token);
 	ttwwakeup(tp);
 }
 
@@ -202,12 +203,15 @@ vcons_intr(void *tpx, struct intrframe *frame __unused)
 	int i;
 	int n;
 
+	lwkt_gettoken(&tty_token);
 	/*
 	 * If we aren't open we only have synchronous traffic via the
 	 * debugger and do not need to poll.
 	 */
-	if ((tp->t_state & TS_ISOPEN) == 0)
+	if ((tp->t_state & TS_ISOPEN) == 0) {
+		lwkt_reltoken(&tty_token);
 		return;
+	}
 
 	/*
 	 * Only poll if we are open and haven't been stolen by the debugger.
@@ -219,6 +223,7 @@ vcons_intr(void *tpx, struct intrframe *frame __unused)
 				(*linesw[tp->t_line].l_rint)(buf[i], tp);
 		} while (n > 0);
 	}
+	lwkt_reltoken(&tty_token);
 }
 
 /************************************************************************
@@ -408,8 +413,9 @@ vcons_set_mode(int in_debugger)
 {
 	struct termios tio;
 
-	if (tcgetattr(0, &tio) < 0)
+	if (tcgetattr(0, &tio) < 0) {
 		return;
+	}
 	cfmakeraw(&tio);
 	tio.c_oflag |= OPOST | ONLCR;
 	tio.c_lflag |= ISIG;

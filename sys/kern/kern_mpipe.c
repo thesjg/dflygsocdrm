@@ -1,4 +1,6 @@
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 2003,2004 The DragonFly Project.  All rights reserved.
  * 
  * This code is derived from software contributed to The DragonFly Project
@@ -30,8 +32,6 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
- * $DragonFly: src/sys/kern/kern_mpipe.c,v 1.9 2006/09/05 00:55:45 dillon Exp $
  */
 
 #include <sys/param.h>
@@ -89,6 +89,8 @@ mpipe_init(malloc_pipe_t mpipe, malloc_type_t type, int bytes,
 	++mpipe->free_count;
 	++mpipe->total_count;
     }
+
+    lwkt_token_init(&mpipe->token, 1, "mpipe token");
 }
 
 /*
@@ -117,6 +119,8 @@ mpipe_done(malloc_pipe_t mpipe)
 	kfree(mpipe->array, M_MPIPEARY);
 	mpipe->array = NULL;
     }
+
+    lwkt_token_uninit(&mpipe->token);
 }
 
 /*
@@ -131,7 +135,7 @@ mpipe_alloc_nowait(malloc_pipe_t mpipe)
     void *buf;
     int n;
 
-    crit_enter();
+    lwkt_gettoken(&mpipe->token);
     if ((n = mpipe->free_count) != 0) {
 	/*
 	 * Use a free entry if it exists.
@@ -153,7 +157,7 @@ mpipe_alloc_nowait(malloc_pipe_t mpipe)
 	if (buf)
 	    ++mpipe->total_count;
     }
-    crit_exit();
+    lwkt_reltoken(&mpipe->token);
     return(buf);
 }
 
@@ -168,7 +172,7 @@ mpipe_alloc_waitok(malloc_pipe_t mpipe)
     int n;
     int mfailed;
 
-    crit_enter();
+    lwkt_gettoken(&mpipe->token);
     mfailed = 0;
     for (;;) {
 	if ((n = mpipe->free_count) != 0) {
@@ -200,7 +204,7 @@ mpipe_alloc_waitok(malloc_pipe_t mpipe)
 	}
 	mfailed = 1;
     }
-    crit_exit();
+    lwkt_reltoken(&mpipe->token);
     return(buf);
 }
 
@@ -215,7 +219,7 @@ mpipe_free(malloc_pipe_t mpipe, void *buf)
     if (buf == NULL)
 	return;
 
-    crit_enter();
+    lwkt_gettoken(&mpipe->token);
     if ((n = mpipe->free_count) < mpipe->ary_count) {
 	/*
 	 * Free slot available in free array (LIFO)
@@ -224,7 +228,7 @@ mpipe_free(malloc_pipe_t mpipe, void *buf)
 	++mpipe->free_count;
 	if ((mpipe->mpflags & (MPF_CACHEDATA|MPF_NOZERO)) == 0) 
 	    bzero(buf, mpipe->bytes);
-	crit_exit();
+	lwkt_reltoken(&mpipe->token);
 
 	/*
 	 * Wakeup anyone blocked in mpipe_alloc_*().
@@ -241,7 +245,7 @@ mpipe_free(malloc_pipe_t mpipe, void *buf)
 	KKASSERT(mpipe->total_count >= mpipe->free_count);
 	if (mpipe->deconstruct)
 	    mpipe->deconstruct(mpipe, buf);
-	crit_exit();
+	lwkt_reltoken(&mpipe->token);
 	kfree(buf, mpipe->type);
     }
 }

@@ -47,7 +47,6 @@
  ** THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  **
  ** $FreeBSD: src/sys/i386/i386/userconfig.c,v 1.175.2.10 2002/10/05 18:31:48 scottl Exp $
- ** $DragonFly: src/sys/platform/pc32/i386/userconfig.c,v 1.15 2008/01/05 14:02:41 swildner Exp $
  **/
 
 /**
@@ -1140,10 +1139,10 @@ putxyl(int x, int y, char *str, int len)
 		break;
 		
 	    default:
-		cnputc(*str++);	/* not an escape */
+		kprintf("%c", *str++);	/* not an escape */
 	    }
 	}else{
-	    cnputc(*str++);		/* emit the character */
+	    kprintf("%c", *str++);		/* emit the character */
 	}
     }
 }
@@ -1347,10 +1346,8 @@ drawline(int row, int detail, DEV_LIST *list, int inverse, char *dhelp)
 /**
  ** drawlist
  **
- ** Displays (num) lines of the contents of (list) at (row), optionally displaying the
- ** port and IRQ fields as well if (detail) is nonzero
- **
- ** kprintf in the kernel is essentially useless, so we do most of the hard work ourselves here.
+ ** Displays (num) lines of the contents of (list) at (row), optionally
+ ** displaying the port and IRQ fields as well if (detail) is nonzero.
  **/
 static void 
 drawlist(int row, int num, int detail, DEV_LIST *list)
@@ -2420,8 +2417,6 @@ visuserconfig(void)
  *
  * $FreeBSD: src/sys/i386/i386/userconfig.c,v 1.175.2.10 2002/10/05 18:31:48 scottl Exp $
  */
-
-#include "use_scbus.h"
 
 #define PARM_DEVSPEC	0x1
 #define PARM_INT	0x2

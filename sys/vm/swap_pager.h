@@ -94,9 +94,11 @@ extern int vm_swap_anon_use;
 extern int vm_swapcache_read_enable;
 extern int vm_swapcache_inactive_heuristic;
 extern struct blist *swapblist;
+extern int nswap_lowat, nswap_hiwat;
 
 void swap_pager_putpages (vm_object_t, struct vm_page **, int, boolean_t, int *);
 boolean_t swap_pager_haspage (vm_object_t object, vm_pindex_t pindex);
+int swap_pager_swapoff (int devidx);
 
 int swap_pager_swp_alloc (vm_object_t, int);
 void swap_pager_copy (vm_object_t, vm_object_t, vm_pindex_t, int);
@@ -108,6 +110,8 @@ void swap_pager_page_inserted(vm_page_t);
 void swap_pager_swap_init (void);
 void swap_pager_newswap (void);
 int swap_pager_reserve (vm_object_t, vm_pindex_t, vm_size_t);
+
+void swapacctspace(swblk_t base, swblk_t count);
 
 /*
  * newswap functions

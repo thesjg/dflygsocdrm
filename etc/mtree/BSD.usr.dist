@@ -16,6 +16,8 @@
     lib
         debug
         ..
+        engines
+        ..
         gcc41
             debug
             ..
@@ -120,8 +122,6 @@
             IPv6
             ..
             atm
-            ..
-            bootforth
             ..
             cvs
                 contrib

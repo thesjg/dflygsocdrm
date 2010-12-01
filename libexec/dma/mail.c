@@ -269,6 +269,7 @@ again:
 
 		case '<':
 			ps->brackets = 1;
+			ps->pos = 0;
 			goto skip;
 
 		case '>':
@@ -320,7 +321,8 @@ newaddr:
 	if (addr == NULL)
 		errlog(1, NULL);
 
-	add_recp(queue, addr, 1);
+	if (add_recp(queue, addr, 1) != 0)
+		errlogx(1, "invalid recipient `%s'", addr);
 	fprintf(stderr, "parsed `%s'\n", addr);
 	goto again;
 }

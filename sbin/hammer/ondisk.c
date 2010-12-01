@@ -72,6 +72,7 @@ int     NumVolumes;
 int	RootVolNo = -1;
 int	UseReadBehind = -4;
 int	UseReadAhead = 4;
+int	AssertOnFailure = 1;
 struct volume_list VolList = TAILQ_HEAD_INITIALIZER(VolList);
 
 static __inline
@@ -164,6 +165,22 @@ setup_volume(int32_t vol_no, const char *filename, int isnew, int oflags)
 }
 
 struct volume_info *
+test_volume(int32_t vol_no)
+{
+	struct volume_info *vol;
+
+	TAILQ_FOREACH(vol, &VolList, entry) {
+		if (vol->vol_no == vol_no)
+			break;
+	}
+	if (vol == NULL)
+		return(NULL);
+	++vol->cache.refs;
+	/* not added to or removed from hammer cache */
+	return(vol);
+}
+
+struct volume_info *
 get_volume(int32_t vol_no)
 {
 	struct volume_info *vol;
@@ -205,9 +222,21 @@ get_buffer(hammer_off_t buf_offset, int isnew)
 	if (zone > HAMMER_ZONE_RAW_BUFFER_INDEX) {
 		buf_offset = blockmap_lookup(buf_offset, NULL, NULL, NULL);
 	}
-	assert((buf_offset & HAMMER_OFF_ZONE_MASK) == HAMMER_ZONE_RAW_BUFFER);
+	if (buf_offset == HAMMER_OFF_BAD)
+		return(NULL);
+
+	if (AssertOnFailure) {
+		assert((buf_offset & HAMMER_OFF_ZONE_MASK) ==
+		       HAMMER_ZONE_RAW_BUFFER);
+	}
 	vol_no = HAMMER_VOL_DECODE(buf_offset);
-	volume = get_volume(vol_no);
+	volume = test_volume(vol_no);
+	if (volume == NULL) {
+		if (AssertOnFailure)
+			errx(1, "get_buffer: Volume %d not found!", vol_no);
+		return(NULL);
+	}
+
 	buf_offset &= ~HAMMER_BUFMASK64;
 
 	hi = buffer_hash(buf_offset);
@@ -249,11 +278,13 @@ get_buffer(hammer_off_t buf_offset, int isnew)
 			n = pread(volume->fd, ondisk, HAMMER_BUFSIZE,
 				  buf->raw_offset);
 			if (n != HAMMER_BUFSIZE) {
+				if (AssertOnFailure)
 				err(1, "get_buffer: %s:%016llx Read failed at "
 				       "offset %016llx",
 				    volume->name,
 				    (long long)buf->buf_offset,
 				    (long long)buf->raw_offset);
+				bzero(ondisk, HAMMER_BUFSIZE);
 			}
 		}
 	}
@@ -342,6 +373,8 @@ get_buffer_data(hammer_off_t buf_offset, struct buffer_info **bufferp,
 	}
 	if (buffer == NULL)
 		buffer = *bufferp = get_buffer(buf_offset, isnew);
+	if (buffer == NULL)
+		return (NULL);
 	return((char *)buffer->ondisk + ((int32_t)buf_offset & HAMMER_BUFMASK));
 }
 
@@ -357,8 +390,12 @@ get_node(hammer_off_t node_offset, struct buffer_info **bufp)
 	if (*bufp)
 		rel_buffer(*bufp);
 	*bufp = buf = get_buffer(node_offset, 0);
-	return((void *)((char *)buf->ondisk +
-			(int32_t)(node_offset & HAMMER_BUFMASK)));
+	if (buf) {
+		return((void *)((char *)buf->ondisk +
+				(int32_t)(node_offset & HAMMER_BUFMASK)));
+	} else {
+		return(NULL);
+	}
 }
 
 /*

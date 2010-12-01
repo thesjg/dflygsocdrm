@@ -52,6 +52,7 @@
 #include <sys/ucred.h>
 
 #include <sys/mplock2.h>
+#include <sys/socketvar2.h>
 
 #include <net/if.h>
 #include <net/route.h>
@@ -136,13 +137,13 @@ soo_ioctl(struct file *fp, u_long cmd, caddr_t data,
 	switch (cmd) {
 	case FIOASYNC:
 		if (*(int *)data) {
-			so->so_state |= SS_ASYNC;
-			so->so_rcv.ssb_flags |= SSB_ASYNC;
-			so->so_snd.ssb_flags |= SSB_ASYNC;
+			sosetstate(so, SS_ASYNC);
+			atomic_set_int(&so->so_rcv.ssb_flags,  SSB_ASYNC);
+			atomic_set_int(&so->so_snd.ssb_flags, SSB_ASYNC);
 		} else {
-			so->so_state &= ~SS_ASYNC;
-			so->so_rcv.ssb_flags &= ~SSB_ASYNC;
-			so->so_snd.ssb_flags &= ~SSB_ASYNC;
+			soclrstate(so, SS_ASYNC);
+			atomic_clear_int(&so->so_rcv.ssb_flags, SSB_ASYNC);
+			atomic_clear_int(&so->so_snd.ssb_flags, SSB_ASYNC);
 		}
 		error = 0;
 		break;
@@ -174,12 +175,13 @@ soo_ioctl(struct file *fp, u_long cmd, caddr_t data,
 		 * interface and routing ioctls should have a
 		 * different entry since a socket's unnecessary
 		 */
-		if (IOCGROUP(cmd) == 'i')
+		if (IOCGROUP(cmd) == 'i') {
 			error = ifioctl(so, cmd, data, cred);
-		else if (IOCGROUP(cmd) == 'r')
+		} else if (IOCGROUP(cmd) == 'r') {
 			error = rtioctl(cmd, data, cred);
-		else
-			error = so_pru_control(so, cmd, data, NULL);
+		} else {
+			error = so_pru_control_direct(so, cmd, data, NULL);
+		}
 		break;
 	}
 	rel_mplock();

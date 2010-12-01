@@ -98,6 +98,7 @@ static void		rt2661_reset_rx_ring(struct rt2661_softc *,
 			    struct rt2661_rx_ring *);
 static void		rt2661_free_rx_ring(struct rt2661_softc *,
 			    struct rt2661_rx_ring *);
+static void		rt2661_newassoc(struct ieee80211_node *, int);
 static int		rt2661_newstate(struct ieee80211vap *,
 			    enum ieee80211_state, int);
 static uint16_t		rt2661_eeprom_read(struct rt2661_softc *, uint8_t);
@@ -122,7 +123,7 @@ static void		rt2661_start_locked(struct ifnet *);
 static void		rt2661_start(struct ifnet *);
 static int		rt2661_raw_xmit(struct ieee80211_node *, struct mbuf *,
 			    const struct ieee80211_bpf_params *);
-static void		rt2661_watchdog(void *);
+static void		rt2661_watchdog_callout(void *);
 static int		rt2661_ioctl(struct ifnet *, u_long, caddr_t,
     			    struct ucred *);
 static void		rt2661_bbp_write(struct rt2661_softc *, uint8_t,
@@ -214,9 +215,6 @@ rt2661_attach(device_t dev, int id)
 	}
 	ic = ifp->if_l2com;
 
-	lockinit(&sc->sc_lock, __DECONST(char *, device_get_nameunit(dev)),
-	    0, LK_CANRECURSE);
-
 	callout_init(&sc->watchdog_ch);
 
 	/* wait for NIC to initialize */
@@ -303,6 +301,7 @@ rt2661_attach(device_t dev, int id)
 	ieee80211_init_channels(ic, NULL, &bands);
 
 	ieee80211_ifattach(ic, macaddr);
+	ic->ic_newassoc = rt2661_newassoc;
 #if 0
 	ic->ic_wme.wme_update = rt2661_wme_update;
 #endif
@@ -344,7 +343,7 @@ rt2661_attach(device_t dev, int id)
 fail3:	rt2661_free_tx_ring(sc, &sc->mgtq);
 fail2:	while (--ac >= 0)
 		rt2661_free_tx_ring(sc, &sc->txq[ac]);
-fail1:	lockuninit(&sc->sc_lock);
+fail1:
 	if_free(ifp);
 	return error;
 }
@@ -356,9 +355,7 @@ rt2661_detach(void *xsc)
 	struct ifnet *ifp = sc->sc_ifp;
 	struct ieee80211com *ic = ifp->if_l2com;
 	
-	RAL_LOCK(sc);
 	rt2661_stop_locked(sc);
-	RAL_UNLOCK(sc);
 
 	ieee80211_ifdetach(ic);
 
@@ -370,8 +367,6 @@ rt2661_detach(void *xsc)
 	rt2661_free_rx_ring(sc, &sc->rxq);
 
 	if_free(ifp);
-
-	lockuninit(&sc->sc_lock);
 
 	return 0;
 }
@@ -771,6 +766,13 @@ rt2661_free_rx_ring(struct rt2661_softc *sc, struct rt2661_rx_ring *ring)
 		bus_dma_tag_destroy(ring->data_dmat);
 }
 
+static void
+rt2661_newassoc(struct ieee80211_node *ni, int isnew)
+{
+	ieee80211_ratectl_node_deinit(ni);
+	ieee80211_ratectl_node_init(ni);
+}
+
 static int
 rt2661_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 {
@@ -1106,7 +1108,6 @@ rt2661_rx_intr(struct rt2661_softc *sc)
 			tap->wr_antnoise = nf;
 		}
 		sc->sc_flags |= RAL_INPUT_RUNNING;
-		RAL_UNLOCK(sc);
 		wh = mtod(m, struct ieee80211_frame *);
 
 		/* send the frame to the 802.11 layer */
@@ -1118,7 +1119,6 @@ rt2661_rx_intr(struct rt2661_softc *sc)
 		} else
 			(void) ieee80211_input_all(ic, m, rssi, nf);
 
-		RAL_LOCK(sc);
 		sc->sc_flags &= ~RAL_INPUT_RUNNING;
 
 skip:		desc->flags |= htole32(RT2661_RX_BUSY);
@@ -1166,15 +1166,12 @@ rt2661_intr(void *arg)
 	struct ifnet *ifp = sc->sc_ifp;
 	uint32_t r1, r2;
 
-	RAL_LOCK(sc);
-
 	/* disable MAC and MCU interrupts */
 	RAL_WRITE(sc, RT2661_INT_MASK_CSR, 0xffffff7f);
 	RAL_WRITE(sc, RT2661_MCU_INT_MASK_CSR, 0xffffffff);
 
 	/* don't re-enable interrupts if we're shutting down */
 	if (!(ifp->if_flags & IFF_RUNNING)) {
-		RAL_UNLOCK(sc);
 		return;
 	}
 
@@ -1218,7 +1215,6 @@ rt2661_intr(void *arg)
 	RAL_WRITE(sc, RT2661_INT_MASK_CSR, 0x0000ff10);
 	RAL_WRITE(sc, RT2661_MCU_INT_MASK_CSR, 0);
 
-	RAL_UNLOCK(sc);
 }
 
 static uint8_t
@@ -1337,7 +1333,7 @@ rt2661_tx_mgt(struct rt2661_softc *sc, struct mbuf *m0,
 	}
 
 	error = bus_dmamap_load_mbuf_segment(sc->mgtq.data_dmat, data->map, m0,
-	    segs, 1, &nsegs, 0);
+	    segs, 1, &nsegs, BUS_DMA_NOWAIT);
 	if (error != 0) {
 		device_printf(sc->sc_dev, "could not map mbuf (error %d)\n",
 		    error);
@@ -1438,7 +1434,7 @@ rt2661_sendprot(struct rt2661_softc *sc, int ac,
 	desc = &txq->desc[txq->cur];
 
 	error = bus_dmamap_load_mbuf_segment(txq->data_dmat, data->map, mprot, segs,
-	    1, &nsegs, 0);
+	    1, &nsegs, BUS_DMA_NOWAIT);
 	if (error != 0) {
 		device_printf(sc->sc_dev,
 		    "could not map mbuf (error %d)\n", error);
@@ -1536,7 +1532,7 @@ rt2661_tx_data(struct rt2661_softc *sc, struct mbuf *m0,
 	desc = &txq->desc[txq->cur];
 
 	error = bus_dmamap_load_mbuf_segment(txq->data_dmat, data->map, m0, segs,
-	    1, &nsegs, 0);
+	    1, &nsegs, BUS_DMA_NOWAIT);
 	if (error != 0 && error != EFBIG) {
 		device_printf(sc->sc_dev, "could not map mbuf (error %d)\n",
 		    error);
@@ -1554,7 +1550,7 @@ rt2661_tx_data(struct rt2661_softc *sc, struct mbuf *m0,
 		m0 = mnew;
 
 		error = bus_dmamap_load_mbuf_segment(txq->data_dmat, data->map, m0,
-		    segs, 1, &nsegs, 0);
+		    segs, 1, &nsegs, BUS_DMA_NOWAIT);
 		if (error != 0) {
 			device_printf(sc->sc_dev,
 			    "could not map mbuf (error %d)\n", error);
@@ -1619,8 +1615,6 @@ rt2661_start_locked(struct ifnet *ifp)
 	struct ieee80211_node *ni;
 	int ac;
 
-	RAL_LOCK_ASSERT(sc);
-
 	/* prevent management frames from being sent if we're not ready */
 	if (!(ifp->if_flags & IFF_RUNNING) || sc->sc_invalid)
 		return;
@@ -1651,11 +1645,7 @@ rt2661_start_locked(struct ifnet *ifp)
 static void
 rt2661_start(struct ifnet *ifp)
 {
-	struct rt2661_softc *sc = ifp->if_softc;
-
-	RAL_LOCK(sc);
 	rt2661_start_locked(ifp);
-	RAL_UNLOCK(sc);
 }
 
 static int
@@ -1666,18 +1656,14 @@ rt2661_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 	struct ifnet *ifp = ic->ic_ifp;
 	struct rt2661_softc *sc = ifp->if_softc;
 
-	RAL_LOCK(sc);
-
 	/* prevent management frames from being sent if we're not ready */
 	if (!(ifp->if_flags & IFF_RUNNING)) {
-		RAL_UNLOCK(sc);
 		m_freem(m);
 		ieee80211_free_node(ni);
 		return ENETDOWN;
 	}
 	if (sc->mgtq.queued >= RT2661_MGT_RING_COUNT) {
 		ifp->if_flags |= IFF_OACTIVE;
-		RAL_UNLOCK(sc);
 		m_freem(m);
 		ieee80211_free_node(ni);
 		return ENOBUFS;		/* XXX */
@@ -1694,23 +1680,18 @@ rt2661_raw_xmit(struct ieee80211_node *ni, struct mbuf *m,
 		goto bad;
 	sc->sc_tx_timer = 5;
 
-	RAL_UNLOCK(sc);
-
 	return 0;
 bad:
 	ifp->if_oerrors++;
 	ieee80211_free_node(ni);
-	RAL_UNLOCK(sc);
 	return EIO;		/* XXX */
 }
 
 static void
-rt2661_watchdog(void *arg)
+rt2661_watchdog_callout(void *arg)
 {
 	struct rt2661_softc *sc = (struct rt2661_softc *)arg;
 	struct ifnet *ifp = sc->sc_ifp;
-
-	RAL_LOCK(sc);
 
 	KASSERT(ifp->if_flags & IFF_RUNNING, ("not running"));
 
@@ -1724,9 +1705,8 @@ rt2661_watchdog(void *arg)
 		/* NB: callout is reset in rt2661_init() */
 		return;
 	}
-	callout_reset(&sc->watchdog_ch, hz, rt2661_watchdog, sc);
+	callout_reset(&sc->watchdog_ch, hz, rt2661_watchdog_callout, sc);
 
-	RAL_UNLOCK(sc);
 }
 
 static int
@@ -1739,7 +1719,6 @@ rt2661_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data, struct ucred *ucred)
 
 	switch (cmd) {
 	case SIOCSIFFLAGS:
-		RAL_LOCK(sc);
 		if (ifp->if_flags & IFF_UP) {
 			if ((ifp->if_flags & IFF_RUNNING) == 0) {
 				rt2661_init_locked(sc);
@@ -1750,7 +1729,6 @@ rt2661_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data, struct ucred *ucred)
 			if (ifp->if_flags & IFF_RUNNING)
 				rt2661_stop_locked(sc);
 		}
-		RAL_UNLOCK(sc);
 		if (startall)
 			ieee80211_start_all(ic);
 		break;
@@ -2322,8 +2300,6 @@ rt2661_init_locked(struct rt2661_softc *sc)
 	uint32_t tmp, sta[3];
 	int i, error, ntries;
 
-	RAL_LOCK_ASSERT(sc);
-
 	if ((sc->sc_flags & RAL_FW_LOADED) == 0) {
 		error = rt2661_load_microcode(sc);
 		if (error != 0) {
@@ -2444,7 +2420,7 @@ rt2661_init_locked(struct rt2661_softc *sc)
 	ifp->if_flags &= ~IFF_OACTIVE;
 	ifp->if_flags |= IFF_RUNNING;
 
-	callout_reset(&sc->watchdog_ch, hz, rt2661_watchdog, sc);
+	callout_reset(&sc->watchdog_ch, hz, rt2661_watchdog_callout, sc);
 #undef N
 }
 
@@ -2455,9 +2431,7 @@ rt2661_init(void *priv)
 	struct ifnet *ifp = sc->sc_ifp;
 	struct ieee80211com *ic = ifp->if_l2com;
 
-	RAL_LOCK(sc);
 	rt2661_init_locked(sc);
-	RAL_UNLOCK(sc);
 
 	if (ifp->if_flags & IFF_RUNNING)
 		ieee80211_start_all(ic);		/* start all vap's */
@@ -2471,7 +2445,7 @@ rt2661_stop_locked(struct rt2661_softc *sc)
 	volatile int *flags = &sc->sc_flags;
 
 	while (*flags & RAL_INPUT_RUNNING)
-		lksleep(sc, &sc->sc_lock, 0, "ralrunning", hz/10);
+		zsleep(sc, &wlan_global_serializer, 0, "ralrunning", hz/10);
 
 	callout_stop(&sc->watchdog_ch);
 	sc->sc_tx_timer = 0;
@@ -2513,9 +2487,7 @@ rt2661_stop(void *priv)
 {
 	struct rt2661_softc *sc = priv;
 
-	RAL_LOCK(sc);
 	rt2661_stop_locked(sc);
-	RAL_UNLOCK(sc);
 }
 
 static int
@@ -2525,8 +2497,6 @@ rt2661_load_microcode(struct rt2661_softc *sc)
 	const struct firmware *fp;
 	const char *imagename;
 	int ntries, error;
-
-	RAL_LOCK_ASSERT(sc);
 
 	switch (sc->sc_id) {
 	case 0x0301: imagename = "rt2561sfw"; break;
@@ -2538,9 +2508,7 @@ rt2661_load_microcode(struct rt2661_softc *sc)
 		    __func__, sc->sc_id);
 		return EINVAL;
 	}
-	RAL_UNLOCK(sc);
 	fp = firmware_get(imagename);
-	RAL_LOCK(sc);
 	if (fp == NULL) {
 		if_printf(ifp, "%s: unable to retrieve firmware image %s\n",
 		    __func__, imagename);
@@ -2855,8 +2823,5 @@ rt2661_set_channel(struct ieee80211com *ic)
 	struct ifnet *ifp = ic->ic_ifp;
 	struct rt2661_softc *sc = ifp->if_softc;
 
-	RAL_LOCK(sc);
 	rt2661_set_chan(sc, ic->ic_curchan);
-	RAL_UNLOCK(sc);
-
 }

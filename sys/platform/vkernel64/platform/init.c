@@ -80,6 +80,7 @@
 vm_paddr_t phys_avail[16];
 vm_paddr_t Maxmem;
 vm_paddr_t Maxmem_bytes;
+int physmem;
 int MemImageFd = -1;
 struct vkdisk_info DiskInfo[VKDISK_MAX];
 int DiskNum;
@@ -412,31 +413,17 @@ init_sys_memory(char *imageFile)
 	}
 
 	/*
-	 * Truncate or extend the file as necessary.
+	 * Truncate or extend the file as necessary.  Clean out the contents
+	 * of the file, we want it to be full of holes so we don't waste
+	 * time reading in data from an old file that we no longer care
+	 * about.
 	 */
-	if (st.st_size > Maxmem_bytes) {
-		ftruncate(fd, Maxmem_bytes);
-	} else if (st.st_size < Maxmem_bytes) {
-		char *zmem;
-		off_t off = st.st_size & ~SEG_MASK;
+	ftruncate(fd, 0);
+	ftruncate(fd, Maxmem_bytes);
 
-		kprintf("%s: Reserving blocks for memory image\n", imageFile);
-		zmem = malloc(SEG_SIZE);
-		bzero(zmem, SEG_SIZE);
-		lseek(fd, off, SEEK_SET);
-		while (off < Maxmem_bytes) {
-			if (write(fd, zmem, SEG_SIZE) != SEG_SIZE) {
-				err(1, "Unable to reserve blocks for memory image");
-				/* NOT REACHED */
-			}
-			off += SEG_SIZE;
-		}
-		if (fsync(fd) < 0)
-			err(1, "Unable to reserve blocks for memory image");
-		free(zmem);
-	}
 	MemImageFd = fd;
 	Maxmem = Maxmem_bytes >> PAGE_SHIFT;
+	physmem = Maxmem;
 }
 
 /*
@@ -487,6 +474,8 @@ init_kern_memory(void)
 	KvaStart = (vm_offset_t)base;
 	KvaSize = KERNEL_KVA_SIZE;
 	KvaEnd = KvaStart + KvaSize;
+
+	/* cannot use kprintf yet */
 	printf("KVM mapped at %p-%p\n", (void *)KvaStart, (void *)KvaEnd);
 
 	/* MAP_FILE? */
@@ -702,18 +691,20 @@ init_disk(char *diskExp[], int diskFileNum, enum vkdisk_type type)
 			size_t l = 0;
 
 			if (type == VKD_DISK)
-			    fd = open(fname, O_RDWR|O_DIRECT|O_EXLOCK|O_NONBLOCK, 0644);
+			    fd = open(fname, O_RDWR|O_DIRECT, 0644);
 			else
 			    fd = open(fname, O_RDONLY|O_DIRECT, 0644);
 			if (fd < 0 || fstat(fd, &st) < 0) {
-				if (errno == EAGAIN)
-					fprintf(stderr, "You may already have a vkernel using this disk image!\n");
 				err(1, "Unable to open/create %s", fname);
 				/* NOT REACHED */
 			}
-			/* get rid of O_NONBLOCK, keep O_DIRECT */
-			if (type == VKD_DISK)
-				fcntl(fd, F_SETFL, O_DIRECT);
+			if (S_ISREG(st.st_mode)) {
+				if (flock(fd, LOCK_EX|LOCK_NB) < 0) {
+					errx(1, "Disk image %s is already "
+						"in use\n", fname);
+					/* NOT REACHED */
+				}
+			}
 
 			info = &DiskInfo[DiskNum];
 			l = strlen(fname);

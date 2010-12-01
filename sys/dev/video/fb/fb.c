@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1999 Kazutaka YOKOTA <yokota@zodiac.mech.utsunomiya-u.ac.jp>
  * All rights reserved.
  *
@@ -26,7 +28,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/dev/fb/fb.c,v 1.11.2.2 2000/08/02 22:35:22 peter Exp $
- * $DragonFly: src/sys/dev/video/fb/fb.c,v 1.19 2008/01/09 21:29:11 swildner Exp $
  */
 
 #include "opt_fb.h"
@@ -164,28 +165,37 @@ vid_register(video_adapter_t *adp)
 
 	adp->va_index = index;
 	adp->va_token = NULL;
+	lwkt_gettoken(&tty_token);
 	SET_FOREACH(list, videodriver_set) {
 		p = *list;
 		if (strcmp(p->name, adp->va_name) == 0) {
 			adapter[index] = adp;
 			vidsw[index] = p->vidsw;
+			lwkt_reltoken(&tty_token);
 			return index;
 		}
 	}
 
+	lwkt_reltoken(&tty_token);
 	return -1;
 }
 
 int
 vid_unregister(video_adapter_t *adp)
 {
-	if ((adp->va_index < 0) || (adp->va_index >= adapters))
+	lwkt_gettoken(&tty_token);
+	if ((adp->va_index < 0) || (adp->va_index >= adapters)) {
+		lwkt_reltoken(&tty_token);
 		return ENOENT;
-	if (adapter[adp->va_index] != adp)
+	}
+	if (adapter[adp->va_index] != adp) {
+		lwkt_reltoken(&tty_token);
 		return ENOENT;
+	}
 
 	adapter[adp->va_index] = NULL;
 	vidsw[adp->va_index] = NULL;
+	lwkt_reltoken(&tty_token);
 	return 0;
 }
 
@@ -196,12 +206,16 @@ vid_get_switch(char *name)
 	const video_driver_t **list;
 	const video_driver_t *p;
 
+	lwkt_gettoken(&tty_token);
 	SET_FOREACH(list, videodriver_set) {
 		p = *list;
-		if (strcmp(p->name, name) == 0)
+		if (strcmp(p->name, name) == 0) {
+			lwkt_reltoken(&tty_token);
 			return p->vidsw;
+		}
 	}
 
+	lwkt_reltoken(&tty_token);
 	return NULL;
 }
 
@@ -355,10 +369,8 @@ fbattach(device_t dev)
 static d_default_t	fboperate;
 static d_open_t		fbopen;
 
-#define CDEV_MAJOR	123	/* XXX */
-
 static struct dev_ops fb_ops = {
-	{ FB_DRIVER_NAME, CDEV_MAJOR, 0 },
+	{ FB_DRIVER_NAME, 0, 0 },
 	.d_default =	fboperate,
 	.d_open =	fbopen
 };
@@ -483,6 +495,7 @@ int genfbread(genfb_softc_t *sc, video_adapter_t *adp, struct uio *uio,
 	int error;
 	int len;
 
+	lwkt_gettoken(&tty_token);
 	error = 0;
 	size = adp->va_buffer_size/adp->va_info.vi_planes;
 	while (uio->uio_resid > 0) {
@@ -499,6 +512,7 @@ int genfbread(genfb_softc_t *sc, video_adapter_t *adp, struct uio *uio,
 		if (error)
 			break;
 	}
+	lwkt_reltoken(&tty_token);
 	return error;
 }
 
@@ -515,16 +529,23 @@ int genfbioctl(genfb_softc_t *sc, video_adapter_t *adp, u_long cmd,
 
 	if (adp == NULL)	/* XXX */
 		return ENXIO;
+	lwkt_gettoken(&tty_token);
 	error = (*vidsw[adp->va_index]->ioctl)(adp, cmd, arg);
 	if (error == ENOIOCTL)
 		error = ENODEV;
+	lwkt_reltoken(&tty_token);
 	return error;
 }
 
 int genfbmmap(genfb_softc_t *sc, video_adapter_t *adp, vm_offset_t offset,
 	      int prot)
 {
-	return (*vidsw[adp->va_index]->mmap)(adp, offset, prot);
+	int error;
+
+	lwkt_gettoken(&tty_token);
+	error = (*vidsw[adp->va_index]->mmap)(adp, offset, prot);
+	lwkt_reltoken(&tty_token);
+	return (error);
 }
 
 #endif /* FB_INSTALL_CDEV */
@@ -635,6 +656,7 @@ fb_commonioctl(video_adapter_t *adp, u_long cmd, caddr_t arg)
 	error = 0;
 	crit_enter();
 
+	lwkt_gettoken(&tty_token);
 	switch (cmd) {
 
 	case FBIO_ADAPTER:	/* get video adapter index */
@@ -754,5 +776,6 @@ fb_commonioctl(video_adapter_t *adp, u_long cmd, caddr_t arg)
 	}
 
 	crit_exit();
+	lwkt_reltoken(&tty_token);
 	return error;
 }

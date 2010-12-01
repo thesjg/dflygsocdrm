@@ -38,7 +38,6 @@
  *      @(#)bpf.c	8.2 (Berkeley) 3/28/94
  *
  * $FreeBSD: src/sys/net/bpf.c,v 1.59.2.12 2002/04/14 21:41:48 luigi Exp $
- * $DragonFly: src/sys/net/bpf.c,v 1.50 2008/09/23 11:28:49 sephe Exp $
  */
 
 #include "use_bpf.h"
@@ -78,7 +77,7 @@
 #include <sys/devfs.h>
 
 struct netmsg_bpf_output {
-	struct netmsg	nm_netmsg;
+	struct netmsg_base base;
 	struct mbuf	*nm_mbuf;
 	struct ifnet	*nm_ifp;
 	struct sockaddr	*nm_dst;
@@ -100,10 +99,10 @@ DEVFS_DECLARE_CLONE_BITMAP(bpf);
  */
 static int bpf_bufsize = BPF_DEFAULTBUFSIZE;
 SYSCTL_INT(_debug, OID_AUTO, bpf_bufsize, CTLFLAG_RW,
-	   &bpf_bufsize, 0, "");
+   &bpf_bufsize, 0, "Current size of bpf buffer");
 int bpf_maxbufsize = BPF_MAXBUFSIZE;
 SYSCTL_INT(_debug, OID_AUTO, bpf_maxbufsize, CTLFLAG_RW,
-	   &bpf_maxbufsize, 0, "");
+   &bpf_maxbufsize, 0, "Maximum size of bpf buffer");
 
 /*
  *  bpf_iflist is the list of interfaces; each corresponds to an ifnet
@@ -141,7 +140,7 @@ static d_kqfilter_t	bpfkqfilter;
 
 #define CDEV_MAJOR 23
 static struct dev_ops bpf_ops = {
-	{ "bpf", CDEV_MAJOR, D_KQFILTER },
+	{ "bpf", 0, 0 },
 	.d_open =	bpfopen,
 	.d_close =	bpfclose,
 	.d_read =	bpfread,
@@ -540,9 +539,9 @@ bpf_timed_out(void *arg)
 }
 
 static void
-bpf_output_dispatch(struct netmsg *nmsg)
+bpf_output_dispatch(netmsg_t msg)
 {
-	struct netmsg_bpf_output *bmsg = (struct netmsg_bpf_output *)nmsg;
+	struct netmsg_bpf_output *bmsg = (struct netmsg_bpf_output *)msg;
 	struct ifnet *ifp = bmsg->nm_ifp;
 	int error;
 
@@ -550,7 +549,7 @@ bpf_output_dispatch(struct netmsg *nmsg)
 	 * The driver frees the mbuf.
 	 */
 	error = ifp->if_output(ifp, bmsg->nm_mbuf, bmsg->nm_dst, NULL);
-	lwkt_replymsg(&nmsg->nm_lmsg, error);
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 static int
@@ -586,13 +585,13 @@ bpfwrite(struct dev_write_args *ap)
 	if (d->bd_hdrcmplt)
 		dst.sa_family = pseudo_AF_HDRCMPLT;
 
-	netmsg_init(&bmsg.nm_netmsg, NULL, &curthread->td_msgport,
-		    MSGF_MPSAFE, bpf_output_dispatch);
+	netmsg_init(&bmsg.base, NULL, &curthread->td_msgport,
+		    0, bpf_output_dispatch);
 	bmsg.nm_mbuf = m;
 	bmsg.nm_ifp = ifp;
 	bmsg.nm_dst = &dst;
 
-	return lwkt_domsg(cpu_portfn(0), &bmsg.nm_netmsg.nm_lmsg, 0);
+	return lwkt_domsg(cpu_portfn(0), &bmsg.base.lmsg, 0);
 }
 
 /*

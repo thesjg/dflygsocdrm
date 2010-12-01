@@ -126,6 +126,7 @@ dev/raid/aac/aac_disk.c			optional aac
 dev/raid/aac/aac_pci.c			optional aac pci
 dev/raid/aac/aac_linux.c		optional aac compat_linux
 dev/raid/aac/aac_cam.c			optional aacp aac
+dev/raid/arcmsr/arcmsr.c		optional arcmsr pci
 
 
 dev/pccard/pccbb/pccbb.c		optional cbb
@@ -606,6 +607,12 @@ dev/netif/rum/if_rum.c		optional rum
 dev/netif/ural/if_ural.c	optional ural
 dev/netif/lge/if_lge.c	optional lge
 dev/disk/md/md.c		optional md
+dev/raid/mfi/mfi.c		optional mfi
+dev/raid/mfi/mfi_debug.c	optional mfi
+dev/raid/mfi/mfi_pci.c		optional mfi pci
+dev/raid/mfi/mfi_disk.c		optional mfi
+#dev/raid/mfi/mfi_linux.c	optional mfi compat_linux
+dev/raid/mfi/mfi_cam.c		optional mfip scbus
 dev/netif/mii_layer/mii.c		optional miibus
 dev/netif/mii_layer/mii_physubr.c	optional miibus
 dev/netif/mii_layer/ukphy.c		optional miibus
@@ -672,6 +679,7 @@ dev/misc/lpt/lpt.c		optional lpt
 dev/misc/pcfclock/pcfclock.c	optional pcfclock
 dev/misc/cmx/cmx.c		optional cmx
 dev/misc/cmx/cmx_pccard.c	optional cmx pccard
+bus/iicbus/pcf/pcf.c	optional pcf
 bus/ppbus/ppb_base.c	optional ppbus
 bus/ppbus/ppb_1284.c	optional ppbus
 bus/ppbus/ppb_msq.c	optional ppbus
@@ -1115,6 +1123,25 @@ net/route.c		standard
 net/rtsock.c		standard
 net/zlib.c		optional ppp_deflate
 net/zlib.c		optional ipsec
+netbt/bt_input.c	optional bluetooth
+netbt/bt_proto.c	optional bluetooth
+netbt/hci_event.c	optional bluetooth
+netbt/hci_ioctl.c	optional bluetooth
+netbt/hci_link.c	optional bluetooth
+netbt/hci_misc.c	optional bluetooth
+netbt/hci_socket.c	optional bluetooth
+netbt/hci_unit.c	optional bluetooth
+netbt/l2cap_lower.c	optional bluetooth
+netbt/l2cap_misc.c	optional bluetooth
+netbt/l2cap_signal.c	optional bluetooth
+netbt/l2cap_socket.c	optional bluetooth
+netbt/l2cap_upper.c	optional bluetooth
+netbt/rfcomm_dlc.c	optional bluetooth
+netbt/rfcomm_session.c	optional bluetooth
+netbt/rfcomm_socket.c	optional bluetooth
+netbt/rfcomm_upper.c	optional bluetooth
+netbt/sco_socket.c	optional bluetooth
+netbt/sco_upper.c	optional bluetooth
 netproto/802_11/wlan/ieee80211.c            optional wlan
 netproto/802_11/wlan_acl/ieee80211_acl.c    optional wlan_acl
 netproto/802_11/wlan/ieee80211_action.c     optional wlan
@@ -1599,9 +1626,11 @@ dev/netif/vge/if_vge.c		optional vge
 dev/netif/vr/if_vr.c		optional vr
 dev/netif/wb/if_wb.c		optional wb
 dev/netif/xl/if_xl.c		optional xl
-dev/powermng/i386/intpm/intpm.c	optional intpm
-dev/powermng/i386/amdpm/amdpm.c	optional amdpm
-dev/powermng/i386/viapm/viapm.c	optional viapm
+dev/powermng/alpm/alpm.c	optional alpm pci
+dev/powermng/amdpm/amdpm.c	optional amdpm pci
+dev/powermng/amdsmb/amdsmb.c	optional amdsmb pci
+dev/powermng/intpm/intpm.c	optional intpm pci
+dev/powermng/viapm/viapm.c	optional viapm pci
 dev/video/meteor/meteor.c	optional meteor pci
 dev/disk/ncr/ncr.c		optional ncr
 dev/disk/sym/sym_hipd.c		optional sym				\
@@ -1618,7 +1647,6 @@ bus/pci/pci_user.c		optional pci
 bus/pci/pcib_if.m		optional pci
 bus/pci/vga_pci.c		optional pci
 bus/pci/pci_compat.c		optional pci compat_oldpci
-dev/powermng/i386/alpm/alpm.c	optional alpm
 kern/kern_posix4_mib.c		standard
 kern/kern_p1003_1b.c		standard
 kern/kern_sched.c		optional _kposix_priority_scheduling
@@ -1681,6 +1709,7 @@ vfs/hammer/hammer_undo.c	optional hammer
 vfs/hammer/hammer_redo.c	optional hammer
 vfs/hammer/hammer_vfsops.c	optional hammer
 vfs/hammer/hammer_vnops.c	optional hammer
+vfs/hammer/hammer_dedup.c	optional hammer
 #tmpfs static filesystem for debugging should be marked as optional tmpfs
 vfs/tmpfs/tmpfs_fifoops.c	standard
 vfs/tmpfs/tmpfs_subr.c		standard
@@ -1734,6 +1763,7 @@ bus/usb/usb_quirks.c		optional usb
 bus/usb/hid.c			optional usb
 bus/usb/uhub.c			optional usb
 dev/usbmisc/moscom/moscom.c	optional moscom ucom
+dev/usbmisc/ubt/ubt.c		optional ubt
 dev/usbmisc/uark/uark.c		optional uark ucom
 dev/usbmisc/uchcom/uchcom.c	optional uchcom ucom
 dev/usbmisc/ufm/ufm.c		optional ufm
@@ -2018,6 +2048,7 @@ dev/powermng/aps/aps.c			optional aps isa
 dev/powermng/it/it.c			optional it isa
 dev/powermng/lm/lm78.c			optional lm isa
 dev/powermng/lm/lm78_isa.c		optional lm isa
+dev/powermng/uguru/uguru.c		optional uguru isa
 dev/powermng/wbsio/wbsio.c		optional wbsio isa
 emulation/43bsd/43bsd_socket.c		optional compat_43
 emulation/43bsd/43bsd_stats.c		optional compat_43

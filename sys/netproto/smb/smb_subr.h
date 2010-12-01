@@ -84,8 +84,8 @@ void m_dumpm(struct mbuf *m);
 #define	smb_slock			spinlock
 #define	smb_sl_init(sl, desc)		spin_init(sl)
 #define	smb_sl_destroy(sl)
-#define	smb_sl_lock(sl)			spin_lock_wr(sl)
-#define	smb_sl_unlock(sl)		spin_unlock_wr(sl)
+#define	smb_sl_lock(sl)			spin_lock(sl)
+#define	smb_sl_unlock(sl)		spin_unlock(sl)
 
 #define SMB_STRFREE(p)	do { if (p) smb_strfree(p); } while(0)
 
@@ -168,9 +168,10 @@ int  smb_put_asunistring(struct smb_rq *rqp, const char *src);
 /*
  * Compatibilty with 5.x functions
  */
-int kthread_create2(void (*func)(void *), void *arg,
-    struct proc **newpp, int flags, const char *fmt, ...);
-void kthread_exit2(void);
+int smb_kthread_create(void (*func)(void *), void *arg,
+	struct proc **newpp, int flags, const char *fmt, ...)
+	__printflike(5, 6);
+void smb_kthread_exit(void);
 int smb_sleep(void *chan, struct smb_slock *sl, int slpflags, const char *wmesg, int timo);
 
 

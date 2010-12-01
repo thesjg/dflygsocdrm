@@ -177,6 +177,7 @@ struct buf {
 	int	b_kvasize;		/* size of kva for buffer */
 	int	b_dirtyoff;		/* Offset in buffer of dirty region. */
 	int	b_dirtyend;		/* Offset of end of dirty region. */
+	int	b_refs;			/* FINDBLK_REF / unrefblk() */
 	struct	xio b_xio;  		/* data buffer page list management */
 	struct  bio_ops *b_ops;		/* bio_ops used w/ b_dep */
 	struct	workhead b_dep;		/* List of filesystem dependencies. */
@@ -211,6 +212,7 @@ struct buf {
 
 #define FINDBLK_TEST	0x0010	/* test only, do not lock */
 #define FINDBLK_NBLOCK	0x0020	/* use non-blocking lock, can return NULL */
+#define FINDBLK_REF	0x0040	/* ref the buf to prevent reuse */
 
 /*
  * These flags are kept in b_flags.
@@ -296,7 +298,7 @@ struct buf {
 #define	B_HASBOGUS	0x00000200	/* Contains bogus pages */
 #define	B_EINTR		0x00000400	/* I/O was interrupted */
 #define	B_ERROR		0x00000800	/* I/O error occurred. */
-#define	B_UNUSED12	0x00001000	/* Unused */
+#define	B_IODEBUG	0x00001000	/* (Debugging only bread) */
 #define	B_INVAL		0x00002000	/* Does not contain valid info. */
 #define	B_LOCKED	0x00004000	/* Locked in core (not reusable). */
 #define	B_NOCACHE	0x00008000	/* Destroy buffer AND backing store */
@@ -375,8 +377,6 @@ struct cluster_save {
 extern int	nbuf;			/* The number of buffer headers */
 extern long	maxswzone;		/* Max KVA for swap structures */
 extern long	maxbcache;		/* Max KVA for buffer cache */
-extern int	runningbufspace;
-extern int	runningbufcount;
 extern int	hidirtybufspace;
 extern int      buf_maxio;              /* nominal maximum I/O for buffer */
 extern struct buf *buf;			/* The buffer headers. */
@@ -390,13 +390,16 @@ extern int	bioq_reorder_minor_interval;
 extern int	bioq_reorder_minor_bytes;
 
 struct uio;
+struct devstat;
 
 void	bufinit (void);
 int	bd_heatup (void);
 void	bd_wait (int count);
+void	waitrunningbufspace(void);
 int	buf_dirty_count_severe (void);
 int	buf_runningbufspace_severe (void);
 void	initbufbio(struct buf *);
+void	uninitbufbio(struct buf *);
 void	reinitbufbio(struct buf *);
 void	clearbiocache(struct bio *);
 void	bremfree (struct buf *);
@@ -421,6 +424,7 @@ struct buf *findblk (struct vnode *, off_t, int);
 struct buf *getblk (struct vnode *, off_t, int, int, int);
 struct buf *getcacheblk (struct vnode *, off_t);
 struct buf *geteblk (int);
+void unrefblk(struct buf *bp);
 void regetblk(struct buf *bp);
 struct bio *push_bio(struct bio *);
 struct bio *pop_bio(struct bio *);
@@ -445,6 +449,7 @@ void	vunmapbuf (struct buf *);
 void	relpbuf (struct buf *, int *);
 void	brelvp (struct buf *);
 int	bgetvp (struct vnode *, struct buf *, int);
+void	bsetrunningbufspace(struct buf *, int);
 int	allocbuf (struct buf *bp, int size);
 int	scan_all_buffers (int (*)(struct buf *, void *), void *);
 void	reassignbuf (struct buf *);
@@ -453,9 +458,9 @@ struct	buf *trypbuf_kva (int *);
 void	bio_ops_sync(struct mount *mp);
 void	vm_hold_free_pages(struct buf *bp, vm_offset_t from, vm_offset_t to);
 void	vm_hold_load_pages(struct buf *bp, vm_offset_t from, vm_offset_t to);
-void	nestiobuf_done(struct bio *mbio, int donebytes, int error);
+void	nestiobuf_done(struct bio *mbio, int donebytes, int error, struct devstat *stats);
 void	nestiobuf_init(struct bio *mbio);
-void	nestiobuf_add(struct bio *mbio, struct buf *bp, int off, size_t size);
+void	nestiobuf_add(struct bio *mbio, struct buf *bp, int off, size_t size, struct devstat *stats);
 void	nestiobuf_start(struct bio *mbio);
 void	nestiobuf_error(struct bio *mbio, int error);
 #endif	/* _KERNEL */

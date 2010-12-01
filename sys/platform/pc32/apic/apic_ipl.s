@@ -54,10 +54,7 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/isa/apic_ipl.s,v 1.27.2.2 2000/09/30 02:49:35 ps Exp $
- * $DragonFly: src/sys/platform/pc32/apic/apic_ipl.s,v 1.17 2006/11/07 18:50:06 dillon Exp $
  */
-
-#include "use_npx.h"
 
 #include <machine/asmacros.h>
 #include <machine/segments.h>
@@ -69,7 +66,7 @@
 #include "apic_ipl.h"
 #include "assym.s"
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 
 	.text
 	SUPERALIGN_TEXT

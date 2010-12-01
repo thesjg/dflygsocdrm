@@ -111,8 +111,6 @@ struct rt2560_softc {
 	bus_space_tag_t		sc_st;
 	bus_space_handle_t	sc_sh;
 
-	struct lock		sc_lock;
-
 	struct callout		watchdog_ch;
 
 	int			sc_tx_timer;
@@ -165,8 +163,3 @@ int	rt2560_detach(void *);
 void	rt2560_stop(void *);
 void	rt2560_resume(void *);
 void	rt2560_intr(void *);
-
-#define RAL_LOCK(sc)		lockmgr(&(sc)->sc_lock, LK_EXCLUSIVE)
-#define RAL_LOCK_ASSERT(sc)	\
-	KKASSERT(lockstatus(&(sc)->sc_lock, curthread) == LK_EXCLUSIVE)
-#define RAL_UNLOCK(sc)		lockmgr(&(sc)->sc_lock, LK_RELEASE)

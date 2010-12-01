@@ -31,10 +31,7 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/i386/exception.s,v 1.65.2.3 2001/08/15 01:23:49 peter Exp $
- * $DragonFly: src/sys/platform/vkernel/i386/fork_tramp.s,v 1.3 2007/01/22 19:37:04 corecode Exp $
  */
-
-#include "use_npx.h"
 
 #include <machine/asmacros.h>
 #include <machine/segments.h>
@@ -54,12 +51,12 @@
  * it before calling the initial function (typically fork_return()) and/or
  * returning to user mode.
  *
- * The MP lock is held on entry, but for processes fork_return(esi)
- * releases it.  'doreti' always runs without the MP lock.
+ * The MP lock is not held at any point but the critcount is bumped
+ * on entry to prevent interruption of the trampoline at a bad point.
  */
 ENTRY(fork_trampoline)
 	movl	PCPU(curthread),%eax
-	subl	$TDPRI_CRIT,TD_PRI(%eax)
+	decl	TD_CRITCOUNT(%eax)
 
 	/*
 	 * cpu_set_fork_handler intercepts this function call to

@@ -50,6 +50,7 @@
 #include <sys/stat.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/socketops.h>
 #include <sys/signalvar.h>
 #include <sys/sysctl.h>
 #include <sys/aio.h> /* for aio_swake proto */
@@ -57,6 +58,7 @@
 
 #include <sys/thread2.h>
 #include <sys/msgport2.h>
+#include <sys/socketvar2.h>
 
 int	maxsockets;
 
@@ -76,16 +78,51 @@ static	u_long sb_efficiency = 8;	/* parameter for sbreserve() */
 
 /*
  * Wait for data to arrive at/drain from a socket buffer.
+ *
+ * NOTE: Caller must generally hold the ssb_lock (client side lock) since
+ *	 WAIT/WAKEUP only works for one client at a time.
+ *
+ * NOTE: Caller always retries whatever operation it was waiting on.
  */
 int
 ssb_wait(struct signalsockbuf *ssb)
 {
+	uint32_t flags;
+	int pflags;
+	int error;
 
-	ssb->ssb_flags |= SSB_WAIT;
-	return (tsleep((caddr_t)&ssb->ssb_cc,
-			((ssb->ssb_flags & SSB_NOINTR) ? 0 : PCATCH),
-			"sbwait",
-			ssb->ssb_timeo));
+	pflags = (ssb->ssb_flags & SSB_NOINTR) ? 0 : PCATCH;
+
+	for (;;) {
+		flags = ssb->ssb_flags;
+		cpu_ccfence();
+
+		/*
+		 * WAKEUP and WAIT interlock eachother.  We can catch the
+		 * race by checking to see if WAKEUP has already been set,
+		 * and only setting WAIT if WAKEUP is clear.
+		 */
+		if (flags & SSB_WAKEUP) {
+			if (atomic_cmpset_int(&ssb->ssb_flags, flags,
+					      flags & ~SSB_WAKEUP)) {
+				error = 0;
+				break;
+			}
+			continue;
+		}
+
+		/*
+		 * Only set WAIT if WAKEUP is clear.
+		 */
+		tsleep_interlock(&ssb->ssb_cc, pflags);
+		if (atomic_cmpset_int(&ssb->ssb_flags, flags,
+				      flags | SSB_WAIT)) {
+			error = tsleep(&ssb->ssb_cc, pflags | PINTERLOCKED,
+				       "sbwait", ssb->ssb_timeo);
+			break;
+		}
+	}
+	return (error);
 }
 
 /*
@@ -95,18 +132,35 @@ ssb_wait(struct signalsockbuf *ssb)
 int
 _ssb_lock(struct signalsockbuf *ssb)
 {
+	uint32_t flags;
+	int pflags;
 	int error;
 
-	while (ssb->ssb_flags & SSB_LOCK) {
-		ssb->ssb_flags |= SSB_WANT;
-		error = tsleep((caddr_t)&ssb->ssb_flags,
-			    ((ssb->ssb_flags & SSB_NOINTR) ? 0 : PCATCH),
-			    "sblock", 0);
-		if (error)
-			return (error);
+	pflags = (ssb->ssb_flags & SSB_NOINTR) ? 0 : PCATCH;
+
+	for (;;) {
+		flags = ssb->ssb_flags;
+		cpu_ccfence();
+		if (flags & SSB_LOCK) {
+			tsleep_interlock(&ssb->ssb_flags, pflags);
+			if (atomic_cmpset_int(&ssb->ssb_flags, flags,
+					      flags | SSB_WANT)) {
+				error = tsleep(&ssb->ssb_flags,
+					       pflags | PINTERLOCKED,
+					       "sblock", 0);
+				if (error)
+					break;
+			}
+		} else {
+			if (atomic_cmpset_int(&ssb->ssb_flags, flags,
+					      flags | SSB_LOCK)) {
+				lwkt_gettoken(&ssb->ssb_token);
+				error = 0;
+				break;
+			}
+		}
 	}
-	ssb->ssb_flags |= SSB_LOCK;
-	return (0);
+	return (error);
 }
 
 /*
@@ -161,32 +215,49 @@ ssbtoxsockbuf(struct signalsockbuf *ssb, struct xsockbuf *xsb)
 void
 soisconnecting(struct socket *so)
 {
-	so->so_state &= ~(SS_ISCONNECTED|SS_ISDISCONNECTING);
-	so->so_state |= SS_ISCONNECTING;
+	soclrstate(so, SS_ISCONNECTED | SS_ISDISCONNECTING);
+	sosetstate(so, SS_ISCONNECTING);
 }
 
 void
 soisconnected(struct socket *so)
 {
-	struct socket *head = so->so_head;
+	struct socket *head;
 
-	so->so_state &= ~(SS_ISCONNECTING|SS_ISDISCONNECTING|SS_ISCONFIRMING);
-	so->so_state |= SS_ISCONNECTED;
+	while ((head = so->so_head) != NULL) {
+		lwkt_getpooltoken(head);
+		if (so->so_head == head)
+			break;
+		lwkt_relpooltoken(head);
+	}
+
+	soclrstate(so, SS_ISCONNECTING | SS_ISDISCONNECTING | SS_ISCONFIRMING);
+	sosetstate(so, SS_ISCONNECTED);
 	if (head && (so->so_state & SS_INCOMP)) {
 		if ((so->so_options & SO_ACCEPTFILTER) != 0) {
 			so->so_upcall = head->so_accf->so_accept_filter->accf_callback;
 			so->so_upcallarg = head->so_accf->so_accept_filter_arg;
-			so->so_rcv.ssb_flags |= SSB_UPCALL;
+			atomic_set_int(&so->so_rcv.ssb_flags, SSB_UPCALL);
 			so->so_options &= ~SO_ACCEPTFILTER;
 			so->so_upcall(so, so->so_upcallarg, 0);
+			lwkt_relpooltoken(head);
 			return;
 		}
+
+		/*
+		 * Listen socket are not per-cpu.
+		 */
 		TAILQ_REMOVE(&head->so_incomp, so, so_list);
 		head->so_incqlen--;
-		so->so_state &= ~SS_INCOMP;
 		TAILQ_INSERT_TAIL(&head->so_comp, so, so_list);
 		head->so_qlen++;
-		so->so_state |= SS_COMP;
+		sosetstate(so, SS_COMP);
+		soclrstate(so, SS_INCOMP);
+
+		/*
+		 * XXX head may be on a different protocol thread.
+		 *     sorwakeup()->sowakeup() is hacked atm.
+		 */
 		sorwakeup(head);
 		wakeup_one(&head->so_timeo);
 	} else {
@@ -194,13 +265,15 @@ soisconnected(struct socket *so)
 		sorwakeup(so);
 		sowwakeup(so);
 	}
+	if (head)
+		lwkt_relpooltoken(head);
 }
 
 void
 soisdisconnecting(struct socket *so)
 {
-	so->so_state &= ~SS_ISCONNECTING;
-	so->so_state |= (SS_ISDISCONNECTING|SS_CANTRCVMORE|SS_CANTSENDMORE);
+	soclrstate(so, SS_ISCONNECTING);
+	sosetstate(so, SS_ISDISCONNECTING | SS_CANTRCVMORE | SS_CANTSENDMORE);
 	wakeup((caddr_t)&so->so_timeo);
 	sowwakeup(so);
 	sorwakeup(so);
@@ -209,8 +282,8 @@ soisdisconnecting(struct socket *so)
 void
 soisdisconnected(struct socket *so)
 {
-	so->so_state &= ~(SS_ISCONNECTING|SS_ISCONNECTED|SS_ISDISCONNECTING);
-	so->so_state |= (SS_CANTRCVMORE|SS_CANTSENDMORE|SS_ISDISCONNECTED);
+	soclrstate(so, SS_ISCONNECTING | SS_ISCONNECTED | SS_ISDISCONNECTING);
+	sosetstate(so, SS_CANTRCVMORE | SS_CANTSENDMORE | SS_ISDISCONNECTED);
 	wakeup((caddr_t)&so->so_timeo);
 	sbdrop(&so->so_snd.sb, so->so_snd.ssb_cc);
 	sowwakeup(so);
@@ -220,15 +293,15 @@ soisdisconnected(struct socket *so)
 void
 soisreconnecting(struct socket *so)
 {
-        so->so_state &= ~(SS_ISDISCONNECTING|SS_ISDISCONNECTED|SS_CANTRCVMORE|
-			SS_CANTSENDMORE);
-	so->so_state |= SS_ISCONNECTING;
+        soclrstate(so, SS_ISDISCONNECTING | SS_ISDISCONNECTED |
+		       SS_CANTRCVMORE | SS_CANTSENDMORE);
+	sosetstate(so, SS_ISCONNECTING);
 }
 
 void
 soisreconnected(struct socket *so)
 {
-	so->so_state &= ~(SS_ISDISCONNECTED|SS_CANTRCVMORE|SS_CANTSENDMORE);
+	soclrstate(so, SS_ISDISCONNECTED | SS_CANTRCVMORE | SS_CANTSENDMORE);
 	soisconnected(so);
 }
 
@@ -250,6 +323,9 @@ sosetport(struct socket *so, lwkt_port_t port)
  * then we allocate a new structure, propoerly linked into the
  * data structure of the original socket, and return this.
  * Connstatus may be 0, or SO_ISCONFIRMING, or SO_ISCONNECTED.
+ *
+ * The new socket is returned with one ref and so_pcb assigned.
+ * The reference is implied by so_pcb.
  */
 struct socket *
 sonewconn(struct socket *head, int connstatus)
@@ -263,24 +339,47 @@ sonewconn(struct socket *head, int connstatus)
 	so = soalloc(1);
 	if (so == NULL)
 		return (NULL);
+
+	/*
+	 * Set the port prior to attaching the inpcb to the current
+	 * cpu's protocol thread (which should be the current thread
+	 * but might not be in all cases).  This serializes any pcb ops
+	 * which occur to our cpu allowing us to complete the attachment
+	 * without racing anything.
+	 */
+	sosetport(so, cpu_portfn(mycpu->gd_cpuid));
 	if ((head->so_options & SO_ACCEPTFILTER) != 0)
 		connstatus = 0;
 	so->so_head = head;
 	so->so_type = head->so_type;
 	so->so_options = head->so_options &~ SO_ACCEPTCONN;
 	so->so_linger = head->so_linger;
-	so->so_state = head->so_state | SS_NOFDREF;
+
+	/*
+	 * NOTE: Clearing NOFDREF implies referencing the so with
+	 *	 soreference().
+	 */
+	so->so_state = head->so_state | SS_NOFDREF | SS_ASSERTINPROG;
 	so->so_proto = head->so_proto;
 	so->so_cred = crhold(head->so_cred);
 	ai.sb_rlimit = NULL;
 	ai.p_ucred = NULL;
 	ai.fd_rdir = NULL;		/* jail code cruft XXX JH */
-	if (soreserve(so, head->so_snd.ssb_hiwat, head->so_rcv.ssb_hiwat, NULL) ||
-	    /* Directly call function since we're already at protocol level. */
-	    (*so->so_proto->pr_usrreqs->pru_attach)(so, 0, &ai)) {
-		sodealloc(so);
+
+	/*
+	 * Reserve space and call pru_attach.  We can direct-call the
+	 * function since we're already in the protocol thread.
+	 */
+	if (soreserve(so, head->so_snd.ssb_hiwat,
+		      head->so_rcv.ssb_hiwat, NULL) ||
+	    so_pru_attach_direct(so, 0, &ai)) {
+		so->so_head = NULL;
+		soclrstate(so, SS_ASSERTINPROG);
+		sofree(so);		/* remove implied pcb ref */
 		return (NULL);
 	}
+	KKASSERT(so->so_refs == 2);	/* attach + our base ref */
+	sofree(so);
 	KKASSERT(so->so_port != NULL);
 	so->so_rcv.ssb_lowat = head->so_rcv.ssb_lowat;
 	so->so_snd.ssb_lowat = head->so_snd.ssb_lowat;
@@ -290,28 +389,35 @@ sonewconn(struct socket *head, int connstatus)
 				(SSB_AUTOSIZE | SSB_AUTOLOWAT);
 	so->so_snd.ssb_flags |= head->so_snd.ssb_flags &
 				(SSB_AUTOSIZE | SSB_AUTOLOWAT);
+	lwkt_getpooltoken(head);
 	if (connstatus) {
 		TAILQ_INSERT_TAIL(&head->so_comp, so, so_list);
-		so->so_state |= SS_COMP;
+		sosetstate(so, SS_COMP);
 		head->so_qlen++;
 	} else {
 		if (head->so_incqlen > head->so_qlimit) {
 			sp = TAILQ_FIRST(&head->so_incomp);
 			TAILQ_REMOVE(&head->so_incomp, sp, so_list);
 			head->so_incqlen--;
-			sp->so_state &= ~SS_INCOMP;
+			soclrstate(sp, SS_INCOMP);
 			sp->so_head = NULL;
 			soaborta(sp);
 		}
 		TAILQ_INSERT_TAIL(&head->so_incomp, so, so_list);
-		so->so_state |= SS_INCOMP;
+		sosetstate(so, SS_INCOMP);
 		head->so_incqlen++;
 	}
+	lwkt_relpooltoken(head);
 	if (connstatus) {
+		/*
+		 * XXX head may be on a different protocol thread.
+		 *     sorwakeup()->sowakeup() is hacked atm.
+		 */
 		sorwakeup(head);
 		wakeup((caddr_t)&head->so_timeo);
-		so->so_state |= connstatus;
+		sosetstate(so, connstatus);
 	}
+	soclrstate(so, SS_ASSERTINPROG);
 	return (so);
 }
 
@@ -327,14 +433,14 @@ sonewconn(struct socket *head, int connstatus)
 void
 socantsendmore(struct socket *so)
 {
-	so->so_state |= SS_CANTSENDMORE;
+	sosetstate(so, SS_CANTSENDMORE);
 	sowwakeup(so);
 }
 
 void
 socantrcvmore(struct socket *so)
 {
-	so->so_state |= SS_CANTRCVMORE;
+	sosetstate(so, SS_CANTRCVMORE);
 	sorwakeup(so);
 }
 
@@ -345,22 +451,45 @@ socantrcvmore(struct socket *so)
  * For users waiting on send/recv try to avoid unnecessary context switch
  * thrashing.  Particularly for senders of large buffers (needs to be
  * extended to sel and aio? XXX)
+ *
+ * WARNING!  Can be called on a foreign socket from the wrong protocol
+ *	     thread.  aka is called on the 'head' listen socket when
+ *	     a new connection comes in.
  */
 void
 sowakeup(struct socket *so, struct signalsockbuf *ssb)
 {
 	struct kqinfo *kqinfo = &ssb->ssb_kq;
+	uint32_t flags;
 
-	if (ssb->ssb_flags & SSB_WAIT) {
+	/*
+	 * Check conditions, set the WAKEUP flag, and clear and signal if
+	 * the WAIT flag is found to be set.  This interlocks against the
+	 * client side.
+	 */
+	for (;;) {
+		flags = ssb->ssb_flags;
+		cpu_ccfence();
+
 		if ((ssb == &so->so_snd && ssb_space(ssb) >= ssb->ssb_lowat) ||
 		    (ssb == &so->so_rcv && ssb->ssb_cc >= ssb->ssb_lowat) ||
 		    (ssb == &so->so_snd && (so->so_state & SS_CANTSENDMORE)) ||
 		    (ssb == &so->so_rcv && (so->so_state & SS_CANTRCVMORE))
 		) {
-			ssb->ssb_flags &= ~SSB_WAIT;
-			wakeup((caddr_t)&ssb->ssb_cc);
+			if (atomic_cmpset_int(&ssb->ssb_flags, flags,
+					  (flags | SSB_WAKEUP) & ~SSB_WAIT)) {
+				if (flags & SSB_WAIT)
+					wakeup(&ssb->ssb_cc);
+				break;
+			}
+		} else {
+			break;
 		}
 	}
+
+	/*
+	 * Misc other events
+	 */
 	if ((so->so_state & SS_ASYNC) && so->so_sigio != NULL)
 		pgsigio(so->so_sigio, SIGIO, 0);
 	if (ssb->ssb_flags & SSB_UPCALL)
@@ -368,18 +497,32 @@ sowakeup(struct socket *so, struct signalsockbuf *ssb)
 	if (ssb->ssb_flags & SSB_AIO)
 		aio_swake(so, ssb);
 	KNOTE(&kqinfo->ki_note, 0);
+
+	/*
+	 * This is a bit of a hack.  Multiple threads can wind up scanning
+	 * ki_mlist concurrently due to the fact that this function can be
+	 * called on a foreign socket, so we can't afford to block here.
+	 *
+	 * We need the pool token for (so) (likely the listne socket if
+	 * SSB_MEVENT is set) because the predicate function may have
+	 * to access the accept queue.
+	 */
 	if (ssb->ssb_flags & SSB_MEVENT) {
 		struct netmsg_so_notify *msg, *nmsg;
 
+		lwkt_gettoken(&kq_token);
+		lwkt_getpooltoken(so);
 		TAILQ_FOREACH_MUTABLE(msg, &kqinfo->ki_mlist, nm_list, nmsg) {
-			if (msg->nm_predicate(&msg->nm_netmsg)) {
+			if (msg->nm_predicate(msg)) {
 				TAILQ_REMOVE(&kqinfo->ki_mlist, msg, nm_list);
-				lwkt_replymsg(&msg->nm_netmsg.nm_lmsg, 
-					      msg->nm_netmsg.nm_lmsg.ms_error);
+				lwkt_replymsg(&msg->base.lmsg,
+					      msg->base.lmsg.ms_error);
 			}
 		}
 		if (TAILQ_EMPTY(&ssb->ssb_kq.ki_mlist))
-			ssb->ssb_flags &= ~SSB_MEVENT;
+			atomic_clear_int(&ssb->ssb_flags, SSB_MEVENT);
+		lwkt_relpooltoken(so);
+		lwkt_reltoken(&kq_token);
 	}
 }
 
@@ -418,7 +561,7 @@ int
 soreserve(struct socket *so, u_long sndcc, u_long rcvcc, struct rlimit *rl)
 {
 	if (so->so_snd.ssb_lowat == 0)
-		so->so_snd.ssb_flags |= SSB_AUTOLOWAT;
+		atomic_set_int(&so->so_snd.ssb_flags, SSB_AUTOLOWAT);
 	if (ssb_reserve(&so->so_snd, sndcc, so, rl) == 0)
 		goto bad;
 	if (ssb_reserve(&so->so_rcv, rcvcc, so, rl) == 0)
@@ -516,77 +659,10 @@ ssb_release(struct signalsockbuf *ssb, struct socket *so)
  * Some routines that return EOPNOTSUPP for entry points that are not
  * supported by a protocol.  Fill in as needed.
  */
-int
-pru_accept_notsupp(struct socket *so, struct sockaddr **nam)
+void
+pr_generic_notsupp(netmsg_t msg)
 {
-	return EOPNOTSUPP;
-}
-
-int
-pru_bind_notsupp(struct socket *so, struct sockaddr *nam, struct thread *td)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_connect_notsupp(struct socket *so, struct sockaddr *nam, struct thread *td)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_connect2_notsupp(struct socket *so1, struct socket *so2)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_control_notsupp(struct socket *so, u_long cmd, caddr_t data,
-		    struct ifnet *ifp, struct thread *td)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_disconnect_notsupp(struct socket *so)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_listen_notsupp(struct socket *so, struct thread *td)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_peeraddr_notsupp(struct socket *so, struct sockaddr **nam)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_rcvd_notsupp(struct socket *so, int flags)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_rcvoob_notsupp(struct socket *so, struct mbuf *m, int flags)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_shutdown_notsupp(struct socket *so)
-{
-	return EOPNOTSUPP;
-}
-
-int
-pru_sockaddr_notsupp(struct socket *so, struct sockaddr **nam)
-{
-	return EOPNOTSUPP;
+	lwkt_replymsg(&msg->lmsg, EOPNOTSUPP);
 }
 
 int
@@ -609,21 +685,15 @@ pru_soreceive_notsupp(struct socket *so, struct sockaddr **paddr,
 	return (EOPNOTSUPP);
 }
 
-int
-pru_ctloutput_notsupp(struct socket *so, struct sockopt *sopt)
-{
-	return (EOPNOTSUPP);
-}
-
 /*
  * This isn't really a ``null'' operation, but it's the default one
  * and doesn't do anything destructive.
  */
-int
-pru_sense_null(struct socket *so, struct stat *sb)
+void
+pru_sense_null(netmsg_t msg)
 {
-	sb->st_blksize = so->so_snd.ssb_hiwat;
-	return 0;
+	msg->sense.nm_stat->st_blksize = msg->base.nm_so->so_snd.ssb_hiwat;
+	lwkt_replymsg(&msg->lmsg, 0);
 }
 
 /*

@@ -73,6 +73,8 @@ static u_long nfsrvhash;
 #define	NETFAMILY(rp) \
 		(((rp)->rc_flag & RC_INETADDR) ? AF_INET : AF_ISO)
 
+struct lwkt_token srvcache_token = LWKT_TOKEN_MP_INITIALIZER(srvcache_token);
+
 /*
  * Static array that defines which nfs rpc's are nonidempotent
  */
@@ -133,7 +135,6 @@ static int nfsv2_repstat[NFS_NPROCS] = {
 void
 nfsrv_initcache(void)
 {
-
 	nfsrvhashtbl = hashinit(desirednfsrvcache, M_NFSD, &nfsrvhash);
 	TAILQ_INIT(&nfsrvlruhead);
 }
@@ -168,6 +169,8 @@ nfsrv_getcache(struct nfsrv_descript *nd, struct nfssvc_sock *slp,
 	 */
 	if (!nd->nd_nam2)
 		return (RC_DOIT);
+
+	lwkt_gettoken(&srvcache_token);
 loop:
 	for (rp = NFSRCHASH(nd->nd_retxid)->lh_first; rp != 0;
 	    rp = rp->rc_hash.le_next) {
@@ -176,7 +179,7 @@ loop:
 		        NFS_DPF(RC, ("H%03x", rp->rc_xid & 0xfff));
 			if ((rp->rc_flag & RC_LOCKED) != 0) {
 				rp->rc_flag |= RC_WANTED;
-				(void) tsleep((caddr_t)rp, 0, "nfsrc", 0);
+				tsleep((caddr_t)rp, 0, "nfsrc", 0);
 				goto loop;
 			}
 			rp->rc_flag |= RC_LOCKED;
@@ -210,33 +213,40 @@ loop:
 				rp->rc_flag &= ~RC_WANTED;
 				wakeup((caddr_t)rp);
 			}
+			lwkt_reltoken(&srvcache_token);
 			return (ret);
 		}
 	}
+
 	nfsstats.srvcache_misses++;
 	NFS_DPF(RC, ("M%03x", nd->nd_retxid & 0xfff));
 	if (numnfsrvcache < desirednfsrvcache) {
-		rp = (struct nfsrvcache *)kmalloc((u_long)sizeof *rp,
-		    M_NFSD, M_WAITOK | M_ZERO);
+		rp = kmalloc((u_long)sizeof *rp, M_NFSD, M_WAITOK | M_ZERO);
 		numnfsrvcache++;
 		rp->rc_flag = RC_LOCKED;
 	} else {
 		rp = TAILQ_FIRST(&nfsrvlruhead);
 		while ((rp->rc_flag & RC_LOCKED) != 0) {
 			rp->rc_flag |= RC_WANTED;
-			(void) tsleep((caddr_t)rp, 0, "nfsrc", 0);
+			tsleep((caddr_t)rp, 0, "nfsrc", 0);
 			rp = TAILQ_FIRST(&nfsrvlruhead);
 		}
 		rp->rc_flag |= RC_LOCKED;
 		LIST_REMOVE(rp, rc_hash);
 		TAILQ_REMOVE(&nfsrvlruhead, rp, rc_lru);
-		if (rp->rc_flag & RC_REPMBUF)
+		if (rp->rc_flag & RC_REPMBUF) {
 			m_freem(rp->rc_reply);
-		if (rp->rc_flag & RC_NAM)
+			rp->rc_reply = NULL;
+			rp->rc_flag &= ~RC_REPMBUF;
+		}
+		if (rp->rc_flag & RC_NAM) {
 			FREE(rp->rc_nam, M_SONAME);
-		rp->rc_flag &= (RC_LOCKED | RC_WANTED);
+			rp->rc_nam = NULL;
+			rp->rc_flag &= ~RC_NAM;
+		}
 	}
 	TAILQ_INSERT_TAIL(&nfsrvlruhead, rp, rc_lru);
+
 	rp->rc_state = RC_INPROG;
 	rp->rc_xid = nd->nd_retxid;
 	saddr = (struct sockaddr_in *)nd->nd_nam;
@@ -258,6 +268,8 @@ loop:
 		rp->rc_flag &= ~RC_WANTED;
 		wakeup((caddr_t)rp);
 	}
+	lwkt_reltoken(&srvcache_token);
+
 	return (RC_DOIT);
 }
 
@@ -271,6 +283,8 @@ nfsrv_updatecache(struct nfsrv_descript *nd, int repvalid, struct mbuf *repmbuf)
 
 	if (!nd->nd_nam2)
 		return;
+
+	lwkt_gettoken(&srvcache_token);
 loop:
 	for (rp = NFSRCHASH(nd->nd_retxid)->lh_first; rp != 0;
 	    rp = rp->rc_hash.le_next) {
@@ -279,7 +293,7 @@ loop:
 			NFS_DPF(RC, ("U%03x", rp->rc_xid & 0xfff));
 			if ((rp->rc_flag & RC_LOCKED) != 0) {
 				rp->rc_flag |= RC_WANTED;
-				(void) tsleep((caddr_t)rp, 0, "nfsrc", 0);
+				tsleep((caddr_t)rp, 0, "nfsrc", 0);
 				goto loop;
 			}
 			rp->rc_flag |= RC_LOCKED;
@@ -292,10 +306,12 @@ loop:
 				 */
 				if (rp->rc_flag & RC_REPMBUF) {
 					m_freem(rp->rc_reply);
+					rp->rc_reply = NULL;
 					rp->rc_flag &= ~RC_REPMBUF;
 				}
 			}
 			rp->rc_state = RC_DONE;
+
 			/*
 			 * If we have a valid reply update status and save
 			 * the reply for non-idempotent rpc's.
@@ -306,8 +322,13 @@ loop:
 					rp->rc_status = nd->nd_repstat;
 					rp->rc_flag |= RC_REPSTATUS;
 				} else {
-					rp->rc_reply = m_copym(repmbuf,
-						0, M_COPYALL, MB_WAIT);
+					if (rp->rc_flag & RC_REPMBUF) {
+						m_freem(rp->rc_reply);
+						rp->rc_reply = NULL;
+						rp->rc_flag &= ~RC_REPMBUF;
+					}
+					rp->rc_reply = m_copym(repmbuf, 0,
+							M_COPYALL, MB_WAIT);
 					rp->rc_flag |= RC_REPMBUF;
 				}
 			}
@@ -316,9 +337,10 @@ loop:
 				rp->rc_flag &= ~RC_WANTED;
 				wakeup((caddr_t)rp);
 			}
-			return;
+			break;
 		}
 	}
+	lwkt_reltoken(&srvcache_token);
 	NFS_DPF(RC, ("L%03x", nd->nd_retxid & 0xfff));
 }
 
@@ -328,18 +350,31 @@ loop:
 void
 nfsrv_cleancache(void)
 {
-	struct nfsrvcache *rp, *nextrp;
+	struct nfsrvcache *rp;
 
-	TAILQ_FOREACH_MUTABLE(rp, &nfsrvlruhead, rc_lru, nextrp) {
+	lwkt_gettoken(&srvcache_token);
+	while ((rp = TAILQ_FIRST(&nfsrvlruhead)) != NULL) {
+		if (rp->rc_flag & RC_LOCKED) {
+			rp->rc_flag |= RC_WANTED;
+			tsleep((caddr_t)rp, 0, "nfsrc", 0);
+			continue;
+		}
 		LIST_REMOVE(rp, rc_hash);
 		TAILQ_REMOVE(&nfsrvlruhead, rp, rc_lru);
-		if (rp->rc_flag & RC_REPMBUF)
+		if (rp->rc_flag & RC_REPMBUF) {
 			m_freem(rp->rc_reply);
-		if (rp->rc_flag & RC_NAM)
+			rp->rc_reply = NULL;
+			rp->rc_flag &= ~RC_REPMBUF;
+		}
+		if (rp->rc_flag & RC_NAM) {
 			kfree(rp->rc_nam, M_SONAME);
+			rp->rc_nam = NULL;
+			rp->rc_flag &= ~RC_NAM;
+		}
 		kfree(rp, M_NFSD);
 	}
 	numnfsrvcache = 0;
+	lwkt_reltoken(&srvcache_token);
 }
 
 #endif /* NFS_NOSERVER */

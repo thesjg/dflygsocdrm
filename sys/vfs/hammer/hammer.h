@@ -508,6 +508,7 @@ struct hammer_record {
 	struct hammer_btree_leaf_elm	leaf;
 	union hammer_data_ondisk	*data;
 	int				flags;
+	int				gflags;
 	hammer_off_t			zone2_offset;	/* direct-write only */
 };
 
@@ -525,11 +526,14 @@ typedef struct hammer_record *hammer_record_t;
 #define HAMMER_RECF_INTERLOCK_BE	0x0020	/* backend interlock */
 #define HAMMER_RECF_WANTED		0x0040	/* wanted by the frontend */
 #define HAMMER_RECF_CONVERT_DELETE 	0x0100	/* special case */
-#define HAMMER_RECF_DIRECT_IO		0x0200	/* related direct I/O running*/
-#define HAMMER_RECF_DIRECT_WAIT		0x0400	/* related direct I/O running*/
-#define HAMMER_RECF_DIRECT_INVAL	0x0800	/* buffer alias invalidation */
 #define HAMMER_RECF_REDO		0x1000	/* REDO was laid down */
 
+/*
+ * These flags must be separate to deal with SMP races
+ */
+#define HAMMER_RECG_DIRECT_IO		0x0001	/* related direct I/O running*/
+#define HAMMER_RECG_DIRECT_WAIT		0x0002	/* related direct I/O running*/
+#define HAMMER_RECG_DIRECT_INVAL	0x0004	/* buffer alias invalidation */
 /*
  * hammer_create_at_cursor() and hammer_delete_at_cursor() flags.
  */
@@ -608,17 +612,33 @@ struct hammer_io {
 	int			bytes;	   /* buffer cache buffer size */
 	int			modify_refs;
 
-	u_int		modified : 1;	/* bp's data was modified */
-	u_int		released : 1;	/* bp released (w/ B_LOCKED set) */
+	/*
+	 * These can be modified at any time by the backend while holding
+	 * io_token, due to bio_done and hammer_io_complete() callbacks.
+	 */
 	u_int		running : 1;	/* bp write IO in progress */
 	u_int		waiting : 1;	/* someone is waiting on us */
+	u_int		ioerror : 1;	/* abort on io-error */
+	u_int		unusedA : 29;
+
+	/*
+	 * These can only be modified by the frontend while holding
+	 * fs_token, or by the backend while holding the io interlocked
+	 * with no references (which will block the frontend when it
+	 * tries to reference it).
+	 *
+	 * WARNING! SMP RACES will create havoc if the callbacks ever tried
+	 *	    to modify any of these outside the above restrictions.
+	 */
+	u_int		modified : 1;	/* bp's data was modified */
+	u_int		released : 1;	/* bp released (w/ B_LOCKED set) */
 	u_int		validated : 1;	/* ondisk has been validated */
 	u_int		waitdep : 1;	/* flush waits for dependancies */
 	u_int		recovered : 1;	/* has recovery ref */
 	u_int		waitmod : 1;	/* waiting for modify_refs */
 	u_int		reclaim : 1;	/* reclaim requested */
 	u_int		gencrc : 1;	/* crc needs to be generated */
-	u_int		ioerror : 1;	/* abort on io-error */
+	u_int		unusedB : 24;
 };
 
 typedef struct hammer_io *hammer_io_t;
@@ -859,8 +879,8 @@ struct hammer_mount {
 	struct hammer_io_list meta_list;	/* dirty meta bufs    */
 	struct hammer_io_list lose_list;	/* loose buffers      */
 	int	locked_dirty_space;		/* meta/volu count    */
-	int	io_running_space;		/* track I/O in progress */
-	int	io_running_wakeup;
+	int	io_running_space;		/* io_token */
+	int	io_running_wakeup;		/* io_token */
 	int	objid_cache_count;
 	int	error;				/* critical I/O error */
 	struct krate	krate;			/* rate limited kprintf */
@@ -890,6 +910,9 @@ struct hammer_mount {
 	TAILQ_HEAD(, hammer_objid_cache) objid_cache_list;
 	TAILQ_HEAD(, hammer_reclaim) reclaim_list;
 	TAILQ_HEAD(, hammer_io) iorun_list;
+
+	struct lwkt_token	fs_token;	/* high level */
+	struct lwkt_token	io_token;	/* low level (IO callback) */
 
 	struct hammer_inostats	inostats[HAMMER_INOSTATS_HSIZE];
 };
@@ -1058,14 +1081,16 @@ int	hammer_cursor_down(hammer_cursor_t cursor);
 int	hammer_cursor_upgrade(hammer_cursor_t cursor);
 int	hammer_cursor_upgrade_node(hammer_cursor_t cursor);
 void	hammer_cursor_downgrade(hammer_cursor_t cursor);
+int	hammer_cursor_upgrade2(hammer_cursor_t c1, hammer_cursor_t c2);
+void	hammer_cursor_downgrade2(hammer_cursor_t c1, hammer_cursor_t c2);
 int	hammer_cursor_seek(hammer_cursor_t cursor, hammer_node_t node,
 			int index);
 void	hammer_lock_ex_ident(struct hammer_lock *lock, const char *ident);
 int	hammer_lock_ex_try(struct hammer_lock *lock);
 void	hammer_lock_sh(struct hammer_lock *lock);
 int	hammer_lock_sh_try(struct hammer_lock *lock);
-int	hammer_lock_upgrade(struct hammer_lock *lock);
-void	hammer_lock_downgrade(struct hammer_lock *lock);
+int	hammer_lock_upgrade(struct hammer_lock *lock, int shcount);
+void	hammer_lock_downgrade(struct hammer_lock *lock, int shcount);
 int	hammer_lock_status(struct hammer_lock *lock);
 void	hammer_unlock(struct hammer_lock *lock);
 void	hammer_ref(struct hammer_lock *lock);
@@ -1128,6 +1153,7 @@ void	hammer_cursor_parent_changed(hammer_node_t node, hammer_node_t oparent,
 			hammer_node_t nparent, int nindex);
 void	hammer_cursor_inserted_element(hammer_node_t node, int index);
 void	hammer_cursor_deleted_element(hammer_node_t node, int index);
+void	hammer_cursor_invalidate_cache(hammer_cursor_t cursor);
 
 int	hammer_btree_lookup(hammer_cursor_t cursor);
 int	hammer_btree_first(hammer_cursor_t cursor);
@@ -1252,6 +1278,8 @@ void hammer_blockmap_reserve_complete(hammer_mount_t hmp,
 void hammer_reserve_clrdelay(hammer_mount_t hmp, hammer_reserve_t resv);
 void hammer_blockmap_free(hammer_transaction_t trans,
 			hammer_off_t bmap_off, int bytes);
+int hammer_blockmap_dedup(hammer_transaction_t trans,
+			hammer_off_t bmap_off, int bytes);
 int hammer_blockmap_finalize(hammer_transaction_t trans,
 			hammer_reserve_t resv,
 			hammer_off_t bmap_off, int bytes);
@@ -1328,8 +1356,7 @@ int hammer_ioctl(hammer_inode_t ip, u_long com, caddr_t data, int fflag,
 
 void hammer_io_init(hammer_io_t io, hammer_volume_t volume,
 			enum hammer_io_type type);
-int hammer_io_read(struct vnode *devvp, struct hammer_io *io,
-			hammer_off_t limit);
+int hammer_io_read(struct vnode *devvp, struct hammer_io *io, int limit);
 void hammer_io_advance(struct hammer_io *io);
 int hammer_io_new(struct vnode *devvp, struct hammer_io *io);
 int hammer_io_inval(hammer_volume_t volume, hammer_off_t zone2_offset);
@@ -1350,6 +1377,7 @@ void hammer_io_clear_modify(struct hammer_io *io, int inval);
 void hammer_io_clear_modlist(struct hammer_io *io);
 void hammer_io_flush_sync(hammer_mount_t hmp);
 void hammer_io_clear_error(struct hammer_io *io);
+void hammer_io_clear_error_noassert(struct hammer_io *io);
 void hammer_io_notmeta(hammer_buffer_t buffer);
 void hammer_io_limit_backlog(hammer_mount_t hmp);
 
@@ -1386,6 +1414,10 @@ int hammer_ioc_volume_add(hammer_transaction_t trans, hammer_inode_t ip,
                         struct hammer_ioc_volume *ioc);
 int hammer_ioc_volume_del(hammer_transaction_t trans, hammer_inode_t ip,
                         struct hammer_ioc_volume *ioc);
+int hammer_ioc_volume_list(hammer_transaction_t trans, hammer_inode_t ip,
+			struct hammer_ioc_volume_list *ioc);
+int hammer_ioc_dedup(hammer_transaction_t trans, hammer_inode_t ip,
+			struct hammer_ioc_dedup *dedup);
 
 int hammer_signal_check(hammer_mount_t hmp);
 
@@ -1417,7 +1449,7 @@ int hammer_crc_test_blockmap(hammer_blockmap_t blockmap);
 int hammer_crc_test_volume(hammer_volume_ondisk_t ondisk);
 int hammer_crc_test_btree(hammer_node_ondisk_t ondisk);
 int hammer_crc_test_leaf(void *data, hammer_btree_leaf_elm_t leaf);
-void hkprintf(const char *ctl, ...);
+void hkprintf(const char *ctl, ...) __printflike(1, 2);
 udev_t hammer_fsid_to_udev(uuid_t *uuid);
 
 

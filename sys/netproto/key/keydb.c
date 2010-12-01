@@ -52,6 +52,7 @@
 
 #include <net/pfkeyv2.h>
 #include "keydb.h"
+#include "key.h"
 #include <netinet6/ipsec.h>
 
 #include <net/net_osdep.h>
@@ -66,14 +67,13 @@ static void keydb_delsecasvar (struct secasvar *);
 struct secpolicy *
 keydb_newsecpolicy(void)
 {
-	return((struct secpolicy *)kmalloc(sizeof(struct secpolicy), M_SECA,
-	       M_INTWAIT | M_NULLOK | M_ZERO));
+	return(kmalloc(sizeof(struct secpolicy), M_SECA,
+		       M_INTWAIT | M_NULLOK | M_ZERO));
 }
 
 void
 keydb_delsecpolicy(struct secpolicy *p)
 {
-
 	kfree(p, M_SECA);
 }
 
@@ -119,20 +119,20 @@ keydb_newsecasvar(void)
 void
 keydb_refsecasvar(struct secasvar *p)
 {
-	crit_enter();
+	lwkt_gettoken(&key_token);
 	p->refcnt++;
-	crit_exit();
+	lwkt_reltoken(&key_token);
 }
 
 void
 keydb_freesecasvar(struct secasvar *p)
 {
-	crit_enter();
+	lwkt_gettoken(&key_token);
 	p->refcnt--;
 	/* negative refcnt will cause panic intentionally */
 	if (p->refcnt <= 0)
 		keydb_delsecasvar(p);
-	crit_exit();
+	lwkt_reltoken(&key_token);
 }
 
 static void

@@ -72,6 +72,8 @@ complete_rqe(struct bio *bio)
     struct sd *sd;
     char *gravity;					    /* for error messages */
 
+    get_mplock();
+
     rqe = (struct rqelement *) bp;			    /* point to the element that completed */
     rqg = rqe->rqg;					    /* and the request group */
     rq = rqg->rq;					    /* and the complete request */
@@ -228,6 +230,7 @@ complete_rqe(struct bio *bio)
 	    freerq(rq);					    /* return the request storage */
 	}
     }
+    rel_mplock();
 }
 
 /* Free a request block and anything hanging off it */
@@ -247,7 +250,7 @@ freerq(struct request *rq)
 		Free(rqg->rqe[rqno].b.b_data);		    /* free it */
 	    if (rqg->rqe[rqno].flags & XFR_BUFLOCKED) {	    /* locked this buffer, */
 		BUF_UNLOCK(&rqg->rqe[rqno].b);		    /* unlock it again */
-		BUF_LOCKFREE(&rqg->rqe[rqno].b);
+		uninitbufbio(&rqg->rqe[rqno].b);
 	    }
 	}
 	nrqg = rqg->next;				    /* note the next one */
@@ -261,6 +264,8 @@ void
 sdio_done(struct bio *bio)
 {
     struct sdbuf *sbp;
+
+    get_mplock();
 
     sbp = (struct sdbuf *) bio->bio_buf;
     if (sbp->b.b_flags & B_ERROR) {			    /* had an error */
@@ -287,8 +292,9 @@ sdio_done(struct bio *bio)
     biodone_sync(bio);
     biodone(sbp->bio);					    /* complete the caller's I/O */
     BUF_UNLOCK(&sbp->b);
-    BUF_LOCKFREE(&sbp->b);
+    uninitbufbio(&sbp->b);
     Free(sbp);
+    rel_mplock();
 }
 
 /* Start the second phase of a RAID-4 or RAID-5 group write operation. */

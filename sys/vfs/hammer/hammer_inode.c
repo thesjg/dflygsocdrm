@@ -177,6 +177,7 @@ int
 hammer_vop_inactive(struct vop_inactive_args *ap)
 {
 	struct hammer_inode *ip = VTOI(ap->a_vp);
+	hammer_mount_t hmp;
 
 	/*
 	 * Degenerate case
@@ -199,12 +200,13 @@ hammer_vop_inactive(struct vop_inactive_args *ap)
 	 * multiple inode updates.
 	 */
 	if (ip->ino_data.nlinks == 0) {
-		get_mplock();
+		hmp = ip->hmp;
+		lwkt_gettoken(&hmp->fs_token);
 		hammer_inode_unloadable_check(ip, 0);
 		if (ip->flags & HAMMER_INODE_MODMASK)
 			hammer_flush_inode(ip, 0);
+		lwkt_reltoken(&hmp->fs_token);
 		vrecycle(ap->a_vp);
-		rel_mplock();
 	}
 	return(0);
 }
@@ -229,6 +231,7 @@ hammer_vop_reclaim(struct vop_reclaim_args *ap)
 
 	if ((ip = vp->v_data) != NULL) {
 		hmp = ip->hmp;
+		lwkt_gettoken(&hmp->fs_token);
 		hammer_lock_ex(&ip->lock);
 		vp->v_data = NULL;
 		ip->vp = NULL;
@@ -240,6 +243,7 @@ hammer_vop_reclaim(struct vop_reclaim_args *ap)
 		}
 		hammer_unlock(&ip->lock);
 		hammer_rel_inode(ip, 1);
+		lwkt_reltoken(&hmp->fs_token);
 	}
 	return(0);
 }
@@ -2297,9 +2301,20 @@ hammer_setup_child_callback(hammer_record_t rec, void *data)
 		break;
 	case HAMMER_FST_FLUSH:
 		/* 
-		 * The flush_group should already match.
+		 * The record could be part of a previous flush group if the
+		 * inode is a directory (the record being a directory entry).
+		 * Once the flush group was closed a hammer_test_inode()
+		 * function can cause a new flush group to be setup, placing
+		 * the directory inode itself in a new flush group.
+		 *
+		 * When associated with a previous flush group we count it
+		 * as if it were in our current flush group, since it will
+		 * effectively be flushed by the time we flush our current
+		 * flush group.
 		 */
-		KKASSERT(rec->flush_group == flg);
+		KKASSERT(
+		    rec->ip->ino_data.obj_type == HAMMER_OBJTYPE_DIRECTORY ||
+		    rec->flush_group == flg);
 		r = 1;
 		break;
 	}
@@ -3070,9 +3085,11 @@ hammer_inode_unloadable_check(hammer_inode_t ip, int getvp)
 	 * one that was already flagged.  A previously set DELETING flag
 	 * may bounce around flags and sync_flags until the operation is
 	 * completely done.
+	 *
+	 * Do not attempt to modify a snapshot inode (one set to read-only).
 	 */
 	if (ip->ino_data.nlinks == 0 &&
-	    ((ip->flags | ip->sync_flags) & (HAMMER_INODE_DELETING|HAMMER_INODE_DELETED)) == 0) {
+	    ((ip->flags | ip->sync_flags) & (HAMMER_INODE_RO|HAMMER_INODE_DELETING|HAMMER_INODE_DELETED)) == 0) {
 		ip->flags |= HAMMER_INODE_DELETING;
 		ip->flags |= HAMMER_INODE_TRUNCATED;
 		ip->trunc_off = 0;
@@ -3206,7 +3223,7 @@ hammer_inode_inostats(hammer_mount_t hmp, pid_t pid)
 	struct hammer_inostats *stats;
 	int delta;
 	int chain;
-	static int iterator;	/* we don't care about MP races */
+	static volatile int iterator;	/* we don't care about MP races */
 
 	/*
 	 * Chain up to 4 times to find our entry.

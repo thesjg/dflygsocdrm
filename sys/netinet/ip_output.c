@@ -57,6 +57,7 @@
 
 #include <sys/thread2.h>
 #include <sys/mplock2.h>
+#include <sys/msgport2.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -305,17 +306,6 @@ ip_output(struct mbuf *m0, struct mbuf *opt, struct route *ro,
 reroute:
 	pkt_dst = next_hop ? next_hop->sin_addr : ip->ip_dst;
 
-#ifdef INVARIANTS
-	if (IN_MULTICAST(ntohl(pkt_dst.s_addr))) {
-		/*
-		 * XXX
-		 * Multicast is not MPSAFE yet.  Caller must hold
-		 * BGL when output a multicast IP packet.
-		 */
-		ASSERT_MP_LOCK_HELD(curthread);
-	}
-#endif
-
 	dst = (struct sockaddr_in *)&ro->ro_dst;
 	/*
 	 * If there is a cached route,
@@ -462,10 +452,14 @@ reroute:
 				 */
 				if (!rsvp_on)
 					imo = NULL;
-				if (ip_mforward &&
-				    ip_mforward(ip, ifp, m, imo) != 0) {
-					m_freem(m);
-					goto done;
+				if (ip_mforward) {
+					get_mplock();
+					if (ip_mforward(ip, ifp, m, imo) != 0) {
+						m_freem(m);
+						rel_mplock();
+						goto done;
+					}
+					rel_mplock();
 				}
 			}
 		}
@@ -570,6 +564,7 @@ sendit:
 
 	case IPSEC_POLICY_BYPASS:
 	case IPSEC_POLICY_NONE:
+	case IPSEC_POLICY_TCP:
 		/* no need to do IPsec. */
 		goto skip_ipsec;
 
@@ -1345,15 +1340,18 @@ ip_optcopy(struct ip *ip, struct ip *jp)
 /*
  * IP socket option processing.
  */
-int
-ip_ctloutput(struct socket *so, struct sockopt *sopt)
+void
+ip_ctloutput(netmsg_t msg)
 {
+	struct socket *so = msg->base.nm_so;
+	struct sockopt *sopt = msg->ctloutput.nm_sopt;
 	struct	inpcb *inp = so->so_pcb;
 	int	error, optval;
 
 	error = optval = 0;
 	if (sopt->sopt_level != IPPROTO_IP) {
-		return (EINVAL);
+		error = EINVAL;
+		goto done;
 	}
 
 	switch (sopt->sopt_dir) {
@@ -1377,8 +1375,9 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 			m->m_len = sopt->sopt_valsize;
 			error = soopt_to_kbuf(sopt, mtod(m, void *), m->m_len,
 					      m->m_len);
-			return (ip_pcbopts(sopt->sopt_name, &inp->inp_options,
-					   m));
+			error = ip_pcbopts(sopt->sopt_name,
+					   &inp->inp_options, m);
+			goto done;
 		}
 
 		case IP_TOS:
@@ -1615,7 +1614,8 @@ ip_ctloutput(struct socket *so, struct sockopt *sopt)
 		}
 		break;
 	}
-	return (error);
+done:
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 /*
@@ -2179,6 +2179,8 @@ ip_mloopback(struct ifnet *ifp, struct mbuf *m, struct sockaddr_in *dst,
 			dst->sin_family = AF_INET;
 		}
 #endif
+		get_mplock();	/* is if_simloop() mpsafe yet? */
 		if_simloop(ifp, copym, dst->sin_family, 0);
+		rel_mplock();
 	}
 }

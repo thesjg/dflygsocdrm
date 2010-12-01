@@ -1,7 +1,6 @@
 /*
  * $NetBSD: usb.c,v 1.68 2002/02/20 20:30:12 christos Exp $
  * $FreeBSD: src/sys/dev/usb/usb.c,v 1.106 2005/03/27 15:31:23 iedowse Exp $
- * $DragonFly: src/sys/bus/usb/usb.c,v 1.50 2008/09/26 08:21:22 hasso Exp $
  */
 
 /* Also already merged from NetBSD:
@@ -73,7 +72,9 @@
 #include <sys/vnode.h>
 #include <sys/signalvar.h>
 #include <sys/sysctl.h>
+
 #include <sys/thread2.h>
+#include <sys/mplock2.h>
 
 #include <bus/usb/usb.h>
 #include <bus/usb/usbdi.h>
@@ -151,8 +152,8 @@ d_kqfilter_t usbkqfilter;
 static void usbfilt_detach(struct knote *);
 static int usbfilt(struct knote *, long);
 
-struct dev_ops usb_ops = {
-	{ "usb", USB_CDEV_MAJOR, D_KQFILTER },
+static struct dev_ops usb_ops = {
+	{ "usb", 0, 0 },
 	.d_open =	usbopen,
 	.d_close =	usbclose,
 	.d_read =	usbread,
@@ -443,6 +444,7 @@ usb_event_thread(void *arg)
 	 */
 	usb_delay_ms(sc->sc_bus, 500);
 
+	get_mplock();
 	crit_enter();
 
 	/* Make sure first discover does something. */
@@ -465,12 +467,12 @@ usb_event_thread(void *arg)
 	sc->sc_event_thread = NULL;
 
 	crit_exit();
+	rel_mplock();
 
 	/* In case parent is waiting for us to exit. */
 	wakeup(sc);
 
 	DPRINTF(("usb_event_thread: exit\n"));
-	kthread_exit();
 }
 
 void
@@ -479,6 +481,7 @@ usb_task_thread(void *arg)
 	struct usb_task *task;
 	struct usb_taskq *taskq;
 
+	get_mplock();
 	crit_enter();
 
 	taskq = arg;
@@ -502,6 +505,7 @@ usb_task_thread(void *arg)
 	}
 
 	crit_exit();
+	rel_mplock();
 
 	taskq->taskcreated = 0;
 	wakeup(&taskq->taskcreated);

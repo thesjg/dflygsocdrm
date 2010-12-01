@@ -1,6 +1,8 @@
 /* $OpenBSD: kern_sensors.c,v 1.19 2007/06/04 18:42:05 deraadt Exp $ */
 
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 2005 David Gwynne <dlg@openbsd.org>
  * Copyright (c) 2006 Constantine A. Murenin <cnst+openbsd@bugmail.mojo.ru>
  *
@@ -25,10 +27,18 @@
 #include <sys/queue.h>
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/spinlock.h>
+#include <sys/spinlock2.h>
 #include <sys/lock.h>
 
 #include <sys/sysctl.h>
 #include <sys/sensors.h>
+
+#include <sys/mplock2.h>
+
+static int		sensor_task_lock_inited = 0;
+static struct lock	sensor_task_lock;
+static struct spinlock	sensor_dev_lock = SPINLOCK_INITIALIZER(sensor_dev_lock);
 
 int			sensordev_count = 0;
 SLIST_HEAD(, ksensordev) sensordev_list = SLIST_HEAD_INITIALIZER(sensordev_list);
@@ -62,6 +72,7 @@ sensordev_install(struct ksensordev *sensdev)
 	struct ksensordev *v, *nv;
 
 	/* mtx_lock(&Giant); */
+	spin_lock(&sensor_dev_lock);
 	if (sensordev_count == 0) {
 		sensdev->num = 0;
 		SLIST_INSERT_HEAD(&sensordev_list, sensdev, list);
@@ -75,6 +86,7 @@ sensordev_install(struct ksensordev *sensdev)
 	}
 	sensordev_count++;
 	/* mtx_unlock(&Giant); */
+	spin_unlock(&sensor_dev_lock);
 
 #ifndef NOSYSCTL8HACK
 	sensor_sysctl8magic_install(sensdev);
@@ -89,6 +101,7 @@ sensor_attach(struct ksensordev *sensdev, struct ksensor *sens)
 	int i;
 
 	/* mtx_lock(&Giant); */
+	spin_lock(&sensor_dev_lock);
 	sh = &sensdev->sensors_list;
 	if (sensdev->sensors_count == 0) {
 		for (i = 0; i < SENSOR_MAX_TYPES; i++)
@@ -114,6 +127,7 @@ sensor_attach(struct ksensordev *sensdev, struct ksensor *sens)
 	if (sensdev->maxnumt[sens->type] == sens->numt)
 		sensdev->maxnumt[sens->type]++;
 	sensdev->sensors_count++;
+	spin_unlock(&sensor_dev_lock);
 	/* mtx_unlock(&Giant); */
 }
 
@@ -121,9 +135,11 @@ void
 sensordev_deinstall(struct ksensordev *sensdev)
 {
 	/* mtx_lock(&Giant); */
+	spin_lock(&sensor_dev_lock);
 	sensordev_count--;
 	SLIST_REMOVE(&sensordev_list, sensdev, ksensordev, list);
 	/* mtx_unlock(&Giant); */
+	spin_unlock(&sensor_dev_lock);
 
 #ifndef NOSYSCTL8HACK
 	sensor_sysctl8magic_deinstall(sensdev);
@@ -152,10 +168,14 @@ sensordev_get(int num)
 {
 	struct ksensordev *sd;
 
+	spin_lock(&sensor_dev_lock);
 	SLIST_FOREACH(sd, &sensordev_list, list)
-		if (sd->num == num)
+		if (sd->num == num) {
+			spin_unlock(&sensor_dev_lock);
 			return (sd);
+		}
 
+	spin_unlock(&sensor_dev_lock);
 	return (NULL);
 }
 
@@ -165,11 +185,16 @@ sensor_find(struct ksensordev *sensdev, enum sensor_type type, int numt)
 	struct ksensor *s;
 	struct ksensors_head *sh;
 
+	spin_lock(&sensor_dev_lock);
 	sh = &sensdev->sensors_list;
-	SLIST_FOREACH(s, sh, list)
-		if (s->type == type && s->numt == numt)
+	SLIST_FOREACH(s, sh, list) {
+		if (s->type == type && s->numt == numt) {
+			spin_unlock(&sensor_dev_lock);
 			return (s);
+		}
+	}
 
+	spin_unlock(&sensor_dev_lock);
 	return (NULL);
 }
 
@@ -183,6 +208,11 @@ sensor_task_register(void *arg, void (*func)(void *), int period)
 	if (st == NULL)
 		return (1);
 
+	if (atomic_cmpset_int(&sensor_task_lock_inited, 0, 1)) {
+		lockinit(&sensor_task_lock, "ksensor_task", 0, LK_CANRECURSE);
+	}
+
+	lockmgr(&sensor_task_lock, LK_EXCLUSIVE);
 	st->arg = arg;
 	st->func = func;
 	st->period = period;
@@ -202,6 +232,7 @@ sensor_task_register(void *arg, void (*func)(void *), int period)
 	
 	wakeup(&tasklist);
 
+	lockmgr(&sensor_task_lock, LK_RELEASE);
 	return (0);
 }
 
@@ -210,9 +241,11 @@ sensor_task_unregister(void *arg)
 {
 	struct sensor_task	*st;
 
+	lockmgr(&sensor_task_lock, LK_EXCLUSIVE);
 	TAILQ_FOREACH(st, &tasklist, entry)
 		if (st->arg == arg)
 			st->running = 0;
+	lockmgr(&sensor_task_lock, LK_RELEASE);
 }
 
 void
@@ -221,10 +254,12 @@ sensor_task_thread(void *arg)
 	struct sensor_task	*st, *nst;
 	time_t			now;
 
+	lockmgr(&sensor_task_lock, LK_EXCLUSIVE);
+
 	while (!TAILQ_EMPTY(&tasklist)) {
 		while ((nst = TAILQ_FIRST(&tasklist))->nextrun >
 		    (now = time_second))
-			tsleep(&tasklist, 0, "timeout",
+			lksleep(&tasklist, &sensor_task_lock, 0, "timeout",
 			       (nst->nextrun - now) * hz);
 
 		while ((st = nst) != NULL) {
@@ -248,7 +283,7 @@ sensor_task_thread(void *arg)
 		}
 	}
 
-	kthread_exit();
+	lockmgr(&sensor_task_lock, LK_RELEASE);
 }
 
 void
@@ -256,17 +291,20 @@ sensor_task_schedule(struct sensor_task *st)
 {
 	struct sensor_task 	*cst;
 
+	lockmgr(&sensor_task_lock, LK_EXCLUSIVE);
 	st->nextrun = time_second + st->period;
 
 	TAILQ_FOREACH(cst, &tasklist, entry) {
 		if (cst->nextrun > st->nextrun) {
 			TAILQ_INSERT_BEFORE(cst, st, entry);
+			lockmgr(&sensor_task_lock, LK_RELEASE);
 			return;
 		}
 	}
 
 	/* must be an empty list, or at the end of the list */
 	TAILQ_INSERT_TAIL(&tasklist, st, entry);
+	lockmgr(&sensor_task_lock, LK_RELEASE);
 }
 
 /*

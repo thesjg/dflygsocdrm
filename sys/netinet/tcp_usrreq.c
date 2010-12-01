@@ -69,6 +69,7 @@
  */
 
 #include "opt_ipsec.h"
+#include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_tcpdebug.h"
 
@@ -90,6 +91,7 @@
 
 #include <sys/thread2.h>
 #include <sys/msgport2.h>
+#include <sys/socketvar2.h>
 
 #include <net/if.h>
 #include <net/netisr.h>
@@ -133,12 +135,11 @@
 extern	char *tcpstates[];	/* XXX ??? */
 
 static int	tcp_attach (struct socket *, struct pru_attach_info *);
-static int	tcp_connect (struct tcpcb *, int flags, struct mbuf *m,
-				struct sockaddr *, struct thread *);
+static void	tcp_connect (netmsg_t msg);
 #ifdef INET6
-static int	tcp6_connect (struct tcpcb *, int flags, struct mbuf *m,
-				struct sockaddr *, struct thread *);
-static int	tcp6_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
+static void	tcp6_connect (netmsg_t msg);
+static int	tcp6_connect_oncpu(struct tcpcb *tp, int flags,
+				struct mbuf **mp,
 				struct sockaddr_in6 *sin6,
 				struct in6_addr *addr6);
 #endif /* INET6 */
@@ -160,17 +161,20 @@ static struct tcpcb *
 
 /*
  * TCP attaches to socket via pru_attach(), reserving space,
- * and an internet control block.
+ * and an internet control block.  This is likely occuring on
+ * cpu0 and may have to move later when we bind/connect.
  */
-static int
-tcp_usr_attach(struct socket *so, int proto, struct pru_attach_info *ai)
+static void
+tcp_usr_attach(netmsg_t msg)
 {
+	struct socket *so = msg->base.nm_so;
+	struct pru_attach_info *ai = msg->attach.nm_ai;
 	int error;
 	struct inpcb *inp;
 	struct tcpcb *tp = 0;
 	TCPDEBUG0;
 
-	crit_enter();
+	soreference(so);
 	inp = so->so_pcb;
 	TCPDEBUG1();
 	if (inp) {
@@ -186,9 +190,9 @@ tcp_usr_attach(struct socket *so, int proto, struct pru_attach_info *ai)
 		so->so_linger = TCP_LINGERTIME;
 	tp = sototcpcb(so);
 out:
+	sofree(so);		/* from ref above */
 	TCPDEBUG2(PRU_ATTACH);
-	crit_exit();
-	return error;
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 /*
@@ -198,68 +202,72 @@ out:
  * which may finish later; embryonic TCB's can just
  * be discarded here.
  */
-static int
-tcp_usr_detach(struct socket *so)
+static void
+tcp_usr_detach(netmsg_t msg)
 {
+	struct socket *so = msg->base.nm_so;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
 	TCPDEBUG0;
 
-	crit_enter();
 	inp = so->so_pcb;
 
 	/*
 	 * If the inp is already detached it may have been due to an async
 	 * close.  Just return as if no error occured.
-	 */
-	if (inp == NULL) {
-		crit_exit();
-		return 0;
-	}
-
-	/*
+	 *
 	 * It's possible for the tcpcb (tp) to disconnect from the inp due
 	 * to tcp_drop()->tcp_close() being called.  This may occur *after*
 	 * the detach message has been queued so we may find a NULL tp here.
 	 */
-	if ((tp = intotcpcb(inp)) != NULL) {
-		TCPDEBUG1();
-		tp = tcp_disconnect(tp);
-		TCPDEBUG2(PRU_DETACH);
+	if (inp) {
+		if ((tp = intotcpcb(inp)) != NULL) {
+			TCPDEBUG1();
+			tp = tcp_disconnect(tp);
+			TCPDEBUG2(PRU_DETACH);
+		}
 	}
-	crit_exit();
-	return error;
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 /*
- * Note: ignore_error is non-zero for certain disconnection races
+ * NOTE: ignore_error is non-zero for certain disconnection races
  * which we want to silently allow, otherwise close() may return
  * an unexpected error.
+ *
+ * NOTE: The variables (msg) and (tp) are assumed.
  */
 #define	COMMON_START(so, inp, ignore_error)			\
-	TCPDEBUG0; 		\
-				\
-	crit_enter();		\
-	inp = so->so_pcb; 	\
-	do {			\
+	TCPDEBUG0; 						\
+								\
+	inp = so->so_pcb; 					\
+	do {							\
 		 if (inp == NULL) {				\
-			 crit_exit();				\
-			 return (ignore_error ? 0 : EINVAL);	\
+			error = ignore_error ? 0 : EINVAL;	\
+			tp = NULL;				\
+			goto out;				\
 		 }						\
 		 tp = intotcpcb(inp);				\
 		 TCPDEBUG1();					\
 	} while(0)
 
-#define COMMON_END(req)	out: TCPDEBUG2(req); crit_exit(); return error; goto out
-
+#define COMMON_END(req)						\
+	out: do {						\
+		TCPDEBUG2(req);					\
+		lwkt_replymsg(&msg->lmsg, error);		\
+		return;						\
+	} while(0)
 
 /*
  * Give the socket an address.
  */
-static int
-tcp_usr_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
+static void
+tcp_usr_bind(netmsg_t msg)
 {
+	struct socket *so = msg->bind.base.nm_so;
+	struct sockaddr *nam = msg->bind.nm_nam;
+	struct thread *td = msg->bind.nm_td;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -285,9 +293,13 @@ tcp_usr_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
 }
 
 #ifdef INET6
-static int
-tcp6_usr_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
+
+static void
+tcp6_usr_bind(netmsg_t msg)
 {
+	struct socket *so = msg->bind.base.nm_so;
+	struct sockaddr *nam = msg->bind.nm_nam;
+	struct thread *td = msg->bind.nm_td;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -328,28 +340,32 @@ tcp6_usr_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
 #endif /* INET6 */
 
 #ifdef SMP
+
 struct netmsg_inswildcard {
-	struct netmsg		nm_netmsg;
+	struct netmsg_base	base;
 	struct inpcb		*nm_inp;
 	struct inpcbinfo	*nm_pcbinfo;
 };
 
 static void
-in_pcbinswildcardhash_handler(struct netmsg *msg0)
+in_pcbinswildcardhash_handler(netmsg_t msg)
 {
-	struct netmsg_inswildcard *msg = (struct netmsg_inswildcard *)msg0;
+	struct netmsg_inswildcard *nm = (struct netmsg_inswildcard *)msg;
 
-	in_pcbinswildcardhash_oncpu(msg->nm_inp, msg->nm_pcbinfo);
-	lwkt_replymsg(&msg->nm_netmsg.nm_lmsg, 0);
+	in_pcbinswildcardhash_oncpu(nm->nm_inp, nm->nm_pcbinfo);
+	lwkt_replymsg(&nm->base.lmsg, 0);
 }
+
 #endif
 
 /*
  * Prepare to accept connections.
  */
-static int
-tcp_usr_listen(struct socket *so, struct thread *td)
+static void
+tcp_usr_listen(netmsg_t msg)
 {
+	struct socket *so = msg->listen.base.nm_so;
+	struct thread *td = msg->listen.nm_td;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -373,20 +389,20 @@ tcp_usr_listen(struct socket *so, struct thread *td)
 	 */
 	inp->inp_flags |= INP_WILDCARD_MP;
 	for (cpu = 0; cpu < ncpus2; cpu++) {
-		struct netmsg_inswildcard *msg;
+		struct netmsg_inswildcard *nm;
 
 		if (cpu == mycpu->gd_cpuid) {
 			in_pcbinswildcardhash(inp);
 			continue;
 		}
 
-		msg = kmalloc(sizeof(struct netmsg_inswildcard), M_LWKTMSG,
-			      M_INTWAIT);
-		netmsg_init(&msg->nm_netmsg, NULL, &netisr_afree_rport,
+		nm = kmalloc(sizeof(struct netmsg_inswildcard),
+			     M_LWKTMSG, M_INTWAIT);
+		netmsg_init(&nm->base, NULL, &netisr_afree_rport,
 			    0, in_pcbinswildcardhash_handler);
-		msg->nm_inp = inp;
-		msg->nm_pcbinfo = &tcbinfo[cpu];
-		lwkt_sendmsg(tcp_cport(cpu), &msg->nm_netmsg.nm_lmsg);
+		nm->nm_inp = inp;
+		nm->nm_pcbinfo = &tcbinfo[cpu];
+		lwkt_sendmsg(cpu_portfn(cpu), &nm->base.lmsg);
 	}
 #else
 	in_pcbinswildcardhash(inp);
@@ -395,9 +411,12 @@ tcp_usr_listen(struct socket *so, struct thread *td)
 }
 
 #ifdef INET6
-static int
-tcp6_usr_listen(struct socket *so, struct thread *td)
+
+static void
+tcp6_usr_listen(netmsg_t msg)
 {
+	struct socket *so = msg->listen.base.nm_so;
+	struct thread *td = msg->listen.nm_td;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -422,20 +441,20 @@ tcp6_usr_listen(struct socket *so, struct thread *td)
 	 */
 	inp->inp_flags |= INP_WILDCARD_MP;
 	for (cpu = 0; cpu < ncpus2; cpu++) {
-		struct netmsg_inswildcard *msg;
+		struct netmsg_inswildcard *nm;
 
 		if (cpu == mycpu->gd_cpuid) {
 			in_pcbinswildcardhash(inp);
 			continue;
 		}
 
-		msg = kmalloc(sizeof(struct netmsg_inswildcard), M_LWKTMSG,
-			      M_INTWAIT);
-		netmsg_init(&msg->nm_netmsg, NULL, &netisr_afree_rport,
+		nm = kmalloc(sizeof(struct netmsg_inswildcard),
+			     M_LWKTMSG, M_INTWAIT);
+		netmsg_init(&nm->base, NULL, &netisr_afree_rport,
 			    0, in_pcbinswildcardhash_handler);
-		msg->nm_inp = inp;
-		msg->nm_pcbinfo = &tcbinfo[cpu];
-		lwkt_sendmsg(tcp_cport(cpu), &msg->nm_netmsg.nm_lmsg);
+		nm->nm_inp = inp;
+		nm->nm_pcbinfo = &tcbinfo[cpu];
+		lwkt_sendmsg(cpu_portfn(cpu), &nm->base.lmsg);
 	}
 #else
 	in_pcbinswildcardhash(inp);
@@ -451,9 +470,12 @@ tcp6_usr_listen(struct socket *so, struct thread *td)
  * Start keep-alive timer, and seed output sequence space.
  * Send initial segment on connection.
  */
-static int
-tcp_usr_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
+static void
+tcp_usr_connect(netmsg_t msg)
 {
+	struct socket *so = msg->connect.base.nm_so;
+	struct sockaddr *nam = msg->connect.nm_nam;
+	struct thread *td = msg->connect.nm_td;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -476,15 +498,25 @@ tcp_usr_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 		goto out;
 	}
 
-	if ((error = tcp_connect(tp, 0, NULL, nam, td)) != 0)
-		goto out;
-	COMMON_END(PRU_CONNECT);
+	tcp_connect(msg);
+	/* msg is invalid now */
+	return;
+out:
+	if (msg->connect.nm_m) {
+		m_freem(msg->connect.nm_m);
+		msg->connect.nm_m = NULL;
+	}
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 #ifdef INET6
-static int
-tcp6_usr_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
+
+static void
+tcp6_usr_connect(netmsg_t msg)
 {
+	struct socket *so = msg->connect.base.nm_so;
+	struct sockaddr *nam = msg->connect.nm_nam;
+	struct thread *td = msg->connect.nm_td;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -508,29 +540,38 @@ tcp6_usr_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
 	}
 
 	if (IN6_IS_ADDR_V4MAPPED(&sin6p->sin6_addr)) {
-		struct sockaddr_in sin;
+		struct sockaddr_in *sinp;
 
 		if ((inp->inp_flags & IN6P_IPV6_V6ONLY) != 0) {
 			error = EINVAL;
 			goto out;
 		}
-
-		in6_sin6_2_sin(&sin, sin6p);
+		sinp = kmalloc(sizeof(*sinp), M_LWKTMSG, M_INTWAIT);
+		in6_sin6_2_sin(sinp, sin6p);
 		inp->inp_vflag |= INP_IPV4;
 		inp->inp_vflag &= ~INP_IPV6;
-		error = tcp_connect(tp, 0, NULL, (struct sockaddr *)&sin, td);
-		if (error)
-			goto out;
-		goto out;
+		msg->connect.nm_nam = (struct sockaddr *)sinp;
+		msg->connect.nm_reconnect |= NMSG_RECONNECT_NAMALLOC;
+		tcp_connect(msg);
+		/* msg is invalid now */
+		return;
 	}
 	inp->inp_vflag &= ~INP_IPV4;
 	inp->inp_vflag |= INP_IPV6;
 	inp->inp_inc.inc_isipv6 = 1;
-	if ((error = tcp6_connect(tp, 0, NULL, nam, td)) != 0)
-		goto out;
-	error = tcp_output(tp);
-	COMMON_END(PRU_CONNECT);
+
+	msg->connect.nm_reconnect |= NMSG_RECONNECT_FALLBACK;
+	tcp6_connect(msg);
+	/* msg is invalid now */
+	return;
+out:
+	if (msg->connect.nm_m) {
+		m_freem(msg->connect.nm_m);
+		msg->connect.nm_m = NULL;
+	}
+	lwkt_replymsg(&msg->lmsg, error);
 }
+
 #endif /* INET6 */
 
 /*
@@ -544,9 +585,10 @@ tcp6_usr_connect(struct socket *so, struct sockaddr *nam, struct thread *td)
  *
  * SHOULD IMPLEMENT LATER PRU_CONNECT VIA REALLOC TCPCB.
  */
-static int
-tcp_usr_disconnect(struct socket *so)
+static void
+tcp_usr_disconnect(netmsg_t msg)
 {
+	struct socket *so = msg->disconnect.base.nm_so;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -561,24 +603,26 @@ tcp_usr_disconnect(struct socket *so)
  * done at higher levels; just return the address
  * of the peer, storing through addr.
  */
-static int
-tcp_usr_accept(struct socket *so, struct sockaddr **nam)
+static void
+tcp_usr_accept(netmsg_t msg)
 {
+	struct socket *so = msg->accept.base.nm_so;
+	struct sockaddr **nam = msg->accept.nm_nam;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp = NULL;
 	TCPDEBUG0;
 
-	crit_enter();
 	inp = so->so_pcb;
 	if (so->so_state & SS_ISDISCONNECTED) {
 		error = ECONNABORTED;
 		goto out;
 	}
 	if (inp == 0) {
-		crit_exit();
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
+
 	tp = intotcpcb(inp);
 	TCPDEBUG1();
 	in_setpeeraddr(so, nam);
@@ -586,15 +630,16 @@ tcp_usr_accept(struct socket *so, struct sockaddr **nam)
 }
 
 #ifdef INET6
-static int
-tcp6_usr_accept(struct socket *so, struct sockaddr **nam)
+static void
+tcp6_usr_accept(netmsg_t msg)
 {
+	struct socket *so = msg->accept.base.nm_so;
+	struct sockaddr **nam = msg->accept.nm_nam;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp = NULL;
 	TCPDEBUG0;
 
-	crit_enter();
 	inp = so->so_pcb;
 
 	if (so->so_state & SS_ISDISCONNECTED) {
@@ -602,8 +647,8 @@ tcp6_usr_accept(struct socket *so, struct sockaddr **nam)
 		goto out;
 	}
 	if (inp == 0) {
-		crit_exit();
-		return (EINVAL);
+		error = EINVAL;
+		goto out;
 	}
 	tp = intotcpcb(inp);
 	TCPDEBUG1();
@@ -614,9 +659,10 @@ tcp6_usr_accept(struct socket *so, struct sockaddr **nam)
 /*
  * Mark the connection as being incapable of further output.
  */
-static int
-tcp_usr_shutdown(struct socket *so)
+static void
+tcp_usr_shutdown(netmsg_t msg)
 {
+	struct socket *so = msg->shutdown.base.nm_so;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -632,9 +678,10 @@ tcp_usr_shutdown(struct socket *so)
 /*
  * After a receive, possibly send window update to peer.
  */
-static int
-tcp_usr_rcvd(struct socket *so, int flags)
+static void
+tcp_usr_rcvd(netmsg_t msg)
 {
+	struct socket *so = msg->rcvd.base.nm_so;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -651,10 +698,15 @@ tcp_usr_rcvd(struct socket *so, int flags)
  * must either enqueue them or free them.  The other pru_* routines
  * generally are caller-frees.
  */
-static int
-tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
-	     struct sockaddr *nam, struct mbuf *control, struct thread *td)
+static void
+tcp_usr_send(netmsg_t msg)
 {
+	struct socket *so = msg->send.base.nm_so;
+	int flags = msg->send.nm_flags;
+	struct mbuf *m = msg->send.nm_m;
+	struct sockaddr *nam = msg->send.nm_addr;
+	struct mbuf *control = msg->send.nm_control;
+	struct thread *td = msg->send.nm_td;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -663,7 +715,6 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 #endif
 	TCPDEBUG0;
 
-	crit_enter();
 	inp = so->so_pcb;
 
 	if (inp == NULL) {
@@ -714,18 +765,20 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 	 * NOTE!  PROTOCOL THREAD MAY BE CHANGED BY THE CONNECT!
 	 */
 	if (nam && tp->t_state < TCPS_SYN_SENT) {
+		kprintf("implied fallback\n");
+		msg->connect.nm_nam = nam;
+		msg->connect.nm_td = td;
+		msg->connect.nm_m = m;
+		msg->connect.nm_flags = flags;
+		msg->connect.nm_reconnect = NMSG_RECONNECT_FALLBACK;
 #ifdef INET6
 		if (isipv6)
-			error = tcp6_connect(tp, flags, m, nam, td);
+			tcp6_connect(msg);
 		else
 #endif /* INET6 */
-		error = tcp_connect(tp, flags, m, nam, td);
-#if 0
-		/* WTF is this doing here? */
-		tp->snd_wnd = TTCP_CLIENT_SND_WND;
-		tcp_mss(tp, -1);
-#endif
-		goto out;
+			tcp_connect(msg);
+		/* msg invalid now */
+		return;
 	}
 
 	/*
@@ -768,11 +821,13 @@ tcp_usr_send(struct socket *so, int flags, struct mbuf *m,
 }
 
 /*
- * Abort the TCP.
+ * NOTE: (so) is referenced from soabort*() and netmsg_pru_abort()
+ *	 will sofree() it when we return.
  */
-static int
-tcp_usr_abort(struct socket *so)
+static void
+tcp_usr_abort(netmsg_t msg)
 {
+	struct socket *so = msg->abort.base.nm_so;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -785,9 +840,12 @@ tcp_usr_abort(struct socket *so)
 /*
  * Receive out-of-band data.
  */
-static int
-tcp_usr_rcvoob(struct socket *so, struct mbuf *m, int flags)
+static void
+tcp_usr_rcvoob(netmsg_t msg)
 {
+	struct socket *so = msg->rcvoob.base.nm_so;
+	struct mbuf *m = msg->rcvoob.nm_m;
+	int flags = msg->rcvoob.nm_flags;
 	int error = 0;
 	struct inpcb *inp;
 	struct tcpcb *tp;
@@ -818,18 +876,18 @@ struct pr_usrreqs tcp_usrreqs = {
 	.pru_attach = tcp_usr_attach,
 	.pru_bind = tcp_usr_bind,
 	.pru_connect = tcp_usr_connect,
-	.pru_connect2 = pru_connect2_notsupp,
-	.pru_control = in_control,
+	.pru_connect2 = pr_generic_notsupp,
+	.pru_control = in_control_dispatch,
 	.pru_detach = tcp_usr_detach,
 	.pru_disconnect = tcp_usr_disconnect,
 	.pru_listen = tcp_usr_listen,
-	.pru_peeraddr = in_setpeeraddr,
+	.pru_peeraddr = in_setpeeraddr_dispatch,
 	.pru_rcvd = tcp_usr_rcvd,
 	.pru_rcvoob = tcp_usr_rcvoob,
 	.pru_send = tcp_usr_send,
 	.pru_sense = pru_sense_null,
 	.pru_shutdown = tcp_usr_shutdown,
-	.pru_sockaddr = in_setsockaddr,
+	.pru_sockaddr = in_setsockaddr_dispatch,
 	.pru_sosend = sosend,
 	.pru_soreceive = soreceive
 };
@@ -841,18 +899,18 @@ struct pr_usrreqs tcp6_usrreqs = {
 	.pru_attach = tcp_usr_attach,
 	.pru_bind = tcp6_usr_bind,
 	.pru_connect = tcp6_usr_connect,
-	.pru_connect2 = pru_connect2_notsupp,
-	.pru_control = in6_control,
+	.pru_connect2 = pr_generic_notsupp,
+	.pru_control = in6_control_dispatch,
 	.pru_detach = tcp_usr_detach,
 	.pru_disconnect = tcp_usr_disconnect,
 	.pru_listen = tcp6_usr_listen,
-	.pru_peeraddr = in6_mapped_peeraddr,
+	.pru_peeraddr = in6_mapped_peeraddr_dispatch,
 	.pru_rcvd = tcp_usr_rcvd,
 	.pru_rcvoob = tcp_usr_rcvoob,
 	.pru_send = tcp_usr_send,
 	.pru_sense = pru_sense_null,
 	.pru_shutdown = tcp_usr_shutdown,
-	.pru_sockaddr = in6_mapped_sockaddr,
+	.pru_sockaddr = in6_mapped_sockaddr_dispatch,
 	.pru_sosend = sosend,
 	.pru_soreceive = soreceive
 };
@@ -867,10 +925,10 @@ tcp_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
 	struct route *ro = &inp->inp_route;
 
 	oinp = in_pcblookup_hash(&tcbinfo[mycpu->gd_cpuid],
-	    sin->sin_addr, sin->sin_port,
-	    inp->inp_laddr.s_addr != INADDR_ANY ?
-		inp->inp_laddr : if_sin->sin_addr,
-	    inp->inp_lport, 0, NULL);
+				 sin->sin_addr, sin->sin_port,
+				 (inp->inp_laddr.s_addr != INADDR_ANY ?
+				  inp->inp_laddr : if_sin->sin_addr),
+				inp->inp_lport, 0, NULL);
 	if (oinp != NULL) {
 		m_freem(m);
 		return (EADDRINUSE);
@@ -906,7 +964,6 @@ tcp_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
 	 * Create TCP timer message now; we are on the tcpcb's owner
 	 * CPU/thread.
 	 */
-	sosetport(so, &curthread->td_msgport);
 	tcp_create_timermsg(tp, &curthread->td_msgport);
 
 	/*
@@ -946,52 +1003,6 @@ tcp_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
 	return (tcp_output(tp));
 }
 
-#ifdef SMP
-
-struct netmsg_tcp_connect {
-	struct netmsg		nm_netmsg;
-	struct tcpcb		*nm_tp;
-	struct sockaddr_in	*nm_sin;
-	struct sockaddr_in	*nm_ifsin;
-	int			nm_flags;
-	struct mbuf		*nm_m;
-};
-
-static void
-tcp_connect_handler(netmsg_t netmsg)
-{
-	struct netmsg_tcp_connect *msg = (void *)netmsg;
-	int error;
-
-	error = tcp_connect_oncpu(msg->nm_tp, msg->nm_flags, msg->nm_m,
-				  msg->nm_sin, msg->nm_ifsin);
-	lwkt_replymsg(&msg->nm_netmsg.nm_lmsg, error);
-}
-
-struct netmsg_tcp6_connect {
-	struct netmsg		nm_netmsg;
-	struct tcpcb		*nm_tp;
-	struct sockaddr_in6	*nm_sin6;
-	struct in6_addr		*nm_addr6;
-	int			nm_flags;
-	struct mbuf		*nm_m;
-};
-
-#ifdef INET6
-static void
-tcp6_connect_handler(netmsg_t netmsg)
-{
-	struct netmsg_tcp6_connect *msg = (void *)netmsg;
-	int error;
-
-	error = tcp6_connect_oncpu(msg->nm_tp, msg->nm_flags, msg->nm_m,
-				   msg->nm_sin6, msg->nm_addr6);
-	lwkt_replymsg(&msg->nm_netmsg.nm_lmsg, error);
-}
-#endif
-
-#endif /* SMP */
-
 /*
  * Common subroutine to open a TCP connection to remote host specified
  * by struct sockaddr_in in mbuf *nam.  Call in_pcbbind to assign a local
@@ -999,47 +1010,58 @@ tcp6_connect_handler(netmsg_t netmsg)
  * a local host address (interface).
  * Initialize connection parameters and enter SYN-SENT state.
  */
-static int
-tcp_connect(struct tcpcb *tp, int flags, struct mbuf *m,
-	    struct sockaddr *nam, struct thread *td)
+static void
+tcp_connect(netmsg_t msg)
 {
-	struct inpcb *inp = tp->t_inpcb;
+	struct socket *so = msg->connect.base.nm_so;
+	struct sockaddr *nam = msg->connect.nm_nam;
+	struct thread *td = msg->connect.nm_td;
 	struct sockaddr_in *sin = (struct sockaddr_in *)nam;
 	struct sockaddr_in *if_sin;
+	struct inpcb *inp;
+	struct tcpcb *tp;
 	int error;
 #ifdef SMP
 	lwkt_port_t port;
 #endif
+
+	COMMON_START(so, inp, 0);
+
+	/*
+	 * Reconnect our pcb if we have to
+	 */
+	if (msg->connect.nm_reconnect & NMSG_RECONNECT_RECONNECT) {
+		msg->connect.nm_reconnect &= ~NMSG_RECONNECT_RECONNECT;
+		in_pcblink(so->so_pcb, &tcbinfo[mycpu->gd_cpuid]);
+	}
 
 	/*
 	 * Bind if we have to
 	 */
 	if (inp->inp_lport == 0) {
 		error = in_pcbbind(inp, NULL, td);
-		if (error) {
-			m_freem(m);
-			return (error);
-		}
+		if (error)
+			goto out;
 	}
+	so = inp->inp_socket;
+	KKASSERT(so);
 
 	/*
 	 * Calculate the correct protocol processing thread.  The connect
-	 * operation must run there.
+	 * operation must run there.  Set the forwarding port before we
+	 * forward the message or it will get bounced right back to us.
 	 */
 	error = in_pcbladdr(inp, nam, &if_sin, td);
-	if (error) {
-		m_freem(m);
-		return (error);
-	}
+	if (error)
+		goto out;
 
 #ifdef SMP
 	port = tcp_addrport(sin->sin_addr.s_addr, sin->sin_port,
-	    inp->inp_laddr.s_addr ?
-		inp->inp_laddr.s_addr : if_sin->sin_addr.s_addr,
-	    inp->inp_lport);
+			    (inp->inp_laddr.s_addr ?
+			     inp->inp_laddr.s_addr : if_sin->sin_addr.s_addr),
+			    inp->inp_lport);
 
 	if (port != &curthread->td_msgport) {
-		struct netmsg_tcp_connect msg;
 		struct route *ro = &inp->inp_route;
 
 		/*
@@ -1052,33 +1074,48 @@ tcp_connect(struct tcpcb *tp, int flags, struct mbuf *m,
 		bzero(ro, sizeof(*ro));
 
 		/*
-		 * NOTE: We haven't set so->so_port yet do not pass so
-		 *	 to netmsg_init() or it will be improperly forwarded.
+		 * We are moving the protocol processing port the socket
+		 * is on, we have to unlink here and re-link on the
+		 * target cpu.
 		 */
-		netmsg_init(&msg.nm_netmsg, NULL, &curthread->td_msgport,
-			    0, tcp_connect_handler);
-		msg.nm_tp = tp;
-		msg.nm_sin = sin;
-		msg.nm_ifsin = if_sin;
-		msg.nm_flags = flags;
-		msg.nm_m = m;
-		error = lwkt_domsg(port, &msg.nm_netmsg.nm_lmsg, 0);
-	} else {
-		error = tcp_connect_oncpu(tp, flags, m, sin, if_sin);
+		in_pcbunlink(so->so_pcb, &tcbinfo[mycpu->gd_cpuid]);
+		sosetport(so, port);
+		msg->connect.nm_reconnect |= NMSG_RECONNECT_RECONNECT;
+		msg->connect.base.nm_dispatch = tcp_connect;
+
+		lwkt_forwardmsg(port, &msg->connect.base.lmsg);
+		/* msg invalid now */
+		return;
 	}
 #else
-	error = tcp_connect_oncpu(tp, flags, m, sin, if_sin);
+	KKASSERT(so->so_port == &curthread->td_msgport);
 #endif
-	return (error);
+	error = tcp_connect_oncpu(tp, msg->connect.nm_flags,
+				  msg->connect.nm_m, sin, if_sin);
+	msg->connect.nm_m = NULL;
+out:
+	if (msg->connect.nm_m) {
+		m_freem(msg->connect.nm_m);
+		msg->connect.nm_m = NULL;
+	}
+	if (msg->connect.nm_reconnect & NMSG_RECONNECT_NAMALLOC) {
+		kfree(msg->connect.nm_nam, M_LWKTMSG);
+		msg->connect.nm_nam = NULL;
+	}
+	lwkt_replymsg(&msg->connect.base.lmsg, error);
+	/* msg invalid now */
 }
 
 #ifdef INET6
 
-static int
-tcp6_connect(struct tcpcb *tp, int flags, struct mbuf *m,
-	     struct sockaddr *nam, struct thread *td)
+static void
+tcp6_connect(netmsg_t msg)
 {
-	struct inpcb *inp = tp->t_inpcb;
+	struct tcpcb *tp;
+	struct socket *so = msg->connect.base.nm_so;
+	struct sockaddr *nam = msg->connect.nm_nam;
+	struct thread *td = msg->connect.nm_td;
+	struct inpcb *inp;
 	struct sockaddr_in6 *sin6 = (struct sockaddr_in6 *)nam;
 	struct in6_addr *addr6;
 #ifdef SMP
@@ -1086,12 +1123,23 @@ tcp6_connect(struct tcpcb *tp, int flags, struct mbuf *m,
 #endif
 	int error;
 
+	COMMON_START(so, inp, 0);
+
+	/*
+	 * Reconnect our pcb if we have to
+	 */
+	if (msg->connect.nm_reconnect & NMSG_RECONNECT_RECONNECT) {
+		msg->connect.nm_reconnect &= ~NMSG_RECONNECT_RECONNECT;
+		in_pcblink(so->so_pcb, &tcbinfo[mycpu->gd_cpuid]);
+	}
+
+	/*
+	 * Bind if we have to
+	 */
 	if (inp->inp_lport == 0) {
 		error = in6_pcbbind(inp, NULL, td);
-		if (error) {
-			m_freem(m);
-			return (error);
-		}
+		if (error)
+			goto out;
 	}
 
 	/*
@@ -1100,16 +1148,13 @@ tcp6_connect(struct tcpcb *tp, int flags, struct mbuf *m,
 	 * TIME_WAIT state, creating an ADDRINUSE error.
 	 */
 	error = in6_pcbladdr(inp, nam, &addr6, td);
-	if (error) {
-		m_freem(m);
-		return (error);
-	}
+	if (error)
+		goto out;
 
 #ifdef SMP
 	port = tcp6_addrport();	/* XXX hack for now, always cpu0 */
 
 	if (port != &curthread->td_msgport) {
-		struct netmsg_tcp6_connect msg;
 		struct route *ro = &inp->inp_route;
 
 		/*
@@ -1121,27 +1166,42 @@ tcp6_connect(struct tcpcb *tp, int flags, struct mbuf *m,
 			RTFREE(ro->ro_rt);
 		bzero(ro, sizeof(*ro));
 
-		netmsg_init(&msg.nm_netmsg, NULL, &curthread->td_msgport,
-			    0, tcp6_connect_handler);
-		msg.nm_tp = tp;
-		msg.nm_sin6 = sin6;
-		msg.nm_addr6 = addr6;
-		msg.nm_flags = flags;
-		msg.nm_m = m;
-		error = lwkt_domsg(port, &msg.nm_netmsg.nm_lmsg, 0);
-	} else {
-		error = tcp6_connect_oncpu(tp, flags, m, sin6, addr6);
+		in_pcbunlink(so->so_pcb, &tcbinfo[mycpu->gd_cpuid]);
+		sosetport(so, port);
+		msg->connect.nm_reconnect |= NMSG_RECONNECT_RECONNECT;
+		msg->connect.base.nm_dispatch = tcp6_connect;
+
+		lwkt_forwardmsg(port, &msg->connect.base.lmsg);
+		/* msg invalid now */
+		return;
 	}
-#else
-	error = tcp6_connect_oncpu(tp, flags, m, sin6, addr6);
 #endif
-	return (error);
+	error = tcp6_connect_oncpu(tp, msg->connect.nm_flags,
+				   &msg->connect.nm_m, sin6, addr6);
+	/* nm_m may still be intact */
+out:
+	if (error && (msg->connect.nm_reconnect & NMSG_RECONNECT_FALLBACK)) {
+		tcp_connect(msg);
+		/* msg invalid now */
+	} else {
+		if (msg->connect.nm_m) {
+			m_freem(msg->connect.nm_m);
+			msg->connect.nm_m = NULL;
+		}
+		if (msg->connect.nm_reconnect & NMSG_RECONNECT_NAMALLOC) {
+			kfree(msg->connect.nm_nam, M_LWKTMSG);
+			msg->connect.nm_nam = NULL;
+		}
+		lwkt_replymsg(&msg->connect.base.lmsg, error);
+		/* msg invalid now */
+	}
 }
 
 static int
-tcp6_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
+tcp6_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf **mp,
 		   struct sockaddr_in6 *sin6, struct in6_addr *addr6)
 {
+	struct mbuf *m = *mp;
 	struct inpcb *inp = tp->t_inpcb;
 	struct socket *so = inp->inp_socket;
 	struct inpcb *oinp;
@@ -1153,13 +1213,12 @@ tcp6_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
 	 */
 	oinp = in6_pcblookup_hash(inp->inp_cpcbinfo,
 				  &sin6->sin6_addr, sin6->sin6_port,
-				  IN6_IS_ADDR_UNSPECIFIED(&inp->in6p_laddr) ?
-				      addr6 : &inp->in6p_laddr,
+				  (IN6_IS_ADDR_UNSPECIFIED(&inp->in6p_laddr) ?
+				      addr6 : &inp->in6p_laddr),
 				  inp->inp_lport,  0, NULL);
-	if (oinp) {
-		m_freem(m);
+	if (oinp)
 		return (EADDRINUSE);
-	}
+
 	if (IN6_IS_ADDR_UNSPECIFIED(&inp->in6p_laddr))
 		inp->in6p_laddr = *addr6;
 	inp->in6p_faddr = sin6->sin6_addr;
@@ -1175,7 +1234,6 @@ tcp6_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
 	 * Create TCP timer message now; we are on the tcpcb's owner
 	 * CPU/thread.
 	 */
-	sosetport(so, &curthread->td_msgport);
 	tcp_create_timermsg(tp, &curthread->td_msgport);
 
 	/* Compute window scaling to request.  */
@@ -1194,7 +1252,7 @@ tcp6_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
 	tcp_sendseqinit(tp);
 	if (m) {
 		ssb_appendstream(&so->so_snd, m);
-		m = NULL;
+		*mp = NULL;
 		if (flags & PRUS_OOB)
 			tp->snd_up = tp->snd_una + so->so_snd.ssb_cc;
 	}
@@ -1219,29 +1277,31 @@ tcp6_connect_oncpu(struct tcpcb *tp, int flags, struct mbuf *m,
  * both now use TSM, there probably isn't any need for this function to 
  * run in a critical section any more.  This needs more examination.)
  */
-int
-tcp_ctloutput(struct socket *so, struct sockopt *sopt)
+void
+tcp_ctloutput(netmsg_t msg)
 {
+	struct socket *so = msg->base.nm_so;
+	struct sockopt *sopt = msg->ctloutput.nm_sopt;
 	int	error, opt, optval;
 	struct	inpcb *inp;
 	struct	tcpcb *tp;
 
 	error = 0;
-	crit_enter();		/* XXX */
 	inp = so->so_pcb;
 	if (inp == NULL) {
-		crit_exit();
-		return (ECONNRESET);
+		error = ECONNRESET;
+		goto done;
 	}
+
 	if (sopt->sopt_level != IPPROTO_TCP) {
 #ifdef INET6
 		if (INP_CHECK_SOCKAF(so, AF_INET6))
-			error = ip6_ctloutput(so, sopt);
+			ip6_ctloutput_dispatch(msg);
 		else
 #endif /* INET6 */
-		error = ip_ctloutput(so, sopt);
-		crit_exit();
-		return (error);
+		ip_ctloutput(msg);
+		/* msg invalid now */
+		return;
 	}
 	tp = intotcpcb(inp);
 
@@ -1252,6 +1312,24 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 		if (error)
 			break;
 		switch (sopt->sopt_name) {
+		case TCP_FASTKEEP:
+			if (optval > 0) {
+				if ((tp->t_flags & TF_FASTKEEP) == 0) {
+					tp->t_flags |= TF_FASTKEEP;
+					tcp_timer_keep_activity(tp, 0);
+				}
+			} else {
+				tp->t_flags &= ~TF_FASTKEEP;
+			}
+			break;
+#ifdef TCP_SIGNATURE
+		case TCP_SIGNATURE_ENABLE:
+			if (optval > 0)
+				tp->t_flags |= TF_SIGNATURE;
+			else
+				tp->t_flags &= ~TF_SIGNATURE;
+			break;
+#endif /* TCP_SIGNATURE */
 		case TCP_NODELAY:
 		case TCP_NOOPT:
 			switch (sopt->sopt_name) {
@@ -1309,6 +1387,11 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 
 	case SOPT_GET:
 		switch (sopt->sopt_name) {
+#ifdef TCP_SIGNATURE
+		case TCP_SIGNATURE_ENABLE:
+			optval = (tp->t_flags & TF_SIGNATURE) ? 1 : 0;
+			break;
+#endif /* TCP_SIGNATURE */
 		case TCP_NODELAY:
 			optval = tp->t_flags & TF_NODELAY;
 			break;
@@ -1329,8 +1412,8 @@ tcp_ctloutput(struct socket *so, struct sockopt *sopt)
 			soopt_from_kbuf(sopt, &optval, sizeof optval);
 		break;
 	}
-	crit_exit();
-	return (error);
+done:
+	lwkt_replymsg(&msg->lmsg, error);
 }
 
 /*
@@ -1349,9 +1432,9 @@ SYSCTL_INT(_net_inet_tcp, TCPCTL_RECVSPACE, recvspace, CTLFLAG_RW,
     &tcp_recvspace , 0, "Maximum incoming TCP datagram size");
 
 /*
- * Attach TCP protocol to socket, allocating
- * internet protocol control block, tcp control block,
- * bufer space, and entering LISTEN state if to accept connections.
+ * Attach TCP protocol to socket, allocating internet protocol control
+ * block, tcp control block, bufer space, and entering LISTEN state
+ * if to accept connections.
  */
 static int
 tcp_attach(struct socket *so, struct pru_attach_info *ai)
@@ -1365,14 +1448,21 @@ tcp_attach(struct socket *so, struct pru_attach_info *ai)
 #endif
 
 	if (so->so_snd.ssb_hiwat == 0 || so->so_rcv.ssb_hiwat == 0) {
+		lwkt_gettoken(&so->so_rcv.ssb_token);
 		error = soreserve(so, tcp_sendspace, tcp_recvspace,
 				  ai->sb_rlimit);
+		lwkt_reltoken(&so->so_rcv.ssb_token);
 		if (error)
 			return (error);
 	}
-	so->so_rcv.ssb_flags |= SSB_AUTOSIZE;
-	so->so_snd.ssb_flags |= SSB_AUTOSIZE;
+	atomic_set_int(&so->so_rcv.ssb_flags, SSB_AUTOSIZE);
+	atomic_set_int(&so->so_snd.ssb_flags, SSB_AUTOSIZE);
 	cpu = mycpu->gd_cpuid;
+
+	/*
+	 * Set the default port for protocol processing. This will likely
+	 * change when we connect.
+	 */
 	error = in_pcballoc(so, &tcbinfo[cpu]);
 	if (error)
 		return (error);
@@ -1386,21 +1476,21 @@ tcp_attach(struct socket *so, struct pru_attach_info *ai)
 #endif
 	inp->inp_vflag |= INP_IPV4;
 	tp = tcp_newtcpcb(inp);
-	if (tp == 0) {
-		int nofd = so->so_state & SS_NOFDREF;	/* XXX */
-
-		so->so_state &= ~SS_NOFDREF;	/* don't free the socket yet */
+	if (tp == NULL) {
+		/*
+		 * Make sure the socket is destroyed by the pcbdetach.
+		 */
+		soreference(so);
 #ifdef INET6
 		if (isipv6)
 			in6_pcbdetach(inp);
 		else
 #endif
 		in_pcbdetach(inp);
-		so->so_state |= nofd;
+		sofree(so);	/* from ref above */
 		return (ENOBUFS);
 	}
 	tp->t_state = TCPS_CLOSED;
-	so->so_port = tcp_soport_attach(so);
 	return (0);
 }
 
@@ -1417,16 +1507,18 @@ tcp_disconnect(struct tcpcb *tp)
 {
 	struct socket *so = tp->t_inpcb->inp_socket;
 
-	if (tp->t_state < TCPS_ESTABLISHED)
+	if (tp->t_state < TCPS_ESTABLISHED) {
 		tp = tcp_close(tp);
-	else if ((so->so_options & SO_LINGER) && so->so_linger == 0)
+	} else if ((so->so_options & SO_LINGER) && so->so_linger == 0) {
 		tp = tcp_drop(tp, 0);
-	else {
+	} else {
+		lwkt_gettoken(&so->so_rcv.ssb_token);
 		soisdisconnecting(so);
 		sbflush(&so->so_rcv.sb);
 		tp = tcp_usrclosed(tp);
 		if (tp)
 			tcp_output(tp);
+		lwkt_reltoken(&so->so_rcv.ssb_token);
 	}
 	return (tp);
 }

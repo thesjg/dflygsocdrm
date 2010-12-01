@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1999 Kazutaka YOKOTA <yokota@zodiac.mech.utsunomiya-u.ac.jp>
  * All rights reserved.
  *
@@ -25,6 +27,9 @@
  *
  * $FreeBSD: src/sys/dev/kbd/atkbd.c,v 1.25.2.4 2002/04/08 19:21:38 asmodai Exp $
  * $DragonFly: src/sys/dev/misc/kbd/atkbd.c,v 1.14 2007/04/22 10:43:00 y0netan1 Exp $
+ */
+/*
+ * NOTE: All locks are handled by the kbd wrappers.
  */
 
 #include "opt_kbd.h"
@@ -65,12 +70,14 @@ atkbd_probe_unit(int unit, int ctlr, int irq, int flags)
 	int error;
 
 	sw = kbd_get_switch(ATKBD_DRIVER_NAME);
-	if (sw == NULL)
+	if (sw == NULL) {
 		return ENXIO;
+	}
 
 	args[0] = ctlr;
 	args[1] = irq;
 	error = (*sw->probe)(unit, args, flags);
+
 	if (error)
 		return error;
 	return 0;
@@ -84,26 +91,30 @@ atkbd_attach_unit(int unit, keyboard_t **kbd, int ctlr, int irq, int flags)
 	int error;
 
 	sw = kbd_get_switch(ATKBD_DRIVER_NAME);
-	if (sw == NULL)
+	if (sw == NULL) {
 		return ENXIO;
+	}
 
 	/* reset, initialize and enable the device */
 	args[0] = ctlr;
 	args[1] = irq;
 	*kbd = NULL;
 	error = (*sw->probe)(unit, args, flags);
-	if (error)
+	if (error) {
 		return error;
+	}
 	error = (*sw->init)(unit, kbd, args, flags);
-	if (error)
+	if (error) {
 		return error;
+	}
 	(*sw->enable)(*kbd);
 
 #ifdef KBD_INSTALL_CDEV
 	/* attach a virtual keyboard cdev */
 	error = kbd_attach(*kbd);
-	if (error)
+	if (error) {
 		return error;
+	}
 #endif
 
 	/*
@@ -114,6 +125,7 @@ atkbd_attach_unit(int unit, keyboard_t **kbd, int ctlr, int irq, int flags)
 
 	if (bootverbose)
 		(*sw->diag)(*kbd, bootverbose);
+
 	return 0;
 }
 
@@ -280,7 +292,7 @@ atkbd_configure(int flags)
 		if (i >= 0) {
 			kbd = kbd_get_keyboard(i);
 			kbd_unregister(kbd);
-			kbd->kb_flags &= ~KB_REGISTERED;
+			kbd = NULL; /* huh? */
 		}
 		return 0;
 	}
@@ -293,10 +305,12 @@ atkbd_configure(int flags)
 	arg[0] = -1;
 	arg[1] = -1;
 	kbd = NULL;
-	if (atkbd_probe(ATKBD_DEFAULT, arg, flags))
+	if (atkbd_probe(ATKBD_DEFAULT, arg, flags)) {
 		return 0;
-	if (atkbd_init(ATKBD_DEFAULT, &kbd, arg, flags))
+	}
+	if (atkbd_init(ATKBD_DEFAULT, &kbd, arg, flags)) {
 		return 0;
+	}
 
 	/* return the number of found keyboards */
 	return 1;
@@ -311,18 +325,23 @@ atkbd_probe(int unit, void *arg, int flags)
 	KBDC kbdc;
 	int *data = (int *)arg;	/* data[0]: controller, data[1]: irq */
 
+
 	if (unit == ATKBD_DEFAULT) {
-		if (KBD_IS_PROBED(&default_kbd))
+		if (KBD_IS_PROBED(&default_kbd)) {
 			return 0;
+		}
 	}
 
 	kbdc = atkbdc_open(data[0]);
-	if (kbdc == NULL)
+	if (kbdc == NULL) {
 		return ENXIO;
-	if (probe_keyboard(kbdc, flags)) {
-		if (flags & KB_CONF_FAIL_IF_NO_KBD)
-			return ENXIO;
 	}
+	if (probe_keyboard(kbdc, flags)) {
+		if (flags & KB_CONF_FAIL_IF_NO_KBD) {
+			return ENXIO;
+		}
+	}
+
 	return 0;
 }
 
@@ -342,8 +361,9 @@ atkbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 	/* XXX */
 	if (unit == ATKBD_DEFAULT) {
 		*kbdp = kbd = &default_kbd;
-		if (KBD_IS_INITIALIZED(kbd) && KBD_IS_CONFIGURED(kbd))
+		if (KBD_IS_INITIALIZED(kbd) && KBD_IS_CONFIGURED(kbd)) {
 			return 0;
+		}
 		state = &default_kbd_state;
 		keymap = &default_keymap;
 		accmap = &default_accentmap;
@@ -371,8 +391,9 @@ atkbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 
 	if (!KBD_IS_PROBED(kbd)) {
 		state->kbdc = atkbdc_open(data[0]);
-		if (state->kbdc == NULL)
+		if (state->kbdc == NULL) {
 			return ENXIO;
+		}
 		kbd_init_struct(kbd, ATKBD_DRIVER_NAME, KB_OTHER, unit, flags,
 				KB_PRI_ATKBD, 0, 0);
 		bcopy(&key_map, keymap, sizeof(key_map));
@@ -383,8 +404,9 @@ atkbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 		kbd->kb_data = (void *)state;
 	
 		if (probe_keyboard(state->kbdc, flags)) { /* shouldn't happen */
-			if (flags & KB_CONF_FAIL_IF_NO_KBD)
+			if (flags & KB_CONF_FAIL_IF_NO_KBD) {
 				return ENXIO;
+			}
 		} else {
 			KBD_FOUND_DEVICE(kbd);
 		}
@@ -400,8 +422,9 @@ atkbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 		kbd->kb_config = flags & ~KB_CONF_PROBE_ONLY;
 		if (KBD_HAS_DEVICE(kbd)
 	    	    && init_keyboard(state->kbdc, &kbd->kb_type, kbd->kb_config)
-	    	    && (kbd->kb_config & KB_CONF_FAIL_IF_NO_KBD))
+	    	    && (kbd->kb_config & KB_CONF_FAIL_IF_NO_KBD)) {
 			return ENXIO;
+		}
 		atkbd_ioctl(kbd, KDSETLED, (caddr_t)&state->ks_state);
 		get_typematic(kbd);
 		delay[0] = kbd->kb_delay1;
@@ -410,8 +433,9 @@ atkbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 		KBD_INIT_DONE(kbd);
 	}
 	if (!KBD_IS_CONFIGURED(kbd)) {
-		if (kbd_register(kbd) < 0)
+		if (kbd_register(kbd) < 0) {
 			return ENXIO;
+		}
 		KBD_CONFIG_DONE(kbd);
 	}
 
@@ -460,6 +484,7 @@ atkbd_intr(keyboard_t *kbd, void *arg)
 			KBD_FOUND_DEVICE(kbd);
 		}
 	}
+
 	return 0;
 }
 
@@ -508,7 +533,7 @@ atkbd_disable(keyboard_t *kbd)
 static int
 atkbd_read(keyboard_t *kbd, int wait)
 {
-	int c;
+	int c, ret;
 
 	if (wait)
 		c = read_kbd_data(((atkbd_state_t *)kbd->kb_data)->kbdc);
@@ -516,16 +541,25 @@ atkbd_read(keyboard_t *kbd, int wait)
 		c = read_kbd_data_no_wait(((atkbd_state_t *)kbd->kb_data)->kbdc);
 	if (c != -1)
 		++kbd->kb_count;
-	return (KBD_IS_ACTIVE(kbd) ? c : -1);
+
+	ret = (KBD_IS_ACTIVE(kbd) ? c : -1);
+
+	return ret;
 }
 
 /* check if data is waiting */
 static int
 atkbd_check(keyboard_t *kbd)
 {
-	if (!KBD_IS_ACTIVE(kbd))
+	int ret;
+
+
+	if (!KBD_IS_ACTIVE(kbd)) {
 		return FALSE;
-	return kbdc_data_ready(((atkbd_state_t *)kbd->kb_data)->kbdc);
+	}
+	ret = kbdc_data_ready(((atkbd_state_t *)kbd->kb_data)->kbdc);
+
+	return ret;
 }
 
 /* read char from the keyboard */
@@ -543,8 +577,9 @@ next_code:
 	if (!(state->ks_flags & COMPOSE) && (state->ks_composed_char > 0)) {
 		action = state->ks_composed_char;
 		state->ks_composed_char = 0;
-		if (action > UCHAR_MAX)
+		if (action > UCHAR_MAX) {
 			return ERRKEY;
+		}
 		return action;
 	}
 
@@ -555,8 +590,9 @@ next_code:
 		} while (scancode == -1);
 	} else {
 		scancode = read_kbd_data_no_wait(state->kbdc);
-		if (scancode == -1)
+		if (scancode == -1) {
 			return NOKEY;
+		}
 	}
 	++kbd->kb_count;
 
@@ -565,8 +601,9 @@ next_code:
 #endif
 
 	/* return the byte as is for the K_RAW mode */
-	if (state->ks_mode == K_RAW)
+	if (state->ks_mode == K_RAW) {
 		return scancode;
+	}
 
 	/* translate the scan code into a keycode */
 	keycode = scancode & 0x7F;
@@ -706,8 +743,9 @@ next_code:
 	}
 
 	/* return the key code in the K_CODE mode */
-	if (state->ks_mode == K_CODE)
+	if (state->ks_mode == K_CODE) {
 		return (keycode | (scancode & 0x80));
+	}
 
 	/* compose a character code */
 	if (state->ks_flags & COMPOSE) {
@@ -760,10 +798,11 @@ next_code:
 	/* keycode to key action */
 	action = genkbd_keyaction(kbd, keycode, scancode & 0x80,
 				  &state->ks_state, &state->ks_accents);
-	if (action == NOKEY)
+	if (action == NOKEY) {
 		goto next_code;
-	else
+	} else {
 		return action;
+	}
 }
 
 /* check if char is waiting */
@@ -771,13 +810,17 @@ static int
 atkbd_check_char(keyboard_t *kbd)
 {
 	atkbd_state_t *state;
+	int ret;
 
-	if (!KBD_IS_ACTIVE(kbd))
+	if (!KBD_IS_ACTIVE(kbd)) {
 		return FALSE;
+	}
 	state = (atkbd_state_t *)kbd->kb_data;
-	if (!(state->ks_flags & COMPOSE) && (state->ks_composed_char > 0))
+	if (!(state->ks_flags & COMPOSE) && (state->ks_composed_char > 0)) {
 		return TRUE;
-	return kbdc_data_ready(state->kbdc);
+	}
+	ret = kbdc_data_ready(state->kbdc);
+	return ret;
 }
 
 /* some useful control functions */
@@ -866,8 +909,9 @@ atkbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 
 	case KDSETREPEAT:	/* set keyboard repeat rate (new interface) */
 		crit_exit();
-		if (!KBD_HAS_DEVICE(kbd))
+		if (!KBD_HAS_DEVICE(kbd)) {
 			return 0;
+		}
 		i = typematic(((int *)arg)[0], ((int *)arg)[1]);
 		error = write_kbd(state->kbdc, KBDC_SET_TYPEMATIC, i);
 		if (error == 0) {
@@ -878,8 +922,9 @@ atkbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 
 	case KDSETRAD:		/* set keyboard repeat rate (old interface) */
 		crit_exit();
-		if (!KBD_HAS_DEVICE(kbd))
+		if (!KBD_HAS_DEVICE(kbd)) {
 			return 0;
+		}
 		error = write_kbd(state->kbdc, KBDC_SET_TYPEMATIC, *(int *)arg);
 		if (error == 0) {
 			kbd->kb_delay1 = typematic_delay(*(int *)arg);
@@ -933,6 +978,7 @@ atkbd_get_state(keyboard_t *kbd, void *buf, size_t len)
 		return sizeof(atkbd_state_t);
 	if (len < sizeof(atkbd_state_t))
 		return -1;
+
 	bcopy(kbd->kb_data, buf, sizeof(atkbd_state_t));
 	return 0;
 }
@@ -958,9 +1004,9 @@ atkbd_poll(keyboard_t *kbd, int on)
 	state = (atkbd_state_t *)kbd->kb_data;
 	crit_enter();
 	if (on)
-		++state->ks_polling;
+		state->ks_polling = 1;
 	else
-		--state->ks_polling;
+		state->ks_polling = 0;
 	crit_exit();
 	return 0;
 }

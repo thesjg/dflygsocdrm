@@ -392,12 +392,22 @@ create_pagetables(vm_paddr_t *firstaddr, int64_t ptov_offset)
 	int kpml4i = pmap_pml4e_index(ptov_offset);
 	int kpdpi = pmap_pdpe_index(ptov_offset);
 
+	/*
+         * Calculate NKPT - number of kernel page tables.  We have to
+         * accomodoate prealloction of the vm_page_array, dump bitmap,
+         * MSGBUF_SIZE, and other stuff.  Be generous.
+         *
+         * Maxmem is in pages.
+         */
+        nkpt = (Maxmem * (sizeof(struct vm_page) * 2) + MSGBUF_SIZE) / NBPDR;
 
-	/* Allocate pages */
+	/*
+	 * Allocate pages
+	 */
 	KPML4phys = allocpages(firstaddr, 1);
 	KPDPphys = allocpages(firstaddr, NKPML4E);
 	KPDphys = allocpages(firstaddr, NKPDPE);
-	KPTphys = allocpages(firstaddr, NKPT);
+	KPTphys = allocpages(firstaddr, nkpt);
 
 	KPML4virt = (pml4_entry_t *)PHYS_TO_DMAP(KPML4phys);
 	KPDPvirt = (pdp_entry_t *)PHYS_TO_DMAP(KPDPphys);
@@ -407,10 +417,10 @@ create_pagetables(vm_paddr_t *firstaddr, int64_t ptov_offset)
 	bzero(KPML4virt, 1 * PAGE_SIZE);
 	bzero(KPDPvirt, NKPML4E * PAGE_SIZE);
 	bzero(KPDvirt, NKPDPE * PAGE_SIZE);
-	bzero(KPTvirt, NKPT * PAGE_SIZE);
+	bzero(KPTvirt, nkpt * PAGE_SIZE);
 
 	/* Now map the page tables at their location within PTmap */
-	for (i = 0; i < NKPT; i++) {
+	for (i = 0; i < nkpt; i++) {
 		KPDvirt[i] = KPTphys + (i << PAGE_SHIFT);
 		KPDvirt[i] |= VPTE_R | VPTE_W | VPTE_V;
 	}
@@ -468,7 +478,6 @@ pmap_bootstrap(vm_paddr_t *firstaddr, int64_t ptov_offset)
 	kernel_pmap.pm_count = 1;
 	kernel_pmap.pm_active = (cpumask_t)-1;	/* don't allow deactivation */
 	TAILQ_INIT(&kernel_pmap.pm_pvlist);
-	nkpt = NKPT;
 
 	/*
 	 * Reserve some special page table entries/VA space for temporary
@@ -1520,13 +1529,16 @@ pmap_release_callback(struct vm_page *p, void *data)
  * No requirements.
  */
 void
-pmap_growkernel(vm_offset_t addr)
+pmap_growkernel(vm_offset_t kstart, vm_offset_t kend)
 {
+	vm_offset_t addr;
 	vm_paddr_t paddr;
 	vm_offset_t ptppaddr;
 	vm_page_t nkpg;
 	pd_entry_t *pde, newpdir;
 	pdp_entry_t newpdp;
+
+	addr = kend;
 
 	crit_enter();
 	lwkt_gettoken(&vm_token);
@@ -1552,20 +1564,23 @@ pmap_growkernel(vm_offset_t addr)
 			nkpg = vm_page_alloc(kptobj, nkpt,
 			                     VM_ALLOC_NORMAL | VM_ALLOC_SYSTEM
 					     | VM_ALLOC_INTERRUPT);
-			if (nkpg == NULL)
-				panic("pmap_growkernel: no memory to grow kernel");
+			if (nkpg == NULL) {
+				panic("pmap_growkernel: no memory to "
+				      "grow kernel");
+			}
 			paddr = VM_PAGE_TO_PHYS(nkpg);
 			if ((nkpg->flags & PG_ZERO) == 0)
 				pmap_zero_page(paddr);
 			vm_page_flag_clear(nkpg, PG_ZERO);
-			newpdp = (pdp_entry_t)
-				(paddr | VPTE_V | VPTE_R | VPTE_W | VPTE_A | VPTE_M);
+			newpdp = (pdp_entry_t)(paddr | VPTE_V | VPTE_R |
+					       VPTE_W | VPTE_A | VPTE_M);
 			*pmap_pdpe(&kernel_pmap, kernel_vm_end) = newpdp;
 			nkpt++;
 			continue; /* try again */
 		}
 		if ((*pde & VPTE_V) != 0) {
-			kernel_vm_end = (kernel_vm_end + PAGE_SIZE * NPTEPG) & ~(PAGE_SIZE * NPTEPG - 1);
+			kernel_vm_end = (kernel_vm_end + PAGE_SIZE * NPTEPG) &
+					~(PAGE_SIZE * NPTEPG - 1);
 			if (kernel_vm_end - 1 >= kernel_map.max_offset) {
 				kernel_vm_end = kernel_map.max_offset;
 				break;
@@ -1577,7 +1592,9 @@ pmap_growkernel(vm_offset_t addr)
 		 * This index is bogus, but out of the way
 		 */
 		nkpg = vm_page_alloc(kptobj, nkpt,
-			VM_ALLOC_NORMAL | VM_ALLOC_SYSTEM | VM_ALLOC_INTERRUPT);
+				     VM_ALLOC_NORMAL |
+				     VM_ALLOC_SYSTEM |
+				     VM_ALLOC_INTERRUPT);
 		if (nkpg == NULL)
 			panic("pmap_growkernel: no memory to grow kernel");
 
@@ -1585,11 +1602,13 @@ pmap_growkernel(vm_offset_t addr)
 		ptppaddr = VM_PAGE_TO_PHYS(nkpg);
 		pmap_zero_page(ptppaddr);
 		vm_page_flag_clear(nkpg, PG_ZERO);
-		newpdir = (pd_entry_t) (ptppaddr | VPTE_V | VPTE_R | VPTE_W | VPTE_A | VPTE_M);
+		newpdir = (pd_entry_t)(ptppaddr | VPTE_V | VPTE_R |
+				       VPTE_W | VPTE_A | VPTE_M);
 		*pmap_pde(&kernel_pmap, kernel_vm_end) = newpdir;
 		nkpt++;
 
-		kernel_vm_end = (kernel_vm_end + PAGE_SIZE * NPTEPG) & ~(PAGE_SIZE * NPTEPG - 1);
+		kernel_vm_end = (kernel_vm_end + PAGE_SIZE * NPTEPG) &
+				~(PAGE_SIZE * NPTEPG - 1);
 		if (kernel_vm_end - 1 >= kernel_map.max_offset) {
 			kernel_vm_end = kernel_map.max_offset;
 			break;
@@ -1777,6 +1796,7 @@ pmap_remove_entry(struct pmap *pmap, vm_page_t m, vm_offset_t va)
 	if (pv) {
 		TAILQ_REMOVE(&m->md.pv_list, pv, pv_list);
 		m->md.pv_list_count--;
+		m->object->agg_pv_list_count--;
 		KKASSERT(m->md.pv_list_count >= 0);
 		if (TAILQ_EMPTY(&m->md.pv_list))
 			vm_page_flag_clear(m, PG_MAPPED | PG_WRITEABLE);
@@ -1807,6 +1827,7 @@ pmap_insert_entry(pmap_t pmap, vm_offset_t va, vm_page_t mpte, vm_page_t m)
 	TAILQ_INSERT_TAIL(&pmap->pm_pvlist, pv, pv_plist);
 	TAILQ_INSERT_TAIL(&m->md.pv_list, pv, pv_list);
 	m->md.pv_list_count++;
+	m->object->agg_pv_list_count++;
 
 	crit_exit();
 }
@@ -2050,6 +2071,7 @@ pmap_remove_all(vm_page_t m)
 		TAILQ_REMOVE(&pv->pv_pmap->pm_pvlist, pv, pv_plist);
 		++pv->pv_pmap->pm_generation;
 		m->md.pv_list_count--;
+		m->object->agg_pv_list_count--;
 		KKASSERT(m->md.pv_list_count >= 0);
 		if (TAILQ_EMPTY(&m->md.pv_list))
 			vm_page_flag_clear(m, PG_MAPPED | PG_WRITEABLE);
@@ -2818,6 +2840,7 @@ pmap_remove_pages(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 		save_generation = ++pmap->pm_generation;
 
 		m->md.pv_list_count--;
+		m->object->agg_pv_list_count--;
 		TAILQ_REMOVE(&m->md.pv_list, pv, pv_list);
 		if (TAILQ_EMPTY(&m->md.pv_list))
 			vm_page_flag_clear(m, PG_MAPPED | PG_WRITEABLE);
@@ -3252,4 +3275,17 @@ pmap_addr_hint(vm_object_t obj, vm_offset_t addr, vm_size_t size)
 
 	addr = (addr + (NBPDR - 1)) & ~(NBPDR - 1);
 	return addr;
+}
+
+/*
+ * Used by kmalloc/kfree, page already exists at va
+ */
+vm_page_t
+pmap_kvtom(vm_offset_t va)
+{
+	vpte_t *ptep;
+
+	KKASSERT(va >= KvaStart && va < KvaEnd);
+	ptep = vtopte(va);
+	return(PHYS_TO_VM_PAGE(*ptep & PG_FRAME));
 }

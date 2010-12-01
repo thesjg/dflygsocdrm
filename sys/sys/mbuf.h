@@ -73,7 +73,8 @@
  * mtocl(x) -	convert pointer within cluster to cluster index #
  * cltom(x) -	convert cluster # to ptr to beginning of cluster
  */
-#define	mtod(m, t)	((t)((m)->m_data))
+#define	mtod(m, t)		((t)((m)->m_data))
+#define	mtodoff(m, t, off)	((t)((m)->m_data + (off)))
 
 /*
  * Header present at the beginning of every mbuf.
@@ -86,7 +87,25 @@ struct m_hdr {
 	int	mh_flags;		/* flags; see below */
 	short	mh_type;		/* type of data in this mbuf */
 	short	mh_pad;			/* padding */
+#ifdef MBUF_DEBUG
+	const char *mh_lastfunc;
+#endif
 	struct netmsg_packet mh_netmsg;	/* hardware->proto stack msg */
+};
+
+/* pf stuff */
+struct pkthdr_pf {
+	void            *hdr;           /* saved hdr pos in mbuf, for ECN */
+	u_int            rtableid;      /* alternate routing table id */
+	u_int32_t        qid;           /* queue id */
+	u_int16_t        tag;           /* tag id */
+	u_int8_t         flags;
+	u_int8_t         routed;
+	uint32_t	state_hash;	/* identifies 'connections' */
+	uint8_t		ecn_af;		/* for altq_red */
+	uint8_t		unused01;
+	uint8_t		unused02;
+	uint8_t		unused03;
 };
 
 /*
@@ -123,13 +142,7 @@ struct pkthdr {
 	uint32_t fw_flags;		/* flags for PF */
 
 	/* variables for PF processing */
-	uint16_t unused01;		/* was PF tag id */
-	uint8_t	pf_routed;		/* PF routing counter */
-
-	/* variables for ALTQ processing */
-	uint8_t	ecn_af;			/* address family for ECN */
-	uint32_t altq_qid;		/* queue id */
-	uint32_t altq_state_hash;	/* identifies 'connections' */
+	struct pkthdr_pf pf;		/* structure for PF */
 
 	uint16_t ether_vlantag;		/* ethernet 802.1p+q vlan tag */
 	uint16_t hash;			/* packet hash */
@@ -248,25 +261,16 @@ struct mbuf {
  * Flags indicating PF processing status
  */
 #define FW_MBUF_GENERATED	0x00000001
-#define	XX_MBUF_UNUSED02	0x00000002
+#define	PF_MBUF_STRUCTURE	0x00000002	/* m_pkthdr.pf valid */
 #define	PF_MBUF_ROUTED		0x00000004	/* pf_routed field is valid */
-#define	PF_MBUF_TRANSLATE_LOCALHOST					\
-				0x00000008
-#define	PF_MBUF_FRAGCACHE	0x00000010
+#define	PF_MBUF_TAGGED		0x00000008
+#define	XX_MBUF_UNUSED10	0x00000010
 #define	XX_MBUF_UNUSED20	0x00000020
 #define IPFORWARD_MBUF_TAGGED	0x00000040
 #define DUMMYNET_MBUF_TAGGED	0x00000080
-#define ALTQ_MBUF_STATE_HASHED	0x00000100
+#define XX_MBUF_UNUSED100	0x00000100
 #define FW_MBUF_REDISPATCH	0x00000200
-#define	PF_MBUF_GENERATED	FW_MBUF_GENERATED
 #define	IPFW_MBUF_GENERATED	FW_MBUF_GENERATED
-
-/*
- * The PF code uses a different symbol name for the m_tag.  This is
- * NOT a pkthdr flag.
- */
-#define	PF_MBUF_TAGGED		PACKET_TAG_PF
-
 /*
  * mbuf types.
  */
@@ -431,7 +435,7 @@ struct mbstat {
 		_mm->m_len += _mplen;					\
 	} else								\
 		_mm = m_prepend(_mm, _mplen, __mhow);			\
-	if (_mm != NULL && _mm->m_flags & M_PKTHDR)			\
+	if (_mm != NULL && (_mm->m_flags & M_PKTHDR))			\
 		_mm->m_pkthdr.len += _mplen;				\
 	*_mmp = _mm;							\
 } while (0)
@@ -471,9 +475,15 @@ struct	mbuf	*m_defrag_nofree(struct mbuf *, int);
 struct	mbuf	*m_devget(char *, int, int, struct ifnet *,
 		  void (*copy)(volatile const void *, volatile void *, size_t));
 struct	mbuf	*m_dup(struct mbuf *, int);
+struct	mbuf	*m_dup_data(struct mbuf *, int);
 int		 m_dup_pkthdr(struct mbuf *, const struct mbuf *, int);
+#ifdef MBUF_DEBUG
+struct	mbuf	*_m_free(struct mbuf *, const char *name);
+void		 _m_freem(struct mbuf *, const char *name);
+#else
 struct	mbuf	*m_free(struct mbuf *);
 void		 m_freem(struct mbuf *);
+#endif
 struct	mbuf	*m_get(int, int);
 struct	mbuf	*m_getc(int len, int how, int type);
 struct	mbuf	*m_getcl(int how, short type, int flags);
@@ -496,9 +506,16 @@ void		m_chtype(struct mbuf *m, int type);
 int		m_devpad(struct mbuf *m, int padto);
 
 #ifdef MBUF_DEBUG
+
 void		mbuftrackid(struct mbuf *, int);
+
+#define m_free(m)	_m_free(m, __func__)
+#define m_freem(m)	_m_freem(m, __func__)
+
 #else
+
 #define mbuftrackid(m, id)	/* empty */
+
 #endif
 
 /*

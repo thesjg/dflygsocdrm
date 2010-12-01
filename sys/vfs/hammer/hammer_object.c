@@ -415,6 +415,12 @@ hammer_rel_mem_record(struct hammer_record *record)
 					  record);
 				record->flags &= ~HAMMER_RECF_ONRBTREE;
 				KKASSERT(ip->rsv_recs > 0);
+				if (RB_EMPTY(&record->ip->rec_tree)) {
+					record->ip->flags &=
+							~HAMMER_INODE_XDIRTY;
+					record->ip->sync_flags &=
+							~HAMMER_INODE_XDIRTY;
+				}
 				diddrop = 1;
 			} else {
 				diddrop = 0;
@@ -425,8 +431,8 @@ hammer_rel_mem_record(struct hammer_record *record)
 			 * we can destroy the record because the bio may
 			 * have a reference to it.
 			 */
-			if (record->flags & 
-			   (HAMMER_RECF_DIRECT_IO | HAMMER_RECF_DIRECT_INVAL)) {
+			if (record->gflags &
+			   (HAMMER_RECG_DIRECT_IO | HAMMER_RECG_DIRECT_INVAL)) {
 				hammer_io_direct_wait(record);
 			}
 
@@ -439,11 +445,8 @@ hammer_rel_mem_record(struct hammer_record *record)
 				--ip->rsv_recs;
 				hmp->rsv_databytes -= record->leaf.data_len;
 
-				if (RB_EMPTY(&record->ip->rec_tree)) {
-					record->ip->flags &= ~HAMMER_INODE_XDIRTY;
-					record->ip->sync_flags &= ~HAMMER_INODE_XDIRTY;
+				if (RB_EMPTY(&record->ip->rec_tree))
 					hammer_test_inode(record->ip);
-				}
 				if (ip->rsv_recs == hammer_limit_inode_recs - 1)
 					wakeup(&ip->rsv_recs);
 			}
@@ -1129,7 +1132,7 @@ hammer_ip_sync_record_cursor(hammer_cursor_t cursor, hammer_record_t record)
 	 * Any direct-write related to the record must complete before we
 	 * can sync the record to the on-disk media.
 	 */
-	if (record->flags & (HAMMER_RECF_DIRECT_IO | HAMMER_RECF_DIRECT_INVAL))
+	if (record->gflags & (HAMMER_RECG_DIRECT_IO | HAMMER_RECG_DIRECT_INVAL))
 		hammer_io_direct_wait(record);
 
 	/*
@@ -1978,7 +1981,7 @@ retry:
 		 * remember the key for a regular file record is (base + len),
 		 * NOT (base).
 		 *
-		 * Note that do to duplicates (mem & media) allowed by
+		 * Note that due to duplicates (mem & media) allowed by
 		 * DELETE_VISIBILITY, off can wind up less then ran_beg.
 		 */
 		if (leaf->base.rec_type == HAMMER_RECTYPE_DATA) {

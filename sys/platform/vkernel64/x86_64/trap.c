@@ -168,16 +168,6 @@ SYSCTL_INT(_machdep, OID_AUTO, fast_release, CTLFLAG_RW,
 static int slow_release;
 SYSCTL_INT(_machdep, OID_AUTO, slow_release, CTLFLAG_RW,
 	&slow_release, 0, "Passive Release was nonoptimal");
-#ifdef SMP
-static int syscall_mpsafe = 1;
-SYSCTL_INT(_kern, OID_AUTO, syscall_mpsafe, CTLFLAG_RW,
-	&syscall_mpsafe, 0, "Allow MPSAFE marked syscalls to run without BGL");
-TUNABLE_INT("kern.syscall_mpsafe", &syscall_mpsafe);
-static int trap_mpsafe = 1;
-SYSCTL_INT(_kern, OID_AUTO, trap_mpsafe, CTLFLAG_RW,
-	&trap_mpsafe, 0, "Allow traps to mostly run without the BGL");
-TUNABLE_INT("kern.trap_mpsafe", &trap_mpsafe);
-#endif
 
 MALLOC_DEFINE(M_SYSMSG, "sysmsg", "sysmsg structure");
 extern int max_sysmsg;
@@ -266,6 +256,8 @@ recheck:
 
 	/*
 	 * Post any pending signals
+	 *
+	 * WARNING!  postsig() can exit and not return.
 	 */
 	if ((sig = CURSIG_TRACE(lp)) != 0) {
 		get_mplock();
@@ -381,7 +373,8 @@ user_trap(struct trapframe *frame)
 	int have_mplock = 0;
 #endif
 #ifdef INVARIANTS
-	int crit_count = td->td_pri & ~TDPRI_MASK;
+	int crit_count = td->td_critcount;
+	lwkt_tokref_t curstop = td->td_toks_stop;
 #endif
 	vm_offset_t eva;
 
@@ -418,14 +411,6 @@ user_trap(struct trapframe *frame)
 		goto out2;
 	}
 #endif
-
-	++gd->gd_trap_nesting_level;
-#ifdef SMP
-	if (trap_mpsafe == 0)
-		MAKEMPSAFE(have_mplock);
-#endif
-
-	--gd->gd_trap_nesting_level;
 
 #if defined(I586_CPU) && !defined(NO_F00F_HACK)
 restart:
@@ -624,7 +609,8 @@ restart:
 
 out:
 #ifdef SMP
-	KASSERT(td->td_mpcount == have_mplock, ("badmpcount trap/end from %p", (void *)frame->tf_rip));
+	KASSERT(td->td_mpcount == have_mplock,
+		("badmpcount trap/end from %p", (void *)frame->tf_rip));
 #endif
 	userret(lp, frame, sticks);
 	userexit(lp);
@@ -635,9 +621,13 @@ out2:	;
 #endif
 	KTR_LOG(kernentry_trap_ret, lp->lwp_proc->p_pid, lp->lwp_tid);
 #ifdef INVARIANTS
-	KASSERT(crit_count == (td->td_pri & ~TDPRI_MASK),
-		("syscall: critical section count mismatch! %d/%d",
-		crit_count / TDPRI_CRIT, td->td_pri / TDPRI_CRIT));
+	KASSERT(crit_count == td->td_critcount,
+		("trap: critical section count mismatch! %d/%d",
+		crit_count, td->td_pri));
+	KASSERT(curstop == td->td_toks_stop,
+		("trap: extra tokens held after trap! %ld/%ld",
+		curstop - &td->td_toks_base,
+		td->td_toks_stop - &td->td_toks_base));
 #endif
 }
 
@@ -653,7 +643,8 @@ kern_trap(struct trapframe *frame)
 	int have_mplock = 0;
 #endif
 #ifdef INVARIANTS
-	int crit_count = td->td_pri & ~TDPRI_MASK;
+	int crit_count = td->td_critcount;
+	lwkt_tokref_t curstop = td->td_toks_stop;
 #endif
 	vm_offset_t eva;
 
@@ -674,15 +665,6 @@ kern_trap(struct trapframe *frame)
 		goto out2;
 	}
 #endif
-
-	++gd->gd_trap_nesting_level;
-
-#ifdef SMP
-	if (trap_mpsafe == 0)
-		MAKEMPSAFE(have_mplock);
-#endif
-
-	--gd->gd_trap_nesting_level;
 
 	type = frame->tf_trapno;
 	code = frame->tf_err;
@@ -846,9 +828,13 @@ out2:
 		rel_mplock();
 #endif
 #ifdef INVARIANTS
-	KASSERT(crit_count == (td->td_pri & ~TDPRI_MASK),
-		("syscall: critical section count mismatch! %d/%d",
-		crit_count / TDPRI_CRIT, td->td_pri / TDPRI_CRIT));
+	KASSERT(crit_count == td->td_critcount,
+		("trap: critical section count mismatch! %d/%d",
+		crit_count, td->td_pri));
+	KASSERT(curstop == td->td_toks_stop,
+		("trap: extra tokens held after trap! %ld/%ld",
+		curstop - &td->td_toks_base,
+		td->td_toks_stop - &td->td_toks_base));
 #endif
 }
 
@@ -1009,7 +995,7 @@ trap_fatal(struct trapframe *frame, int usermode, vm_offset_t eva)
 		kprintf("Idle\n");
 	}
 	kprintf("current thread          = pri %d ", curthread->td_pri);
-	if (curthread->td_pri >= TDPRI_CRIT)
+	if (curthread->td_critcount)
 		kprintf("(CRIT)");
 	kprintf("\n");
 #ifdef SMP
@@ -1141,7 +1127,8 @@ syscall2(struct trapframe *frame)
 	int error;
 	int narg;
 #ifdef INVARIANTS
-	int crit_count = td->td_pri & ~TDPRI_MASK;
+	int crit_count = td->td_critcount;
+	lwkt_tokref_t curstop = td->td_toks_stop;
 #endif
 #ifdef SMP
 	int have_mplock = 0;
@@ -1158,9 +1145,8 @@ syscall2(struct trapframe *frame)
 		frame->tf_eax);
 
 #ifdef SMP
-	KASSERT(td->td_mpcount == 0, ("badmpcount syscall2 from %p", (void *)frame->tf_rip));
-	if (syscall_mpsafe == 0)
-		MAKEMPSAFE(have_mplock);
+	KASSERT(td->td_mpcount == 0,
+		("badmpcount syscall2 from %p", (void *)frame->tf_rip));
 #endif
 	userenter(td, p);	/* lazy raise our priority */
 
@@ -1363,12 +1349,18 @@ bad:
 #endif
 	KTR_LOG(kernentry_syscall_ret, lp->lwp_proc->p_pid, lp->lwp_tid, error);
 #ifdef INVARIANTS
-	KASSERT(crit_count == (td->td_pri & ~TDPRI_MASK),
+	KASSERT(&td->td_toks_base == td->td_toks_stop,
 		("syscall: critical section count mismatch! %d/%d",
-		crit_count / TDPRI_CRIT, td->td_pri / TDPRI_CRIT));
+		crit_count, td->td_pri));
+	KASSERT(curstop == td->td_toks_stop,
+		("syscall: extra tokens held after trap! %ld",
+		td->td_toks_stop - &td->td_toks_base));
 #endif
 }
 
+/*
+ * NOTE: mplock not held at any point
+ */
 void
 fork_return(struct lwp *lp, struct trapframe *frame)
 {
@@ -1382,9 +1374,12 @@ fork_return(struct lwp *lp, struct trapframe *frame)
 
 /*
  * Simplified back end of syscall(), used when returning from fork()
- * or lwp_create() directly into user mode.  MP lock is held on entry and
- * should be released on return.  This code will return back into the fork
- * trampoline code which then runs doreti.
+ * directly into user mode.
+ *
+ * This code will return back into the fork trampoline code which then
+ * runs doreti.
+ *
+ * NOTE: The mplock is not held at any point.
  */
 void
 generic_lwp_return(struct lwp *lp, struct trapframe *frame)
@@ -1410,10 +1405,6 @@ generic_lwp_return(struct lwp *lp, struct trapframe *frame)
 	p->p_flag |= P_PASSIVE_ACQ;
 	userexit(lp);
 	p->p_flag &= ~P_PASSIVE_ACQ;
-#ifdef SMP
-	KKASSERT(lp->lwp_thread->td_mpcount == 1);
-	rel_mplock();
-#endif
 }
 
 /*

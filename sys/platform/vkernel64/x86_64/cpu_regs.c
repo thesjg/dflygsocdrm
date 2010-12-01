@@ -39,8 +39,6 @@
  * $FreeBSD: src/sys/i386/i386/machdep.c,v 1.385.2.30 2003/05/31 08:48:05 alc Exp $
  */
 
-#include "use_ether.h"
-#include "use_isa.h"
 #include "opt_atalk.h"
 #include "opt_compat.h"
 #include "opt_ddb.h"
@@ -106,6 +104,7 @@
 #include <sys/ptrace.h>
 #include <machine/sigframe.h>
 #include <unistd.h>		/* umtx_* functions */
+#include <pthread.h>		/* pthread_yield() */
 
 extern void dblfault_handler (void);
 
@@ -591,7 +590,7 @@ sendupcall(struct vmupcall *vu, int morepending)
 	 */
 	vu->vu_pending = 0;
 	upcall.upc_pending = morepending;
-	crit_count += TDPRI_CRIT;
+	++crit_count;
 	copyout(&upcall.upc_pending, &lp->lwp_upcall->upc_pending,
 		sizeof(upcall.upc_pending));
 	copyout(&crit_count, (char *)upcall.upc_uthread + upcall.upc_critoff,
@@ -649,7 +648,7 @@ fetchupcall(struct vmupcall *vu, int morepending, void *rsp)
 		crit_count = 0;
 		if (error == 0)
 			error = copyin((char *)upcall.upc_uthread + upcall.upc_critoff, &crit_count, sizeof(int));
-		crit_count += TDPRI_CRIT;
+		++crit_count;
 		if (error == 0)
 			error = copyout(&crit_count, (char *)upcall.upc_uthread + upcall.upc_critoff, sizeof(int));
 		regs->tf_rax = (register_t)vu->vu_func;
@@ -706,9 +705,10 @@ cpu_idle(void)
 {
 	struct thread *td = curthread;
 	struct mdglobaldata *gd = mdcpu;
+	int reqflags;
 
 	crit_exit();
-	KKASSERT(td->td_pri < TDPRI_CRIT);
+	KKASSERT(td->td_critcount == 0);
 	cpu_enable_intr();
 	for (;;) {
 		/*
@@ -728,7 +728,10 @@ cpu_idle(void)
 				struct timeval tv1, tv2;
 				gettimeofday(&tv1, NULL);
 #endif
-				umtx_sleep(&gd->mi.gd_runqmask, 0, 1000000);
+				reqflags = gd->mi.gd_reqflags &
+					   ~RQF_IDLECHECK_MASK;
+				umtx_sleep(&gd->mi.gd_reqflags, reqflags,
+					   1000000);
 #ifdef DEBUGIDLE
 				gettimeofday(&tv2, NULL);
 				if (tv2.tv_usec - tv1.tv_usec +
@@ -736,14 +739,14 @@ cpu_idle(void)
 				    > 500000) {
 					kprintf("cpu %d idlelock %08x %08x\n",
 						gd->mi.gd_cpuid,
-						gd->mi.gd_runqmask,
+						gd->mi.gd_reqflags,
 						gd->gd_fpending);
 				}
 #endif
 			}
 #ifdef SMP
 			else {
-			    __asm __volatile("pause");
+				handle_cpu_contention_mask();
 			}
 #endif
 			++cpu_idle_hltcnt;
@@ -751,10 +754,8 @@ cpu_idle(void)
 			td->td_flags &= ~TDF_IDLE_NOHLT;
 			splz();
 #ifdef SMP
-			/*__asm __volatile("sti; pause");*/
+			handle_cpu_contention_mask();
 			__asm __volatile("pause");
-#else
-			/*__asm __volatile("sti");*/
 #endif
 			++cpu_idle_spincnt;
 		}
@@ -770,9 +771,14 @@ cpu_idle(void)
  * we sleep for a bit.
  */
 void
-cpu_mplock_contested(void)
+handle_cpu_contention_mask(void)
 {
-	usleep(1000);
+	cpumask_t mask;
+
+	mask = cpu_contention_mask;
+	cpu_ccfence();
+	if (mask && bsfl(mask) != mycpu->gd_cpuid)
+		pthread_yield();
 }
 
 /*
@@ -785,9 +791,7 @@ cpu_mplock_contested(void)
 void
 cpu_spinlock_contested(void)
 {
-	crit_enter();
-	usleep(1000);
-	crit_exit();
+	cpu_pause();
 }
 
 #endif

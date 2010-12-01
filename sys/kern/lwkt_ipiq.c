@@ -83,12 +83,18 @@ static int	panic_ipiq_count = 100;
 #endif
 
 #ifdef SMP
-SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_count, CTLFLAG_RW, &ipiq_count, 0, "");
-SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_fifofull, CTLFLAG_RW, &ipiq_fifofull, 0, "");
-SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_avoided, CTLFLAG_RW, &ipiq_avoided, 0, "");
-SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_passive, CTLFLAG_RW, &ipiq_passive, 0, "");
-SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_cscount, CTLFLAG_RW, &ipiq_cscount, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, ipiq_optimized, CTLFLAG_RW, &ipiq_optimized, 0, "");
+SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_count, CTLFLAG_RW, &ipiq_count, 0,
+    "Number of IPI's sent");
+SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_fifofull, CTLFLAG_RW, &ipiq_fifofull, 0,
+    "Number of fifo full conditions detected");
+SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_avoided, CTLFLAG_RW, &ipiq_avoided, 0,
+    "Number of IPI's avoided by interlock with target cpu");
+SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_passive, CTLFLAG_RW, &ipiq_passive, 0,
+    "Number of passive IPI messages sent");
+SYSCTL_QUAD(_lwkt, OID_AUTO, ipiq_cscount, CTLFLAG_RW, &ipiq_cscount, 0,
+    "Number of cpu synchronizations");
+SYSCTL_INT(_lwkt, OID_AUTO, ipiq_optimized, CTLFLAG_RW, &ipiq_optimized, 0,
+    "");
 #ifdef PANIC_DEBUG
 SYSCTL_INT(_lwkt, OID_AUTO, panic_ipiq_cpu, CTLFLAG_RW, &panic_ipiq_cpu, 0, "");
 SYSCTL_INT(_lwkt, OID_AUTO, panic_ipiq_count, CTLFLAG_RW, &panic_ipiq_count, 0, "");
@@ -163,7 +169,7 @@ lwkt_send_ipiq3(globaldata_t target, ipifunc3_t func, void *arg1, int arg2)
     if (gd->gd_intr_nesting_level > 20)
 	panic("lwkt_send_ipiq: TOO HEAVILY NESTED!");
 #endif
-    KKASSERT(curthread->td_pri >= TDPRI_CRIT);
+    KKASSERT(curthread->td_critcount);
     ++ipiq_count;
     ip = &gd->gd_ipiq[target->gd_cpuid];
 
@@ -253,7 +259,7 @@ lwkt_send_ipiq3_passive(globaldata_t target, ipifunc3_t func,
     if (gd->gd_intr_nesting_level > 20)
 	panic("lwkt_send_ipiq: TOO HEAVILY NESTED!");
 #endif
-    KKASSERT(curthread->td_pri >= TDPRI_CRIT);
+    KKASSERT(curthread->td_critcount);
     ++ipiq_count;
     ++ipiq_passive;
     ip = &gd->gd_ipiq[target->gd_cpuid];
@@ -322,7 +328,7 @@ lwkt_send_ipiq3_nowait(globaldata_t target, ipifunc3_t func,
     struct globaldata *gd = mycpu;
 
     logipiq(send_nbio, func, arg1, arg2, gd, target);
-    KKASSERT(curthread->td_pri >= TDPRI_CRIT);
+    KKASSERT(curthread->td_critcount);
     if (target == gd) {
 	func(arg1, arg2, NULL);
 	logipiq(send_end, func, arg1, arg2, gd, target);
@@ -519,6 +525,7 @@ static int
 lwkt_process_ipiq_core(globaldata_t sgd, lwkt_ipiq_t ip, 
 		       struct intrframe *frame)
 {
+    globaldata_t mygd = mycpu;
     int ri;
     int wi;
     ipifunc3_t copy_func;
@@ -530,27 +537,33 @@ lwkt_process_ipiq_core(globaldata_t sgd, lwkt_ipiq_t ip,
      * Issue a load fence to prevent speculative reads of e.g. data written
      * by the other cpu prior to it updating the index.
      */
-    KKASSERT(curthread->td_pri >= TDPRI_CRIT);
+    KKASSERT(curthread->td_critcount);
     wi = ip->ip_windex;
     cpu_lfence();
+    ++mygd->gd_intr_nesting_level;
 
     /*
-     * Note: xindex is only updated after we are sure the function has
-     * finished execution.  Beware lwkt_process_ipiq() reentrancy!  The
-     * function may send an IPI which may block/drain.
+     * NOTE: xindex is only updated after we are sure the function has
+     *	     finished execution.  Beware lwkt_process_ipiq() reentrancy!
+     *	     The function may send an IPI which may block/drain.
      *
-     * Note: due to additional IPI operations that the callback function
-     * may make, it is possible for both rindex and windex to advance and
-     * thus for rindex to advance passed our cached windex.
+     * NOTE: Due to additional IPI operations that the callback function
+     *	     may make, it is possible for both rindex and windex to advance and
+     *	     thus for rindex to advance passed our cached windex.
+     *
+     * NOTE: A memory fence is required to prevent speculative loads prior
+     *	     to the loading of ip_rindex.  Even though stores might be
+     *	     ordered, loads are probably not.
      */
     while (wi - (ri = ip->ip_rindex) > 0) {
 	ri &= MAXCPUFIFO_MASK;
+	cpu_mfence();
 	copy_func = ip->ip_func[ri];
 	copy_arg1 = ip->ip_arg1[ri];
 	copy_arg2 = ip->ip_arg2[ri];
-	cpu_mfence();
 	++ip->ip_rindex;
-	KKASSERT((ip->ip_rindex & MAXCPUFIFO_MASK) == ((ri + 1) & MAXCPUFIFO_MASK));
+	KKASSERT((ip->ip_rindex & MAXCPUFIFO_MASK) ==
+		 ((ri + 1) & MAXCPUFIFO_MASK));
 	logipiq(receive, copy_func, copy_arg1, copy_arg2, sgd, mycpu);
 	copy_func(copy_arg1, copy_arg2, frame);
 	cpu_sfence();
@@ -571,6 +584,7 @@ lwkt_process_ipiq_core(globaldata_t sgd, lwkt_ipiq_t ip,
 	}
 #endif
     }
+    --mygd->gd_intr_nesting_level;
 
     /*
      * Return non-zero if there are more IPI messages pending on this

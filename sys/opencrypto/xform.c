@@ -62,8 +62,8 @@
 #include <opencrypto/cryptodev.h>
 #include <opencrypto/xform.h>
 
-static void null_encrypt(caddr_t, u_int8_t *);
-static void null_decrypt(caddr_t, u_int8_t *);
+static void null_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static void null_decrypt(caddr_t, u_int8_t *, u_int8_t *);
 static int null_setkey(u_int8_t **, u_int8_t *, int);
 static void null_zerokey(u_int8_t **);
 
@@ -73,28 +73,39 @@ static	int blf_setkey(u_int8_t **, u_int8_t *, int);
 static	int cast5_setkey(u_int8_t **, u_int8_t *, int);
 static	int skipjack_setkey(u_int8_t **, u_int8_t *, int);
 static	int rijndael128_setkey(u_int8_t **, u_int8_t *, int);
+static	int aes_xts_setkey(u_int8_t **, u_int8_t *, int);
+static	int aes_ctr_setkey(u_int8_t **, u_int8_t *, int);
 static	int cml_setkey(u_int8_t **, u_int8_t *, int);
-static	void des1_encrypt(caddr_t, u_int8_t *);
-static	void des3_encrypt(caddr_t, u_int8_t *);
-static	void blf_encrypt(caddr_t, u_int8_t *);
-static	void cast5_encrypt(caddr_t, u_int8_t *);
-static	void skipjack_encrypt(caddr_t, u_int8_t *);
-static	void rijndael128_encrypt(caddr_t, u_int8_t *);
-static	void cml_encrypt(caddr_t, u_int8_t *);
-static	void des1_decrypt(caddr_t, u_int8_t *);
-static	void des3_decrypt(caddr_t, u_int8_t *);
-static	void blf_decrypt(caddr_t, u_int8_t *);
-static	void cast5_decrypt(caddr_t, u_int8_t *);
-static	void skipjack_decrypt(caddr_t, u_int8_t *);
-static	void rijndael128_decrypt(caddr_t, u_int8_t *);
-static	void cml_decrypt(caddr_t, u_int8_t *);
+static	void des1_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void des3_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void blf_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void cast5_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void skipjack_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void rijndael128_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void aes_xts_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void cml_encrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void des1_decrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void des3_decrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void blf_decrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void cast5_decrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void skipjack_decrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void rijndael128_decrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void aes_xts_decrypt(caddr_t, u_int8_t *, u_int8_t *);
+static	void cml_decrypt(caddr_t, u_int8_t *, u_int8_t *);
 static	void des1_zerokey(u_int8_t **);
 static	void des3_zerokey(u_int8_t **);
 static	void blf_zerokey(u_int8_t **);
 static	void cast5_zerokey(u_int8_t **);
 static	void skipjack_zerokey(u_int8_t **);
 static	void rijndael128_zerokey(u_int8_t **);
+static	void aes_xts_zerokey(u_int8_t **);
+static	void aes_ctr_zerokey(u_int8_t **);
 static	void cml_zerokey(u_int8_t **);
+
+static	void aes_ctr_crypt(caddr_t, u_int8_t *, u_int8_t *);
+
+static	void aes_ctr_reinit(caddr_t, u_int8_t *);
+static	void aes_xts_reinit(caddr_t, u_int8_t *);
 
 static	void null_init(void *);
 static	int null_update(void *, u_int8_t *, u_int16_t);
@@ -111,89 +122,122 @@ static	int SHA512Update_int(void *, u_int8_t *, u_int16_t);
 static	u_int32_t deflate_compress(u_int8_t *, u_int32_t, u_int8_t **);
 static	u_int32_t deflate_decompress(u_int8_t *, u_int32_t, u_int8_t **);
 
+/* Helper */
+struct aes_xts_ctx;
+static void aes_xts_crypt(struct aes_xts_ctx *, u_int8_t *, u_int8_t *, u_int);
+
 MALLOC_DEFINE(M_XDATA, "xform", "xform data buffers");
 
 /* Encryption instances */
 struct enc_xform enc_xform_null = {
 	CRYPTO_NULL_CBC, "NULL",
 	/* NB: blocksize of 4 is to generate a properly aligned ESP header */
-	NULL_BLOCK_LEN, 0, 256, /* 2048 bits, max key */
+	NULL_BLOCK_LEN, NULL_BLOCK_LEN, 0, 256, /* 2048 bits, max key */
 	null_encrypt,
 	null_decrypt,
 	null_setkey,
 	null_zerokey,
+	NULL
 };
 
 struct enc_xform enc_xform_des = {
 	CRYPTO_DES_CBC, "DES",
-	DES_BLOCK_LEN, 8, 8,
+	DES_BLOCK_LEN, DES_BLOCK_LEN, 8, 8,
 	des1_encrypt,
 	des1_decrypt,
 	des1_setkey,
 	des1_zerokey,
+	NULL
 };
 
 struct enc_xform enc_xform_3des = {
 	CRYPTO_3DES_CBC, "3DES",
-	DES3_BLOCK_LEN, 24, 24,
+	DES3_BLOCK_LEN, DES3_BLOCK_LEN, 24, 24,
 	des3_encrypt,
 	des3_decrypt,
 	des3_setkey,
-	des3_zerokey
+	des3_zerokey,
+	NULL
 };
 
 struct enc_xform enc_xform_blf = {
 	CRYPTO_BLF_CBC, "Blowfish",
-	BLOWFISH_BLOCK_LEN, 5, 56 /* 448 bits, max key */,
+	BLOWFISH_BLOCK_LEN, BLOWFISH_BLOCK_LEN, 5, 56 /* 448 bits, max key */,
 	blf_encrypt,
 	blf_decrypt,
 	blf_setkey,
-	blf_zerokey
+	blf_zerokey,
+	NULL
 };
 
 struct enc_xform enc_xform_cast5 = {
 	CRYPTO_CAST_CBC, "CAST-128",
-	CAST128_BLOCK_LEN, 5, 16,
+	CAST128_BLOCK_LEN, CAST128_BLOCK_LEN, 5, 16,
 	cast5_encrypt,
 	cast5_decrypt,
 	cast5_setkey,
-	cast5_zerokey
+	cast5_zerokey,
+	NULL
 };
 
 struct enc_xform enc_xform_skipjack = {
 	CRYPTO_SKIPJACK_CBC, "Skipjack",
-	SKIPJACK_BLOCK_LEN, 10, 10,
+	SKIPJACK_BLOCK_LEN, SKIPJACK_BLOCK_LEN, 10, 10,
 	skipjack_encrypt,
 	skipjack_decrypt,
 	skipjack_setkey,
-	skipjack_zerokey
+	skipjack_zerokey,
+	NULL
 };
 
 struct enc_xform enc_xform_rijndael128 = {
 	CRYPTO_RIJNDAEL128_CBC, "Rijndael-128/AES",
-	RIJNDAEL128_BLOCK_LEN, 8, 32,
+	RIJNDAEL128_BLOCK_LEN, RIJNDAEL128_BLOCK_LEN, 8, 32,
 	rijndael128_encrypt,
 	rijndael128_decrypt,
 	rijndael128_setkey,
 	rijndael128_zerokey,
+	NULL
+};
+
+struct enc_xform enc_xform_aes_xts = {
+	CRYPTO_AES_XTS, "AES-XTS",
+	AES_XTS_BLOCK_LEN, AES_XTS_IV_LEN, 32, 64,
+	aes_xts_encrypt,
+	aes_xts_decrypt,
+	aes_xts_setkey,
+	aes_xts_zerokey,
+	aes_xts_reinit
+};
+
+struct enc_xform enc_xform_aes_ctr = {
+	CRYPTO_AES_CTR, "AES-CTR",
+	AESCTR_BLOCK_LEN, AESCTR_IV_LEN, 16+4, 32+4,
+	aes_ctr_crypt,
+	aes_ctr_crypt,
+	aes_ctr_setkey,
+	aes_ctr_zerokey,
+	aes_ctr_reinit
 };
 
 struct enc_xform enc_xform_arc4 = {
 	CRYPTO_ARC4, "ARC4",
-	1, 1, 32,
+	1, 1, 1, 32,
 	NULL,
 	NULL,
 	NULL,
 	NULL,
+	NULL
 };
 
 struct enc_xform enc_xform_camellia = {
 	CRYPTO_CAMELLIA_CBC, "Camellia",
-	CAMELLIA_BLOCK_LEN, 8, 32,
+	CAMELLIA_BLOCK_LEN, CAMELLIA_BLOCK_LEN, 8, 32,
 	cml_encrypt,
 	cml_decrypt,
 	cml_setkey,
 	cml_zerokey,
+	NULL
 };
 
 /* Authentication instances */
@@ -268,11 +312,11 @@ struct comp_algo comp_algo_deflate = {
  * Encryption wrapper routines.
  */
 static void
-null_encrypt(caddr_t key, u_int8_t *blk)
+null_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 }
 static void
-null_decrypt(caddr_t key, u_int8_t *blk)
+null_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 }
 static int
@@ -288,7 +332,7 @@ null_zerokey(u_int8_t **sched)
 }
 
 static void
-des1_encrypt(caddr_t key, u_int8_t *blk)
+des1_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	des_cblock *cb = (des_cblock *) blk;
 	des_key_schedule *p = (des_key_schedule *) key;
@@ -297,7 +341,7 @@ des1_encrypt(caddr_t key, u_int8_t *blk)
 }
 
 static void
-des1_decrypt(caddr_t key, u_int8_t *blk)
+des1_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	des_cblock *cb = (des_cblock *) blk;
 	des_key_schedule *p = (des_key_schedule *) key;
@@ -312,7 +356,7 @@ des1_setkey(u_int8_t **sched, u_int8_t *key, int len)
 	int err;
 
 	p = kmalloc(sizeof (des_key_schedule),
-		M_CRYPTO_DATA, M_NOWAIT|M_ZERO);
+		    M_CRYPTO_DATA, M_INTWAIT | M_ZERO);
 	if (p != NULL) {
 		des_set_key((des_cblock *) key, p[0]);
 		err = 0;
@@ -331,7 +375,7 @@ des1_zerokey(u_int8_t **sched)
 }
 
 static void
-des3_encrypt(caddr_t key, u_int8_t *blk)
+des3_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	des_cblock *cb = (des_cblock *) blk;
 	des_key_schedule *p = (des_key_schedule *) key;
@@ -340,7 +384,7 @@ des3_encrypt(caddr_t key, u_int8_t *blk)
 }
 
 static void
-des3_decrypt(caddr_t key, u_int8_t *blk)
+des3_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	des_cblock *cb = (des_cblock *) blk;
 	des_key_schedule *p = (des_key_schedule *) key;
@@ -354,8 +398,8 @@ des3_setkey(u_int8_t **sched, u_int8_t *key, int len)
 	des_key_schedule *p;
 	int err;
 
-	p = kmalloc(3*sizeof (des_key_schedule),
-		M_CRYPTO_DATA, M_NOWAIT|M_ZERO);
+	p = kmalloc(3 * sizeof(des_key_schedule),
+		    M_CRYPTO_DATA, M_INTWAIT | M_ZERO);
 	if (p != NULL) {
 		des_set_key((des_cblock *)(key +  0), p[0]);
 		des_set_key((des_cblock *)(key +  8), p[1]);
@@ -376,7 +420,7 @@ des3_zerokey(u_int8_t **sched)
 }
 
 static void
-blf_encrypt(caddr_t key, u_int8_t *blk)
+blf_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	BF_LONG t[2];
 
@@ -391,7 +435,7 @@ blf_encrypt(caddr_t key, u_int8_t *blk)
 }
 
 static void
-blf_decrypt(caddr_t key, u_int8_t *blk)
+blf_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	BF_LONG t[2];
 
@@ -410,8 +454,7 @@ blf_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
 	int err;
 
-	*sched = kmalloc(sizeof(BF_KEY),
-		M_CRYPTO_DATA, M_NOWAIT|M_ZERO);
+	*sched = kmalloc(sizeof(BF_KEY), M_CRYPTO_DATA, M_INTWAIT | M_ZERO);
 	if (*sched != NULL) {
 		BF_set_key((BF_KEY *) *sched, len, key);
 		err = 0;
@@ -429,13 +472,13 @@ blf_zerokey(u_int8_t **sched)
 }
 
 static void
-cast5_encrypt(caddr_t key, u_int8_t *blk)
+cast5_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	cast_encrypt((cast_key *) key, blk, blk);
 }
 
 static void
-cast5_decrypt(caddr_t key, u_int8_t *blk)
+cast5_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	cast_decrypt((cast_key *) key, blk, blk);
 }
@@ -445,7 +488,7 @@ cast5_setkey(u_int8_t **sched, u_int8_t *key, int len)
 {
 	int err;
 
-	*sched = kmalloc(sizeof(cast_key), M_CRYPTO_DATA, M_NOWAIT|M_ZERO);
+	*sched = kmalloc(sizeof(cast_key), M_CRYPTO_DATA, M_INTWAIT | M_ZERO);
 	if (*sched != NULL) {
 		cast_setkey((cast_key *)*sched, key, len);
 		err = 0;
@@ -463,13 +506,13 @@ cast5_zerokey(u_int8_t **sched)
 }
 
 static void
-skipjack_encrypt(caddr_t key, u_int8_t *blk)
+skipjack_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	skipjack_forwards(blk, blk, (u_int8_t **) key);
 }
 
 static void
-skipjack_decrypt(caddr_t key, u_int8_t *blk)
+skipjack_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	skipjack_backwards(blk, blk, (u_int8_t **) key);
 }
@@ -481,7 +524,7 @@ skipjack_setkey(u_int8_t **sched, u_int8_t *key, int len)
 
 	/* NB: allocate all the memory that's needed at once */
 	*sched = kmalloc(10 * (sizeof(u_int8_t *) + 0x100),
-		M_CRYPTO_DATA, M_NOWAIT|M_ZERO);
+			 M_CRYPTO_DATA, M_INTWAIT | M_ZERO);
 	if (*sched != NULL) {
 		u_int8_t** key_tables = (u_int8_t**) *sched;
 		u_int8_t* table = (u_int8_t*) &key_tables[10];
@@ -507,13 +550,13 @@ skipjack_zerokey(u_int8_t **sched)
 }
 
 static void
-rijndael128_encrypt(caddr_t key, u_int8_t *blk)
+rijndael128_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	rijndael_encrypt((rijndael_ctx *) key, (u_char *) blk, (u_char *) blk);
 }
 
 static void
-rijndael128_decrypt(caddr_t key, u_int8_t *blk)
+rijndael128_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	rijndael_decrypt(((rijndael_ctx *) key), (u_char *) blk,
 	    (u_char *) blk);
@@ -527,7 +570,7 @@ rijndael128_setkey(u_int8_t **sched, u_int8_t *key, int len)
 	if (len != 16 && len != 24 && len != 32)
 		return (EINVAL);
 	*sched = kmalloc(sizeof(rijndael_ctx), M_CRYPTO_DATA,
-	    M_NOWAIT|M_ZERO);
+			 M_INTWAIT | M_ZERO);
 	if (*sched != NULL) {
 		rijndael_set_key((rijndael_ctx *) *sched, (u_char *) key,
 		    len * 8);
@@ -545,14 +588,186 @@ rijndael128_zerokey(u_int8_t **sched)
 	*sched = NULL;
 }
 
+#define AES_XTS_ALPHA		0x87	/* GF(2^128) generator polynomial */
+
+struct aes_xts_ctx {
+	rijndael_ctx key1;
+	rijndael_ctx key2;
+};
+
+void
+aes_xts_reinit(caddr_t key, u_int8_t *iv)
+{
+	struct aes_xts_ctx *ctx = (struct aes_xts_ctx *)key;
+#if 0
+	u_int64_t blocknum;
+	u_int i;
+#endif
+
+#if 0
+	/* 
+	 * XXX: I've no idea why OpenBSD chose to make this dance of the moon
+	 * around just copying the IV...
+	 */
+	/*
+	 * Prepare tweak as E_k2(IV). IV is specified as LE representation
+	 * of a 64-bit block number which we allow to be passed in directly.
+	 */
+	bcopy(iv, &blocknum, AES_XTS_IV_LEN);
+	for (i = 0; i < AES_XTS_IV_LEN; i++) {
+		ctx->tweak[i] = blocknum & 0xff;
+		blocknum >>= 8;
+	}
+#endif
+	/* Last 64 bits of IV are always zero */
+	bzero(iv + AES_XTS_IV_LEN, AES_XTS_IV_LEN);
+
+	rijndael_encrypt(&ctx->key2, iv, iv);
+}
+
+void
+aes_xts_crypt(struct aes_xts_ctx *ctx, u_int8_t *data, u_int8_t *iv, u_int do_encrypt)
+{
+	u_int8_t block[AES_XTS_BLOCK_LEN];
+	u_int i, carry_in, carry_out;
+
+	for (i = 0; i < AES_XTS_BLOCK_LEN; i++)
+		block[i] = data[i] ^ iv[i];
+
+	if (do_encrypt)
+		rijndael_encrypt(&ctx->key1, block, data);
+	else
+		rijndael_decrypt(&ctx->key1, block, data);
+
+	for (i = 0; i < AES_XTS_BLOCK_LEN; i++)
+		data[i] ^= iv[i];
+
+	/* Exponentiate tweak */
+	carry_in = 0;
+	for (i = 0; i < AES_XTS_BLOCK_LEN; i++) {
+		carry_out = iv[i] & 0x80;
+		iv[i] = (iv[i] << 1) | (carry_in ? 1 : 0);
+		carry_in = carry_out;
+	}
+	if (carry_in)
+		iv[0] ^= AES_XTS_ALPHA;
+	bzero(block, sizeof(block));
+}
+
+void
+aes_xts_encrypt(caddr_t key, u_int8_t *data, u_int8_t *iv)
+{
+	aes_xts_crypt((struct aes_xts_ctx *)key, data, iv, 1);
+}
+
+void
+aes_xts_decrypt(caddr_t key, u_int8_t *data, u_int8_t *iv)
+{
+	aes_xts_crypt((struct aes_xts_ctx *)key, data, iv, 0);
+}
+
+int
+aes_xts_setkey(u_int8_t **sched, u_int8_t *key, int len)
+{
+	struct aes_xts_ctx *ctx;
+	
+	if (len != 32 && len != 64)
+		return -1;
+	
+	*sched = kmalloc(sizeof(struct aes_xts_ctx), M_CRYPTO_DATA,
+	    M_WAITOK | M_ZERO);
+	ctx = (struct aes_xts_ctx *)*sched;
+	
+	rijndael_set_key(&ctx->key1, key, len * 4);
+	rijndael_set_key(&ctx->key2, key + (len / 2), len * 4);
+	
+	return 0;
+}
+
+void
+aes_xts_zerokey(u_int8_t **sched)
+{
+	bzero(*sched, sizeof(struct aes_xts_ctx));
+	kfree(*sched, M_CRYPTO_DATA);
+	*sched = NULL;
+}
+
+#define AESCTR_NONCESIZE	4
+
+struct aes_ctr_ctx {
+	u_int32_t       ac_ek[4*(14 + 1)];
+	u_int8_t        ac_block[AESCTR_BLOCK_LEN];
+	int             ac_nr;
+};
+
+void
+aes_ctr_reinit(caddr_t key, u_int8_t *iv)
+{
+	struct aes_ctr_ctx *ctx;
+
+	ctx = (struct aes_ctr_ctx *)key;
+	bcopy(iv, iv + AESCTR_NONCESIZE, AESCTR_IV_LEN);
+	bcopy(ctx->ac_block, iv, AESCTR_NONCESIZE);
+
+	/* reset counter */
+	bzero(iv + AESCTR_NONCESIZE + AESCTR_IV_LEN, 4);
+}
+
+void
+aes_ctr_crypt(caddr_t key, u_int8_t *data, u_int8_t *iv)
+{
+	struct aes_ctr_ctx *ctx;
+	u_int8_t keystream[AESCTR_BLOCK_LEN];
+	int i;
+
+	ctx = (struct aes_ctr_ctx *)key;
+	/* increment counter */
+	for (i = AESCTR_BLOCK_LEN - 1;
+	i >= AESCTR_NONCESIZE + AESCTR_IV_LEN; i--)
+		if (++iv[i])   /* continue on overflow */
+			break;
+	rijndaelEncrypt(ctx->ac_ek, ctx->ac_nr, iv, keystream);
+	for (i = 0; i < AESCTR_BLOCK_LEN; i++)
+		data[i] ^= keystream[i];
+}
+
+int
+aes_ctr_setkey(u_int8_t **sched, u_int8_t *key, int len)
+{
+	struct aes_ctr_ctx *ctx;
+
+	if (len < AESCTR_NONCESIZE)
+		return -1;
+
+	*sched = kmalloc(sizeof(struct aes_ctr_ctx), M_CRYPTO_DATA,
+	M_WAITOK | M_ZERO);
+	ctx = (struct aes_ctr_ctx *)*sched;
+	ctx->ac_nr = rijndaelKeySetupEnc(ctx->ac_ek, (u_char *)key,
+	(len - AESCTR_NONCESIZE) * 8);
+	if (ctx->ac_nr == 0) {
+		aes_ctr_zerokey(sched);
+		return -1;
+	}
+	bcopy(key + len - AESCTR_NONCESIZE, ctx->ac_block, AESCTR_NONCESIZE);
+	return 0;
+}
+
+void
+aes_ctr_zerokey(u_int8_t **sched)
+{
+	bzero(*sched, sizeof(struct aes_ctr_ctx));
+	kfree(*sched, M_CRYPTO_DATA);
+	*sched = NULL;
+}
+
 static void
-cml_encrypt(caddr_t key, u_int8_t *blk)
+cml_encrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	camellia_encrypt((camellia_ctx *) key, (u_char *) blk, (u_char *) blk);
 }
 
 static void
-cml_decrypt(caddr_t key, u_int8_t *blk)
+cml_decrypt(caddr_t key, u_int8_t *blk, u_int8_t *iv)
 {
 	camellia_decrypt(((camellia_ctx *) key), (u_char *) blk,
 	    (u_char *) blk);
@@ -566,7 +781,7 @@ cml_setkey(u_int8_t **sched, u_int8_t *key, int len)
 	if (len != 16 && len != 24 && len != 32)
 		return (EINVAL);
 	*sched = kmalloc(sizeof(camellia_ctx), M_CRYPTO_DATA,
-	    M_NOWAIT|M_ZERO);
+			 M_INTWAIT | M_ZERO);
 	if (*sched != NULL) {
 		camellia_set_key((camellia_ctx *) *sched, (u_char *) key,
 		    len * 8);

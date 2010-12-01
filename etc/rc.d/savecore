@@ -29,7 +29,7 @@ savecore_prestart()
 	#
 	DUMPDIR="${dumpdir:-/var/crash}"
 
-	# Quit if we have no dumb device
+	# Quit if we have no dump device
 	case ${dumpdev} in
 	[Nn][Oo] | '')
 		debug 'No dump device. Quitting.'
@@ -57,8 +57,14 @@ savecore_prestart()
 savecore_start()
 {
 	if [ X$dumpdev != X ]; then
-		echo "Checking for core dump..."
-		savecore ${savecore_flags} ${DUMPDIR} ${dumpdev}
+		if savecore -C "${DUMPDIR}" "${dumpdev}" > /dev/null; then
+			savecore ${savecore_flags} ${DUMPDIR} ${dumpdev}
+			if checkyesno crashinfo_enable; then
+				${crashinfo_program} -d ${DUMPDIR}
+			fi
+		else
+			echo 'No core dumps found.'
+		fi
 		return ${RC_CONFIGURED}
 	fi
 }

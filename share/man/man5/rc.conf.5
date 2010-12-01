@@ -24,7 +24,7 @@
 .\"
 .\" $FreeBSD: src/share/man/man5/rc.conf.5,v 1.197 2003/07/28 13:56:00 mbr Exp $
 .\"
-.Dd June 29, 2010
+.Dd October 12, 2010
 .Dt RC.CONF 5
 .Os
 .Sh NAME
@@ -850,6 +850,35 @@ device via DHCP, it is possible to use something like:
 .Bd -literal
 ifconfig_ed0="DHCP"
 .Ed
+.Pp
+If a
+.Va wlans_ Ns Aq Ar interface
+variable is set,
+an
+.Xr wlan 4
+interface will be created for each item in the list with the
+.Ar wlandev
+argument set to
+.Ar interface .
+Further wlan cloning arguments may be passed to the
+.Xr ifconfig 8
+.Cm create
+command by setting the
+.Va create_args_ Ns Aq Ar interface
+variable.
+One or more
+.Xr wlan 4
+devices must be created for each wireless devices as of
+.Dx 2.5 .
+Debugging flags for
+.Xr wlan 4
+devices as set by
+.Xr wlandebug 8
+may be specified with an
+.Va wlandebug_ Ns Aq Ar interface
+variable.
+The contents of this variable will be passed directly to
+.Xr wlandebug 8 .
 .Pp
 Also, if your interface needs WPA authentication, it is possible to add
 .Dq Li WPA
@@ -2317,6 +2346,22 @@ is set.
 If crash dumps are enabled, these are the flags to pass to the
 .Xr savecore 8
 utility.
+.It Va crashinfo_enable
+.Pq Vt bool
+Set to
+.Dq Li YES
+to turn on automatic crash dump summary generation using the utility
+specified by the
+.Va crashinfo_program
+variable.
+.It Va crashinfo_program
+.Pq Vt str
+Program to run to generate a crash dump summary if the variable
+.Va crashinfo_enable
+is set to
+.Dq Li YES .
+The default value is
+.Pa /usr/sbin/crashinfo .
 .It Va enable_quotas
 .Pq Vt bool
 Set to
@@ -2813,6 +2858,14 @@ the udevd daemon will be started on boot.
 If set to
 .Dq Li NO ,
 any configured vkernels will not be started.
+.It Va vkernel_kill_timeout
+.Pq Vt int
+This defines the default number of seconds that we will wait for the
+vkernel to shut down on it's own. If after this time it's still alive,
+it will be killed with SIGKILL.
+.It Va vkernel_bin
+.Pq Vt str
+Defines the default path to the vkernel binary.
 .It Va vkernel_list
 .Pq Vt str
 A space separated list of names for vkernels.
@@ -2831,9 +2884,10 @@ vkernel_example_rootimg_list="/var/vkernel/rootimg.01"
 vkernel_example_iface_list="auto:bridge0"
 vkernel_example_logfile="/dev/null"
 vkernel_example_flags="-U"
+vkernel_example_kill_timeout="45"
 .Ed
 .Pp
-The last three are optional.
+The last five are optional.
 They default to an empty string if not set, except for logfile which defaults to
 .Pa /dev/null
 if it is not set.

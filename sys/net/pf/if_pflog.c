@@ -1,7 +1,4 @@
-/*	$FreeBSD: src/sys/contrib/pf/net/if_pflog.c,v 1.9 2004/06/22 20:13:24 brooks Exp $	*/
-/*	$OpenBSD: if_pflog.c,v 1.11 2003/12/31 11:18:25 cedric Exp $	*/
-/*	$DragonFly: src/sys/net/pf/if_pflog.c,v 1.6 2006/12/22 23:44:57 swildner Exp $ */
-/*	$OpenBSD: if_pflog.c,v 1.22 2006/12/15 09:31:20 otto Exp $	*/
+/*	$OpenBSD: if_pflog.c,v 1.24 2007/05/26 17:13:30 jason Exp $	*/
 /*
  * The authors of this code are John Ioannidis (ji@tla.org),
  * Angelos D. Keromytis (kermit@csd.uch.gr) and 
@@ -92,7 +89,6 @@ int	pflogoutput(struct ifnet *, struct mbuf *, struct sockaddr *,
 int	pflogioctl(struct ifnet *, u_long, caddr_t, struct ucred *);
 void	pflogrtrequest(int, struct rtentry *, struct sockaddr *);
 void	pflogstart(struct ifnet *);
-
 int	pflog_clone_create(struct if_clone *, int, caddr_t);
 void pflog_clone_destroy(struct ifnet *);
 
@@ -109,7 +105,6 @@ pflogattach(int npflog)
 	LIST_INIT(&pflogif_list);
 	for (i = 0; i < PFLOGIFS_MAX; i++)
 		pflogifs[i] = NULL;
-	(void) pflog_clone_create(&pflog_cloner, 0, NULL);
 	if_clone_attach(&pflog_cloner);
 }
 
@@ -119,14 +114,21 @@ pflog_clone_create(struct if_clone *ifc, int unit, caddr_t param __unused)
 	struct ifnet *ifp;
 	struct pflog_softc *pflogif;
 
-	if (unit >= PFLOGIFS_MAX)
-		return (EINVAL);
+	lwkt_gettoken(&pf_token);
 
-	if ((pflogif = kmalloc(sizeof(*pflogif), M_DEVBUF, M_WAITOK)) == NULL)
+	if (unit >= PFLOGIFS_MAX) {
+		lwkt_reltoken(&pf_token);
+		return (EINVAL);
+	}
+
+	if ((pflogif = kmalloc(sizeof(*pflogif), M_DEVBUF, M_WAITOK)) == NULL) {
+		lwkt_reltoken(&pf_token);
 		return (ENOMEM);
+	}
 	bzero(pflogif, sizeof(*pflogif));
 
 	pflogif->sc_unit = unit;
+	lwkt_reltoken(&pf_token);
 	ifp = &pflogif->sc_if;
 	ksnprintf(ifp->if_xname, sizeof ifp->if_xname, "pflog%d", unit);
 	ifp->if_softc = pflogif;
@@ -140,12 +142,14 @@ pflog_clone_create(struct if_clone *ifc, int unit, caddr_t param __unused)
 	if_attach(ifp, NULL);
 
 	bpfattach(&pflogif->sc_if, DLT_PFLOG, PFLOG_HDRLEN);
+	lwkt_gettoken(&pf_token);
 
 	crit_enter();
 	LIST_INSERT_HEAD(&pflogif_list, pflogif, sc_list);
 	pflogifs[unit] = ifp;
 	crit_exit();
 
+	lwkt_reltoken(&pf_token);
 	return (0);
 }
 
@@ -154,16 +158,21 @@ pflog_clone_destroy(struct ifnet *ifp)
 {
 	struct pflog_softc	*pflogif = ifp->if_softc;
 
+	lwkt_gettoken(&pf_token);
+
 	crit_enter();
 	pflogifs[pflogif->sc_unit] = NULL;
 	LIST_REMOVE(pflogif, sc_list);
 	crit_exit();
 
+	lwkt_reltoken(&pf_token);
 #if NBPFILTER > 0
 	bpfdetach(ifp);
 #endif
 	if_detach(ifp);
+	lwkt_gettoken(&pf_token);
 	kfree(pflogif, M_DEVBUF);
+	lwkt_reltoken(&pf_token);
 }
 
 /*
@@ -174,11 +183,15 @@ pflogstart(struct ifnet *ifp)
 {
 	struct mbuf *m;
 
+	ASSERT_LWKT_TOKEN_HELD(&pf_token);
+
 	for (;;) {
+		lwkt_reltoken(&pf_token);
 		crit_enter();
 		IF_DROP(&ifp->if_snd);
 		IF_DEQUEUE(&ifp->if_snd, m);
 		crit_exit();
+		lwkt_gettoken(&pf_token);
 
 		if (m == NULL)
 			return;
@@ -207,20 +220,27 @@ pflogrtrequest(int cmd, struct rtentry *rt, struct sockaddr *sa)
 int
 pflogioctl(struct ifnet *ifp, u_long cmd, caddr_t data, struct ucred *cr)
 {
+
+	lwkt_gettoken(&pf_token);
+
 	switch (cmd) {
 	case SIOCSIFADDR:
 	case SIOCAIFADDR:
 	case SIOCSIFDSTADDR:
 	case SIOCSIFFLAGS:
+		lwkt_reltoken(&pf_token);
 		if (ifp->if_flags & IFF_UP)
 			ifp->if_flags |= IFF_RUNNING;
 		else
 			ifp->if_flags &= ~IFF_RUNNING;
+		lwkt_gettoken(&pf_token);
 		break;
 	default:
+		lwkt_reltoken(&pf_token);
 		return (EINVAL);
 	}
 
+	lwkt_reltoken(&pf_token);
 	return (0);
 }
 
@@ -231,6 +251,8 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
 {
 	struct ifnet *ifn = NULL;
 	struct pfloghdr hdr;
+
+	ASSERT_LWKT_TOKEN_HELD(&pf_token);
 
 	if (kif == NULL || m == NULL || rm == NULL)
 		return (-1);
@@ -251,13 +273,12 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
 	} else {
 		hdr.rulenr = htonl(am->nr);
 		hdr.subrulenr = htonl(rm->nr);
-		if (ruleset != NULL && ruleset->anchor != NULL) {
+		if (ruleset != NULL && ruleset->anchor != NULL)
 			strlcpy(hdr.ruleset, ruleset->anchor->name,
 			    sizeof(hdr.ruleset));
-		}
 	}
 	if (rm->log & PF_LOG_SOCKET_LOOKUP && !pd->lookup.done)
-		pd->lookup.done = pf_socket_lookup(dir, pd, NULL);
+		pd->lookup.done = pf_socket_lookup(dir, pd);
 	if (pd->lookup.done > 0) {
 		hdr.uid = pd->lookup.uid;
 		hdr.pid = pd->lookup.pid;
@@ -285,8 +306,10 @@ pflog_packet(struct pfi_kif *kif, struct mbuf *m, sa_family_t af, u_int8_t dir,
 
 	ifn->if_opackets++;
 	ifn->if_obytes += m->m_pkthdr.len;
+	lwkt_reltoken(&pf_token);
 	bpf_mtap_hdr(ifn->if_bpf, (char *)&hdr, PFLOG_HDRLEN, m,
 	    BPF_DIRECTION_OUT);
+	lwkt_gettoken(&pf_token);
 
 #ifdef INET
 	if (af == AF_INET) {
@@ -305,25 +328,31 @@ pflog_modevent(module_t mod, int type, void *data)
 {
 	int error = 0;
 
+	lwkt_gettoken(&pf_token);
+
 	switch (type) {
 	case MOD_LOAD:
 		LIST_INIT(&pflogif_list);
+		lwkt_reltoken(&pf_token);
 		if_clone_attach(&pflog_cloner);
+		lwkt_gettoken(&pf_token);
 		break;
 
 	case MOD_UNLOAD:
+		lwkt_reltoken(&pf_token);
 		if_clone_detach(&pflog_cloner);
 		while (!LIST_EMPTY(&pflogif_list)) {
 			pflog_clone_destroy(
 				&LIST_FIRST(&pflogif_list)->sc_if);
 		}
+		lwkt_gettoken(&pf_token);
 		break;
 
 	default:
 		error = EINVAL;
 		break;
 	}
-
+	lwkt_reltoken(&pf_token);
 	return error;
 }
 

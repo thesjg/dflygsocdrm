@@ -42,6 +42,7 @@
 #include <sys/resourcevar.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
+#include <sys/socketvar2.h>
 #include <sys/socketops.h>
 #include <sys/poll.h>
 #include <sys/uio.h>
@@ -153,7 +154,7 @@ nb_connect_in(struct nbpcb *nbp, struct sockaddr_in *to, struct thread *td)
 	nbp->nbp_tso = so;
 	so->so_upcallarg = (caddr_t)nbp;
 	so->so_upcall = nb_upcall;
-	so->so_rcv.ssb_flags |= SSB_UPCALL;
+	atomic_set_int(&so->so_rcv.ssb_flags, SSB_UPCALL);
 	so->so_rcv.ssb_timeo = (5 * hz);
 	so->so_snd.ssb_timeo = (5 * hz);
 	error = soreserve(so, nbp->nbp_sndbuf, nbp->nbp_rcvbuf,
@@ -162,16 +163,16 @@ nb_connect_in(struct nbpcb *nbp, struct sockaddr_in *to, struct thread *td)
 		goto bad;
 	nb_setsockopt_int(so, SOL_SOCKET, SO_KEEPALIVE, 1);
 	nb_setsockopt_int(so, IPPROTO_TCP, TCP_NODELAY, 1);
-	so->so_rcv.ssb_flags &= ~SSB_NOINTR;
-	so->so_snd.ssb_flags &= ~SSB_NOINTR;
+	atomic_clear_int(&so->so_rcv.ssb_flags, SSB_NOINTR);
+	atomic_clear_int(&so->so_snd.ssb_flags, SSB_NOINTR);
 	error = soconnect(so, (struct sockaddr*)to, td);
 
 	/*
 	 * If signals are allowed nbssn_recv() can wind up in a hard loop
 	 * on EWOULDBLOCK. 
 	 */
-	so->so_rcv.ssb_flags |= SSB_NOINTR;
-	so->so_snd.ssb_flags |= SSB_NOINTR;
+	atomic_set_int(&so->so_rcv.ssb_flags, SSB_NOINTR);
+	atomic_set_int(&so->so_snd.ssb_flags, SSB_NOINTR);
 	if (error)
 		goto bad;
 	crit_enter();
@@ -179,7 +180,7 @@ nb_connect_in(struct nbpcb *nbp, struct sockaddr_in *to, struct thread *td)
 		tsleep(&so->so_timeo, 0, "nbcon", 2 * hz);
 		if ((so->so_state & SS_ISCONNECTING) && so->so_error == 0 &&
 			(error = nb_intr(nbp, td)) != 0) {
-			so->so_state &= ~SS_ISCONNECTING;
+			soclrstate(so, SS_ISCONNECTING);
 			crit_exit();
 			goto bad;
 		}

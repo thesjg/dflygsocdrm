@@ -134,7 +134,7 @@ lf_count_adjust(struct proc *p, int increase)
 	KKASSERT(p != NULL);
 
 	uip = p->p_ucred->cr_uidinfo;
-	spin_lock_wr(&uip->ui_lock);
+	spin_lock(&uip->ui_lock);
 
 	if (increase)
 		uip->ui_posixlocks += p->p_numposixlocks;
@@ -144,7 +144,7 @@ lf_count_adjust(struct proc *p, int increase)
 	KASSERT(uip->ui_posixlocks >= 0,
 		("Negative number of POSIX locks held by %s user: %d.",
 		 increase ? "new" : "old", uip->ui_posixlocks));
-	spin_unlock_wr(&uip->ui_lock);
+	spin_unlock(&uip->ui_lock);
 }
 
 static int
@@ -162,7 +162,7 @@ lf_count_change(struct proc *owner, int diff)
 	max = MIN(owner->p_rlimit[RLIMIT_POSIXLOCKS].rlim_cur,
 		  maxposixlocksperuid);
 
-	spin_lock_wr(&uip->ui_lock);
+	spin_lock(&uip->ui_lock);
 	if (diff > 0 && owner->p_ucred->cr_uid != 0 && max != -1 &&
 	    uip->ui_posixlocks >= max ) {
 		ret = 1;
@@ -177,7 +177,7 @@ lf_count_change(struct proc *owner, int diff)
 			 uip->ui_posixlocks));
 		ret = 0;
 	}
-	spin_unlock_wr(&uip->ui_lock);
+	spin_unlock(&uip->ui_lock);
 	return ret;
 }
 
@@ -812,7 +812,7 @@ lf_alloc_range(void)
 	struct lockf_range *range;
 
 #ifdef INVARIANTS
-	lf_global_counter++;
+	atomic_add_int(&lf_global_counter, 1);
 #endif
 	range = kmalloc(sizeof(struct lockf_range), M_LOCKF, M_WAITOK);
 	range->lf_owner = NULL;
@@ -853,8 +853,8 @@ lf_destroy_range(struct lockf_range *range)
 		  range->lf_start, range->lf_end);
 	kfree(range, M_LOCKF);
 #ifdef INVARIANTS
-	lf_global_counter--;
-	KKASSERT(lf_global_counter>=0);
+	atomic_add_int(&lf_global_counter, -1);
+	KKASSERT(lf_global_counter >= 0);
 #endif
 }
 

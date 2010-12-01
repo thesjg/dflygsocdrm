@@ -160,7 +160,7 @@ cam_periph_alloc(periph_ctor_t *periph_ctor,
 	
 	periph = kmalloc(sizeof(*periph), M_CAMPERIPH, M_INTWAIT | M_ZERO);
 	
-	init_level++;
+	init_level++;	/* 1 */
 
 	xpt_lock_buses();
 	for (p_drv = periph_drivers; *p_drv != NULL; p_drv++) {
@@ -170,6 +170,7 @@ cam_periph_alloc(periph_ctor_t *periph_ctor,
 	xpt_unlock_buses();
 
 	sim = xpt_path_sim(path);
+	CAM_SIM_LOCK(sim);
 	path_id = xpt_path_path_id(path);
 	target_id = xpt_path_target_id(path);
 	lun_id = xpt_path_lun_id(path);
@@ -189,9 +190,9 @@ cam_periph_alloc(periph_ctor_t *periph_ctor,
 	if (status != CAM_REQ_CMP)
 		goto failure;
 
-	periph->path = path;
-	init_level++;
+	init_level++;	/* 2 */
 
+	periph->path = path;
 	status = xpt_add_periph(periph);
 
 	if (status != CAM_REQ_CMP)
@@ -220,15 +221,18 @@ failure:
 	switch (init_level) {
 	case 4:
 		/* Initialized successfully */
+		CAM_SIM_UNLOCK(sim);
 		break;
 	case 3:
 		TAILQ_REMOVE(&(*p_drv)->units, periph, unit_links);
 		xpt_remove_periph(periph);
 		/* FALLTHROUGH */
 	case 2:
-		xpt_free_path(periph->path);
+		periph->path = NULL;
 		/* FALLTHROUGH */
 	case 1:
+		CAM_SIM_UNLOCK(sim);	/* sim was retrieved from path */
+		xpt_free_path(path);
 		kfree(periph, M_CAMPERIPH);
 		/* FALLTHROUGH */
 	case 0:
@@ -610,15 +614,15 @@ cam_periph_mapmem(union ccb *ccb, struct cam_periph_map_info *mapinfo)
 			return(EINVAL);
 		}
 		if (ccb->cdm.pattern_buf_len > 0) {
-			data_ptrs[0] = (u_int8_t **)&ccb->cdm.patterns;
+			data_ptrs[0] = (void *)&ccb->cdm.patterns;
 			lengths[0] = ccb->cdm.pattern_buf_len;
 			mapinfo->dirs[0] = CAM_DIR_OUT;
-			data_ptrs[1] = (u_int8_t **)&ccb->cdm.matches;
+			data_ptrs[1] = (void *)&ccb->cdm.matches;
 			lengths[1] = ccb->cdm.match_buf_len;
 			mapinfo->dirs[1] = CAM_DIR_IN;
 			numbufs = 2;
 		} else {
-			data_ptrs[0] = (u_int8_t **)&ccb->cdm.matches;
+			data_ptrs[0] = (void *)&ccb->cdm.matches;
 			lengths[0] = ccb->cdm.match_buf_len;
 			mapinfo->dirs[0] = CAM_DIR_IN;
 			numbufs = 1;
@@ -783,10 +787,10 @@ cam_periph_unmapmem(union ccb *ccb, struct cam_periph_map_info *mapinfo)
 		numbufs = min(mapinfo->num_bufs_used, 2);
 
 		if (numbufs == 1) {
-			data_ptrs[0] = (u_int8_t **)&ccb->cdm.matches;
+			data_ptrs[0] = (void *)&ccb->cdm.matches;
 		} else {
-			data_ptrs[0] = (u_int8_t **)&ccb->cdm.patterns;
-			data_ptrs[1] = (u_int8_t **)&ccb->cdm.matches;
+			data_ptrs[0] = (void *)&ccb->cdm.patterns;
+			data_ptrs[1] = (void *)&ccb->cdm.matches;
 		}
 		break;
 	case XPT_SCSI_IO:

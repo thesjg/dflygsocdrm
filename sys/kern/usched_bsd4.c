@@ -159,7 +159,8 @@ static volatile int bsd4_scancpu;
 static struct spinlock bsd4_spin;
 static struct usched_bsd4_pcpu bsd4_pcpu[MAXCPU];
 
-SYSCTL_INT(_debug, OID_AUTO, bsd4_runqcount, CTLFLAG_RD, &bsd4_runqcount, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, bsd4_runqcount, CTLFLAG_RD, &bsd4_runqcount, 0,
+    "Number of run queues");
 #ifdef INVARIANTS
 static int usched_nonoptimal;
 SYSCTL_INT(_debug, OID_AUTO, usched_nonoptimal, CTLFLAG_RW,
@@ -169,7 +170,8 @@ SYSCTL_INT(_debug, OID_AUTO, usched_optimal, CTLFLAG_RW,
         &usched_optimal, 0, "acquire_curproc() was optimal");
 #endif
 static int usched_debug = -1;
-SYSCTL_INT(_debug, OID_AUTO, scdebug, CTLFLAG_RW, &usched_debug, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, scdebug, CTLFLAG_RW, &usched_debug, 0,
+    "Print debug information for this pid");
 #ifdef SMP
 static int remote_resched_nonaffinity;
 static int remote_resched_affinity;
@@ -291,10 +293,7 @@ bsd4_acquire_curproc(struct lwp *lp)
 		 * the run queue.  When we are reactivated we will have
 		 * another chance.
 		 */
-		if (lwkt_check_resched(lp->lwp_thread) > 1) {
-			lwkt_switch();
-			continue;
-		}
+		lwkt_switch();
 	} while (dd->uschedcp != lp);
 
 	crit_exit();
@@ -369,22 +368,22 @@ bsd4_select_curproc(globaldata_t gd)
 
 	crit_enter_gd(gd);
 
-	spin_lock_wr(&bsd4_spin);
+	spin_lock(&bsd4_spin);
 	if ((nlp = chooseproc_locked(dd->uschedcp)) != NULL) {
 		atomic_set_int(&bsd4_curprocmask, 1 << cpuid);
 		dd->upri = nlp->lwp_priority;
 		dd->uschedcp = nlp;
-		spin_unlock_wr(&bsd4_spin);
+		spin_unlock(&bsd4_spin);
 #ifdef SMP
 		lwkt_acquire(nlp->lwp_thread);
 #endif
 		lwkt_schedule(nlp->lwp_thread);
 	} else if (bsd4_runqcount && (bsd4_rdyprocmask & (1 << cpuid))) {
 		atomic_clear_int(&bsd4_rdyprocmask, 1 << cpuid);
-		spin_unlock_wr(&bsd4_spin);
+		spin_unlock(&bsd4_spin);
 		lwkt_schedule(&dd->helper_thread);
 	} else {
-		spin_unlock_wr(&bsd4_spin);
+		spin_unlock(&bsd4_spin);
 	}
 	crit_exit_gd(gd);
 }
@@ -472,7 +471,7 @@ bsd4_setrunqueue(struct lwp *lp)
 	 * up and it could exit, or its priority could be further adjusted,
 	 * or something like that.
 	 */
-	spin_lock_wr(&bsd4_spin);
+	spin_lock(&bsd4_spin);
 	bsd4_setrunqueue_locked(lp);
 
 #ifdef SMP
@@ -484,7 +483,7 @@ bsd4_setrunqueue(struct lwp *lp)
 	++bsd4_scancpu;
 	mask = ~bsd4_curprocmask & bsd4_rdyprocmask &
 		lp->lwp_cpumask & smp_active_mask;
-	spin_unlock_wr(&bsd4_spin);
+	spin_unlock(&bsd4_spin);
 
 	while (mask) {
 		tmpmask = ~((1 << cpuid) - 1);
@@ -508,7 +507,7 @@ bsd4_setrunqueue(struct lwp *lp)
 	/*
 	 * Request a reschedule if appropriate.
 	 */
-	spin_unlock_wr(&bsd4_spin);
+	spin_unlock(&bsd4_spin);
 	if ((dd->upri & ~PPQMASK) > (lp->lwp_priority & ~PPQMASK)) {
 		need_user_resched();
 	}
@@ -520,11 +519,6 @@ bsd4_setrunqueue(struct lwp *lp)
  * This routine is called from a systimer IPI.  It MUST be MP-safe and
  * the BGL IS NOT HELD ON ENTRY.  This routine is called at ESTCPUFREQ on
  * each cpu.
- *
- * Because this is effectively a 'fast' interrupt, we cannot safely
- * use spinlocks unless gd_spinlock_rd is NULL and gd_spinlocks_wr is 0,
- * even if the spinlocks are 'non conflicting'.  This is due to the way
- * spinlock conflicts against cached read locks are handled.
  *
  * MPSAFE
  */
@@ -560,15 +554,19 @@ bsd4_schedulerclock(struct lwp *lp, sysclock_t period, sysclock_t cpstamp)
 		--lp->lwp_origcpu;
 
 	/*
-	 * We can only safely call bsd4_resetpriority(), which uses spinlocks,
-	 * if we aren't interrupting a thread that is using spinlocks.
-	 * Otherwise we can deadlock with another cpu waiting for our read
-	 * spinlocks to clear.
+	 * Spinlocks also hold a critical section so there should not be
+	 * any active.
 	 */
-	if (gd->gd_spinlock_rd == NULL && gd->gd_spinlocks_wr == 0)
-		bsd4_resetpriority(lp);
-	else
-		need_user_resched();
+	KKASSERT(gd->gd_spinlocks_wr == 0);
+
+	bsd4_resetpriority(lp);
+#if 0
+	/*
+	* if we can't call bsd4_resetpriority for some reason we must call
+	 * need user_resched().
+	 */
+	need_user_resched();
+#endif
 }
 
 /*
@@ -691,7 +689,7 @@ bsd4_resetpriority(struct lwp *lp)
 	 * Calculate the new priority and queue type
 	 */
 	crit_enter();
-	spin_lock_wr(&bsd4_spin);
+	spin_lock(&bsd4_spin);
 
 	newrqtype = lp->lwp_rtprio.type;
 
@@ -741,7 +739,7 @@ bsd4_resetpriority(struct lwp *lp)
 		lp->lwp_priority = newpriority;
 		reschedcpu = -1;
 	}
-	spin_unlock_wr(&bsd4_spin);
+	spin_unlock(&bsd4_spin);
 
 	/*
 	 * Determine if we need to reschedule the target cpu.  This only
@@ -1073,10 +1071,13 @@ bsd4_setrunqueue_locked(struct lwp *lp)
 /*
  * For SMP systems a user scheduler helper thread is created for each
  * cpu and is used to allow one cpu to wakeup another for the purposes of
- * scheduling userland threads from setrunqueue().  UP systems do not
- * need the helper since there is only one cpu.  We can't use the idle
- * thread for this because we need to hold the MP lock.  Additionally,
- * doing things this way allows us to HLT idle cpus on MP systems.
+ * scheduling userland threads from setrunqueue().
+ *
+ * UP systems do not need the helper since there is only one cpu.
+ *
+ * We can't use the idle thread for this because we might block.
+ * Additionally, doing things this way allows us to HLT idle cpus
+ * on MP systems.
  *
  * MPSAFE
  */
@@ -1099,11 +1100,9 @@ sched_thread(void *dummy)
     dd = &bsd4_pcpu[cpuid];
 
     /*
-     * The scheduler thread does not need to hold the MP lock.  Since we
-     * are woken up only when no user processes are scheduled on a cpu, we
-     * can run at an ultra low priority.
+     * Since we are woken up only when no user processes are scheduled
+     * on a cpu, we can run at an ultra low priority.
      */
-    rel_mplock();
     lwkt_setpri_self(TDPRI_USER_SCHEDULER);
 
     for (;;) {
@@ -1114,7 +1113,7 @@ sched_thread(void *dummy)
 	 */
 	crit_enter_gd(gd);
 	lwkt_deschedule_self(gd->gd_curthread);
-	spin_lock_wr(&bsd4_spin);
+	spin_lock(&bsd4_spin);
 	atomic_set_int(&bsd4_rdyprocmask, cpumask);
 
 	clear_user_resched();	/* This satisfied the reschedule request */
@@ -1129,11 +1128,11 @@ sched_thread(void *dummy)
 			atomic_set_int(&bsd4_curprocmask, cpumask);
 			dd->upri = nlp->lwp_priority;
 			dd->uschedcp = nlp;
-			spin_unlock_wr(&bsd4_spin);
+			spin_unlock(&bsd4_spin);
 			lwkt_acquire(nlp->lwp_thread);
 			lwkt_schedule(nlp->lwp_thread);
 		} else {
-			spin_unlock_wr(&bsd4_spin);
+			spin_unlock(&bsd4_spin);
 		}
 #if 0
 	/*
@@ -1167,7 +1166,7 @@ sched_thread(void *dummy)
 		/*
 		 * The runq is empty.
 		 */
-		spin_unlock_wr(&bsd4_spin);
+		spin_unlock(&bsd4_spin);
 	}
 	crit_exit_gd(gd);
 	lwkt_switch();

@@ -1,4 +1,6 @@
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 2004 Jeffrey M. Hsu.  All rights reserved.
  * Copyright (c) 2004 The DragonFly Project.  All rights reserved.
  * 
@@ -83,7 +85,9 @@
 #include <sys/uio.h>
 #include <sys/thread.h>
 #include <sys/globaldata.h>
+
 #include <sys/thread2.h>
+#include <sys/spinlock2.h>
 
 #include <machine/atomic.h>
 #include <machine/limits.h>
@@ -134,18 +138,21 @@ mbtrack_cmp(struct mbtrack *mb1, struct mbtrack *mb2)
 RB_GENERATE2(mbuf_rb_tree, mbtrack, rb_node, mbtrack_cmp, struct mbuf *, m);
 
 struct mbuf_rb_tree	mbuf_track_root;
+static struct spinlock	mbuf_track_spin = SPINLOCK_INITIALIZER(mbuf_track_spin);
 
 static void
 mbuftrack(struct mbuf *m)
 {
 	struct mbtrack *mbt;
 
-	crit_enter();
 	mbt = kmalloc(sizeof(*mbt), M_MTRACK, M_INTWAIT|M_ZERO);
+	spin_lock(&mbuf_track_spin);
 	mbt->m = m;
-	if (mbuf_rb_tree_RB_INSERT(&mbuf_track_root, mbt))
+	if (mbuf_rb_tree_RB_INSERT(&mbuf_track_root, mbt)) {
+		spin_unlock(&mbuf_track_spin);
 		panic("mbuftrack: mbuf %p already being tracked\n", m);
-	crit_exit();
+	}
+	spin_unlock(&mbuf_track_spin);
 }
 
 static void
@@ -153,15 +160,16 @@ mbufuntrack(struct mbuf *m)
 {
 	struct mbtrack *mbt;
 
-	crit_enter();
+	spin_lock(&mbuf_track_spin);
 	mbt = mbuf_rb_tree_RB_LOOKUP(&mbuf_track_root, m);
 	if (mbt == NULL) {
-		kprintf("mbufuntrack: mbuf %p was not tracked\n", m);
+		spin_unlock(&mbuf_track_spin);
+		panic("mbufuntrack: mbuf %p was not tracked\n", m);
 	} else {
 		mbuf_rb_tree_RB_REMOVE(&mbuf_track_root, mbt);
+		spin_unlock(&mbuf_track_spin);
 		kfree(mbt, M_MTRACK);
 	}
-	crit_exit();
 }
 
 void
@@ -170,18 +178,21 @@ mbuftrackid(struct mbuf *m, int trackid)
 	struct mbtrack *mbt;
 	struct mbuf *n;
 
-	crit_enter();
+	spin_lock(&mbuf_track_spin);
 	while (m) { 
 		n = m->m_nextpkt;
 		while (m) {
 			mbt = mbuf_rb_tree_RB_LOOKUP(&mbuf_track_root, m);
-			if (mbt)
-				mbt->trackid = trackid;
+			if (mbt == NULL) {
+				spin_unlock(&mbuf_track_spin);
+				panic("mbuftrackid: mbuf %p not tracked", m);
+			}
+			mbt->trackid = trackid;
 			m = m->m_next;
 		}
 		m = n;
 	}
-	crit_exit();
+	spin_unlock(&mbuf_track_spin);
 }
 
 static int
@@ -193,7 +204,9 @@ mbuftrack_callback(struct mbtrack *mbt, void *arg)
 
 	ksnprintf(buf, sizeof(buf), "mbuf %p track %d\n", mbt->m, mbt->trackid);
 
+	spin_unlock(&mbuf_track_spin);
 	error = SYSCTL_OUT(req, buf, strlen(buf));
+	spin_lock(&mbuf_track_spin);
 	if (error)	
 		return(-error);
 	return(0);
@@ -204,10 +217,10 @@ mbuftrack_show(SYSCTL_HANDLER_ARGS)
 {
 	int error;
 
-	crit_enter();
+	spin_lock(&mbuf_track_spin);
 	error = mbuf_rb_tree_RB_SCAN(&mbuf_track_root, NULL,
 				     mbuftrack_callback, req);
-	crit_exit();
+	spin_unlock(&mbuf_track_spin);
 	return (-error);
 }
 SYSCTL_PROC(_kern_ipc, OID_AUTO, showmbufs, CTLFLAG_RD|CTLTYPE_STRING,
@@ -638,14 +651,14 @@ m_reclaim(void)
 	struct domain *dp;
 	struct protosw *pr;
 
-	crit_enter();
+	kprintf("Debug: m_reclaim() called\n");
+
 	SLIST_FOREACH(dp, &domains, dom_next) {
 		for (pr = dp->dom_protosw; pr < dp->dom_protoswNPROTOSW; pr++) {
 			if (pr->pr_drain)
 				(*pr->pr_drain)();
 		}
 	}
-	crit_exit();
 	atomic_add_long_nonlocked(&mbstat[mycpu->gd_cpuid].m_drain, 1);
 }
 
@@ -653,9 +666,13 @@ static void __inline
 updatestats(struct mbuf *m, int type)
 {
 	struct globaldata *gd = mycpu;
-	m->m_type = type;
 
+	m->m_type = type;
 	mbuftrack(m);
+#ifdef MBUF_DEBUG
+	KASSERT(m->m_next == NULL, ("mbuf %p: bad m_next in get", m));
+	KASSERT(m->m_nextpkt == NULL, ("mbuf %p: bad m_nextpkt in get", m));
+#endif
 
 	atomic_add_long_nonlocked(&mbtypes[gd->gd_cpuid][type], 1);
 	atomic_add_long_nonlocked(&mbstat[mycpu->gd_cpuid].m_mbufs, 1);
@@ -680,7 +697,8 @@ retryonce:
 		if ((how & MB_TRYWAIT) && ntries++ == 0) {
 			struct objcache *reclaimlist[] = {
 				mbufphdr_cache,
-				mbufcluster_cache, mbufphdrcluster_cache
+				mbufcluster_cache,
+				mbufphdrcluster_cache
 			};
 			const int nreclaims = __arysize(reclaimlist);
 
@@ -691,6 +709,10 @@ retryonce:
 		++mbstat[mycpu->gd_cpuid].m_drops;
 		return (NULL);
 	}
+#ifdef MBUF_DEBUG
+	KASSERT(m->m_data == m->m_dat, ("mbuf %p: bad m_data in get", m));
+#endif
+	m->m_len = 0;
 
 	updatestats(m, type);
 	return (m);
@@ -722,6 +744,11 @@ retryonce:
 		++mbstat[mycpu->gd_cpuid].m_drops;
 		return (NULL);
 	}
+#ifdef MBUF_DEBUG
+	KASSERT(m->m_data == m->m_pktdat, ("mbuf %p: bad m_data in get", m));
+#endif
+	m->m_len = 0;
+	m->m_pkthdr.len = 0;
 
 	updatestats(m, type);
 	return (m);
@@ -779,7 +806,13 @@ retryonce:
 		return (NULL);
 	}
 
+#ifdef MBUF_DEBUG
+	KASSERT(m->m_data == m->m_ext.ext_buf,
+		("mbuf %p: bad m_data in get", m));
+#endif
 	m->m_type = type;
+	m->m_len = 0;
+	m->m_pkthdr.len = 0;	/* just do it unconditonally */
 
 	mbuftrack(m);
 
@@ -853,7 +886,8 @@ m_mclget(struct mbuf *m, int how)
 	mcl = objcache_get(mclmeta_cache, MBTOM(how));
 	if (mcl != NULL) {
 		linkcluster(m, mcl);
-		atomic_add_long_nonlocked(&mbstat[mycpu->gd_cpuid].m_clusters, 1);
+		atomic_add_long_nonlocked(&mbstat[mycpu->gd_cpuid].m_clusters,
+					  1);
 	} else {
 		++mbstat[mycpu->gd_cpuid].m_drops;
 	}
@@ -866,10 +900,7 @@ m_mclget(struct mbuf *m, int how)
  * since multiple entities may have a reference on the cluster.
  *
  * m_mclfree() is almost the same but it must contend with two entities
- * freeing the cluster at the same time.  If there is only one reference
- * count we are the only entity referencing the cluster and no further
- * locking is required.  Otherwise we must protect against a race to 0
- * with the serializer.
+ * freeing the cluster at the same time.
  */
 static void
 m_mclref(void *arg)
@@ -901,13 +932,24 @@ m_mclfree(void *arg)
  * code does not call M_PREPEND properly.
  * (example: call to bpf_mtap from drivers)
  */
+
+#ifdef MBUF_DEBUG
+
+struct mbuf  *
+_m_free(struct mbuf *m, const char *func)
+
+#else
+
 struct mbuf *
 m_free(struct mbuf *m)
+
+#endif
 {
 	struct mbuf *n;
 	struct globaldata *gd = mycpu;
 
 	KASSERT(m->m_type != MT_FREE, ("freeing free mbuf %p", m));
+	KASSERT(M_TRAILINGSPACE(m) >= 0, ("overflowed mbuf %p", m));
 	atomic_subtract_long_nonlocked(&mbtypes[gd->gd_cpuid][m->m_type], 1);
 
 	n = m->m_next;
@@ -918,6 +960,9 @@ m_free(struct mbuf *m)
 	 */
 	m->m_next = NULL;
 	mbufuntrack(m);
+#ifdef MBUF_DEBUG
+	m->m_hdr.mh_lastfunc = func;
+#endif
 #ifdef notyet
 	KKASSERT(m->m_nextpkt == NULL);
 #else
@@ -957,7 +1002,6 @@ m_free(struct mbuf *m)
 	 * and is totally separate from whether the mbuf is currently
 	 * associated with a cluster.
 	 */
-	crit_enter();
 	switch(m->m_flags & (M_CLCACHE | M_EXT | M_EXT_CLUSTER)) {
 	case M_CLCACHE | M_EXT | M_EXT_CLUSTER:
 		/*
@@ -1036,18 +1080,28 @@ m_free(struct mbuf *m)
 			panic("bad mbuf flags %p %08x\n", m, m->m_flags);
 		break;
 	}
-	crit_exit();
 	return (n);
 }
+
+#ifdef MBUF_DEBUG
+
+void
+_m_freem(struct mbuf *m, const char *func)
+{
+	while (m)
+		m = _m_free(m, func);
+}
+
+#else
 
 void
 m_freem(struct mbuf *m)
 {
-	crit_enter();
 	while (m)
 		m = m_free(m);
-	crit_exit();
 }
+
+#endif
 
 /*
  * mbuf utility routines
@@ -1097,7 +1151,7 @@ m_copym(const struct mbuf *m, int off0, int len, int wait)
 
 	KASSERT(off >= 0, ("m_copym, negative off %d", off));
 	KASSERT(len >= 0, ("m_copym, negative len %d", len));
-	if (off == 0 && m->m_flags & M_PKTHDR)
+	if (off == 0 && (m->m_flags & M_PKTHDR))
 		copyhdr = 1;
 	while (off > 0) {
 		KASSERT(m != NULL, ("m_copym, offset > size of mbuf chain"));
@@ -1107,7 +1161,7 @@ m_copym(const struct mbuf *m, int off0, int len, int wait)
 		m = m->m_next;
 	}
 	np = &top;
-	top = 0;
+	top = NULL;
 	while (len > 0) {
 		if (m == NULL) {
 			KASSERT(len == M_COPYALL, 
@@ -1312,6 +1366,80 @@ m_dup(struct mbuf *m, int how)
 nospace:
 	m_freem(top);
 nospace0:
+	atomic_add_long_nonlocked(&mbstat[mycpu->gd_cpuid].m_mcfail, 1);
+	return (NULL);
+}
+
+/*
+ * Copy the non-packet mbuf data chain into a new set of mbufs, including
+ * copying any mbuf clusters.  This is typically used to realign a data
+ * chain by nfs_realign().
+ *
+ * The original chain is left intact.  how should be MB_WAIT or MB_DONTWAIT
+ * and NULL can be returned if MB_DONTWAIT is passed.
+ *
+ * Be careful to use cluster mbufs, a large mbuf chain converted to non
+ * cluster mbufs can exhaust our supply of mbufs.
+ */
+struct mbuf *
+m_dup_data(struct mbuf *m, int how)
+{
+	struct mbuf **p, *n, *top = NULL;
+	int mlen, moff, chunk, gsize, nsize;
+
+	/*
+	 * Degenerate case
+	 */
+	if (m == NULL)
+		return (NULL);
+
+	/*
+	 * Optimize the mbuf allocation but do not get too carried away.
+	 */
+	if (m->m_next || m->m_len > MLEN)
+		gsize = MCLBYTES;
+	else
+		gsize = MLEN;
+
+	/* Chain control */
+	p = &top;
+	n = NULL;
+	nsize = 0;
+
+	/*
+	 * Scan the mbuf chain until nothing is left, the new mbuf chain
+	 * will be allocated on the fly as needed.
+	 */
+	while (m) {
+		mlen = m->m_len;
+		moff = 0;
+
+		while (mlen) {
+			KKASSERT(m->m_type == MT_DATA);
+			if (n == NULL) {
+				n = m_getl(gsize, how, MT_DATA, 0, &nsize);
+				n->m_len = 0;
+				if (n == NULL)
+					goto nospace;
+				*p = n;
+				p = &n->m_next;
+			}
+			chunk = imin(mlen, nsize);
+			bcopy(m->m_data + moff, n->m_data + n->m_len, chunk);
+			mlen -= chunk;
+			moff += chunk;
+			n->m_len += chunk;
+			nsize -= chunk;
+			if (nsize == 0)
+				n = NULL;
+		}
+		m = m->m_next;
+	}
+	*p = NULL;
+	return(top);
+nospace:
+	*p = NULL;
+	m_freem(top);
 	atomic_add_long_nonlocked(&mbstat[mycpu->gd_cpuid].m_mcfail, 1);
 	return (NULL);
 }

@@ -92,6 +92,7 @@
 #include <sys/buf2.h>
 #include <sys/thread2.h>
 #include <sys/sysref2.h>
+#include <sys/mplock2.h>
 
 #include <vm/vm.h>
 #include <vm/vm_object.h>
@@ -135,9 +136,9 @@ static TAILQ_HEAD(,bio_ops) bio_ops_list = TAILQ_HEAD_INITIALIZER(bio_ops_list);
 void
 vfs_mount_init(void)
 {
-	lwkt_token_init(&mountlist_token, 1);
-	lwkt_token_init(&mntvnode_token, 1);
-	lwkt_token_init(&mntid_token, 1);
+	lwkt_token_init(&mountlist_token, 1, "mntlist");
+	lwkt_token_init(&mntvnode_token, 1, "mntvnode");
+	lwkt_token_init(&mntid_token, 1, "mntid");
 	TAILQ_INIT(&mountscan_list);
 	TAILQ_INIT(&mntvnodescan_list);
 	mount_init(&dummymount);
@@ -320,7 +321,7 @@ void
 mount_init(struct mount *mp)
 {
 	lockinit(&mp->mnt_lock, "vfslock", 0, 0);
-	lwkt_token_init(&mp->mnt_token, 1);
+	lwkt_token_init(&mp->mnt_token, 1, "permnt");
 
 	TAILQ_INIT(&mp->mnt_nvnodelist);
 	TAILQ_INIT(&mp->mnt_reservedvnlist);
@@ -488,14 +489,14 @@ visleaf(struct vnode *vp)
 {
 	struct namecache *ncp;
 
-	spin_lock_wr(&vp->v_spinlock);
+	spin_lock(&vp->v_spinlock);
 	TAILQ_FOREACH(ncp, &vp->v_namecache, nc_vnode) {
 		if (!TAILQ_EMPTY(&ncp->nc_list)) {
-			spin_unlock_wr(&vp->v_spinlock);
+			spin_unlock(&vp->v_spinlock);
 			return(0);
 		}
 	}
-	spin_unlock_wr(&vp->v_spinlock);
+	spin_unlock(&vp->v_spinlock);
 	return(1);
 }
 
@@ -693,9 +694,11 @@ vnlru_proc(void)
 	int done;
 
 	EVENTHANDLER_REGISTER(shutdown_pre_sync, shutdown_kproc, td,
-	    SHUTDOWN_PRI_FIRST);   
+			      SHUTDOWN_PRI_FIRST);
 
+	get_mplock();
 	crit_enter();
+
 	for (;;) {
 		kproc_suspend_loop();
 
@@ -757,7 +760,9 @@ vnlru_proc(void)
 			vnlru_nowhere = 0;
 		}
 	}
+
 	crit_exit();
+	rel_mplock();
 }
 
 /*
@@ -981,6 +986,11 @@ insmntque(struct vnode *vp, struct mount *mp)
  * arbitrarily block.  The scanning code guarentees consistency of operation
  * even if the slow function deletes or moves the node, or blocks and some
  * other thread deletes or moves the node.
+ *
+ * NOTE: We hold vmobj_token to prevent a VM object from being destroyed
+ *	 out from under the fastfunc()'s vnode test.  It will not prevent
+ *	 v_object from getting NULL'd out but it will ensure that the
+ *	 pointer (if we race) will remain stable.
  */
 int
 vmntvnodescan(
@@ -998,6 +1008,7 @@ vmntvnodescan(
 	int count = 0;
 
 	lwkt_gettoken(&mntvnode_token);
+	lwkt_gettoken(&vmobj_token);
 
 	/*
 	 * If asked to do one pass stop after iterating available vnodes.
@@ -1116,6 +1127,7 @@ next:
 			info.vp = TAILQ_NEXT(vp, v_nmntvnodes);
 	}
 	TAILQ_REMOVE(&mntvnodescan_list, &info, entry);
+	lwkt_reltoken(&vmobj_token);
 	lwkt_reltoken(&mntvnode_token);
 	return(r);
 }

@@ -51,6 +51,7 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/kerneldump.h>
 #include <sys/proc.h>
 #include <sys/pioctl.h>
 #include <sys/types.h>
@@ -144,6 +145,9 @@ static char *trap_msg[] = {
 static int ddb_on_nmi = 1;
 SYSCTL_INT(_machdep, OID_AUTO, ddb_on_nmi, CTLFLAG_RW,
 	&ddb_on_nmi, 0, "Go to DDB on NMI");
+static int ddb_on_seg_fault = 0;
+SYSCTL_INT(_machdep, OID_AUTO, ddb_on_seg_fault, CTLFLAG_RW,
+	&ddb_on_seg_fault, 0, "Go to DDB on user seg-fault");
 #endif
 static int panic_on_nmi = 1;
 SYSCTL_INT(_machdep, OID_AUTO, panic_on_nmi, CTLFLAG_RW,
@@ -154,16 +158,6 @@ SYSCTL_INT(_machdep, OID_AUTO, fast_release, CTLFLAG_RW,
 static int slow_release;
 SYSCTL_INT(_machdep, OID_AUTO, slow_release, CTLFLAG_RW,
 	&slow_release, 0, "Passive Release was nonoptimal");
-#ifdef SMP
-static int syscall_mpsafe = 1;
-SYSCTL_INT(_kern, OID_AUTO, syscall_mpsafe, CTLFLAG_RW,
-	&syscall_mpsafe, 0, "Allow MPSAFE marked syscalls to run without BGL");
-TUNABLE_INT("kern.syscall_mpsafe", &syscall_mpsafe);
-static int trap_mpsafe = 1;
-SYSCTL_INT(_kern, OID_AUTO, trap_mpsafe, CTLFLAG_RW,
-	&trap_mpsafe, 0, "Allow traps to mostly run without the BGL");
-TUNABLE_INT("kern.trap_mpsafe", &trap_mpsafe);
-#endif
 
 /*
  * Passively intercepts the thread switch function to increase
@@ -229,7 +223,7 @@ recheck:
 	/*
 	 * Block here if we are in a stopped state.
 	 */
-	if (p->p_stat == SSTOP) {
+	if (p->p_stat == SSTOP || dump_stop_usertds) {
 		get_mplock();
 		tstop();
 		rel_mplock();
@@ -251,6 +245,8 @@ recheck:
 	/*
 	 * Post any pending signals.  If running a virtual kernel be sure
 	 * to restore the virtual kernel's vmspace before posting the signal.
+	 *
+	 * WARNING!  postsig() can exit and not return.
 	 */
 	if ((sig = CURSIG_TRACE(lp)) != 0) {
 		get_mplock();
@@ -366,32 +362,20 @@ trap(struct trapframe *frame)
 	int have_mplock = 0;
 #endif
 #ifdef INVARIANTS
-	int crit_count = td->td_pri & ~TDPRI_MASK;
+	int crit_count = td->td_critcount;
+	lwkt_tokref_t curstop = td->td_toks_stop;
 #endif
 	vm_offset_t eva;
 
 	p = td->td_proc;
 
-#ifdef JG
-	kprintf0("TRAP ");
-	kprintf0("\"%s\" type=%ld\n",
-		trap_msg[frame->tf_trapno], frame->tf_trapno);
-	kprintf0(" rip=%lx rsp=%lx\n", frame->tf_rip, frame->tf_rsp);
-	kprintf0(" err=%lx addr=%lx\n", frame->tf_err, frame->tf_addr);
-	kprintf0(" cs=%lx ss=%lx rflags=%lx\n", (unsigned long)frame->tf_cs, (unsigned long)frame->tf_ss, frame->tf_rflags);
-#endif
-
 #ifdef DDB
-	if (db_active) {
-		++gd->gd_trap_nesting_level;
-		MAKEMPSAFE(have_mplock);
-		trap_fatal(frame, frame->tf_addr);
-		--gd->gd_trap_nesting_level;
-		goto out2;
-	}
-#endif
-#ifdef DDB
-	if (db_active) {
+        /*
+	 * We need to allow T_DNA faults when the debugger is active since
+	 * some dumping paths do large bcopy() which use the floating
+	 * point registers for faster copying.
+	 */
+	if (db_active && frame->tf_trapno != T_DNA) {
 		eva = (frame->tf_trapno == T_PAGEFLT ? frame->tf_addr : 0);
 		++gd->gd_trap_nesting_level;
 		MAKEMPSAFE(have_mplock);
@@ -402,14 +386,6 @@ trap(struct trapframe *frame)
 #endif
 
 	eva = 0;
-
-#ifdef SMP
-        if (trap_mpsafe == 0) {
-		++gd->gd_trap_nesting_level;
-		MAKEMPSAFE(have_mplock);
-		--gd->gd_trap_nesting_level;
-	}
-#endif
 
 	if ((frame->tf_rflags & PSL_I) == 0) {
 		/*
@@ -450,7 +426,8 @@ trap(struct trapframe *frame)
 		userenter(td, p);
 
 		sticks = (int)td->td_sticks;
-		lp->lwp_md.md_regs = frame;
+		KASSERT(lp->lwp_md.md_regs == frame,
+			("Frame mismatch %p %p", lp->lwp_md.md_regs, frame));
 
 		switch (type) {
 		case T_PRIVINFLT:	/* privileged instruction fault */
@@ -636,7 +613,6 @@ trap(struct trapframe *frame)
 			 * selectors and pointers when the user changes
 			 * them.
 			 */
-			kprintf("trap.c line %d\n", __LINE__);
 			if (mycpu->gd_intr_nesting_level == 0) {
 				if (td->td_pcb->pcb_onfault) {
 					frame->tf_rip = (register_t)
@@ -781,8 +757,10 @@ trap(struct trapframe *frame)
 
 out:
 #ifdef SMP
-        if (ISPL(frame->tf_cs) == SEL_UPL)
-		KASSERT(td->td_mpcount == have_mplock, ("badmpcount trap/end from %p", (void *)frame->tf_rip));
+        if (ISPL(frame->tf_cs) == SEL_UPL) {
+		KASSERT(td->td_mpcount == have_mplock,
+			("badmpcount trap/end from %p", (void *)frame->tf_rip));
+	}
 #endif
 	userret(lp, frame, sticks);
 	userexit(lp);
@@ -794,9 +772,13 @@ out2:	;
 	if (p != NULL && lp != NULL)
 		KTR_LOG(kernentry_trap_ret, p->p_pid, lp->lwp_tid);
 #ifdef INVARIANTS
-	KASSERT(crit_count == (td->td_pri & ~TDPRI_MASK),
-		("syscall: critical section count mismatch! %d/%d",
-		crit_count / TDPRI_CRIT, td->td_pri / TDPRI_CRIT));
+	KASSERT(crit_count == td->td_critcount,
+		("trap: critical section count mismatch! %d/%d",
+		crit_count, td->td_pri));
+	KASSERT(curstop == td->td_toks_stop,
+		("trap: extra tokens held after trap! %ld/%ld",
+		curstop - &td->td_toks_base,
+		td->td_toks_stop - &td->td_toks_base));
 #endif
 }
 
@@ -811,14 +793,18 @@ trap_pfault(struct trapframe *frame, int usermode)
 	vm_prot_t ftype;
 	thread_t td = curthread;
 	struct lwp *lp = td->td_lwp;
+	struct proc *p;
 
 	va = trunc_page(frame->tf_addr);
 	if (va >= VM_MIN_KERNEL_ADDRESS) {
 		/*
 		 * Don't allow user-mode faults in kernel address space.
 		 */
-		if (usermode)
+		if (usermode) {
+			fault_flags = -1;
+			ftype = -1;
 			goto nogo;
+		}
 
 		map = &kernel_map;
 	} else {
@@ -830,8 +816,11 @@ trap_pfault(struct trapframe *frame, int usermode)
 		if (lp != NULL)
 			vm = lp->lwp_vmspace;
 
-		if (vm == NULL)
+		if (vm == NULL) {
+			fault_flags = -1;
+			ftype = -1;
 			goto nogo;
+		}
 
 		map = &vm->vm_map;
 	}
@@ -874,6 +863,7 @@ trap_pfault(struct trapframe *frame, int usermode)
 		 * Don't have to worry about process locking or stacks
 		 * in the kernel.
 		 */
+		fault_flags = VM_FAULT_NORMAL;
 		rv = vm_fault(map, va, ftype, VM_FAULT_NORMAL);
 	}
 
@@ -894,10 +884,16 @@ nogo:
 	 * NOTE: on x86_64 we have a tf_addr field in the trapframe, no
 	 * kludge is needed to pass the fault address to signal handlers.
 	 */
-	struct proc *p = td->td_proc;
+	p = td->td_proc;
 	if (td->td_lwp->lwp_vkernel == NULL) {
-		kprintf("seg-fault accessing address %p rip=%p pid=%d p_comm=%s\n",
-			(void *)va, (void *)frame->tf_rip, p->p_pid, p->p_comm);
+		kprintf("seg-fault ft=%04x ff=%04x addr=%p rip=%p "
+			"pid=%d p_comm=%s\n",
+			ftype, fault_flags,
+			(void *)frame->tf_addr,
+			(void *)frame->tf_rip,
+			p->p_pid, p->p_comm);
+		if (ddb_on_seg_fault)
+			Debugger("ddb_on_seg_fault");
 	}
 	/* Debugger("seg-fault"); */
 
@@ -971,7 +967,7 @@ trap_fatal(struct trapframe *frame, vm_offset_t eva)
 		kprintf("Idle\n");
 	}
 	kprintf("current thread          = pri %d ", curthread->td_pri);
-	if (curthread->td_pri >= TDPRI_CRIT)
+	if (curthread->td_critcount)
 		kprintf("(CRIT)");
 	kprintf("\n");
 
@@ -992,10 +988,33 @@ trap_fatal(struct trapframe *frame, vm_offset_t eva)
  * when the stack overflows (such is the case with infinite recursion,
  * for example).
  */
+static __inline
+int
+in_kstack_guard(register_t rptr)
+{
+	thread_t td = curthread;
+
+	if ((char *)rptr >= td->td_kstack &&
+	    (char *)rptr < td->td_kstack + PAGE_SIZE) {
+		return 1;
+	}
+	return 0;
+}
+
 void
 dblfault_handler(struct trapframe *frame)
 {
-	kprintf0("DOUBLE FAULT\n");
+	thread_t td = curthread;
+
+	if (in_kstack_guard(frame->tf_rsp) || in_kstack_guard(frame->tf_rbp)) {
+		kprintf("DOUBLE FAULT - KERNEL STACK GUARD HIT!\n");
+		if (in_kstack_guard(frame->tf_rsp))
+			frame->tf_rsp = (register_t)(td->td_kstack + PAGE_SIZE);
+		if (in_kstack_guard(frame->tf_rbp))
+			frame->tf_rbp = (register_t)(td->td_kstack + PAGE_SIZE);
+	} else {
+		kprintf("DOUBLE FAULT\n");
+	}
 	kprintf("\nFatal double fault\n");
 	kprintf("rip = 0x%lx\n", frame->tf_rip);
 	kprintf("rsp = 0x%lx\n", frame->tf_rsp);
@@ -1032,7 +1051,7 @@ syscall2(struct trapframe *frame)
 	int error;
 	int narg;
 #ifdef INVARIANTS
-	int crit_count = td->td_pri & ~TDPRI_MASK;
+	int crit_count = td->td_critcount;
 #endif
 #ifdef SMP
 	int have_mplock = 0;
@@ -1054,12 +1073,11 @@ syscall2(struct trapframe *frame)
 #endif
 
 	KTR_LOG(kernentry_syscall, p->p_pid, lp->lwp_tid,
-		frame->tf_eax);
+		frame->tf_rax);
 
 #ifdef SMP
-	KASSERT(td->td_mpcount == 0, ("badmpcount syscall2 from %p", (void *)frame->tf_rip));
-	if (syscall_mpsafe == 0)
-		MAKEMPSAFE(have_mplock);
+	KASSERT(td->td_mpcount == 0,
+		("badmpcount syscall2 from %p", (void *)frame->tf_rip));
 #endif
 	userenter(td, p);	/* lazy raise our priority */
 
@@ -1086,7 +1104,8 @@ syscall2(struct trapframe *frame)
 	/*
 	 * Get the system call parameters and account for time
 	 */
-	lp->lwp_md.md_regs = frame;
+	KASSERT(lp->lwp_md.md_regs == frame,
+		("Frame mismatch %p %p", lp->lwp_md.md_regs, frame));
 	params = (caddr_t)frame->tf_rsp + sizeof(register_t);
 	code = frame->tf_rax;
 
@@ -1259,12 +1278,18 @@ bad:
 #endif
 	KTR_LOG(kernentry_syscall_ret, p->p_pid, lp->lwp_tid, error);
 #ifdef INVARIANTS
-	KASSERT(crit_count == (td->td_pri & ~TDPRI_MASK), 
+	KASSERT(crit_count == td->td_critcount,
 		("syscall: critical section count mismatch! %d/%d",
-		crit_count / TDPRI_CRIT, td->td_pri / TDPRI_CRIT));
+		crit_count, td->td_pri));
+	KASSERT(&td->td_toks_base == td->td_toks_stop,
+		("syscall: extra tokens held after trap! %ld",
+		td->td_toks_stop - &td->td_toks_base));
 #endif
 }
 
+/*
+ * NOTE: mplock not held at any point
+ */
 void
 fork_return(struct lwp *lp, struct trapframe *frame)
 {
@@ -1278,9 +1303,12 @@ fork_return(struct lwp *lp, struct trapframe *frame)
 
 /*
  * Simplified back end of syscall(), used when returning from fork()
- * directly into user mode.  MP lock is held on entry and should be
- * released on return.  This code will return back into the fork
- * trampoline code which then runs doreti.
+ * directly into user mode.
+ *
+ * This code will return back into the fork trampoline code which then
+ * runs doreti.
+ *
+ * NOTE: The mplock is not held at any point.
  */
 void
 generic_lwp_return(struct lwp *lp, struct trapframe *frame)
@@ -1306,10 +1334,6 @@ generic_lwp_return(struct lwp *lp, struct trapframe *frame)
 	p->p_flag |= P_PASSIVE_ACQ;
 	userexit(lp);
 	p->p_flag &= ~P_PASSIVE_ACQ;
-#ifdef SMP
-	KKASSERT(lp->lwp_thread->td_mpcount == 1);
-	rel_mplock();
-#endif
 }
 
 /*

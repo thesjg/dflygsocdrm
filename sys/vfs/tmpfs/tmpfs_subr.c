@@ -33,7 +33,6 @@
 /*
  * Efficient memory file system supporting functions.
  */
-#include <sys/cdefs.h>
 
 #include <sys/kernel.h>
 #include <sys/param.h>
@@ -102,10 +101,12 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 	KKASSERT(IFF(type == VLNK, target != NULL));
 	KKASSERT(IFF(type == VBLK || type == VCHR, rmajor != VNOVAL));
 
-	if (tmp->tm_nodes_inuse > tmp->tm_nodes_max)
+	if (tmp->tm_nodes_inuse >= tmp->tm_nodes_max)
 		return (ENOSPC);
 
-	nnode = (struct tmpfs_node *)objcache_get(tmp->tm_node_pool, M_WAITOK);
+	nnode = objcache_get(tmp->tm_node_pool, M_WAITOK | M_NULLOK);
+	if (nnode == NULL)
+		return (ENOSPC);
 
 	/* Generic initialization. */
 	nnode->tn_type = type;
@@ -126,6 +127,7 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 	case VCHR:
 		rdev = makeudev(rmajor, rminor);
 		if (rdev == NOUDEV) {
+			objcache_put(tmp->tm_node_pool, nnode);
 			return(EINVAL);
 		}
 		nnode->tn_rdev = rdev;
@@ -154,8 +156,12 @@ tmpfs_alloc_node(struct tmpfs_mount *tmp, enum vtype type,
 
 	case VLNK:
 		nnode->tn_size = strlen(target);
-		nnode->tn_link = kmalloc(nnode->tn_size + 1, M_TMPFSNAME,
-					 M_WAITOK);
+		nnode->tn_link = kmalloc(nnode->tn_size + 1, tmp->tm_name_zone,
+					 M_WAITOK | M_NULLOK);
+		if (nnode->tn_link == NULL) {
+			objcache_put(tmp->tm_node_pool, nnode);
+			return (ENOSPC);
+		}
 		bcopy(target, nnode->tn_link, nnode->tn_size);
 		nnode->tn_link[nnode->tn_size] = '\0';
 		break;
@@ -269,7 +275,7 @@ tmpfs_free_node(struct tmpfs_mount *tmp, struct tmpfs_node *node)
 		break;
 
 	case VLNK:
-		kfree(node->tn_link, M_TMPFSNAME);
+		kfree(node->tn_link, tmp->tm_name_zone);
 		node->tn_link = NULL;
 		node->tn_size = 0;
 		break;
@@ -315,9 +321,13 @@ tmpfs_alloc_dirent(struct tmpfs_mount *tmp, struct tmpfs_node *node,
 {
 	struct tmpfs_dirent *nde;
 
-
-	nde = (struct tmpfs_dirent *)objcache_get(tmp->tm_dirent_pool, M_WAITOK);
-	nde->td_name = kmalloc(len + 1, M_TMPFSNAME, M_WAITOK);
+	nde = objcache_get(tmp->tm_dirent_pool, M_WAITOK);
+	nde->td_name = kmalloc(len + 1, tmp->tm_name_zone, M_WAITOK | M_NULLOK);
+	if (nde->td_name == NULL) {
+		objcache_put(tmp->tm_dirent_pool, nde);
+		*de = NULL;
+		return (ENOSPC);
+	}
 	nde->td_namelen = len;
 	bcopy(name, nde->td_name, len);
 	nde->td_name[len] = '\0';
@@ -357,7 +367,7 @@ tmpfs_free_dirent(struct tmpfs_mount *tmp, struct tmpfs_dirent *de)
 	node->tn_links--;
 	TMPFS_NODE_UNLOCK(node);
 
-	kfree(de->td_name, M_TMPFSNAME);
+	kfree(de->td_name, tmp->tm_name_zone);
 	de->td_namelen = 0;
 	de->td_name = NULL;
 	de->td_node = NULL;
@@ -1003,41 +1013,22 @@ out:
  * The vnode must be locked on entry and remain locked on exit.
  */
 int
-tmpfs_chflags(struct vnode *vp, int flags, struct ucred *cred)
+tmpfs_chflags(struct vnode *vp, int vaflags, struct ucred *cred)
 {
 	int error;
 	struct tmpfs_node *node;
-	int fmode, mode;
+	int flags;
 
 	KKASSERT(vn_islocked(vp));
 
 	node = VP_TO_TMPFS_NODE(vp);
+	flags = node->tn_flags;
 
 	/* Disallow this operation if the file system is mounted read-only. */
 	if (vp->v_mount->mnt_flag & MNT_RDONLY)
 		return EROFS;
+	error = vop_helper_setattr_flags(&flags, vaflags, node->tn_uid, cred);
 
-	fmode = FFLAGS(node->tn_flags);
-	mode = 0;
-	if (((fmode & (FREAD | FWRITE)) == 0) || (fmode & O_CREAT))
-		return EINVAL;
-	if (fmode & (FWRITE | O_TRUNC)) {
-		if (vp->v_type == VDIR) {
-			return EISDIR;
-		}
-		error = vn_writechk(vp, NULL);
-		if (error)
-			return (error);
-
-		mode |= VWRITE;
-	}
-	if (fmode & FREAD)
-		mode |= VREAD;
-	if (mode) {
-		error = VOP_ACCESS(vp, mode, cred);
-		if (error)
-			return (error);
-	}
 	/*
 	 * Unprivileged processes are not permitted to unset system
 	 * flags, or modify flags if any system flags are set.
@@ -1045,39 +1036,29 @@ tmpfs_chflags(struct vnode *vp, int flags, struct ucred *cred)
 	 * Silently enforce SF_NOCACHE on the root tmpfs vnode so
 	 * tmpfs data is not double-cached by swapcache.
 	 */
-	TMPFS_NODE_LOCK(node);
-	if (!priv_check_cred(cred, PRIV_VFS_SYSFLAGS, 0)) {
-#if 0
-		if (node->tn_flags
-		  & (SF_NOUNLINK | SF_IMMUTABLE | SF_APPEND)) {
-			error = securelevel_gt(cred, 0);
-			if (error)
-				return (error);
+	if (error == 0) {
+		TMPFS_NODE_LOCK(node);
+		if (!priv_check_cred(cred, PRIV_VFS_SYSFLAGS, 0)) {
+			if (vp->v_flag & VROOT)
+				flags |= SF_NOCACHE;
+			node->tn_flags = flags;
+		} else {
+			if (node->tn_flags & (SF_NOUNLINK | SF_IMMUTABLE |
+					      SF_APPEND) ||
+			    (flags & UF_SETTABLE) != flags) {
+				error = EPERM;
+			} else {
+				node->tn_flags &= SF_SETTABLE;
+				node->tn_flags |= (flags & UF_SETTABLE);
+			}
 		}
-		/* Snapshot flag cannot be set or cleared */
-		if (((flags & SF_SNAPSHOT) != 0 &&
-		  (node->tn_flags & SF_SNAPSHOT) == 0) ||
-		  ((flags & SF_SNAPSHOT) == 0 &&
-		  (node->tn_flags & SF_SNAPSHOT) != 0))
-			return (EPERM);
-#endif
-		if (vp->v_flag & VROOT)
-			flags |= SF_NOCACHE;
-		node->tn_flags = flags;
-	} else {
-		if (node->tn_flags
-		  & (SF_NOUNLINK | SF_IMMUTABLE | SF_APPEND) ||
-		  (flags & UF_SETTABLE) != flags)
-			return (EPERM);
-		node->tn_flags &= SF_SETTABLE;
-		node->tn_flags |= (flags & UF_SETTABLE);
+		node->tn_status |= TMPFS_NODE_CHANGED;
+		TMPFS_NODE_UNLOCK(node);
 	}
-	node->tn_status |= TMPFS_NODE_CHANGED;
-	TMPFS_NODE_UNLOCK(node);
 
 	KKASSERT(vn_islocked(vp));
 
-	return 0;
+	return error;
 }
 
 /* --------------------------------------------------------------------- */
@@ -1088,11 +1069,11 @@ tmpfs_chflags(struct vnode *vp, int flags, struct ucred *cred)
  * The vnode must be locked on entry and remain locked on exit.
  */
 int
-tmpfs_chmod(struct vnode *vp, mode_t mode, struct ucred *cred)
+tmpfs_chmod(struct vnode *vp, mode_t vamode, struct ucred *cred)
 {
-	int error;
 	struct tmpfs_node *node;
-	int fmode, accmode;
+	mode_t cur_mode;
+	int error;
 
 	KKASSERT(vn_islocked(vp));
 
@@ -1106,50 +1087,19 @@ tmpfs_chmod(struct vnode *vp, mode_t mode, struct ucred *cred)
 	if (node->tn_flags & (IMMUTABLE | APPEND))
 		return EPERM;
 
-	fmode = FFLAGS(node->tn_flags);
-	accmode = 0;
-	if (((fmode & (FREAD | FWRITE)) == 0) || (fmode & O_CREAT))
-		return EINVAL;
-	if (fmode & (FWRITE | O_TRUNC)) {
-		if (vp->v_type == VDIR) {
-			return EISDIR;
-		}
-		error = vn_writechk(vp, NULL);
-		if (error)
-			return (error);
+	cur_mode = node->tn_mode;
+	error = vop_helper_chmod(vp, vamode, cred, node->tn_uid, node->tn_gid,
+				 &cur_mode);
 
-		accmode |= VWRITE;
+	if (error == 0 &&
+	    (node->tn_mode & ALLPERMS) != (cur_mode & ALLPERMS)) {
+		TMPFS_NODE_LOCK(node);
+		node->tn_mode &= ~ALLPERMS;
+		node->tn_mode |= cur_mode & ALLPERMS;
+
+		node->tn_status |= TMPFS_NODE_CHANGED;
+		TMPFS_NODE_UNLOCK(node);
 	}
-	if (fmode & FREAD)
-		accmode |= VREAD;
-	if (accmode) {
-		error = VOP_ACCESS(vp, accmode, cred);
-		if (error)
-			return (error);
-	}
-
-	/*
-	 * Privileged processes may set the sticky bit on non-directories,
-	 * as well as set the setgid bit on a file with a group that the
-	 * process is not a member of.
-	 */
-	if (vp->v_type != VDIR && (mode & S_ISTXT)) {
-		if (priv_check_cred(cred, PRIV_VFS_STICKYFILE, 0))
-			return (EFTYPE);
-	}
-	if (!groupmember(node->tn_gid, cred) && (mode & S_ISGID)) {
-		error = priv_check_cred(cred, PRIV_VFS_SETGID, 0);
-		if (error)
-			return (error);
-	}
-
-
-	TMPFS_NODE_LOCK(node);
-	node->tn_mode &= ~ALLPERMS;
-	node->tn_mode |= mode & ALLPERMS;
-
-	node->tn_status |= TMPFS_NODE_CHANGED;
-	TMPFS_NODE_UNLOCK(node);
 
 	KKASSERT(vn_islocked(vp));
 
@@ -1196,8 +1146,8 @@ tmpfs_chown(struct vnode *vp, uid_t uid, gid_t gid, struct ucred *cred)
 		if (cur_uid != node->tn_uid ||
 		    cur_gid != node->tn_gid ||
 		    cur_mode != node->tn_mode) {
-			node->tn_uid = uid;
-			node->tn_gid = gid;
+			node->tn_uid = cur_uid;
+			node->tn_gid = cur_gid;
 			node->tn_mode = cur_mode;
 			node->tn_status |= TMPFS_NODE_CHANGED;
 		}
@@ -1274,9 +1224,7 @@ int
 tmpfs_chtimes(struct vnode *vp, struct timespec *atime, struct timespec *mtime,
 	int vaflags, struct ucred *cred)
 {
-	int error;
 	struct tmpfs_node *node;
-	int fmode, mode;
 
 	KKASSERT(vn_islocked(vp));
 
@@ -1289,35 +1237,6 @@ tmpfs_chtimes(struct vnode *vp, struct timespec *atime, struct timespec *mtime,
 	/* Immutable or append-only files cannot be modified, either. */
 	if (node->tn_flags & (IMMUTABLE | APPEND))
 		return EPERM;
-
-	/* Determine if the user have proper privilege to update time. */
-	fmode = FFLAGS(node->tn_flags);
-	mode = 0;
-	if (((fmode & (FREAD | FWRITE)) == 0) || (fmode & O_CREAT))
-		return EINVAL;
-	if (fmode & (FWRITE | O_TRUNC)) {
-		if (vp->v_type == VDIR) {
-			return EISDIR;
-		}
-		error = vn_writechk(vp, NULL);
-		if (error)
-			return (error);
-
-		mode |= VWRITE;
-	}
-	if (fmode & FREAD)
-		mode |= VREAD;
-
-	if (mode) {
-		if (vaflags & VA_UTIMES_NULL) {
-			error = VOP_ACCESS(vp, mode, cred);
-			if (error)
-				error = VOP_ACCESS(vp, VWRITE, cred);
-		} else
-			error = VOP_ACCESS(vp, mode, cred);
-		if (error)
-			return (error);
-	}
 
 	TMPFS_NODE_LOCK(node);
 	if (atime->tv_sec != VNOVAL && atime->tv_nsec != VNOVAL)
@@ -1428,9 +1347,9 @@ tmpfs_fetch_ino(void)
 {
 	ino_t	ret;
 
-	spin_lock_wr(&ino_lock);
+	spin_lock(&ino_lock);
 	ret = t_ino++;
-	spin_unlock_wr(&ino_lock);
+	spin_unlock(&ino_lock);
 
 	return ret;
 }

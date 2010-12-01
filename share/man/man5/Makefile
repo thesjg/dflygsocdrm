@@ -7,6 +7,7 @@ MAN=	acct.5 \
 	a.out.5 \
 	compilers.conf.5 \
 	core.5 \
+	crypttab.5 \
 	devfs.5 \
 	devtab.5 \
 	dir.5 \
@@ -33,6 +34,7 @@ MAN=	acct.5 \
 	kernel.conf.5 \
 	link.5 \
 	linprocfs.5 \
+	loader.conf.5 \
 	mailer.conf.5 \
 	make.conf.5 \
 	manpath.config.5 \

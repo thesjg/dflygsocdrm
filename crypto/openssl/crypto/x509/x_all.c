@@ -57,7 +57,6 @@
  */
 
 #include <stdio.h>
-#undef SSLEAY_MACROS
 #include <openssl/stack.h>
 #include "cryptlib.h"
 #include <openssl/buffer.h>
@@ -83,12 +82,6 @@ int X509_REQ_verify(X509_REQ *a, EVP_PKEY *r)
 		a->sig_alg,a->signature,a->req_info,r));
 	}
 
-int X509_CRL_verify(X509_CRL *a, EVP_PKEY *r)
-	{
-	return(ASN1_item_verify(ASN1_ITEM_rptr(X509_CRL_INFO),
-		a->sig_alg, a->signature,a->crl,r));
-	}
-
 int NETSCAPE_SPKI_verify(NETSCAPE_SPKI *a, EVP_PKEY *r)
 	{
 	return(ASN1_item_verify(ASN1_ITEM_rptr(NETSCAPE_SPKAC),
@@ -97,6 +90,7 @@ int NETSCAPE_SPKI_verify(NETSCAPE_SPKI *a, EVP_PKEY *r)
 
 int X509_sign(X509 *x, EVP_PKEY *pkey, const EVP_MD *md)
 	{
+	x->cert_info->enc.modified = 1;
 	return(ASN1_item_sign(ASN1_ITEM_rptr(X509_CINF), x->cert_info->signature,
 		x->sig_alg, x->signature, x->cert_info,pkey,md));
 	}

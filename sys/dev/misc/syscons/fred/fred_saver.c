@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1997 Sandro Sigala, Brescia, Italy.
  * Copyright (c) 1997 Chris Shenton
  * Copyright (c) 1995 S ren Schmidt
@@ -37,6 +39,7 @@
 #include <sys/sysctl.h>
 #include <sys/consio.h>
 #include <sys/fbio.h>
+#include <sys/thread.h>
 
 #include <machine/pc/display.h>
 
@@ -116,6 +119,7 @@ clear_fred(sc_softc_t *sc, int xpos, int ypos, int dxdir, int xoff, int yoff,
 
 	if (xlen <= 0)
 		return;
+
 	for (y = yoff; y < ylen; y++) {
 		sc_vtb_erase(&sc->cur_scp->scr,
 			     (ypos + y)*sc->cur_scp->xsize + xpos + xoff,
@@ -201,13 +205,15 @@ fred_saver(video_adapter_t *adp, int blank)
 	int min, max;
 
 	sc = sc_find_softc(adp, NULL);
-	if (sc == NULL)
+	if (sc == NULL) {
 		return EAGAIN;
+	}
 	scp = sc->cur_scp;
 
 	if (blank) {
-		if (adp->va_info.vi_flags & V_INFO_GRAPHICS)
+		if (adp->va_info.vi_flags & V_INFO_GRAPHICS) {
 			return EAGAIN;
+		}
 		if (blanked == 0) {
 			/* clear the screen and set the border color */
 			sc_vtb_clear(&scp->scr, sc->scr_map[0x20],
@@ -216,8 +222,9 @@ fred_saver(video_adapter_t *adp, int blank)
 			sc_set_border(scp, 0);
 			xlen = ylen = tlen = 0;
 		}
-		if (blanked++ < 2)
+		if (blanked++ < 2) {
 			return 0;
+		}
 		blanked = 1;
 
  		clear_fred(sc, dxpos, dypos, dxdir, xoff, yoff, xlen, ylen);

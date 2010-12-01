@@ -39,16 +39,19 @@
  * $Id: fn_configure.c,v 1.82 2005/03/25 05:24:00 cpressey Exp $
  */
 
+#include <sys/stat.h>
 #include <sys/types.h>
 
 #include <ctype.h>
 #include <dirent.h>
+#include <fcntl.h>
 #include <libgen.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 #ifdef ENABLE_NLS
 #include <libintl.h>
@@ -76,7 +79,7 @@
 #include "pathnames.h"
 
 static const char	*yes_to_y(const char *);
-static char		*convert_swap_options(char *);
+static char		*convert_tmpfs_options(char *);
 
 /** CONFIGURE FUNCTIONS **/
 
@@ -337,28 +340,96 @@ fn_root_passwd(struct i_fn_args *a)
 }
 
 void
-fn_cvsup_sources(struct i_fn_args *a)
+fn_get_passphrase(struct i_fn_args *a)
 {
-	struct commands *cmds;
+	struct dfui_dataset *ds, *new_ds;
+	struct dfui_form *f;
+	struct dfui_response *r;
+	const char *passphrase_1, *passphrase_2;
+	int fd;
+	int done = 0;
 
-	inform(a->c, _("The system has issued a cvsup command in the background.\n\nPlease tail /tmp/cvsupdate.log if you wish to follow the progress."));
+	f = dfui_form_create(
+	    "crypt_passphrase",
+	    _("Set Passphrase For Encryption"),
+	    _("Please specify the passphrase to be used for the encrypted "
+	    "filesystems.\n\n"
+	    "Please note that in the LiveCD environment the keymap is set to "
+	    "\"US ISO\". "
+	    "If you prefer a different keymap for entering the passphrase "
+	    "here, you will need to set it manually using kbdcontrol(1)."),
+	    "",
 
-	// TODO: This needs a lot more work.
+	    "f", "passphrase_1", _("Passphrase"),
+	    _("Enter the passphrase you would like to use for encryption"), "",
+	    "p", "obscured", "true",
+	    "f", "passphrase_2", _("Passphrase again"),
+	    _("Enter the passphrase again to confirm"), "",
+	    "p", "obscured", "true",
 
-	cmds = commands_new();
-	command_add(cmds, "%s%s -h cvsup.dragonflybsd.com -b /usr "
-	    "/usr/share/examples/cvsup/DragonFly-supfile >/tmp/cvsupdate.log",
-	    a->os_root, cmd_name(a, "CVSUP"));
-	if (!commands_execute(a, cmds))
-	    inform(a->c, _("Warning: could not launch cvsup"));
+	    "a", "ok", _("Accept and Set Passphrase"), "", "",
+	    "p", "accelerator", "ESC",
 
-	commands_free(cmds);
+	    NULL
+	);
+
+	ds = dfui_dataset_new();
+	dfui_dataset_celldata_add(ds, "passphrase_1", "");
+	dfui_dataset_celldata_add(ds, "passphrase_2", "");
+	dfui_form_dataset_add(f, ds);
+
+	while (!done) {
+		if (!dfui_be_present(a->c, f, &r))
+			abort_backend();
+
+		if (strcmp(dfui_response_get_action_id(r), "ok") == 0) {
+			new_ds = dfui_dataset_dup(dfui_response_dataset_get_first(r));
+			dfui_form_datasets_free(f);
+			dfui_form_dataset_add(f, new_ds);
+
+			/*
+			 * Fetch form field values.
+			 */
+
+			passphrase_1 = dfui_dataset_get_value(new_ds, "passphrase_1");
+			passphrase_2 = dfui_dataset_get_value(new_ds, "passphrase_2");
+
+			if (strlen(passphrase_1) == 0 && strlen(passphrase_2) == 0) {
+				done = 0;
+			} else if (strcmp(passphrase_1, passphrase_2) == 0) {
+				/*
+				 * Passphrases match, write it out.
+				 */
+				fd = open("/tmp/t1", O_RDWR | O_CREAT | O_TRUNC,
+				    S_IRUSR);
+				if (fd != -1) {
+					write(fd, passphrase_1, strlen(passphrase_1));
+					close(fd);
+					done = 1;
+				} else {
+					inform(a->c, _("write() error"));
+					done = 0;
+				}
+			} else {
+				/*
+				 * Passphrases don't match, tell the user,
+				 * let them try again.
+				 */
+				inform(a->c, _("The passphrases do not match."));
+				done = 0;
+			}
+		}
+
+		dfui_response_free(r);
+	}
+
+	dfui_form_free(f);
 }
 
 void
 fn_install_packages(struct i_fn_args *a)
 {
-	FILE *pipe;
+	FILE *pfp;
 	struct commands *cmds;
 	struct dfui_celldata *cd;
 	struct dfui_dataset *ds;
@@ -391,8 +462,8 @@ fn_install_packages(struct i_fn_args *a)
 
 	ds = dfui_dataset_new();
 	snprintf(command, 256, "ls %svar/db/pkg", a->os_root);
-	if ((pipe = popen(command, "r")) != NULL) {
-		while (fgets(pkg_name, 255, pipe) != NULL) {
+	if ((pfp = popen(command, "r")) != NULL) {
+		while (fgets(pkg_name, 255, pfp) != NULL) {
 			while (strlen(pkg_name) > 0 &&
 			       isspace(pkg_name[strlen(pkg_name) - 1])) {
 				pkg_name[strlen(pkg_name) - 1] = '\0';
@@ -403,7 +474,7 @@ fn_install_packages(struct i_fn_args *a)
 			dfui_dataset_celldata_add(ds,
 			    pkg_name, "Y");
 		}
-		pclose(pipe);
+		pclose(pfp);
 	}
 	dfui_form_dataset_add(f, ds);
 
@@ -449,7 +520,7 @@ fn_install_packages(struct i_fn_args *a)
 void
 fn_remove_packages(struct i_fn_args *a)
 {
-	FILE *pipe;
+	FILE *pfp;
 	struct commands *cmds;
 	struct dfui_celldata *cd;
 	struct dfui_dataset *ds;
@@ -474,8 +545,8 @@ fn_remove_packages(struct i_fn_args *a)
 
 	ds = dfui_dataset_new();
 	snprintf(command, 256, "ls %smnt/var/db/pkg", a->os_root);
-	if ((pipe = popen(command, "r")) != NULL) {
-		while (fgets(pkg_name, 255, pipe)) {
+	if ((pfp = popen(command, "r")) != NULL) {
+		while (fgets(pkg_name, 255, pfp)) {
 			pkg_name[strlen(pkg_name) - 1] = '\0';
 			fi = dfui_form_field_add(f, pkg_name,
 			    dfui_info_new(pkg_name, "", ""));
@@ -483,7 +554,7 @@ fn_remove_packages(struct i_fn_args *a)
 			dfui_dataset_celldata_add(ds,
 			    pkg_name, "N");
 		}
-		pclose(pipe);
+		pclose(pfp);
 	}
 	dfui_form_dataset_add(f, ds);
 
@@ -703,8 +774,8 @@ fn_set_timezone(struct i_fn_args *a)
 
         switch (dfui_be_present_dialog(a->c, _("Local or UTC (Greenwich Mean Time) clock"),
 	    _("Yes|No"),
-            _("Is this machine's CMOS clock set to UTC?\n"),
-	    _("If it is set to local time, or you don't know, please choose NO here!"))) {
+            _("Is this machine's CMOS clock set to UTC?\n\n"
+	    "If it is set to local time, or you don't know, please choose NO here!"))) {
 		case 1:
 			cmds = commands_new();
 			command_add(cmds, "%s%s %s%setc/wall_cmos_clock",
@@ -880,14 +951,17 @@ fn_assign_hostname_domain(struct i_fn_args *a)
 
 		hostname = dfui_dataset_get_value(new_ds, "hostname");
 		domain = dfui_dataset_get_value(new_ds, "domain");
-		asprintf(&fqdn, "%s.%s", hostname, domain);
+		if (strlen(domain) == 0)
+			asprintf(&fqdn, "%s", hostname);
+		else
+			asprintf(&fqdn, "%s.%s", hostname, domain);
 
 		resolv_conf = config_vars_new();
 
 		config_var_set(rc_conf, "hostname", fqdn);
 		config_var_set(resolv_conf, "search", domain);
 		config_vars_write(resolv_conf, CONFIG_TYPE_RESOLV,
-		    "%s%setc/resolv.conf", "/", a->cfg_root);
+		    "%s%setc/resolv.conf", a->os_root, a->cfg_root);
 
 		config_vars_free(resolv_conf);
 
@@ -1134,7 +1208,8 @@ fn_select_services(struct i_fn_args *a)
 	struct dfui_form *f;
 	struct dfui_response *r;
 
-	if (!config_vars_read(a, rc_conf, CONFIG_TYPE_SH, "%setc/rc.conf", a->cfg_root)) {
+	if (!config_vars_read(a, rc_conf, CONFIG_TYPE_SH, "%s%setc/rc.conf",
+		a->os_root, a->cfg_root)) {
 		inform(a->c, _("Couldn't read %s%setc/rc.conf."),
 		    a->os_root, a->cfg_root);
 		a->result = 0;
@@ -1198,13 +1273,13 @@ fn_select_services(struct i_fn_args *a)
 	dfui_response_free(r);
 }
 
-/*** NON-fn_ FUnCTIONS ***/
+/*** NON-fn_ FUNCTIONS ***/
 
 /*
  * Caller is responsible for deallocation.
  */
 static char *
-convert_swap_options(char *line)
+convert_tmpfs_options(char *line)
 {
 	char *result, *word;
 	int i;
@@ -1239,10 +1314,11 @@ convert_swap_options(char *line)
 int
 mount_target_system(struct i_fn_args *a)
 {
-	FILE *fstab;
+	FILE *crypttab, *fstab;
 	struct commands *cmds;
+	struct command *cmd;
 	struct subpartition *a_subpart;
-	char device[256], mtpt[256], fstype[256], options[256];
+	char name[256], device[256], mtpt[256], fstype[256], options[256];
 	char *filename, line[256];
 	const char *try_mtpt[5]  = {"/var", "/tmp", "/usr", "/home", NULL};
 	char *word, *cvtoptions;
@@ -1271,8 +1347,8 @@ mount_target_system(struct i_fn_args *a)
 	 * assume exists
 	 */
 
-	a_subpart = subpartition_new(storage_get_selected_slice(a->s),
-	    "/dummy", 0, 0, 0, 0, 0);
+	a_subpart = subpartition_new_ufs(storage_get_selected_slice(a->s),
+	    "/dummy", 0, 0, 0, 0, 0, 0);
 
 	/*
 	 * Mount the target's / and read its /etc/fstab.
@@ -1283,37 +1359,124 @@ mount_target_system(struct i_fn_args *a)
 		    a->os_root,
 		    subpartition_get_device_name(a_subpart),
 		    a->os_root, a->cfg_root);
+		cmd = command_add(cmds,
+		    "%s%s -f %st2;"
+		    "%s%s \"^[^#]\" %s%s/etc/crypttab >%st2",
+		    a->os_root, cmd_name(a, "RM"), a->tmp,
+		    a->os_root, cmd_name(a, "GREP"),
+		    a->os_root, a->cfg_root, a->tmp);
+		command_set_failure_mode(cmd, COMMAND_FAILURE_IGNORE);
 	} else {
 		command_add(cmds, "%s%s %sdev/%s %sboot",
 		    a->os_root, cmd_name(a, "MOUNT"),
 		    a->os_root,
 		    subpartition_get_device_name(a_subpart),
-		    a->os_root, a->cfg_root);
-		command_add(cmds,
-		    "%s%s %sdev/`%s%s \"^vfs\\.root\\.mountfrom\" %sboot/loader.conf |"
-		    "%s%s -Fhammer: '{print $2;}' |"
-		    "%s%s 's/\"//'` %s%s",
-		    a->os_root, cmd_name(a, "MOUNT_HAMMER"),
-		    a->os_root,
+		    a->os_root);
+		cmd = command_add(cmds,
+		    "%s%s -f %st2;"
+		    "%s%s \"^vfs\\.root\\.realroot=\" %sboot/loader.conf >%st2",
+		    a->os_root, cmd_name(a, "RM"), a->tmp,
 		    a->os_root, cmd_name(a, "GREP"),
-		    a->os_root,
-		    a->os_root, cmd_name(a, "AWK"),
-		    a->os_root, cmd_name(a, "SED"),
-		    a->os_root, a->cfg_root);
-		command_add(cmds, "%s%s %sboot",
-		    a->os_root, cmd_name(a, "UMOUNT"),
-		    a->os_root, a->cfg_root);
+		    a->os_root, a->tmp);
+		command_set_failure_mode(cmd, COMMAND_FAILURE_IGNORE);
 	}
 	if (!commands_execute(a, cmds)) {
 		commands_free(cmds);
 		return(0);
 	}
 	commands_free(cmds);
+	cmds = commands_new();
+
+	if (use_hammer) {
+		struct stat sb = { .st_size = 0 };
+		stat("/tmp/t2", &sb);
+		if (sb.st_size > 0) {
+			command_add(cmds, "%s%s %sboot",
+			    a->os_root, cmd_name(a, "UMOUNT"),
+			    a->os_root);
+			fn_get_passphrase(a);
+			command_add(cmds,
+			    "%s%s -d /tmp/t1 luksOpen %sdev/`%s%s \"^vfs\\.root\\.realroot=\" %st2 |"
+			    "%s%s -Fhammer: '{print $2;}' |"
+			    "%s%s -F: '{print $1;}'` root",
+			    a->os_root, cmd_name(a, "CRYPTSETUP"),
+			    a->os_root,
+			    a->os_root, cmd_name(a, "GREP"),
+			    a->tmp,
+			    a->os_root, cmd_name(a, "AWK"),
+			    a->os_root, cmd_name(a, "AWK"));
+			command_add(cmds,
+			    "%s%s %sdev/mapper/root %s%s",
+			    a->os_root, cmd_name(a, "MOUNT_HAMMER"),
+			    a->os_root,
+			    a->os_root, a->cfg_root);
+		} else {
+			command_add(cmds,
+			    "%s%s %sdev/`%s%s \"^vfs\\.root\\.mountfrom\" %sboot/loader.conf |"
+			    "%s%s -Fhammer: '{print $2;}' |"
+			    "%s%s 's/\"//'` %s%s",
+			    a->os_root, cmd_name(a, "MOUNT_HAMMER"),
+			    a->os_root,
+			    a->os_root, cmd_name(a, "GREP"),
+			    a->os_root,
+			    a->os_root, cmd_name(a, "AWK"),
+			    a->os_root, cmd_name(a, "SED"),
+			    a->os_root, a->cfg_root);
+			command_add(cmds, "%s%s %sboot",
+			    a->os_root, cmd_name(a, "UMOUNT"),
+			    a->os_root);
+		}
+	}
+	if (!commands_execute(a, cmds)) {
+		commands_free(cmds);
+		return(0);
+	}
+	commands_free(cmds);
+	cmds = commands_new();
 
 	/*
 	 * Get rid of the dummy subpartition.
 	 */
 	subpartitions_free(storage_get_selected_slice(a->s));
+
+	/*
+	 * See if an /etc/crypttab exists.
+	 */
+	asprintf(&filename, "%s%s/etc/crypttab", a->os_root, a->cfg_root);
+	crypttab = fopen(filename, "r");
+	free(filename);
+	if (crypttab != NULL) {
+		if (!use_hammer)
+			fn_get_passphrase(a);
+		while (fgets(line, 256, crypttab) != NULL) {
+			/*
+			 * Parse the crypttab line.
+			 */
+			if (first_non_space_char_is(line, '#'))
+				continue;
+			if ((word = strtok(line, " \t")) == NULL)
+				continue;
+			strlcpy(name, word, 256);
+			if (strcmp(name, "swap") == 0)
+				continue;
+			if ((word = strtok(NULL, " \t")) == NULL)
+				continue;
+			strlcpy(device, word, 256);
+
+			command_add(cmds,
+			    "%s%s -d /tmp/t1 luksOpen %s %s",
+			    a->os_root, cmd_name(a, "CRYPTSETUP"),
+			    device, name);
+
+			continue;
+		}
+		fclose(crypttab);
+	}
+	if (!commands_execute(a, cmds)) {
+		commands_free(cmds);
+		return(0);
+	}
+	commands_free(cmds);
 
 	asprintf(&filename, "%s%s/etc/fstab", a->os_root, a->cfg_root);
 	fstab = fopen(filename, "r");
@@ -1366,21 +1529,21 @@ mount_target_system(struct i_fn_args *a)
 
 				/*
 				 * Don't mount it if device doesn't start
-				 * with /dev/ or /pfs and it isn't 'swap'.
+				 * with /dev/ or /pfs and it isn't 'tmpfs'.
 				 */
 				if (strstr(device, "/dev/") != NULL &&
 				     strstr(device, "/pfs/") != NULL &&
-				     strcmp(device, "swap") != 0)
+				     strcmp(device, "tmpfs") != 0)
 					continue;
 
 				/*
-				 * If the device is 'swap', mount_mfs it instead.
+				 * If the device is 'tmpfs', mount_tmpfs it instead.
 				 */
-				if (strcmp(device, "swap") == 0) {
-					cvtoptions = convert_swap_options(options);
+				if (strcmp(device, "tmpfs") == 0) {
+					cvtoptions = convert_tmpfs_options(options);
 					command_add(cmds,
-					    "%s%s %s swap %s%s%s",
-					    a->os_root, cmd_name(a, "MOUNT_MFS"),
+					    "%s%s %s tmpfs %s%s%s",
+					    a->os_root, cmd_name(a, "MOUNT_TMPFS"),
 					    cvtoptions, a->os_root, a->cfg_root, mtpt);
 					free(cvtoptions);
 				} else {
@@ -1396,8 +1559,8 @@ mount_target_system(struct i_fn_args *a)
 						    "%s%s -o %s %s%s%s %s%s%s",
 						    a->os_root, cmd_name(a, "MOUNT_NULL"),
 						    options,
-						    a->os_root, a->cfg_root, device, a->os_root,
-						    a->cfg_root, mtpt);
+						    a->os_root, a->cfg_root, device,
+						    a->os_root, a->cfg_root, mtpt);
 					}
 				}
 			}

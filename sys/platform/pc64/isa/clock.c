@@ -91,7 +91,7 @@
 
 #include <machine_base/isa/intr_machdep.h>
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 /* The interrupt triggered by the 8254 (timer) chip */
 int apic_8254_intr;
 static void setup_8254_mixed_mode (void);
@@ -445,6 +445,7 @@ DODELAY(int n, int doswitch)
 		ticks_left -= delta;
 		if (doswitch && ticks_left > 0)
 			lwkt_switch();
+		cpu_pause();
 	}
 #ifdef DELAYDEBUG
 	if (state == 1)
@@ -453,20 +454,52 @@ DODELAY(int n, int doswitch)
 #endif
 }
 
+/*
+ * DELAY() never switches.
+ */
 void
 DELAY(int n)
 {
 	DODELAY(n, 0);
 }
 
+/*
+ * Returns non-zero if the specified time period has elapsed.  Call
+ * first with last_clock set to 0.
+ */
+int
+CHECKTIMEOUT(TOTALDELAY *tdd)
+{
+	sysclock_t delta;
+	int us;
+
+	if (tdd->started == 0) {
+		if (timer0_state == RELEASED)
+			i8254_restore();
+		tdd->last_clock = sys_cputimer->count();
+		tdd->started = 1;
+		return(0);
+	}
+	delta = sys_cputimer->count() - tdd->last_clock;
+	us = (u_int64_t)delta * (u_int64_t)1000000 /
+	     (u_int64_t)sys_cputimer->freq;
+	tdd->last_clock += (u_int64_t)us * (u_int64_t)sys_cputimer->freq /
+			   1000000;
+	tdd->us -= us;
+	return (tdd->us < 0);
+}
+
+
+/*
+ * DRIVERSLEEP() does not switch if called with a spinlock held or
+ * from a hard interrupt.
+ */
 void
 DRIVERSLEEP(int usec)
 {
 	globaldata_t gd = mycpu;
 
-	if (gd->gd_intr_nesting_level || 
-	    gd->gd_spinlock_rd ||
-	    gd->gd_spinlocks_wr) {
+	if (gd->gd_intr_nesting_level || gd->gd_spinlocks_wr) {
 		DODELAY(usec, 0);
 	} else {
 		DODELAY(usec, 1);
@@ -485,6 +518,8 @@ int
 sysbeep(int pitch, int period)
 {
 	if (acquire_timer2(TIMER_SQWAVE|TIMER_16BIT))
+		return(-1);
+	if (sysbeep_enable == 0)
 		return(-1);
 	/*
 	 * Nobody else is using timer2, we do not need the clock lock
@@ -1014,10 +1049,10 @@ static void
 i8254_intr_initclock(struct cputimer_intr *cti, boolean_t selected)
 {
 	int diag;
-#ifdef APIC_IO
-	int apic_8254_trial;
-	void *clkdesc;
-#endif /* APIC_IO */
+#ifdef SMP /* APIC-IO */
+	int apic_8254_trial = 0;
+	void *clkdesc = NULL;
+#endif
 
 	callout_init(&sysbeepstop_ch);
 
@@ -1042,10 +1077,9 @@ i8254_intr_initclock(struct cputimer_intr *cti, boolean_t selected)
         }
 
 	/* Finish initializing 8253 timer 0. */
-#ifdef APIC_IO
-
+#ifdef SMP /* APIC-IO */
+if (apic_io_enable) {
 	apic_8254_intr = isa_apic_irq(0);
-	apic_8254_trial = 0;
 	if (apic_8254_intr >= 0 ) {
 		if (apic_int_type(0, 0) == 3)
 			apic_8254_trial = 1;
@@ -1064,16 +1098,16 @@ i8254_intr_initclock(struct cputimer_intr *cti, boolean_t selected)
 			       INTR_NOPOLL | INTR_MPSAFE | 
 			       INTR_NOENTROPY);
 	machintr_intren(apic_8254_intr);
-	
-#else /* APIC_IO */
-
+} else {
+#endif
 	register_int(0, clkintr, NULL, "clk", NULL,
 		     INTR_EXCL | INTR_CLOCK |
 		     INTR_NOPOLL | INTR_MPSAFE |
 		     INTR_NOENTROPY);
 	machintr_intren(ICU_IRQ0);
-
-#endif /* APIC_IO */
+#ifdef SMP /* APIC-IO */
+}
+#endif
 
 	/* Initialize RTC. */
 	writertc(RTC_STATUSA, rtc_statusa);
@@ -1084,10 +1118,12 @@ i8254_intr_initclock(struct cputimer_intr *cti, boolean_t selected)
 		if (diag != 0)
 			kprintf("RTC BIOS diagnostic error %b\n", diag, RTCDG_BITS);
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
+if (apic_io_enable) {
 		if (isa_apic_irq(8) != 8)
 			panic("APIC RTC != 8");
-#endif /* APIC_IO */
+}
+#endif
 
 		register_int(8, (inthand2_t *)rtcintr, NULL, "rtc", NULL,
 			     INTR_EXCL | INTR_CLOCK | INTR_NOPOLL |
@@ -1097,7 +1133,8 @@ i8254_intr_initclock(struct cputimer_intr *cti, boolean_t selected)
 		writertc(RTC_STATUSB, rtc_statusb);
 	}
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
+if (apic_io_enable) {
 	if (apic_8254_trial) {
 		sysclock_t base;
 		long lastcnt;
@@ -1165,10 +1202,11 @@ i8254_intr_initclock(struct cputimer_intr *cti, boolean_t selected)
 		kprintf("APIC_IO: "
 		       "routing 8254 via 8259 and IOAPIC #0 intpin 0\n");
 	}
+}
 #endif
 }
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 
 static void 
 setup_8254_mixed_mode(void)

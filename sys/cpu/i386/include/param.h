@@ -130,7 +130,7 @@
 #define MAXDUMPPGS	(DFLTPHYS/PAGE_SIZE)
 
 #define IOPAGES	2		/* pages of i/o permission bitmap */
-#define UPAGES	3		/* pages of u-area */
+#define UPAGES	4		/* pages of u-area */
 
 /*
  * Ceiling on amount of swblock kva space, can be changed via
@@ -148,24 +148,6 @@
 #ifndef VM_BCACHE_SIZE_MAX
 #define VM_BCACHE_SIZE_MAX	(200 * 1024 * 1024)
 #endif
-
-
-/*
- * Constants related to network buffer management.
- * MCLBYTES must be no larger than CLBYTES (the software page size), and,
- * on machines that exchange pages of input or output buffers with mbuf
- * clusters (MAPPED_MBUFS), MCLBYTES must also be an integral multiple
- * of the hardware page size.
- */
-#ifndef	MSIZE
-#define MSIZE		256		/* size of an mbuf */
-#endif	/* MSIZE */
-
-#ifndef	MCLSHIFT
-#define MCLSHIFT	11		/* convert bytes to m_buf clusters */
-#endif	/* MCLSHIFT */
-#define MCLBYTES	(1 << MCLSHIFT)	/* size of an m_buf cluster */
-#define MCLOFSET	(MCLBYTES - 1)	/* offset within an m_buf cluster */
 
 /*
  * Some macros for units conversion

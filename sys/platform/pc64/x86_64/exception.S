@@ -147,8 +147,9 @@ IDTVEC(align)
 	.globl	alltraps
 	.type	alltraps,@function
 alltraps:
-	testb	$SEL_RPL_MASK,TF_CS(%rsp) /* Did we come from kernel? */
-	jz	alltraps_testi		/* already running with kernel GS.base */
+	/* Fixup %gs if coming from userland */
+	testb	$SEL_RPL_MASK,TF_CS(%rsp)
+	jz	alltraps_testi
 	swapgs
 alltraps_testi:
 	testq	$PSL_I,TF_RFLAGS(%rsp)
@@ -189,8 +190,9 @@ calltrap:
 	.globl	alltraps_noen
 	.type	alltraps_noen,@function
 alltraps_noen:
-	testb	$SEL_RPL_MASK,TF_CS(%rsp) /* Did we come from kernel? */
-	jz	alltraps_pushregs	/* already running with kernel GS.base */
+	/* Fixup %gs if coming from userland */
+	testb	$SEL_RPL_MASK,TF_CS(%rsp)
+	jz	alltraps_pushregs
 	swapgs
 	jmp	alltraps_pushregs
 
@@ -215,8 +217,8 @@ IDTVEC(dblfault)
 	movq	%r13,TF_R13(%rsp)
 	movq	%r14,TF_R14(%rsp)
 	movq	%r15,TF_R15(%rsp)
-	testb	$SEL_RPL_MASK,TF_CS(%rsp) /* Did we come from kernel? */
-	jz	1f			/* already running with kernel GS.base */
+	testb	$SEL_RPL_MASK,TF_CS(%rsp)
+	jz	1f
 	swapgs
 1:	movq	%rsp, %rdi
 	call	dblfault_handler
@@ -226,8 +228,9 @@ IDTVEC(dblfault)
 IDTVEC(page)
 	subq	$TF_ERR,%rsp
 	movq	$T_PAGEFLT,TF_TRAPNO(%rsp)
-	testb	$SEL_RPL_MASK,TF_CS(%rsp) /* Did we come from kernel? */
-	jz	1f			/* already running with kernel GS.base */
+	/* Fixup %gs if coming from userland */
+	testb	$SEL_RPL_MASK,TF_CS(%rsp)
+	jz	1f
 	swapgs
 1:
 	movq	%rdi,TF_RDI(%rsp)	/* free up a GP register */
@@ -251,11 +254,16 @@ IDTVEC(prot)
 	movq	$0,TF_ADDR(%rsp)
 	movq	$0,TF_XFLAGS(%rsp)
 	movq	%rdi,TF_RDI(%rsp)	/* free up a GP register */
+
+	/*
+	 * Fixup %gs if coming from userland.  Handle the special case where
+	 * %fs faults in doreti at the iretq instruction itself.
+	 */
 	leaq	doreti_iret(%rip),%rdi
-	cmpq	%rdi,TF_RIP(%rsp)
-	je	2f			/* kernel but with user gsbase!! */
-	testb	$SEL_RPL_MASK,TF_CS(%rsp) /* Did we come from kernel? */
-	jz	1f			/* already running with kernel GS.base */
+	cmpq	%rdi,TF_RIP(%rsp)		/* special iretq fault case */
+	je	2f
+	testb	$SEL_RPL_MASK,TF_CS(%rsp)	/* check if from userland */
+	jz	1f
 2:
 	swapgs
 1:
@@ -273,7 +281,7 @@ IDTVEC(prot)
 IDTVEC(fast_syscall)
 	swapgs
 	movq	%rsp,PCPU(scratch_rsp)
-	movq	PCPU(rsp0),%rsp
+	movq    PCPU(common_tss) + TSS_RSP0, %rsp
 	/* Now emulate a trapframe. Make the 8 byte alignment odd for call. */
 	subq	$TF_SIZE,%rsp
 	/* defer TF_RSP till we have a spare register */
@@ -403,12 +411,12 @@ nmi_restoreregs:
  * it before calling the initial function (typically fork_return()) and/or
  * returning to user mode.
  *
- * The MP lock is held on entry, but for processes fork_return(esi)
- * releases it.  'doreti' always runs without the MP lock.
+ * The MP lock is not held at any point but the critcount is bumped
+ * on entry to prevent interruption of the trampoline at a bad point.
  */
 ENTRY(fork_trampoline)
 	movq	PCPU(curthread),%rax
-	subl	$TDPRI_CRIT,TD_PRI(%rax)
+	decl	TD_CRITCOUNT(%rax)
 
 	/*
 	 * cpu_set_fork_handler intercepts this function call to

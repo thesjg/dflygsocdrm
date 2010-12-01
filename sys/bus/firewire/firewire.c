@@ -639,7 +639,7 @@ fw_reset_crom(struct firewire_comm *fc)
 	crom_add_entry(root, CSRKEY_VENDOR, CSRVAL_VENDOR_PRIVATE);
 #ifdef __DragonFly__
 	crom_add_simple_text(src, root, &buf->vendor, "DragonFly Project");
-	crom_add_entry(root, CSRKEY_HW, __DragonFly_cc_version);
+	crom_add_entry(root, CSRKEY_HW, __DragonFly_version);
 #else
 	crom_add_simple_text(src, root, &buf->vendor, "FreeBSD Project");
 	crom_add_entry(root, CSRKEY_HW, __FreeBSD_version);
@@ -1489,7 +1489,7 @@ fw_bus_explore_callback(struct fw_xfer *xfer)
 	if(fc->ongodev == NULL){
 		if(sfp->mode.rreqq.dest_lo == (0xf0000000 | CSRROMOFF)){
 			rfp->mode.rresq.data = ntohl(rfp->mode.rresq.data);
-			chdr = (struct csrhdr *)(&rfp->mode.rresq.data);
+			chdr = (struct csrhdr *)(void *)(&rfp->mode.rresq.data);
 /* If CSR is minimal confinguration, more investgation is not needed. */
 			if(chdr->info_len == 1){
 				if (firewire_debug)

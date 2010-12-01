@@ -64,7 +64,7 @@ zalloc(vm_zone_t z)
 	if (z == NULL)
 		zerror(ZONE_ERROR_INVALID);
 #endif
-	spin_lock_wr(&z->zlock);
+	spin_lock(&z->zlock);
 	if (z->zfreecnt > z->zfreemin) {
 		item = z->zitems;
 #ifdef INVARIANTS
@@ -76,9 +76,9 @@ zalloc(vm_zone_t z)
 		z->zitems = ((void **) item)[0];
 		z->zfreecnt--;
 		z->znalloc++;
-		spin_unlock_wr(&z->zlock);
+		spin_unlock(&z->zlock);
 	} else {
-		spin_unlock_wr(&z->zlock);
+		spin_unlock(&z->zlock);
 		item = zget(z);
 		/*
 		 * PANICFAIL allows the caller to assume that the zalloc()
@@ -98,7 +98,7 @@ zalloc(vm_zone_t z)
 void
 zfree(vm_zone_t z, void *item)
 {
-	spin_lock_wr(&z->zlock);
+	spin_lock(&z->zlock);
 	((void **) item)[0] = z->zitems;
 #ifdef INVARIANTS
 	if (((void **) item)[1] == (void *) ZENTRY_FREE)
@@ -107,7 +107,7 @@ zfree(vm_zone_t z, void *item)
 #endif
 	z->zitems = item;
 	z->zfreecnt++;
-	spin_unlock_wr(&z->zlock);
+	spin_unlock(&z->zlock);
 }
 
 /*
@@ -407,7 +407,6 @@ zget(vm_zone_t z)
 		 * Interrupt zones do not mess with the kernel_map, they
 		 * simply populate an existing mapping.
 		 */
-		get_mplock();
 		lwkt_gettoken(&vm_token);
 		savezpc = z->zpagecount;
 		nbytes = z->zpagecount * PAGE_SIZE;
@@ -442,7 +441,6 @@ zget(vm_zone_t z)
 		}
 		nitems = ((z->zpagecount * PAGE_SIZE) - nbytes) / z->zsize;
 		lwkt_reltoken(&vm_token);
-		rel_mplock();
 	} else if (z->zflags & ZONE_SPECIAL) {
 		/*
 		 * The special zone is the one used for vm_map_entry_t's.
@@ -492,7 +490,7 @@ zget(vm_zone_t z)
 		nitems = nbytes / z->zsize;
 	}
 
-	spin_lock_wr(&z->zlock);
+	spin_lock(&z->zlock);
 	z->ztotal += nitems;
 	/*
 	 * Save one for immediate allocation
@@ -522,7 +520,7 @@ zget(vm_zone_t z)
 	} else {
 		item = NULL;
 	}
-	spin_unlock_wr(&z->zlock);
+	spin_unlock(&z->zlock);
 
 	/*
 	 * A special zone may have used a kernel-reserved vm_map_entry.  If

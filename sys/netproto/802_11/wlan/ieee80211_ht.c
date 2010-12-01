@@ -1044,8 +1044,6 @@ htinfo_notify(struct ieee80211com *ic)
 	struct ieee80211vap *vap;
 	int first = 1;
 
-	IEEE80211_LOCK_ASSERT(ic);
-
 	TAILQ_FOREACH(vap, &ic->ic_vaps, iv_next) {
 		if (vap->iv_opmode != IEEE80211_M_HOSTAP)
 			continue;
@@ -1106,8 +1104,6 @@ ieee80211_ht_node_join(struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = ni->ni_ic;
 
-	IEEE80211_LOCK_ASSERT(ic);
-
 	if (ni->ni_flags & IEEE80211_NODE_HT) {
 		ic->ic_ht_sta_assoc++;
 		if (ni->ni_chw == 40)
@@ -1123,8 +1119,6 @@ void
 ieee80211_ht_node_leave(struct ieee80211_node *ni)
 {
 	struct ieee80211com *ic = ni->ni_ic;
-
-	IEEE80211_LOCK_ASSERT(ic);
 
 	if (ni->ni_flags & IEEE80211_NODE_HT) {
 		ic->ic_ht_sta_assoc--;
@@ -1150,8 +1144,6 @@ void
 ieee80211_htprot_update(struct ieee80211com *ic, int protmode)
 {
 #define	OPMODE(x)	SM(x, IEEE80211_HTINFO_OPMODE)
-	IEEE80211_LOCK(ic);
-
 	/* track non-HT station presence */
 	KASSERT(protmode & IEEE80211_HTINFO_NONHT_PRESENT,
 	    ("protmode 0x%x", protmode));
@@ -1165,7 +1157,6 @@ ieee80211_htprot_update(struct ieee80211com *ic, int protmode)
 		ic->ic_curhtprotmode = protmode;
 		htinfo_notify(ic);
 	}
-	IEEE80211_UNLOCK(ic);
 #undef OPMODE
 }
 
@@ -1180,8 +1171,6 @@ ieee80211_htprot_update(struct ieee80211com *ic, int protmode)
 void
 ieee80211_ht_timeout(struct ieee80211com *ic)
 {
-	IEEE80211_LOCK_ASSERT(ic);
-
 	if ((ic->ic_flags_ht & IEEE80211_FHT_NONHT_PR) &&
 	    time_after(ticks, ic->ic_lastnonht + IEEE80211_NONHT_PRESENT_AGE)) {
 #if 0
@@ -1507,13 +1496,15 @@ ampdu_tx_stop(struct ieee80211_tx_ampdu *tap)
 }
 
 static void
-addba_timeout(void *arg)
+addba_timeout_callout(void *arg)
 {
 	struct ieee80211_tx_ampdu *tap = arg;
 
+	wlan_serialize_enter();
 	/* XXX ? */
 	tap->txa_flags &= ~IEEE80211_AGGR_XCHGPEND;
 	tap->txa_attempts++;
+	wlan_serialize_exit();
 }
 
 static void
@@ -1521,7 +1512,7 @@ addba_start_timeout(struct ieee80211_tx_ampdu *tap)
 {
 	/* XXX use CALLOUT_PENDING instead? */
 	callout_reset(&tap->txa_timer, ieee80211_addba_timeout,
-	    addba_timeout, tap);
+			addba_timeout_callout, tap);
 	tap->txa_flags |= IEEE80211_AGGR_XCHGPEND;
 	tap->txa_nextrequest = ticks + ieee80211_addba_timeout;
 }
@@ -1721,8 +1712,8 @@ ht_recv_action_ba_addba_response(struct ieee80211_node *ni,
 		IEEE80211_DISCARD_MAC(vap,
 		    IEEE80211_MSG_ACTION | IEEE80211_MSG_11N,
 		    ni->ni_macaddr, "ADDBA response",
-		    "policy mismatch: expecting %s, "
-		    "received %s, tid %d code %d",
+		    "policy mismatch: expecting %d, "
+		    "received %d, tid %d code %d",
 		    tap->txa_flags & IEEE80211_AGGR_IMMEDIATE,
 		    policy, tid, code);
 		vap->iv_stats.is_addba_badpolicy++;
@@ -1952,11 +1943,13 @@ ieee80211_ampdu_stop(struct ieee80211_node *ni, struct ieee80211_tx_ampdu *tap,
 }
 
 static void
-bar_timeout(void *arg)
+bar_timeout_callout(void *arg)
 {
 	struct ieee80211_tx_ampdu *tap = arg;
-	struct ieee80211_node *ni = tap->txa_ni;
+	struct ieee80211_node *ni;
 
+	wlan_serialize_enter();
+	ni = tap->txa_ni;
 	KASSERT((tap->txa_flags & IEEE80211_AGGR_XCHGPEND) == 0,
 	    ("bar/addba collision, flags 0x%x", tap->txa_flags));
 
@@ -1965,19 +1958,21 @@ bar_timeout(void *arg)
 	    tap->txa_ac, tap->txa_flags, tap->txa_attempts);
 
 	/* guard against race with bar_tx_complete */
-	if ((tap->txa_flags & IEEE80211_AGGR_BARPEND) == 0)
-		return;
-	/* XXX ? */
-	if (tap->txa_attempts >= ieee80211_bar_maxtries)
-		ieee80211_ampdu_stop(ni, tap, IEEE80211_REASON_TIMEOUT);
-	else
-		ieee80211_send_bar(ni, tap, tap->txa_seqpending);
+	if (tap->txa_flags & IEEE80211_AGGR_BARPEND) {
+		/* XXX ? */
+		if (tap->txa_attempts >= ieee80211_bar_maxtries)
+			ieee80211_ampdu_stop(ni, tap, IEEE80211_REASON_TIMEOUT);
+		else
+			ieee80211_send_bar(ni, tap, tap->txa_seqpending);
+	}
+	wlan_serialize_exit();
 }
 
 static void
 bar_start_timer(struct ieee80211_tx_ampdu *tap)
 {
-	callout_reset(&tap->txa_timer, ieee80211_bar_timeout, bar_timeout, tap);
+	callout_reset(&tap->txa_timer, ieee80211_bar_timeout,
+			bar_timeout_callout, tap);
 }
 
 static void

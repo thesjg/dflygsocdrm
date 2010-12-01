@@ -169,23 +169,16 @@ swi_softclock_setup(void *arg)
 			TAILQ_INIT(&sc->callwheel[i]);
 
 		/*
-		 * Create a preemption-capable thread for each cpu to handle
-		 * softclock timeouts on that cpu.  The preemption can only
-		 * be blocked by a critical section.  The thread can itself
-		 * be preempted by normal interrupts.
+		 * Mark the softclock handler as being an interrupt thread
+		 * even though it really isn't, but do not allow it to
+		 * preempt other threads (do not assign td_preemptable).
+		 *
+		 * Kernel code now assumes that callouts do not preempt
+		 * the cpu they were scheduled on.
 		 */
 		lwkt_create(softclock_handler, sc, NULL,
-			    &sc->thread, TDF_STOPREQ|TDF_INTTHREAD, cpu,
-			    "softclock %d", cpu);
-#if 0
-		/* 
-		 * Do not make the thread preemptable until we clean up all
-		 * the splsoftclock() calls in the system.  Since the threads
-		 * are no longer operated as a software interrupt, the 
-		 * splsoftclock() calls will not have any effect on them.
-		 */
-		sc->thread.td_preemptable = lwkt_preempt;
-#endif
+			    &sc->thread, TDF_STOPREQ | TDF_INTTHREAD,
+			    cpu, "softclock %d", cpu);
 	}
 }
 
@@ -244,9 +237,9 @@ hardclock_softtick(globaldata_t gd)
  * a critical section is sufficient to interlock sc->curticks and protect
  * us from remote IPI's / list removal.
  *
- * The thread starts with the MP lock held and not in a critical section.
- * The loop itself is MP safe while individual callbacks may or may not
- * be, so we obtain or release the MP lock as appropriate.
+ * The thread starts with the MP lock released and not in a critical
+ * section.  The loop itself is MP safe while individual callbacks
+ * may or may not be, so we obtain or release the MP lock as appropriate.
  */
 static void
 softclock_handler(void *arg)
@@ -257,7 +250,7 @@ softclock_handler(void *arg)
 	void (*c_func)(void *);
 	void *c_arg;
 #ifdef SMP
-	int mpsafe = 0;
+	int mpsafe = 1;
 #endif
 
 	lwkt_setpri_self(TDPRI_SOFT_NORM);

@@ -280,18 +280,12 @@ ktr_resync_callback(void *dummy __unused)
 		struct spinlock spin;
 
 		spin_init(&spin);
-		spin_lock_wr(&spin);
-		spin_unlock_wr(&spin);
+		spin_lock(&spin);
+		spin_unlock(&spin);
 		logtest_noargs(spin_beg);
 		for (count = ktr_testspincnt; count; --count) {
-			spin_lock_wr(&spin);
-			spin_unlock_wr(&spin);
-		}
-		logtest_noargs(spin_end);
-		logtest_noargs(spin_beg);
-		for (count = ktr_testspincnt; count; --count) {
-			spin_lock_rd(&spin);
-			spin_unlock_rd(&spin);
+			spin_lock(&spin);
+			spin_unlock(&spin);
 		}
 		logtest_noargs(spin_end);
 		ktr_testspincnt = 0;
@@ -635,8 +629,10 @@ db_mach_vtrace(int cpu, struct ktr_entry *kp, int idx)
 	}
 	db_printf("%s\t", kp->ktr_info->kf_name);
 	db_printf("from(%p,%p) ", kp->ktr_caller1, kp->ktr_caller2);
+#ifdef __i386__
 	if (kp->ktr_info->kf_format)
 		db_vprintf(kp->ktr_info->kf_format, (__va_list)kp->ktr_data);
+#endif
 	db_printf("\n");
 
 	return(1);

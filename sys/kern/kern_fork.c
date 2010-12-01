@@ -622,9 +622,6 @@ lwp_fork(struct lwp *origlp, struct proc *destproc, int flags)
 	td->td_proc = destproc;
 	td->td_lwp = lp;
 	td->td_switch = cpu_heavy_switch;
-#ifdef SMP
-	KKASSERT(td->td_mpcount == 1);
-#endif
 	lwkt_setpri(td, TDPRI_KERN_USER);
 	lwkt_set_comm(td, "%s", destproc->p_comm);
 

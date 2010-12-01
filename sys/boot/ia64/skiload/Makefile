@@ -13,16 +13,12 @@ SRCS+=		conf.c main.c start.S
 
 CFLAGS+=	-ffreestanding
 
-.if !defined(NOFORTH)
-# Enable BootForth
-BOOT_FORTH=	yes
-CFLAGS+=	-DBOOT_FORTH
-CFLAGS+=	-I${.CURDIR}/../../ficl -I${.CURDIR}/../../ficl/${MACHINE_ARCH}
-.if exists(${.OBJDIR}/../../ficl/libficl.a)
-LIBFICL=	${.OBJDIR}/../../ficl/libficl.a
+BOOT_DLOADER=	yes
+CFLAGS+=	-I${.CURDIR}/../../dloader -I${.CURDIR}/../../dloader/${MACHINE_ARCH}
+.if exists(${.OBJDIR}/../../dloader/libdloader.a)
+LIBDLOADER=	${.OBJDIR}/../../dloader/libdloader.a
 .else
-LIBFICL=	${.CURDIR}/../../ficl/libficl.a
-.endif
+LIBDLOADER=	${.CURDIR}/../../dloader/libdloader.a
 .endif
 
 # where to get libstand from
@@ -75,10 +71,10 @@ beforeinstall:
 machine:
 	${LN} -sf ${.CURDIR}/../../../arch/${MACHINE_ARCH}/include machine
 
-${PROG}: ${OBJS} ${LIBFICL} ${LIBSKI} ${LIBSTAND} vers.o
+${PROG}: ${OBJS} ${LIBDLOADER} ${LIBSKI} ${LIBSTAND} vers.o
 	${LD} ${LDFLAGS} -o ${PROG} -M \
 	    ${OBJS} vers.o \
-	    ${LIBFICL} ${LIBSTAND} ${LIBSKI} ${LIBSTAND} \
+	    ${LIBDLOADER} ${LIBSTAND} ${LIBSKI} ${LIBSTAND} \
 	    > ${.OBJDIR}/${PROG}.list
 
 .include <bsd.prog.mk>

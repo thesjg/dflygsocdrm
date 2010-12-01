@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1995-1998 Søren Schmidt
  * All rights reserved.
  *
@@ -35,6 +37,7 @@
 #include <sys/module.h>
 #include <sys/consio.h>
 #include <sys/fbio.h>
+#include <sys/thread.h>
 
 #include <machine/pc/display.h>
 
@@ -62,13 +65,15 @@ star_saver(video_adapter_t *adp, int blank)
 	static u_short 	stars[NUM_STARS][2];
 
 	sc = sc_find_softc(adp, NULL);
-	if (sc == NULL)
+	if (sc == NULL) {
 		return EAGAIN;
+	}
 	scp = sc->cur_scp;
 
 	if (blank) {
-		if (adp->va_info.vi_flags & V_INFO_GRAPHICS)
+		if (adp->va_info.vi_flags & V_INFO_GRAPHICS) {
 			return EAGAIN;
+		}
 		if (!blanked) {
 			/* clear the screen and set the border color */
 			sc_vtb_clear(&scp->scr, sc->scr_map[0x20],

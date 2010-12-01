@@ -100,7 +100,8 @@ extern	struct user *proc0paddr;
 extern int fallback_elf_brand;
 
 int	boothowto = 0;		/* initialized so that it can be patched */
-SYSCTL_INT(_debug, OID_AUTO, boothowto, CTLFLAG_RD, &boothowto, 0, "");
+SYSCTL_INT(_debug, OID_AUTO, boothowto, CTLFLAG_RD, &boothowto, 0,
+    "Reboot flags, from console subsystem");
 
 /*
  * This ensures that there is at least one entry so that the sysinit_set
@@ -163,6 +164,9 @@ mi_proc0init(struct globaldata *gd, struct user *proc0paddr)
 {
 	lwkt_init_thread(&thread0, proc0paddr, LWKT_THREAD_STACK, 0, gd);
 	lwkt_set_comm(&thread0, "thread0");
+#ifdef SMP
+	thread0.td_mpcount = 1;	/* will hold mplock initially */
+#endif
 	RB_INIT(&proc0.p_lwp_tree);
 	spin_init(&proc0.p_spin);
 	proc0.p_lasttid = 0;	/* +1 = next TID */
@@ -498,8 +502,6 @@ SYSCTL_STRING(_kern, OID_AUTO, init_path, CTLFLAG_RD, init_path, 0, "");
 /*
  * Start the initial user process; try exec'ing each pathname in init_path.
  * The program is invoked with one argument containing the boot flags.
- *
- * The MP lock is held on entry.
  */
 static void
 start_init(void *dummy, struct trapframe *frame)
@@ -513,7 +515,20 @@ start_init(void *dummy, struct trapframe *frame)
 	struct lwp *lp;
 	struct mount *mp;
 	struct vnode *vp;
+	char *env;
 
+        /*
+	 * This is passed in by the bootloader
+         */
+	env = kgetenv("kernelname");
+	if (env != NULL)
+		strlcpy(kernelname, env, sizeof(kernelname));
+
+	/*
+	 * The MP lock is not held on entry.  We release it before
+	 * returning to userland.
+	 */
+	get_mplock();
 	p = curproc;
 
 	lp = ONLY_LWP_IN_PROC(p);

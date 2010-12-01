@@ -49,7 +49,6 @@
 #include <sys/kernel.h>
 #include <sys/sysctl.h>
 #include <sys/thread.h>
-#include <sys/mutex.h>
 
 #include <machine/cpufunc.h>
 
@@ -112,14 +111,17 @@ __mtx_lock_ex(mtx_t mtx, mtx_link_t link, const char *ident, int flags, int to)
 			 * Also set MTX_EXWANTED coincident with EXLINK, if
 			 * not already set.
 			 */
+			thread_t td;
+
 			if (lock & MTX_EXLINK) {
 				cpu_pause();
 				++mtx_collision_count;
 				continue;
 			}
+			td = curthread;
 			/*lock &= ~MTX_EXLINK;*/
 			nlock = lock | MTX_EXWANTED | MTX_EXLINK;
-			++mycpu->gd_spinlocks_wr;
+			++td->td_critcount;
 			if (atomic_cmpset_int(&mtx->mtx_lock, lock, nlock)) {
 				/*
 				 * Check for early abort
@@ -127,7 +129,7 @@ __mtx_lock_ex(mtx_t mtx, mtx_link_t link, const char *ident, int flags, int to)
 				if (link->state == MTX_LINK_ABORTED) {
 					atomic_clear_int(&mtx->mtx_lock,
 							 MTX_EXLINK);
-					--mycpu->gd_spinlocks_wr;
+					--td->td_critcount;
 					error = ENOLCK;
 					if (mtx->mtx_link == NULL) {
 						atomic_clear_int(&mtx->mtx_lock,
@@ -140,7 +142,7 @@ __mtx_lock_ex(mtx_t mtx, mtx_link_t link, const char *ident, int flags, int to)
 				 * Success.  Link in our structure then
 				 * release EXLINK and sleep.
 				 */
-				link->owner = curthread;
+				link->owner = td;
 				link->state = MTX_LINK_LINKED;
 				if (mtx->mtx_link) {
 					link->next = mtx->mtx_link;
@@ -154,7 +156,7 @@ __mtx_lock_ex(mtx_t mtx, mtx_link_t link, const char *ident, int flags, int to)
 				}
 				tsleep_interlock(link, 0);
 				atomic_clear_int(&mtx->mtx_lock, MTX_EXLINK);
-				--mycpu->gd_spinlocks_wr;
+				--td->td_critcount;
 
 				error = tsleep(link, flags, ident, to);
 				++mtx_contention_count;
@@ -185,7 +187,7 @@ __mtx_lock_ex(mtx_t mtx, mtx_link_t link, const char *ident, int flags, int to)
 				if (error)
 					break;
 			} else {
-				--mycpu->gd_spinlocks_wr;
+				--td->td_critcount;
 			}
 		}
 		++mtx_collision_count;
@@ -273,8 +275,11 @@ _mtx_lock_sh_quick(mtx_t mtx, const char *ident)
 	return (__mtx_lock_sh(mtx, ident, 0, 0));
 }
 
+/*
+ * Get an exclusive spinlock the hard way.
+ */
 void
-_mtx_spinlock_ex(mtx_t mtx)
+_mtx_spinlock(mtx_t mtx)
 {
 	u_int	lock;
 	u_int	nlock;
@@ -309,6 +314,49 @@ _mtx_spinlock_ex(mtx_t mtx)
 	}
 }
 
+/*
+ * Attempt to acquire a spinlock, if we fail we must undo the
+ * gd->gd_spinlocks_wr/gd->gd_curthead->td_critcount predisposition.
+ *
+ * Returns 0 on success, EAGAIN on failure.
+ */
+int
+_mtx_spinlock_try(mtx_t mtx)
+{
+	globaldata_t gd = mycpu;
+	u_int	lock;
+	u_int	nlock;
+	int	res = 0;
+
+	for (;;) {
+		lock = mtx->mtx_lock;
+		if (lock == 0) {
+			nlock = MTX_EXCLUSIVE | 1;
+			if (atomic_cmpset_int(&mtx->mtx_lock, 0, nlock)) {
+				mtx->mtx_owner = gd->gd_curthread;
+				break;
+			}
+		} else if ((lock & MTX_EXCLUSIVE) &&
+			   mtx->mtx_owner == gd->gd_curthread) {
+			KKASSERT((lock & MTX_MASK) != MTX_MASK);
+			nlock = lock + 1;
+			if (atomic_cmpset_int(&mtx->mtx_lock, lock, nlock))
+				break;
+		} else {
+			--gd->gd_spinlocks_wr;
+			cpu_ccfence();
+			--gd->gd_curthread->td_critcount;
+			res = EAGAIN;
+			break;
+		}
+		cpu_pause();
+		++mtx_collision_count;
+	}
+	return res;
+}
+
+#if 0
+
 void
 _mtx_spinlock_sh(mtx_t mtx)
 {
@@ -337,6 +385,8 @@ _mtx_spinlock_sh(mtx_t mtx)
 		++mtx_collision_count;
 	}
 }
+
+#endif
 
 int
 _mtx_lock_ex_try(mtx_t mtx)
@@ -516,21 +566,24 @@ _mtx_unlock(mtx_t mtx)
 			 * Acquire an exclusive lock leaving the lockcount
 			 * set to 1, and get EXLINK for access to mtx_link.
 			 */
+			thread_t td;
+
 			if (lock & MTX_EXLINK) {
 				cpu_pause();
 				++mtx_collision_count;
 				continue;
 			}
+			td = curthread;
 			/*lock &= ~MTX_EXLINK;*/
 			nlock |= MTX_EXLINK | MTX_EXCLUSIVE;
 			nlock |= (lock & MTX_SHWANTED);
-			++mycpu->gd_spinlocks_wr;
+			++td->td_critcount;
 			if (atomic_cmpset_int(&mtx->mtx_lock, lock, nlock)) {
 				mtx_chain_link(mtx);
-				--mycpu->gd_spinlocks_wr;
+				--td->td_critcount;
 				break;
 			}
-			--mycpu->gd_spinlocks_wr;
+			--td->td_critcount;
 		} else if (nlock == (MTX_EXCLUSIVE | MTX_EXWANTED | 1)) {
 			/*
 			 * Last release, exclusive lock, with exclusive
@@ -539,21 +592,24 @@ _mtx_unlock(mtx_t mtx)
 			 * leave the exclusive lock intact and the lockcount
 			 * set to 1, and get EXLINK for access to mtx_link.
 			 */
+			thread_t td;
+
 			if (lock & MTX_EXLINK) {
 				cpu_pause();
 				++mtx_collision_count;
 				continue;
 			}
+			td = curthread;
 			/*lock &= ~MTX_EXLINK;*/
 			nlock |= MTX_EXLINK;
 			nlock |= (lock & MTX_SHWANTED);
-			++mycpu->gd_spinlocks_wr;
+			++td->td_critcount;
 			if (atomic_cmpset_int(&mtx->mtx_lock, lock, nlock)) {
 				mtx_chain_link(mtx);
-				--mycpu->gd_spinlocks_wr;
+				--td->td_critcount;
 				break;
 			}
-			--mycpu->gd_spinlocks_wr;
+			--td->td_critcount;
 		} else {
 			/*
 			 * Not the last release (shared or exclusive)
@@ -646,6 +702,7 @@ static
 void
 mtx_delete_link(mtx_t mtx, mtx_link_t link)
 {
+	thread_t td = curthread;
 	u_int	lock;
 	u_int	nlock;
 
@@ -655,7 +712,7 @@ mtx_delete_link(mtx_t mtx, mtx_link_t link)
 	 * Do not use cmpxchg to wait for EXLINK to clear as this might
 	 * result in too much cpu cache traffic.
 	 */
-	++mycpu->gd_spinlocks_wr;
+	++td->td_critcount;
 	for (;;) {
 		lock = mtx->mtx_lock;
 		if (lock & MTX_EXLINK) {
@@ -685,7 +742,7 @@ mtx_delete_link(mtx_t mtx, mtx_link_t link)
 		link->state = MTX_LINK_IDLE;
 	}
 	atomic_clear_int(&mtx->mtx_lock, MTX_EXLINK);
-	--mycpu->gd_spinlocks_wr;
+	--td->td_critcount;
 }
 
 /*
@@ -697,13 +754,14 @@ mtx_delete_link(mtx_t mtx, mtx_link_t link)
 void
 mtx_abort_ex_link(mtx_t mtx, mtx_link_t link)
 {
+	thread_t td = curthread;
 	u_int	lock;
 	u_int	nlock;
 
 	/*
 	 * Acquire MTX_EXLINK
 	 */
-	++mycpu->gd_spinlocks_wr;
+	++td->td_critcount;
 	for (;;) {
 		lock = mtx->mtx_lock;
 		if (lock & MTX_EXLINK) {
@@ -755,5 +813,5 @@ mtx_abort_ex_link(mtx_t mtx, mtx_link_t link)
 		break;
 	}
 	atomic_clear_int(&mtx->mtx_lock, MTX_EXLINK);
-	--mycpu->gd_spinlocks_wr;
+	--td->td_critcount;
 }

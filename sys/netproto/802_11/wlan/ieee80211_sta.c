@@ -207,8 +207,6 @@ sta_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 	struct ieee80211_node *ni;
 	enum ieee80211_state ostate;
 
-	IEEE80211_LOCK_ASSERT(ic);
-
 	ostate = vap->iv_state;
 	IEEE80211_DPRINTF(vap, IEEE80211_MSG_STATE, "%s: %s -> %s (%d)\n",
 	    __func__, ieee80211_state_name[ostate],
@@ -411,7 +409,7 @@ sta_newstate(struct ieee80211vap *vap, enum ieee80211_state nstate, int arg)
 				2 * vap->iv_bmissthreshold * ni->ni_intval);
 			vap->iv_swbmiss_count = 0;
 			callout_reset(&vap->iv_swbmiss, vap->iv_swbmiss_period,
-				ieee80211_swbmiss, vap);
+				      ieee80211_swbmiss_callout, vap);
 		}
 		/*
 		 * When 802.1x is not in use mark the port authorized
@@ -983,7 +981,7 @@ sta_auth_shared(struct ieee80211_node *ni, struct ieee80211_frame *wh,
 			IEEE80211_DISCARD_MAC(vap, IEEE80211_MSG_AUTH,
 			    ni->ni_macaddr, "shared key auth",
 			    "ie %d/%d too long",
-			    frm[0], (frm[1] + 2) - (efrm - frm));
+			    frm[0], (int)((frm[1] + 2) - (efrm - frm)));
 			vap->iv_stats.is_rx_bad_auth++;
 			estatus = IEEE80211_STATUS_CHALLENGE;
 			goto bad;
@@ -1118,7 +1116,6 @@ ieee80211_parse_csaparams(struct ieee80211vap *vap, uint8_t *frm,
 		    wh, "CSA", "invalid mode %u", csa->csa_mode);
 		return;
 	}
-	IEEE80211_LOCK(ic);
 	if ((ic->ic_flags & IEEE80211_F_CSAPENDING) == 0) {
 		/*
 		 * Convert the channel number to a channel reference.  We
@@ -1187,7 +1184,7 @@ ieee80211_parse_csaparams(struct ieee80211vap *vap, uint8_t *frm,
 			IEEE80211_NOTE_FRAME(vap, IEEE80211_MSG_DOTH, wh,
 			    "CSA ie mismatch, initial ie <%d,%d,%d>, "
 			    "this ie <%d,%d,%d>", ic->ic_csa_mode,
-			    ic->ic_csa_newchan, ic->ic_csa_count,
+			    ic->ic_csa_newchan->ic_ieee, ic->ic_csa_count,
 			    csa->csa_mode, csa->csa_newchan, csa->csa_count);
 			ieee80211_csa_cancelswitch(ic);
 		} else {
@@ -1198,7 +1195,7 @@ ieee80211_parse_csaparams(struct ieee80211vap *vap, uint8_t *frm,
 		}
 	}
 done:
-	IEEE80211_UNLOCK(ic);
+	;
 }
 
 /*
@@ -1377,9 +1374,7 @@ sta_recv_mgmt(struct ieee80211_node *ni, struct mbuf *m0,
 				 * stuck in CSA state.  If the AP really is
 				 * moving we'll get a beacon miss and scan.
 				 */
-				IEEE80211_LOCK(ic);
 				ieee80211_csa_cancelswitch(ic);
-				IEEE80211_UNLOCK(ic);
 			}
 			/*
 			 * If scanning, pass the info to the scan module.

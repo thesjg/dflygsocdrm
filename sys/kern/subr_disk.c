@@ -3,6 +3,7 @@
  *
  * This code is derived from software contributed to The DragonFly Project
  * by Matthew Dillon <dillon@backplane.com>
+ * and Alex Hornung <ahornung@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -101,15 +102,18 @@
 #include <sys/syslog.h>
 #include <sys/device.h>
 #include <sys/msgport.h>
-#include <sys/msgport2.h>
-#include <sys/buf2.h>
 #include <sys/devfs.h>
 #include <sys/thread.h>
-#include <sys/thread2.h>
 #include <sys/dsched.h>
 #include <sys/queue.h>
 #include <sys/lock.h>
 #include <sys/udev.h>
+#include <sys/uuid.h>
+
+#include <sys/buf2.h>
+#include <sys/mplock2.h>
+#include <sys/msgport2.h>
+#include <sys/thread2.h>
 
 static MALLOC_DEFINE(M_DISK, "disk", "disk data");
 static int disk_debug_enable = 0;
@@ -121,20 +125,22 @@ static void disk_probe(struct disk *dp, int reprobe);
 static void _setdiskinfo(struct disk *disk, struct disk_info *info);
 static void bioqwritereorder(struct bio_queue_head *bioq);
 static void disk_cleanserial(char *serno);
+static int disk_debug(int, char *, ...) __printflike(2, 3);
+static cdev_t _disk_create_named(const char *name, int unit, struct disk *dp,
+    struct dev_ops *raw_ops, int clone);
 
 static d_open_t diskopen;
 static d_close_t diskclose;
 static d_ioctl_t diskioctl;
 static d_strategy_t diskstrategy;
 static d_psize_t diskpsize;
-static d_clone_t diskclone;
 static d_dump_t diskdump;
 
 static LIST_HEAD(, disk) disklist = LIST_HEAD_INITIALIZER(&disklist);
 static struct lwkt_token disklist_token;
 
 static struct dev_ops disk_ops = {
-	{ "disk", 0, D_DISK },
+	{ "disk", 0, D_DISK | D_MPSAFE | D_TRACKCLOSE },
 	.d_open = diskopen,
 	.d_close = diskclose,
 	.d_read = physread,
@@ -143,7 +149,6 @@ static struct dev_ops disk_ops = {
 	.d_strategy = diskstrategy,
 	.d_dump = diskdump,
 	.d_psize = diskpsize,
-	.d_clone = diskclone
 };
 
 static struct objcache 	*disk_msg_cache;
@@ -175,6 +180,7 @@ disk_probe_slice(struct disk *dp, cdev_t dev, int slice, int reprobe)
 	disklabel_ops_t ops;
 	struct partinfo part;
 	const char *msg;
+	char uuid_buf[128];
 	cdev_t ndev;
 	int sno;
 	u_int i;
@@ -210,6 +216,21 @@ disk_probe_slice(struct disk *dp, cdev_t dev, int slice, int reprobe)
 					 * is still valid.
 					 */
 					ndev->si_flags |= SI_REPROBE_TEST;
+
+					/*
+					 * Destroy old UUID alias
+					 */
+					destroy_dev_alias(ndev, "part-by-uuid/*");
+
+					/* Create UUID alias */
+					if (!kuuid_is_nil(&part.storage_uuid)) {
+						snprintf_uuid(uuid_buf,
+						    sizeof(uuid_buf),
+						    &part.storage_uuid);
+						make_dev_alias(ndev,
+						    "part-by-uuid/%s",
+						    uuid_buf);
+					}
 				} else {
 					ndev = make_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
 						dkmakeminor(dkunit(dp->d_cdev),
@@ -220,14 +241,26 @@ disk_probe_slice(struct disk *dp, cdev_t dev, int slice, int reprobe)
 					udev_dict_set_cstr(ndev, "subsystem", "disk");
 					/* Inherit parent's disk type */
 					if (dp->d_disktype) {
-						udev_dict_set_cstr(ndev, "disk-type", 
+						udev_dict_set_cstr(ndev, "disk-type",
 						    __DECONST(char *, dp->d_disktype));
 					}
+
+					/* Create serno alias */
 					if (dp->d_info.d_serialno) {
 						make_dev_alias(ndev,
 						    "serno/%s.s%d%c",
 						    dp->d_info.d_serialno,
 						    sno, 'a' + i);
+					}
+
+					/* Create UUID alias */
+					if (!kuuid_is_nil(&part.storage_uuid)) {
+						snprintf_uuid(uuid_buf,
+						    sizeof(uuid_buf),
+						    &part.storage_uuid);
+						make_dev_alias(ndev,
+						    "part-by-uuid/%s",
+						    uuid_buf);
 					}
 					ndev->si_flags |= SI_REPROBE_TEST;
 				}
@@ -270,6 +303,7 @@ disk_probe(struct disk *dp, int reprobe)
 	int error, i, sno;
 	struct diskslices *osp;
 	struct diskslice *sp;
+	char uuid_buf[128];
 
 	KKASSERT (info->d_media_blksize != 0);
 
@@ -289,6 +323,17 @@ disk_probe(struct disk *dp, int reprobe)
 		 */
 		if (i == WHOLE_DISK_SLICE)
 			continue;
+
+#if 1
+		/*
+		 * Ignore the compatibility slice s0 if it's a device mapper
+		 * volume.
+		 */
+		if ((i == COMPATIBILITY_SLICE) &&
+		    (info->d_dsflags & DSO_DEVICEMAPPER))
+			continue;
+#endif
+
 		sp = &dp->d_slice->dss_slices[i];
 
 		/*
@@ -321,6 +366,19 @@ disk_probe(struct disk *dp, int reprobe)
 			 * Device already exists and is still valid
 			 */
 			ndev->si_flags |= SI_REPROBE_TEST;
+
+			/*
+			 * Destroy old UUID alias
+			 */
+			destroy_dev_alias(ndev, "slice-by-uuid/*");
+
+			/* Create UUID alias */
+			if (!kuuid_is_nil(&sp->ds_stor_uuid)) {
+				snprintf_uuid(uuid_buf, sizeof(uuid_buf),
+				    &sp->ds_stor_uuid);
+				make_dev_alias(ndev, "slice-by-uuid/%s",
+				    uuid_buf);
+			}
 		} else {
 			/*
 			 * Else create new device
@@ -328,17 +386,29 @@ disk_probe(struct disk *dp, int reprobe)
 			ndev = make_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
 					dkmakewholeslice(dkunit(dev), i),
 					UID_ROOT, GID_OPERATOR, 0640,
-					"%ss%d", dev->si_name, sno);
+					(info->d_dsflags & DSO_DEVICEMAPPER)?
+					"%s.s%d" : "%ss%d", dev->si_name, sno);
 			udev_dict_set_cstr(ndev, "subsystem", "disk");
 			/* Inherit parent's disk type */
 			if (dp->d_disktype) {
-				udev_dict_set_cstr(ndev, "disk-type", 
+				udev_dict_set_cstr(ndev, "disk-type",
 				    __DECONST(char *, dp->d_disktype));
 			}
+
+			/* Create serno alias */
 			if (dp->d_info.d_serialno) {
 				make_dev_alias(ndev, "serno/%s.s%d",
 					       dp->d_info.d_serialno, sno);
 			}
+
+			/* Create UUID alias */
+			if (!kuuid_is_nil(&sp->ds_stor_uuid)) {
+				snprintf_uuid(uuid_buf, sizeof(uuid_buf),
+				    &sp->ds_stor_uuid);
+				make_dev_alias(ndev, "slice-by-uuid/%s",
+				    uuid_buf);
+			}
+
 			ndev->si_disk = dp;
 			ndev->si_flags |= SI_REPROBE_TEST;
 		}
@@ -373,8 +443,12 @@ disk_msg_core(void *arg)
 	disk_msg_t msg;
 	int run;
 
+	lwkt_gettoken(&disklist_token);
 	lwkt_initport_thread(&disk_msg_port, curthread);
-	wakeup(curthread);
+	wakeup(curthread);	/* synchronous startup */
+	lwkt_reltoken(&disklist_token);
+
+	get_mplock();	/* not mpsafe yet? */
 	run = 1;
 
 	while (run) {
@@ -394,7 +468,8 @@ disk_msg_core(void *arg)
 				    "DISK_DISK_DESTROY: %s\n",
 					dp->d_cdev->si_name);
 			devfs_destroy_subnames(dp->d_cdev->si_name);
-			devfs_destroy_dev(dp->d_cdev);
+			destroy_dev(dp->d_cdev);
+			destroy_only_dev(dp->d_rawdev);
 			lwkt_gettoken(&disklist_token);
 			LIST_REMOVE(dp, d_list);
 			lwkt_reltoken(&disklist_token);
@@ -512,42 +587,87 @@ disk_msg_send_sync(uint32_t cmd, void *load, void *load2)
 cdev_t
 disk_create(int unit, struct disk *dp, struct dev_ops *raw_ops)
 {
-	return disk_create_named(NULL, unit, dp, raw_ops);
+	return _disk_create_named(NULL, unit, dp, raw_ops, 0);
+}
+
+cdev_t
+disk_create_clone(int unit, struct disk *dp, struct dev_ops *raw_ops)
+{
+	return _disk_create_named(NULL, unit, dp, raw_ops, 1);
 }
 
 cdev_t
 disk_create_named(const char *name, int unit, struct disk *dp, struct dev_ops *raw_ops)
 {
-	cdev_t rawdev;
+	return _disk_create_named(name, unit, dp, raw_ops, 0);
+}
 
-	if (name == NULL)
-		name = raw_ops->head.name;
+cdev_t
+disk_create_named_clone(const char *name, int unit, struct disk *dp, struct dev_ops *raw_ops)
+{
+	return _disk_create_named(name, unit, dp, raw_ops, 1);
+}
+
+static cdev_t
+_disk_create_named(const char *name, int unit, struct disk *dp, struct dev_ops *raw_ops, int clone)
+{
+	cdev_t rawdev;
 
 	disk_debug(1, "disk_create (begin): %s%d\n", name, unit);
 
-	rawdev = make_only_dev(raw_ops, dkmakewholedisk(unit),
-			    UID_ROOT, GID_OPERATOR, 0640,
-			    "%s%d", name, unit);
+	if (name) {
+		rawdev = make_only_dev(raw_ops, dkmakewholedisk(unit),
+		    UID_ROOT, GID_OPERATOR, 0640, "%s", name);
+	} else {
+		rawdev = make_only_dev(raw_ops, dkmakewholedisk(unit),
+		    UID_ROOT, GID_OPERATOR, 0640,
+		    "%s%d", raw_ops->head.name, unit);
+	}
 
 	bzero(dp, sizeof(*dp));
 
 	dp->d_rawdev = rawdev;
 	dp->d_raw_ops = raw_ops;
 	dp->d_dev_ops = &disk_ops;
-	dp->d_cdev = make_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
+
+	if (name) {
+		if (clone) {
+			dp->d_cdev = make_only_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
+			    dkmakewholedisk(unit), UID_ROOT, GID_OPERATOR, 0640,
+			    "%s", name);
+		} else {
+			dp->d_cdev = make_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
+			    dkmakewholedisk(unit), UID_ROOT, GID_OPERATOR, 0640,
+			    "%s", name);
+		}
+	} else {
+		if (clone) {
+			dp->d_cdev = make_only_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
 			    dkmakewholedisk(unit),
 			    UID_ROOT, GID_OPERATOR, 0640,
-			    "%s%d", name, unit);
+			    "%s%d", raw_ops->head.name, unit);
+		} else {
+			dp->d_cdev = make_dev_covering(&disk_ops, dp->d_rawdev->si_ops,
+			    dkmakewholedisk(unit),
+			    UID_ROOT, GID_OPERATOR, 0640,
+			    "%s%d", raw_ops->head.name, unit);
+		}
+	}
+
 	udev_dict_set_cstr(dp->d_cdev, "subsystem", "disk");
 	dp->d_cdev->si_disk = dp;
 
-	dsched_disk_create_callback(dp, name, unit);
+	if (name)
+		dsched_disk_create_callback(dp, name, unit);
+	else
+		dsched_disk_create_callback(dp, raw_ops->head.name, unit);
 
 	lwkt_gettoken(&disklist_token);
 	LIST_INSERT_HEAD(&disklist, dp, d_list);
 	lwkt_reltoken(&disklist_token);
 
-	disk_debug(1, "disk_create (end): %s%d\n", name, unit);
+	disk_debug(1, "disk_create (end): %s%d\n",
+	    (name != NULL)?(name):(raw_ops->head.name), unit);
 
 	return (dp->d_rawdev);
 }
@@ -559,6 +679,12 @@ disk_setdisktype(struct disk *disk, const char *type)
 
 	disk->d_disktype = type;
 	return udev_dict_set_cstr(disk->d_cdev, "disk-type", __DECONST(char *, type));
+}
+
+int
+disk_getopencount(struct disk *disk)
+{
+	return disk->d_opencount;
 }
 
 static void
@@ -597,7 +723,7 @@ _setdiskinfo(struct disk *disk, struct disk_info *info)
 	 * The caller may set d_media_size or d_media_blocks and we
 	 * calculate the other.
 	 */
-	KKASSERT(info->d_media_size == 0 || info->d_media_blksize == 0);
+	KKASSERT(info->d_media_size == 0 || info->d_media_blocks == 0);
 	if (info->d_media_size == 0 && info->d_media_blocks) {
 		info->d_media_size = (u_int64_t)info->d_media_blocks *
 				     info->d_media_blksize;
@@ -619,6 +745,10 @@ _setdiskinfo(struct disk *disk, struct disk_info *info)
 		disk->d_cdev->si_bsize_phys = disk->d_rawdev->si_bsize_phys;
 		disk->d_cdev->si_bsize_best = disk->d_rawdev->si_bsize_best;
 	}
+
+	/* Add the serial number to the udev_dictionary */
+	if (info->d_serialno)
+		udev_dict_set_cstr(disk->d_cdev, "serno", info->d_serialno);
 }
 
 /*
@@ -797,11 +927,14 @@ diskopen(struct dev_open_args *ap)
 	/*
 	 * Deal with open races
 	 */
+	get_mplock();
 	while (dp->d_flags & DISKFLAG_LOCK) {
 		dp->d_flags |= DISKFLAG_WANTED;
 		error = tsleep(dp, PCATCH, "diskopen", hz);
-		if (error)
+		if (error) {
+			rel_mplock();
 			return (error);
+		}
 	}
 	dp->d_flags |= DISKFLAG_LOCK;
 
@@ -816,13 +949,6 @@ diskopen(struct dev_open_args *ap)
 		error = dev_dopen(dp->d_rawdev, ap->a_oflags,
 				  ap->a_devtype, ap->a_cred);
 	}
-#if 0
-	/*
-	 * Inherit properties from the underlying device now that it is
-	 * open.
-	 */
-	dev_dclone(dev);
-#endif
 
 	if (error)
 		goto out;
@@ -837,6 +963,12 @@ out:
 		dp->d_flags &= ~DISKFLAG_WANTED;
 		wakeup(dp);
 	}
+	rel_mplock();
+
+	KKASSERT(dp->d_opencount >= 0);
+	/* If the open was successful, bump open count */
+	if (error == 0)
+		atomic_add_int(&dp->d_opencount, 1);
 
 	return(error);
 }
@@ -855,10 +987,17 @@ diskclose(struct dev_close_args *ap)
 	error = 0;
 	dp = dev->si_disk;
 
+	KKASSERT(dp->d_opencount >= 1);
+	/* If this is not the last close, just ignore it */
+	if ((atomic_fetchadd_int(&dp->d_opencount, -1)) > 1)
+		return 0;
+
+	get_mplock();
 	dsclose(dev, ap->a_devtype, dp->d_slice);
 	if (!dsisopen(dp->d_slice)) {
 		error = dev_dclose(dp->d_rawdev, ap->a_fflag, ap->a_devtype);
 	}
+	rel_mplock();
 	return (error);
 }
 
@@ -891,11 +1030,15 @@ diskioctl(struct dev_ioctl_args *ap)
 		return disk_dumpconf(dev, u);
 	}
 
-	if (&dp->d_slice == NULL || dp->d_slice == NULL) {
+	if (&dp->d_slice == NULL || dp->d_slice == NULL ||
+	    ((dp->d_info.d_dsflags & DSO_DEVICEMAPPER) &&
+	     dkslice(dev) == WHOLE_DISK_SLICE)) {
 		error = ENOIOCTL;
 	} else {
+		get_mplock();
 		error = dsioctl(dev, ap->a_cmd, ap->a_data, ap->a_fflag,
 				&dp->d_slice, &dp->d_info);
+		rel_mplock();
 	}
 
 	if (error == ENOIOCTL) {
@@ -955,33 +1098,14 @@ diskpsize(struct dev_psize_args *ap)
 	dp = dev->si_disk;
 	if (dp == NULL)
 		return(ENODEV);
+
 	ap->a_result = dssize(dev, &dp->d_slice);
-	return(0);
-}
 
-/*
- * When new device entries are instantiated, make sure they inherit our
- * si_disk structure and block and iosize limits from the raw device.
- *
- * This routine is always called synchronously in the context of the
- * client.
- *
- * XXX The various io and block size constraints are not always initialized
- * properly by devices.
- */
-static
-int
-diskclone(struct dev_clone_args *ap)
-{
-	cdev_t dev = ap->a_head.a_dev;
-	struct disk *dp;
-	dp = dev->si_disk;
-
-	KKASSERT(dp != NULL);
-	dev->si_disk = dp;
-	dev->si_iosize_max = dp->d_rawdev->si_iosize_max;
-	dev->si_bsize_phys = dp->d_rawdev->si_bsize_phys;
-	dev->si_bsize_best = dp->d_rawdev->si_bsize_best;
+	if ((ap->a_result == -1) &&
+	   (dp->d_info.d_dsflags & DSO_DEVICEMAPPER)) {
+		ap->a_head.a_dev = dp->d_rawdev;
+		return dev_doperate(&ap->a_head);
+	}
 	return(0);
 }
 
@@ -1254,17 +1378,18 @@ disk_init(void)
 					 objcache_malloc_free,
 					 &disk_msg_malloc_args);
 
-	lwkt_token_init(&disklist_token, 1);
+	lwkt_token_init(&disklist_token, 1, "disks");
 
 	/*
 	 * Initialize the reply-only port which acts as a message drain
 	 */
 	lwkt_initport_replyonly(&disk_dispose_port, disk_msg_autofree_reply);
 
+	lwkt_gettoken(&disklist_token);
 	lwkt_create(disk_msg_core, /*args*/NULL, &td_core, NULL,
 		    0, 0, "disk_msg_core");
-
 	tsleep(td_core, 0, "diskcore", 0);
+	lwkt_reltoken(&disklist_token);
 }
 
 static void

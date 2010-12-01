@@ -166,7 +166,12 @@ struct blist *swapblist;
 static int swap_async_max = 4;	/* maximum in-progress async I/O's	*/
 static int swap_burst_read = 0;	/* allow burst reading */
 
-extern struct vnode *swapdev_vp;	/* from vm_swap.c */
+/* from vm_swap.c */
+extern struct vnode *swapdev_vp;
+extern struct swdevt *swdevt;
+extern int nswdev;
+
+#define BLK2DEVIDX(blk) (nswdev > 1 ? blk / dmmax % nswdev : 0)
 
 SYSCTL_INT(_vm, OID_AUTO, swap_async_max,
         CTLFLAG_RW, &swap_async_max, 0, "Maximum running async swap ops");
@@ -177,6 +182,8 @@ SYSCTL_INT(_vm, OID_AUTO, swap_cache_use,
         CTLFLAG_RD, &vm_swap_cache_use, 0, "");
 SYSCTL_INT(_vm, OID_AUTO, swap_anon_use,
         CTLFLAG_RD, &vm_swap_anon_use, 0, "");
+SYSCTL_INT(_vm, OID_AUTO, swap_size,
+        CTLFLAG_RD, &vm_swap_size, 0, "");
 
 vm_zone_t		swap_zone;
 
@@ -488,7 +495,7 @@ swp_pager_getswapspace(vm_object_t object, int npages)
 			swap_pager_almost_full = 1;
 		}
 	} else {
-		vm_swap_size -= npages;
+		swapacctspace(blk, -npages);
 		if (object->type == OBJT_SWAP)
 			vm_swap_anon_use += npages;
 		else
@@ -516,12 +523,19 @@ swp_pager_getswapspace(vm_object_t object, int npages)
 static __inline void
 swp_pager_freeswapspace(vm_object_t object, swblk_t blk, int npages)
 {
-	blist_free(swapblist, blk, npages);
-	vm_swap_size += npages;
+	struct swdevt *sp = &swdevt[BLK2DEVIDX(blk)];
+
+	sp->sw_nused -= npages;
 	if (object->type == OBJT_SWAP)
 		vm_swap_anon_use -= npages;
 	else
 		vm_swap_cache_use -= npages;
+
+	if (sp->sw_flags & SW_CLOSING)
+		return;
+
+	blist_free(swapblist, blk, npages);
+	vm_swap_size += npages;
 	swp_sizecheck();
 }
 
@@ -1123,10 +1137,10 @@ swap_chain_iodone(struct bio *biox)
         KKASSERT(bp != NULL);
 	if (bufx->b_flags & B_ERROR) {
 		atomic_set_int(&bufx->b_flags, B_ERROR);
-		bp->b_error = bufx->b_error;
+		bp->b_error = bufx->b_error;	/* race ok */
 	} else if (bufx->b_resid != 0) {
 		atomic_set_int(&bufx->b_flags, B_ERROR);
-		bp->b_error = EINVAL;
+		bp->b_error = EINVAL;		/* race ok */
 	} else {
 		atomic_subtract_int(&bp->b_resid, bufx->b_bcount);
 	}
@@ -1134,7 +1148,7 @@ swap_chain_iodone(struct bio *biox)
 	/*
 	 * Remove us from the chain.
 	 */
-	spin_lock_wr(&bp->b_lock.lk_spinlock);
+	spin_lock(&bp->b_lock.lk_spinlock);
 	nextp = &nbio->bio_caller_info1.cluster_head;
 	while (*nextp != bufx) {
 		KKASSERT(*nextp != NULL);
@@ -1142,7 +1156,7 @@ swap_chain_iodone(struct bio *biox)
 	}
 	*nextp = bufx->b_cluster_next;
 	chain_empty = (nbio->bio_caller_info1.cluster_head == NULL);
-	spin_unlock_wr(&bp->b_lock.lk_spinlock);
+	spin_unlock(&bp->b_lock.lk_spinlock);
 
 	/*
 	 * Clean up bufx.  If the chain is now empty we finish out
@@ -1885,6 +1899,86 @@ swp_pager_async_iodone(struct bio *bio)
 	relpbuf(bp, nswptr);
 	lwkt_reltoken(&vm_token);
 	crit_exit();
+}
+
+/*
+ * Fault-in a potentially swapped page and remove the swap reference.
+ */
+static __inline void
+swp_pager_fault_page(vm_object_t object, vm_pindex_t pindex)
+{
+	struct vnode *vp;
+	vm_page_t m;
+	int error;
+
+	if (object->type == OBJT_VNODE) {
+		/*
+		 * Any swap related to a vnode is due to swapcache.  We must
+		 * vget() the vnode in case it is not active (otherwise
+		 * vref() will panic).  Calling vm_object_page_remove() will
+		 * ensure that any swap ref is removed interlocked with the
+		 * page.  clean_only is set to TRUE so we don't throw away
+		 * dirty pages.
+		 */
+		vp = object->handle;
+		error = vget(vp, LK_SHARED | LK_RETRY | LK_CANRECURSE);
+		if (error == 0) {
+			vm_object_page_remove(object, pindex, pindex + 1, TRUE);
+			vput(vp);
+		}
+	} else {
+		/*
+		 * Otherwise it is a normal OBJT_SWAP object and we can
+		 * fault the page in and remove the swap.
+		 */
+		m = vm_fault_object_page(object, IDX_TO_OFF(pindex),
+					 VM_PROT_NONE,
+					 VM_FAULT_DIRTY | VM_FAULT_UNSWAP,
+					 &error);
+		if (m)
+			vm_page_unhold(m);
+	}
+}
+
+int
+swap_pager_swapoff(int devidx)
+{
+	vm_object_t object;
+	struct swblock *swap;
+	swblk_t v;
+	int i;
+
+	lwkt_gettoken(&vm_token);
+	lwkt_gettoken(&vmobj_token);
+rescan:
+	TAILQ_FOREACH(object, &vm_object_list, object_list) {
+		if (object->type == OBJT_SWAP || object->type == OBJT_VNODE) {
+			RB_FOREACH(swap, swblock_rb_tree, &object->swblock_root) {
+				for (i = 0; i < SWAP_META_PAGES; ++i) {
+					v = swap->swb_pages[i];
+					if (v != SWAPBLK_NONE &&
+					    BLK2DEVIDX(v) == devidx) {
+						swp_pager_fault_page(
+						    object,
+						    swap->swb_index + i);
+						goto rescan;
+					}
+				}
+			}
+		}
+	}
+	lwkt_reltoken(&vmobj_token);
+	lwkt_reltoken(&vm_token);
+
+	/*
+	 * If we fail to locate all swblocks we just fail gracefully and
+	 * do not bother to restore paging on the swap device.  If the
+	 * user wants to retry the user can retry.
+	 */
+	if (swdevt[devidx].sw_nused)
+		return (1);
+	else
+		return (0);
 }
 
 /************************************************************************

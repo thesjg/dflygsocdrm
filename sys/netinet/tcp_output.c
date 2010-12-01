@@ -68,6 +68,7 @@
  * $DragonFly: src/sys/netinet/tcp_output.c,v 1.34 2007/04/22 01:13:14 dillon Exp $
  */
 
+#include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
 #include "opt_tcpdebug.h"
@@ -151,6 +152,9 @@ tcp_output(struct tcpcb *tp)
 	long len, recvwin, sendwin;
 	int nsacked = 0;
 	int off, flags, error;
+#ifdef TCP_SIGNATURE
+	int sigoff = 0;
+#endif
 	struct mbuf *m;
 	struct ip *ip = NULL;
 	struct ipovly *ipov = NULL;
@@ -165,6 +169,8 @@ tcp_output(struct tcpcb *tp)
 #else
 	const boolean_t isipv6 = FALSE;
 #endif
+
+	KKASSERT(so->so_port == &curthread->td_msgport);
 
 	/*
 	 * Determine length of data that should be transmitted,
@@ -369,9 +375,9 @@ again:
 					 tcp_autosndbuf_inc,
 					tcp_autosndbuf_max);
 			if (!ssb_reserve(&so->so_snd, newsize, so, NULL))
-				so->so_snd.ssb_flags &= ~SSB_AUTOSIZE;
+				atomic_clear_int(&so->so_snd.ssb_flags, SSB_AUTOSIZE);
 			if (newsize >= (TCP_MAXWIN << tp->snd_scale))
-				so->so_snd.ssb_flags &= ~SSB_AUTOSIZE;
+				atomic_clear_int(&so->so_snd.ssb_flags, SSB_AUTOSIZE);
 		}
 	}
 
@@ -599,6 +605,28 @@ send:
 	     tp->reportblk.rblk_start != tp->reportblk.rblk_end))
 		tcp_sack_fill_report(tp, opt, &optlen);
 
+#ifdef TCP_SIGNATURE
+	if (tp->t_flags & TF_SIGNATURE) {
+		int i;
+		u_char *bp;
+		/*
+		 * Initialize TCP-MD5 option (RFC2385)
+		 */
+		bp = (u_char *)opt + optlen;
+		*bp++ = TCPOPT_SIGNATURE;
+		*bp++ = TCPOLEN_SIGNATURE;
+		sigoff = optlen + 2;
+		for (i = 0; i < TCP_SIGLEN; i++)
+			*bp++ = 0;
+		optlen += TCPOLEN_SIGNATURE;
+		/*
+		 * Terminate options list and maintain 32-bit alignment.
+		 */
+		*bp++ = TCPOPT_NOP;
+		*bp++ = TCPOPT_EOL;
+		optlen += 2;
+	}
+#endif /* TCP_SIGNATURE */
 	KASSERT(optlen <= TCP_MAXOLEN, ("too many TCP options"));
 	hdrlen += optlen;
 
@@ -817,6 +845,12 @@ send:
 		 */
 		tp->snd_up = tp->snd_una;		/* drag it along */
 	}
+
+#ifdef TCP_SIGNATURE
+	if (tp->t_flags & TF_SIGNATURE)
+		tcpsignature_compute(m, len, optlen,
+				(u_char *)(th + 1) + sigoff, IPSEC_DIR_OUTBOUND);
+#endif /* TCP_SIGNATURE */
 
 	/*
 	 * Put TCP length in extended header, and then

@@ -4,6 +4,8 @@
  */
 
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 1998 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -42,6 +44,8 @@
 
 /*
  * HID spec: http://www.usb.org/developers/devclass_docs/HID1_11.pdf
+ *
+ * NOTE: All locks are handled by the kbd wrappers.
  */
 
 #include "opt_kbd.h"
@@ -197,7 +201,6 @@ ukbd_attach(device_t self)
 #endif
 	if (bootverbose)
 		(*sw->diag)(kbd, bootverbose);
-
 	return 0;
 }
 
@@ -238,6 +241,7 @@ ukbd_resume(device_t self)
 						 device_get_unit(self)));
 	if (kbd)
 		kbd_clear_state(kbd);
+
 	return (0);
 }
 
@@ -524,8 +528,9 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 
 	if (unit == UKBD_DEFAULT) {
 		*kbdp = kbd = &default_kbd;
-		if (KBD_IS_INITIALIZED(kbd) && KBD_IS_CONFIGURED(kbd))
+		if (KBD_IS_INITIALIZED(kbd) && KBD_IS_CONFIGURED(kbd)) {
 			return 0;
+		}
 		state = &default_kbd_state;
 		keymap = &default_keymap;
 		accmap = &default_accentmap;
@@ -575,10 +580,11 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 		kbd_set_maps(kbd, keymap, accmap, fkeymap, fkeymap_size);
 		kbd->kb_data = (void *)state;
 
-		if (probe_keyboard(uaa, flags))
+		if (probe_keyboard(uaa, flags)) {
 			return ENXIO;
-		else
+		} else {
 			KBD_FOUND_DEVICE(kbd);
+		}
 		ukbd_clear_state(kbd);
 
 		/*
@@ -591,7 +597,7 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 		state->ks_iface = uaa->iface;
 		state->ks_uaa = uaa;
 		state->ks_ifstate = 0;
-		callout_init(&state->ks_timeout);
+		callout_init_mp(&state->ks_timeout);
 		/*
 		 * FIXME: set the initial value for lock keys in ks_state
 		 * according to the BIOS data?
@@ -601,8 +607,9 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 	if (!KBD_IS_INITIALIZED(kbd) && !(flags & KB_CONF_PROBE_ONLY)) {
 		if (KBD_HAS_DEVICE(kbd)
 		    && init_keyboard((ukbd_state_t *)kbd->kb_data,
-				     &kbd->kb_type, kbd->kb_flags))
+				     &kbd->kb_type, kbd->kb_flags)) {
 			return ENXIO;
+		}
 		ukbd_ioctl(kbd, KDSETLED, (caddr_t)&(state->ks_state));
 	}
 	if (!KBD_IS_CONFIGURED(kbd)) {
@@ -615,6 +622,7 @@ ukbd_init(int unit, keyboard_t **kbdp, void *arg, int flags)
 			ukbd_timeout((void *)kbd);
 		KBD_CONFIG_DONE(kbd);
 	}
+
 	return 0;
 }
 
@@ -626,8 +634,9 @@ ukbd_enable_intr(keyboard_t *kbd, int on, usbd_intr_t *func)
 
 	if (on) {
 		/* Set up interrupt pipe. */
-		if (state->ks_ifstate & INTRENABLED)
+		if (state->ks_ifstate & INTRENABLED) {
 			return EBUSY;
+		}
 
 		state->ks_ifstate |= INTRENABLED;
 		err = usbd_open_pipe_intr(state->ks_iface, state->ks_ep_addr,
@@ -636,8 +645,9 @@ ukbd_enable_intr(keyboard_t *kbd, int on, usbd_intr_t *func)
 					&state->ks_ndata,
 					sizeof(state->ks_ndata), func,
 					USBD_DEFAULT_INTERVAL);
-		if (err)
+		if (err) {
 			return (EIO);
+		}
 	} else {
 		/* Disable interrupts. */
 		usbd_abort_pipe(state->ks_intrpipe);
@@ -671,6 +681,7 @@ ukbd_term(keyboard_t *kbd)
 	}
 
 	error = kbd_unregister(kbd);
+
 	DPRINTF(("ukbd_term: kbd_unregister() %d\n", error));
 	if (error == 0) {
 		kbd->kb_flags = 0;
@@ -728,8 +739,9 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 		return 0;
 	}
 
-	if (ud->keycode[0] == KEY_ERROR)
+	if (ud->keycode[0] == KEY_ERROR) {
 		return 0;		/* ignore  */
+	}
 
 	getmicrouptime(&tv);
 	now = (u_long)tv.tv_sec*1000 + (u_long)tv.tv_usec/1000;
@@ -801,8 +813,9 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 
 	state->ks_odata = *ud;
 	bcopy(state->ks_ntime, state->ks_otime, sizeof(state->ks_ntime));
-	if (state->ks_inputs <= 0)
+	if (state->ks_inputs <= 0) {
 		return 0;
+	}
 
 #ifdef USB_DEBUG
 	for (i = state->ks_inputhead, j = 0; j < state->ks_inputs; ++j,
@@ -820,8 +833,9 @@ ukbd_interrupt(keyboard_t *kbd, void *arg)
 	DPRINTF(("\n"));
 #endif /* USB_DEBUG */
 
-	if (state->ks_polling)
+	if (state->ks_polling) {
 		return 0;
+	}
 
 	if (KBD_IS_ACTIVE(kbd) && KBD_IS_BUSY(kbd)) {
 		/* let the callback function to process the input */
@@ -861,6 +875,7 @@ ukbd_getc(ukbd_state_t *state, int wait)
 		state->ks_inputhead = (state->ks_inputhead + 1)%INPUTBUFSIZE;
 	}
 	crit_exit();
+
 	return c;
 }
 
@@ -921,13 +936,15 @@ ukbd_read(keyboard_t *kbd, int wait)
 #endif /* UKBD_EMULATE_ATSCANCODE */
 
 	usbcode = ukbd_getc(state, wait);
-	if (!KBD_IS_ACTIVE(kbd) || (usbcode == -1))
+	if (!KBD_IS_ACTIVE(kbd) || (usbcode == -1)) {
 		return -1;
+	}
 	++kbd->kb_count;
 #ifdef UKBD_EMULATE_ATSCANCODE
 	keycode = ukbd_trtab[KEY_INDEX(usbcode)];
-	if (keycode == NN)
+	if (keycode == NN) {
 		return -1;
+	}
 
 	scancode = keycode2scancode(keycode, state->ks_ndata.modifiers,
 				    usbcode & KEY_RELEASE);
@@ -959,8 +976,9 @@ ukbd_check(keyboard_t *kbd)
 {
 	ukbd_state_t *state;
 
-	if (!KBD_IS_ACTIVE(kbd))
+	if (!KBD_IS_ACTIVE(kbd)) {
 		return FALSE;
+	}
 	state = (ukbd_state_t *)kbd->kb_data;
 	if (state->ks_polling) {
 		crit_enter();
@@ -968,11 +986,14 @@ ukbd_check(keyboard_t *kbd)
 		crit_exit();
 	}
 #ifdef UKBD_EMULATE_ATSCANCODE
-	if (((ukbd_state_t *)kbd->kb_data)->ks_buffered_char[0])
+	if (((ukbd_state_t *)kbd->kb_data)->ks_buffered_char[0]) {
 		return TRUE;
+	}
 #endif
-	if (((ukbd_state_t *)kbd->kb_data)->ks_inputs > 0)
+	if (((ukbd_state_t *)kbd->kb_data)->ks_inputs > 0) {
 		return TRUE;
+	}
+
 	return FALSE;
 }
 
@@ -994,8 +1015,9 @@ next_code:
 	if (!(state->ks_flags & COMPOSE) && (state->ks_composed_char > 0)) {
 		action = state->ks_composed_char;
 		state->ks_composed_char = 0;
-		if (action > UCHAR_MAX)
+		if (action > UCHAR_MAX) {
 			return ERRKEY;
+		}
 		return action;
 	}
 
@@ -1021,15 +1043,17 @@ next_code:
 	/* see if there is something in the keyboard port */
 	/* XXX */
 	usbcode = ukbd_getc(state, wait);
-	if (usbcode == -1)
+	if (usbcode == -1) {
 		return NOKEY;
+	}
 	++kbd->kb_count;
 
 #ifdef UKBD_EMULATE_ATSCANCODE
 	/* USB key index -> key code -> AT scan code */
 	keycode = ukbd_trtab[KEY_INDEX(usbcode)];
-	if (keycode == NN)
+	if (keycode == NN) {
 		return NOKEY;
+	}
 
 	/* return an AT scan code for the K_RAW mode */
 	if (state->ks_mode == K_RAW) {
@@ -1057,13 +1081,15 @@ next_code:
 	}
 #else /* !UKBD_EMULATE_ATSCANCODE */
 	/* return the byte as is for the K_RAW mode */
-	if (state->ks_mode == K_RAW)
+	if (state->ks_mode == K_RAW) {
 		return usbcode;
+	}
 
 	/* USB key index -> key code */
 	keycode = ukbd_trtab[KEY_INDEX(usbcode)];
-	if (keycode == NN)
+	if (keycode == NN) {
 		return NOKEY;
+	}
 #endif /* UKBD_EMULATE_ATSCANCODE */
 
 	switch (keycode) {
@@ -1095,8 +1121,9 @@ next_code:
 	/* return the key code in the K_CODE mode */
 	if (usbcode & KEY_RELEASE)
 		keycode |= SCAN_RELEASE;
-	if (state->ks_mode == K_CODE)
+	if (state->ks_mode == K_CODE) {
 		return keycode;
+	}
 
 	/* compose a character code */
 	if (state->ks_flags & COMPOSE) {
@@ -1105,25 +1132,29 @@ next_code:
 		case 0x47: case 0x48: case 0x49:	/* keypad 7,8,9 */
 			state->ks_composed_char *= 10;
 			state->ks_composed_char += keycode - 0x40;
-			if (state->ks_composed_char > UCHAR_MAX)
+			if (state->ks_composed_char > UCHAR_MAX) {
 				return ERRKEY;
+			}
 			goto next_code;
 		case 0x4B: case 0x4C: case 0x4D:	/* keypad 4,5,6 */
 			state->ks_composed_char *= 10;
 			state->ks_composed_char += keycode - 0x47;
-			if (state->ks_composed_char > UCHAR_MAX)
+			if (state->ks_composed_char > UCHAR_MAX) {
 				return ERRKEY;
+			}
 			goto next_code;
 		case 0x4F: case 0x50: case 0x51:	/* keypad 1,2,3 */
 			state->ks_composed_char *= 10;
 			state->ks_composed_char += keycode - 0x4E;
-			if (state->ks_composed_char > UCHAR_MAX)
+			if (state->ks_composed_char > UCHAR_MAX) {
 				return ERRKEY;
+			}
 			goto next_code;
 		case 0x52:				/* keypad 0 */
 			state->ks_composed_char *= 10;
-			if (state->ks_composed_char > UCHAR_MAX)
+			if (state->ks_composed_char > UCHAR_MAX) {
 				return ERRKEY;
+			}
 			goto next_code;
 
 		/* key released, no interest here */
@@ -1156,10 +1187,12 @@ next_code:
 	action = genkbd_keyaction(kbd, SCAN_CHAR(keycode),
 				  keycode & SCAN_RELEASE, &state->ks_state,
 				  &state->ks_accents);
-	if (action == NOKEY)
+	if (action == NOKEY) {
 		goto next_code;
-	else
+	} else {
 		return action;
+	}
+	/* NOTREACHED */
 }
 
 /* check if char is waiting */
@@ -1167,13 +1200,18 @@ static int
 ukbd_check_char(keyboard_t *kbd)
 {
 	ukbd_state_t *state;
+	int ret;
 
-	if (!KBD_IS_ACTIVE(kbd))
+	if (!KBD_IS_ACTIVE(kbd)) {
 		return FALSE;
+	}
 	state = (ukbd_state_t *)kbd->kb_data;
-	if (!(state->ks_flags & COMPOSE) && (state->ks_composed_char > 0))
+	if (!(state->ks_flags & COMPOSE) && (state->ks_composed_char > 0)) {
 		return TRUE;
-	return (ukbd_check(kbd));
+	}
+	ret = (ukbd_check(kbd));
+
+	return ret;
 }
 
 /* some useful control functions */
@@ -1256,12 +1294,15 @@ ukbd_ioctl(keyboard_t *kbd, u_long cmd, caddr_t arg)
 
 	case KDSETREPEAT:	/* set keyboard repeat rate (new interface) */
 		crit_exit();
-		if (!KBD_HAS_DEVICE(kbd))
+		if (!KBD_HAS_DEVICE(kbd)) {
 			return 0;
-		if (((int *)arg)[1] < 0)
+		}
+		if (((int *)arg)[1] < 0) {
 			return EINVAL;
-		if (((int *)arg)[0] < 0)
+		}
+		if (((int *)arg)[0] < 0) {
 			return EINVAL;
+		}
 		else if (((int *)arg)[0] == 0)	/* fastest possible value */
 			kbd->kb_delay1 = 200;
 		else

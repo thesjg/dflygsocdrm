@@ -32,6 +32,7 @@
 .Os
 .Dt MUTEX 9
 .Sh NAME
+.Nm mutex ,
 .Nm mtx_init ,
 .Nm mtx_uninit ,
 .Nm mtx_lock_sh ,
@@ -51,14 +52,14 @@
 .Nm mtx_islocked_ex ,
 .Nm mtx_notlocked ,
 .Nm mtx_notlocked_ex ,
-.Nm mtx_owner ,
-.Nm mtx_notowner ,
+.Nm mtx_owned ,
+.Nm mtx_notowned ,
 .Nm mtx_lockrefs ,
 .Nm mtx_hold ,
 .Nm mtx_drop
 .Nd general blocking/spinnable mutex functions
 .Sh SYNOPSIS
-.In sys/mutex.h
+.In sys/globaldata.h
 .In sys/mutex2.h
 .Ft void
 .Fn mtx_init "struct mtx *mtx"
@@ -99,9 +100,9 @@
 .Ft int
 .Fn mtx_notlocked_ex "struct mtx *mtx"
 .Ft int
-.Fn mtx_owner "struct mtx *mtx"
+.Fn mtx_owned "struct mtx *mtx"
 .Ft int
-.Fn mtx_notowner "struct mtx *mtx"
+.Fn mtx_notowned "struct mtx *mtx"
 .Ft int
 .Fn mtx_lockrefs "struct mtx *mtx"
 .Ft void
@@ -245,7 +246,9 @@ A return value of
 means that the current count is
 .Sq 0 .
 .Sh FILES
-The uncontended path of the spinlock implementation is in
+The uncontended path of the
+.Nm
+implementation is in
 .Pa /sys/sys/mutex2.h .
 The data structures are in
 .Pa /sys/sys/mutex.h .
@@ -262,6 +265,6 @@ Mutexes first appeared in
 .Sh AUTHORS
 .An -nosplit
 The
-.Nm mutex
+.Nm
 implementation was written by
 .An Matthew Dillon .

@@ -37,7 +37,6 @@
  *
  *	@(#)kern_sig.c	8.7 (Berkeley) 4/18/94
  * $FreeBSD: src/sys/kern/kern_sig.c,v 1.72.2.17 2003/05/16 16:34:34 obrien Exp $
- * $DragonFly: src/sys/kern/kern_sig.c,v 1.90 2008/06/09 04:33:08 dillon Exp $
  */
 
 #include "opt_ktrace.h"
@@ -71,7 +70,6 @@
 
 #include <sys/signal2.h>
 #include <sys/thread2.h>
-#include <sys/mplock2.h>
 
 #include <machine/cpu.h>
 #include <machine/smp.h>
@@ -81,6 +79,7 @@ static char	*expand_name(const char *, uid_t, pid_t);
 static int	dokillpg(int sig, int pgid, int all);
 static int	sig_ffs(sigset_t *set);
 static int	sigprop(int sig);
+static void	lwp_signotify(struct lwp *lp);
 #ifdef SMP
 static void	signotify_remote(void *arg);
 #endif
@@ -227,6 +226,9 @@ sig_ffs(sigset_t *set)
 	return (0);
 }
 
+/* 
+ * No requirements. 
+ */
 int
 kern_sigaction(int sig, struct sigaction *act, struct sigaction *oact)
 {
@@ -237,6 +239,8 @@ kern_sigaction(int sig, struct sigaction *act, struct sigaction *oact)
 
 	if (sig <= 0 || sig > _SIG_MAXSIG)
 		return (EINVAL);
+
+	lwkt_gettoken(&proc_token);
 
 	if (oact) {
 		oact->sa_handler = ps->ps_sigact[_SIG_IDX(sig)];
@@ -265,8 +269,10 @@ kern_sigaction(int sig, struct sigaction *act, struct sigaction *oact)
 		 * caught.
 		 */
 		if (sig == SIGKILL || sig == SIGSTOP) {
-			if (act->sa_handler != SIG_DFL)
+			if (act->sa_handler != SIG_DFL) {
+				lwkt_reltoken(&proc_token);
 				return (EINVAL);
+			}
 #if 0
 			/* (not needed, SIG_DFL forces action to occur) */
 			if (act->sa_flags & SA_MAILBOX)
@@ -346,9 +352,10 @@ kern_sigaction(int sig, struct sigaction *act, struct sigaction *oact)
 			FOREACH_LWP_IN_PROC(lp, p) {
 				SIGDELSET(lp->lwp_siglist, sig);
 			}
-			if (sig != SIGCONT)
+			if (sig != SIGCONT) {
 				/* easier in ksignal */
 				SIGADDSET(p->p_sigignore, sig);
+			}
 			SIGDELSET(p->p_sigcatch, sig);
 		} else {
 			SIGDELSET(p->p_sigignore, sig);
@@ -360,12 +367,10 @@ kern_sigaction(int sig, struct sigaction *act, struct sigaction *oact)
 
 		crit_exit();
 	}
+	lwkt_reltoken(&proc_token);
 	return (0);
 }
 
-/*
- * MPALMOSTSAFE
- */
 int
 sys_sigaction(struct sigaction_args *uap)
 {
@@ -380,9 +385,7 @@ sys_sigaction(struct sigaction_args *uap)
 		if (error)
 			return (error);
 	}
-	get_mplock();
 	error = kern_sigaction(uap->sig, actp, oactp);
-	rel_mplock();
 	if (oactp && !error) {
 		error = copyout(oactp, uap->oact, sizeof(oact));
 	}
@@ -459,6 +462,8 @@ kern_sigprocmask(int how, sigset_t *set, sigset_t *oset)
 	struct lwp *lp = td->td_lwp;
 	int error;
 
+	lwkt_gettoken(&proc_token);
+
 	if (oset != NULL)
 		*oset = lp->lwp_sigmask;
 
@@ -481,6 +486,9 @@ kern_sigprocmask(int how, sigset_t *set, sigset_t *oset)
 			break;
 		}
 	}
+
+	lwkt_reltoken(&proc_token);
+
 	return (error);
 }
 
@@ -721,72 +729,86 @@ killpg_all_callback(struct proc *p, void *data)
 /*
  * Send a general signal to a process or LWPs within that process.  Note
  * that new signals cannot be sent if a process is exiting.
+ * 
+ * No requirements.
  */
 int
 kern_kill(int sig, pid_t pid, lwpid_t tid)
 {
+	int t;
+
 	if ((u_int)sig > _SIG_MAXSIG)
 		return (EINVAL);
+
+	lwkt_gettoken(&proc_token);
+
 	if (pid > 0) {
 		struct proc *p;
 		struct lwp *lp = NULL;
 
 		/* kill single process */
-		if ((p = pfind(pid)) == NULL)
+		if ((p = pfind(pid)) == NULL) {
+			lwkt_reltoken(&proc_token);
 			return (ESRCH);
-		if (!CANSIGNAL(p, sig))
+		}
+		if (!CANSIGNAL(p, sig)) {
+			lwkt_reltoken(&proc_token);
 			return (EPERM);
+		}
 
 		/*
 		 * NOP if the process is exiting.  Note that lwpsignal() is
 		 * called directly with P_WEXIT set to kill individual LWPs
 		 * during exit, which is allowed.
 		 */
-		if (p->p_flag & P_WEXIT)
+		if (p->p_flag & P_WEXIT) {
+			lwkt_reltoken(&proc_token);
 			return (0);
+		}
 		if (tid != -1) {
 			lp = lwp_rb_tree_RB_LOOKUP(&p->p_lwp_tree, tid);
-			if (lp == NULL)
+			if (lp == NULL) {
+				lwkt_reltoken(&proc_token);
 				return (ESRCH);
+			}
 		}
 		if (sig)
 			lwpsignal(p, lp, sig);
+		lwkt_reltoken(&proc_token);
 		return (0);
 	}
 	/*
 	 * If we come here, pid is a special broadcast pid.
 	 * This doesn't mix with a tid.
 	 */
-	if (tid != -1)
+	if (tid != -1) {
+		lwkt_reltoken(&proc_token);
 		return (EINVAL);
+	}
 	switch (pid) {
 	case -1:		/* broadcast signal */
-		return (dokillpg(sig, 0, 1));
+		t = (dokillpg(sig, 0, 1));
+		break;
 	case 0:			/* signal own process group */
-		return (dokillpg(sig, 0, 0));
+		t = (dokillpg(sig, 0, 0));
+		break;
 	default:		/* negative explicit process group */
-		return (dokillpg(sig, -pid, 0));
+		t = (dokillpg(sig, -pid, 0));
+		break;
 	}
-	/* NOTREACHED */
+	lwkt_reltoken(&proc_token);
+	return t;
 }
 
-/*
- * MPALMOSTSAFE
- */
 int
 sys_kill(struct kill_args *uap)
 {
 	int error;
 
-	get_mplock();
 	error = kern_kill(uap->signum, uap->pid, -1);
-	rel_mplock();
 	return (error);
 }
 
-/*
- * MPALMOSTSAFE
- */
 int
 sys_lwp_kill(struct lwp_kill_args *uap)
 {
@@ -807,9 +829,7 @@ sys_lwp_kill(struct lwp_kill_args *uap)
 	if (pid == -1)
 		pid = curproc->p_pid;
 
-	get_mplock();
 	error = kern_kill(uap->signum, pid, uap->tid);
-	rel_mplock();
 	return (error);
 }
 
@@ -969,6 +989,8 @@ find_lwp_for_signal(struct proc *p, int sig)
  *     regardless of the signal action (eg, blocked or ignored).
  *
  * Other ignored signals are discarded immediately.
+ *
+ * No requirements.
  */
 void
 ksignal(struct proc *p, int sig)
@@ -979,6 +1001,8 @@ ksignal(struct proc *p, int sig)
 /*
  * The core for ksignal.  lp may be NULL, then a suitable thread
  * will be chosen.  If not, lp MUST be a member of p.
+ *
+ * No requirements.
  */
 void
 lwpsignal(struct proc *p, struct lwp *lp, int sig)
@@ -992,6 +1016,8 @@ lwpsignal(struct proc *p, struct lwp *lp, int sig)
 	}
 
 	KKASSERT(lp == NULL || lp->lwp_proc == p);
+
+	lwkt_gettoken(&proc_token);
 
 	prop = sigprop(sig);
 
@@ -1008,16 +1034,20 @@ lwpsignal(struct proc *p, struct lwp *lp, int sig)
 		 * that we must still deliver the signal if P_WEXIT is set
 		 * in the process flags.
 		 */
-		if (lp && (lp->lwp_flag & LWP_WEXIT))
+		if (lp && (lp->lwp_flag & LWP_WEXIT)) {
+			lwkt_reltoken(&proc_token);
 			return;
+		}
 
 		/*
 		 * If the signal is being ignored, then we forget about
 		 * it immediately.  NOTE: We don't set SIGCONT in p_sigignore,
 		 * and if it is set to SIG_IGN, action will be SIG_DFL here.
 		 */
-		if (SIGISMEMBER(p->p_sigignore, sig))
+		if (SIGISMEMBER(p->p_sigignore, sig)) {
+			lwkt_reltoken(&proc_token);
 			return;
+		}
 		if (SIGISMEMBER(p->p_sigcatch, sig))
 			action = SIG_CATCH;
 		else
@@ -1039,6 +1069,7 @@ lwpsignal(struct proc *p, struct lwp *lp, int sig)
 		 */
 		if (prop & SA_TTYSTOP && p->p_pgrp->pg_jobc == 0 &&
 		    action == SIG_DFL) {
+			lwkt_reltoken(&proc_token);
 		        return;
 		}
 		SIG_CONTSIGMASK(p->p_siglist);
@@ -1200,13 +1231,19 @@ active_process:
 	lwp_signotify(lp);
 
 out:
+	lwkt_reltoken(&proc_token);
 	crit_exit();
 }
 
-void
+/*
+ * proc_token must be held
+ */
+static void
 lwp_signotify(struct lwp *lp)
 {
+	ASSERT_LWKT_TOKEN_HELD(&proc_token);
 	crit_enter();
+
 	if (lp->lwp_stat == LSSLEEP || lp->lwp_stat == LSSTOP) {
 		/*
 		 * Thread is in tsleep.
@@ -1282,18 +1319,34 @@ lwp_signotify(struct lwp *lp)
 
 /*
  * This function is called via an IPI.  We will be in a critical section but
- * the MP lock will NOT be held.  Also note that by the time the ipi message
- * gets to us the process 'p' (arg) may no longer be scheduled or even valid.
+ * the MP lock will NOT be held.  The passed lp will be held.
+ *
+ * We must essentially repeat the code at the end of lwp_signotify(),
+ * in particular rechecking all races.  If we are still not on the
+ * correct cpu we leave the lwp ref intact and continue the chase.
+ *
+ * XXX this may still not be entirely correct, since we are checking
+ *     lwp_stat asynchronously.
  */
 static void
 signotify_remote(void *arg)
 {
 	struct lwp *lp = arg;
+	thread_t td;
 
 	if (lp == lwkt_preempted_proc()) {
 		signotify();
-	} else {
-		struct thread *td = lp->lwp_thread;
+	} else if (lp->lwp_stat == LSRUN) {
+		/*
+		 * To prevent a MP race with TDF_SINTR we must
+		 * schedule the thread on the correct cpu.
+		 */
+		td = lp->lwp_thread;
+		if (td->td_gd != mycpu) {
+			lwkt_send_ipiq(td->td_gd, signotify_remote, lp);
+			return;
+			/* NOT REACHED */
+		}
 		if (td->td_flags & TDF_SINTR)
 			lwkt_schedule(td);
 	}
@@ -1302,16 +1355,22 @@ signotify_remote(void *arg)
 
 #endif
 
+/*
+ * Caller must hold proc_token
+ */
 void
 proc_stop(struct proc *p)
 {
 	struct lwp *lp;
 
-	/* If somebody raced us, be happy with it */
-	if (p->p_stat == SSTOP || p->p_stat == SZOMB)
-		return;
-
+	ASSERT_LWKT_TOKEN_HELD(&proc_token);
 	crit_enter();
+
+	/* If somebody raced us, be happy with it */
+	if (p->p_stat == SSTOP || p->p_stat == SZOMB) {
+		crit_exit();
+		return;
+	}
 	p->p_stat = SSTOP;
 
 	FOREACH_LWP_IN_PROC(lp, p) {
@@ -1356,15 +1415,22 @@ proc_stop(struct proc *p)
 	crit_exit();
 }
 
+/*
+ * Caller must hold proc_token
+ */
 void
 proc_unstop(struct proc *p)
 {
 	struct lwp *lp;
 
-	if (p->p_stat != SSTOP)
-		return;
-
+	ASSERT_LWKT_TOKEN_HELD(&proc_token);
 	crit_enter();
+
+	if (p->p_stat != SSTOP) {
+		crit_exit();
+		return;
+	}
+
 	p->p_stat = SACTIVE;
 
 	FOREACH_LWP_IN_PROC(lp, p) {
@@ -1407,6 +1473,9 @@ proc_unstop(struct proc *p)
 	crit_exit();
 }
 
+/* 
+ * No requirements.
+ */
 static int
 kern_sigtimedwait(sigset_t waitset, siginfo_t *info, struct timespec *timeout)
 {
@@ -1416,6 +1485,8 @@ kern_sigtimedwait(sigset_t waitset, siginfo_t *info, struct timespec *timeout)
 	int error, sig, hz, timevalid = 0;
 	struct timespec rts, ets, ts;
 	struct timeval tv;
+
+	lwkt_gettoken(&proc_token);
 
 	error = 0;
 	sig = 0;
@@ -1508,9 +1579,15 @@ kern_sigtimedwait(sigset_t waitset, siginfo_t *info, struct timespec *timeout)
 		info->si_signo = sig;
 		lwp_delsig(lp, sig);	/* take the signal! */
 
-		if (sig == SIGKILL)
+		if (sig == SIGKILL) {
+			lwkt_reltoken(&proc_token);
 			sigexit(lp, sig);
+			/* NOT REACHED */
+		}
 	}
+
+	lwkt_reltoken(&proc_token);
+
 	return (error);
 }
 
@@ -1537,9 +1614,7 @@ sys_sigtimedwait(struct sigtimedwait_args *uap)
 	error = copyin(uap->set, &set, sizeof(set));
 	if (error)
 		return (error);
-	get_mplock();
 	error = kern_sigtimedwait(set, &info, timeout);
-	rel_mplock();
 	if (error)
 		return (error);
  	if (uap->info)
@@ -1552,9 +1627,7 @@ sys_sigtimedwait(struct sigtimedwait_args *uap)
 	 * thread / process pending signal.
 	 */
 	if (error) {
-		get_mplock();
 		ksignal(curproc, info.si_signo);
-		rel_mplock();
 	} else {
 		uap->sysmsg_result = info.si_signo;
 	}
@@ -1574,9 +1647,7 @@ sys_sigwaitinfo(struct sigwaitinfo_args *uap)
 	error = copyin(uap->set, &set, sizeof(set));
 	if (error)
 		return (error);
-	get_mplock();
 	error = kern_sigtimedwait(set, &info, NULL);
-	rel_mplock();
 	if (error)
 		return (error);
 	if (uap->info)
@@ -1589,9 +1660,7 @@ sys_sigwaitinfo(struct sigwaitinfo_args *uap)
 	 * thread / process pending signal.
 	 */
 	if (error) {
-		get_mplock();
 		ksignal(curproc, info.si_signo);
-		rel_mplock();
 	} else {
 		uap->sysmsg_result = info.si_signo;
 	}
@@ -1640,7 +1709,8 @@ issignal(struct lwp *lp, int maytrace)
 	sigset_t mask;
 	int sig, prop;
 
-	get_mplock();
+	lwkt_gettoken(&proc_token);
+
 	for (;;) {
 		int traced = (p->p_flag & P_TRACED) || (p->p_stops & S_SIG);
 
@@ -1655,7 +1725,7 @@ issignal(struct lwp *lp, int maytrace)
 		if (p->p_flag & P_PPWAIT)
 			SIG_STOPSIGMASK(mask);
 		if (SIGISEMPTY(mask)) {		/* no signal to send */
-			rel_mplock();
+			lwkt_reltoken(&proc_token);
 			return (0);
 		}
 		sig = sig_ffs(&mask);
@@ -1772,7 +1842,7 @@ issignal(struct lwp *lp, int maytrace)
 				 */
 				break;		/* == ignore */
 			} else {
-				rel_mplock();
+				lwkt_reltoken(&proc_token);
 				return (sig);
 			}
 
@@ -1794,7 +1864,7 @@ issignal(struct lwp *lp, int maytrace)
 			 * This signal has an action, let
 			 * postsig() process it.
 			 */
-			rel_mplock();
+			lwkt_reltoken(&proc_token);
 			return (sig);
 		}
 		lwp_delsig(lp, sig);		/* take the signal! */
@@ -1938,6 +2008,8 @@ killproc(struct proc *p, char *why)
  * signal state.  Mark the accounting record with the signal termination.
  * If dumping core, save the signal number for the debugger.  Calls exit and
  * does not return.
+ *
+ * This routine does not return.
  */
 void
 sigexit(struct lwp *lp, int sig)
@@ -2156,9 +2228,7 @@ out2:
 int
 sys_nosys(struct nosys_args *args)
 {
-	get_mplock();
 	lwpsignal(curproc, curthread->td_lwp, SIGSYS);
-	rel_mplock();
 	return (EINVAL);
 }
 

@@ -25,7 +25,6 @@
  * SUCH DAMAGE.
  *
  *	$FreeBSD: src/sys/dev/ciss/ciss.c,v 1.2.2.25 2008/06/10 18:51:05 ps Exp $
- *	$DragonFly: src/sys/dev/raid/ciss/ciss.c,v 1.28 2008/05/18 20:30:23 pavalos Exp $
  */
 
 /*
@@ -87,6 +86,8 @@
 #include <sys/kthread.h>
 #include <sys/queue.h>
 #include <sys/rman.h>
+
+#include <sys/mplock2.h>
 
 #include <bus/cam/cam.h>
 #include <bus/cam/cam_ccb.h>
@@ -228,10 +229,8 @@ static d_open_t		ciss_open;
 static d_close_t	ciss_close;
 static d_ioctl_t	ciss_ioctl;
 
-#define CISS_CDEV_MAJOR  166
-
 static struct dev_ops ciss_ops = {
-    { "ciss", CISS_CDEV_MAJOR, 0 },
+    { "ciss", 0, 0 },
     .d_open =		ciss_open,
     .d_close =		ciss_close,
     .d_ioctl =		ciss_ioctl
@@ -733,7 +732,7 @@ ciss_flush_adapter(struct ciss_softc *sc)
      */
     cbfc = kmalloc(sizeof(*cbfc), CISS_MALLOC_CLASS, M_INTWAIT | M_ZERO);
     if ((error = ciss_get_bmic_request(sc, &cr, CISS_BMIC_FLUSH_CACHE,
-				       (void **)&cbfc, sizeof(*cbfc))) != 0)
+				       (void *)&cbfc, sizeof(*cbfc))) != 0)
 	goto out;
 
     /*
@@ -859,7 +858,7 @@ ciss_identify_adapter(struct ciss_softc *sc)
      * Get a request, allocate storage for the adapter data.
      */
     if ((error = ciss_get_bmic_request(sc, &cr, CISS_BMIC_ID_CTLR,
-				       (void **)&sc->ciss_id,
+				       (void *)&sc->ciss_id,
 				       sizeof(*sc->ciss_id))) != 0)
 	goto out;
 
@@ -1339,7 +1338,7 @@ ciss_identify_logical(struct ciss_softc *sc, struct ciss_ldrive *ld)
      * Build a BMIC request to fetch the drive ID.
      */
     if ((error = ciss_get_bmic_request(sc, &cr, CISS_BMIC_ID_LDRIVE,
-				       (void **)&ld->cl_ldrive,
+				       (void *)&ld->cl_ldrive,
 				       sizeof(*ld->cl_ldrive))) != 0)
 	goto out;
     cc = CISS_FIND_COMMAND(cr);
@@ -1435,7 +1434,7 @@ ciss_get_ldrive_status(struct ciss_softc *sc,  struct ciss_ldrive *ld)
      * Build a CISS BMIC command to get the logical drive status.
      */
     if ((error = ciss_get_bmic_request(sc, &cr, CISS_BMIC_ID_LSTATUS,
-				       (void **)&ld->cl_lstatus,
+				       (void *)&ld->cl_lstatus,
 				       sizeof(*ld->cl_lstatus))) != 0)
 	goto out;
     cc = CISS_FIND_COMMAND(cr);
@@ -3541,7 +3540,9 @@ ciss_notify_thread(void *arg)
 
     sc = (struct ciss_softc *)arg;
 
+    get_mplock();
     crit_enter();
+
     for (;;) {
 	if (TAILQ_EMPTY(&sc->ciss_notify) != 0 &&
 	    (sc->ciss_flags & CISS_FLAG_THREAD_SHUT) == 0) {
@@ -3577,8 +3578,7 @@ ciss_notify_thread(void *arg)
     sc->ciss_notify_thread = NULL;
     wakeup(&sc->ciss_notify_thread);
     crit_exit();
-
-    kthread_exit();
+    rel_mplock();
 }
 
 /************************************************************************
@@ -3587,7 +3587,7 @@ ciss_notify_thread(void *arg)
 static void
 ciss_spawn_notify_thread(struct ciss_softc *sc)
 {
-    if (kthread_create((void(*)(void *))ciss_notify_thread, sc,
+    if (kthread_create(ciss_notify_thread, sc,
 		       &sc->ciss_notify_thread, "ciss_notify%d",
 		       device_get_unit(sc->ciss_dev)))
 	panic("Could not create notify thread\n");

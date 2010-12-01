@@ -157,8 +157,12 @@ MALLOC_DECLARE(M_KQUEUE);
 /*
  * Flag indicating hint is a signal.  Used by EVFILT_SIGNAL, and also
  * shared by EVFILT_PROC  (all knotes attached to p->p_klist)
+ *
+ * NOTE_OLDAPI is used to signal that standard filters are being called
+ * from the select/poll wrapper.
  */
 #define NOTE_SIGNAL	0x08000000
+#define NOTE_OLDAPI	0x04000000	/* select/poll note */
 
 #define FILTEROP_ISFD	0x0001		/* if ident == filedescriptor */
 #define FILTEROP_MPSAFE	0x0002
@@ -190,10 +194,16 @@ struct knote {
 	} kn_ptr;
 	struct			filterops *kn_fop;
 	caddr_t			kn_hook;
-#define KN_ACTIVE	0x01			/* event has been triggered */
-#define KN_QUEUED	0x02			/* event is on queue */
-#define KN_DISABLED	0x04			/* event is disabled */
-#define KN_DETACHED	0x08			/* knote is detached */
+};
+
+#define KN_ACTIVE	0x0001			/* event has been triggered */
+#define KN_QUEUED	0x0002			/* event is on queue */
+#define KN_DISABLED	0x0004			/* event is disabled */
+#define KN_DETACHED	0x0008			/* knote is detached */
+#define KN_REPROCESS	0x0010			/* force reprocessing race */
+#define KN_DELETING	0x0020			/* deletion in progress */
+#define KN_PROCESSING	0x0040			/* event processing in prog */
+#define KN_WAITING	0x0080			/* waiting on processing */
 
 #define kn_id		kn_kevent.ident
 #define kn_filter	kn_kevent.filter
@@ -201,7 +211,6 @@ struct knote {
 #define kn_fflags	kn_kevent.fflags
 #define kn_data		kn_kevent.data
 #define kn_fp		kn_ptr.p_fp
-};
 
 struct proc;
 struct thread;
@@ -220,6 +229,8 @@ extern void	knote(struct klist *list, long hint);
 extern void	knote_insert(struct klist *klist, struct knote *kn);
 extern void	knote_remove(struct klist *klist, struct knote *kn);
 extern void	knote_empty(struct klist *list);
+extern void	knote_assume_knotes(struct kqinfo *, struct kqinfo *,
+		    struct filterops *, void *);
 extern void	knote_fdclose(struct file *fp, struct filedesc *fdp, int fd);
 extern void	kqueue_init(struct kqueue *kq, struct filedesc *fdp);
 extern void	kqueue_terminate(struct kqueue *kq);

@@ -81,6 +81,7 @@
 #include <sys/buf2.h>
 #include <sys/mplock2.h>
 
+#include <machine/cpu.h>
 #include <machine/clock.h>
 #include <machine/md_var.h>
 #include <machine/smp.h>		/* smp_active_mask, cpuid */
@@ -148,10 +149,9 @@ const char *panicstr;
 int dumping;				/* system is dumping */
 static struct dumperinfo dumper;	/* selected dumper */
 
-#ifdef SMP
-u_int panic_cpu_interlock;		/* panic interlock */
 globaldata_t panic_cpu_gd;		/* which cpu took the panic */
-#endif
+struct lwkt_tokref panic_tokens[LWKT_MAXTOKENS];
+int panic_tokens_count;
 
 int bootverbose = 0;			/* note: assignment to force non-bss */
 SYSCTL_INT(_debug, OID_AUTO, bootverbose, CTLFLAG_RW,
@@ -632,6 +632,7 @@ dump_conf(void *dummy)
 
 	path = kmalloc(MNAMELEN, M_TEMP, M_WAITOK);
 	if (TUNABLE_STR_FETCH("dumpdev", path, MNAMELEN) != 0) {
+		sync_devs();
 		dev = kgetdiskbyname(path);
 		if (dev != NULL)
 			dumpdev = dev;
@@ -668,6 +669,8 @@ void
 panic(const char *fmt, ...)
 {
 	int bootopt, newpanic;
+	globaldata_t gd = mycpu;
+	thread_t td = gd->gd_curthread;
 	__va_list ap;
 	static char buf[256];
 
@@ -685,37 +688,77 @@ panic(const char *fmt, ...)
 	 * Bumping gd_trap_nesting_level will also bypass assertions in
 	 * lwkt_switch() and allow us to switch away even if we are a
 	 * FAST interrupt or IPI.
+	 *
+	 * The setting of panic_cpu_gd also determines how kprintf()
+	 * spin-locks itself.  DDB can set panic_cpu_gd as well.
 	 */
-	if (atomic_poll_acquire_int(&panic_cpu_interlock)) {
-		panic_cpu_gd = mycpu;
-	} else if (panic_cpu_gd != mycpu) {
-		crit_enter();
-		++mycpu->gd_trap_nesting_level;
-		if (mycpu->gd_trap_nesting_level < 25) {
-			kprintf("SECONDARY PANIC ON CPU %d THREAD %p\n",
-				mycpu->gd_cpuid, curthread);
+	for (;;) {
+		globaldata_t xgd = panic_cpu_gd;
+
+		/*
+		 * Someone else got the panic cpu
+		 */
+		if (xgd && xgd != gd) {
+			crit_enter();
+			++mycpu->gd_trap_nesting_level;
+			if (mycpu->gd_trap_nesting_level < 25) {
+				kprintf("SECONDARY PANIC ON CPU %d THREAD %p\n",
+					mycpu->gd_cpuid, td);
+			}
+			td->td_release = NULL;	/* be a grinch */
+			for (;;) {
+				lwkt_deschedule_self(td);
+				lwkt_switch();
+			}
+			/* NOT REACHED */
+			/* --mycpu->gd_trap_nesting_level */
+			/* crit_exit() */
 		}
-		curthread->td_release = NULL;	/* be a grinch */
-		for (;;) {
-			lwkt_deschedule_self(curthread);
-			lwkt_switch();
-		}
-		/* NOT REACHED */
-		/* --mycpu->gd_trap_nesting_level */
-		/* crit_exit() */
+
+		/*
+		 * Reentrant panic
+		 */
+		if (xgd && xgd == gd)
+			break;
+
+		/*
+		 * We got it
+		 */
+		if (atomic_cmpset_ptr(&panic_cpu_gd, NULL, gd))
+			break;
 	}
+#else
+	panic_cpu_gd = gd;
 #endif
+	/*
+	 * Try to get the system into a working state.  Save information
+	 * we are about to destroy.
+	 */
+	kvcreinitspin();
+	if (panicstr == NULL) {
+		bcopy(td->td_toks_array, panic_tokens, sizeof(panic_tokens));
+		panic_tokens_count = td->td_toks_stop - &td->td_toks_base;
+	}
+	lwkt_relalltokens(td);
+	td->td_toks_stop = &td->td_toks_base;
+
+	/*
+	 * Setup
+	 */
 	bootopt = RB_AUTOBOOT | RB_DUMP;
 	if (sync_on_panic == 0)
 		bootopt |= RB_NOSYNC;
 	newpanic = 0;
-	if (panicstr)
+	if (panicstr) {
 		bootopt |= RB_NOSYNC;
-	else {
+	} else {
 		panicstr = fmt;
 		newpanic = 1;
 	}
 
+	/*
+	 * Format the panic string.
+	 */
 	__va_start(ap, fmt);
 	kvsnprintf(buf, sizeof(buf), fmt, ap);
 	if (panicstr == fmt)
@@ -838,4 +881,38 @@ dumpsys(void)
 		dumping++;
 		md_dumpsys(&dumper);
 	}
+}
+
+int dump_stop_usertds = 0;
+
+#ifdef SMP
+static
+void
+need_user_resched_remote(void *dummy)
+{
+	need_user_resched();
+}
+#endif
+
+void
+dump_reactivate_cpus(void)
+{
+#ifdef SMP
+	globaldata_t gd;
+	int cpu, seq;
+#endif
+
+	dump_stop_usertds = 1;
+
+	need_user_resched();
+
+#ifdef SMP
+	for (cpu = 0; cpu < ncpus; cpu++) {
+		gd = globaldata_find(cpu);
+		seq = lwkt_send_ipiq(gd, need_user_resched_remote, NULL);
+		lwkt_wait_ipiq(gd, seq);
+	}
+
+	restart_cpus(stopped_cpus);
+#endif
 }

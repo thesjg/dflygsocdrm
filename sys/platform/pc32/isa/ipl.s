@@ -37,10 +37,7 @@
  *	@(#)ipl.s
  *
  * $FreeBSD: src/sys/i386/isa/ipl.s,v 1.32.2.3 2002/05/16 16:03:56 bde Exp $
- * $DragonFly: src/sys/platform/pc32/isa/ipl.s,v 1.28 2007/01/22 19:37:04 corecode Exp $
  */
-
-#include "use_npx.h"
 
 #include <machine/asmacros.h>
 #include <machine/segments.h>
@@ -111,17 +108,16 @@ doreti:
 	popl	%eax			/* cpl to restore XXX */
 	movl	$0,%eax			/* irq mask unavailable due to BGL */
 	movl	PCPU(curthread),%ebx
-	cli				/* interlock with TDPRI_CRIT */
+	cli				/* interlock with td_critcount */
 	cmpl	$0,PCPU(reqflags)	/* short cut if nothing to do */
 	je	5f
-	cmpl	$TDPRI_CRIT,TD_PRI(%ebx) /* can't unpend if in critical sec */
-	jge	5f
-	addl	$TDPRI_CRIT,TD_PRI(%ebx) /* force all ints to pending */
+	testl	$-1,TD_CRITCOUNT(%ebx)	/* can't unpend if in critical sec */
+	jne	5f
+	incl	TD_CRITCOUNT(%ebx)	/* force all ints to pending */
 doreti_next:
-	sti				/* allow new interrupts */
+	cli				/* re-assert cli on loop */
 	movl	%eax,%ecx		/* irq mask unavailable due to BGL */
 	notl	%ecx
-	cli				/* disallow YYY remove */
 #ifdef SMP
 	testl	$RQF_IPIQ,PCPU(reqflags)
 	jnz	doreti_ipiq
@@ -152,7 +148,7 @@ doreti_next:
 	 * BGL requirements.  We can only clear RQF_INTPEND if *ALL* pending
 	 * interrupts have been processed.
 	 */
-	subl	$TDPRI_CRIT,TD_PRI(%ebx)	/* interlocked with cli */
+	decl	TD_CRITCOUNT(%ebx)	/* interlocked with cli */
 	testl	%eax,%eax
 	jnz	5f
 	andl	$~RQF_INTPEND,PCPU(reqflags)
@@ -187,6 +183,11 @@ doreti_popl_ds:
 doreti_iret:
 	iret
 
+	/*
+	 * Interrupts are likely disabled due to the above interlock
+	 * between cli/iretq.  We must enable them before calling any
+	 * high level function.
+	 */
 	ALIGN_TEXT
 	.globl	doreti_iret_fault
 doreti_iret_fault:
@@ -204,6 +205,7 @@ doreti_popl_fs_fault:
 	pushl	%gs
 	.globl	doreti_popl_gs_fault
 doreti_popl_gs_fault:
+	sti
 	movl	$0,TF_ERR(%esp)	/* XXX should be the error code */
 	movl	$T_PROTFLT,TF_TRAPNO(%esp)
 	jmp	alltraps_with_regs_pushed
@@ -215,6 +217,7 @@ doreti_popl_gs_fault:
 	ALIGN_TEXT
 doreti_fast:
 	andl	PCPU(fpending),%ecx	/* only check fast ints */
+	sti
 	bsfl	%ecx, %ecx		/* locate the next dispatchable int */
 	btrl	%ecx, PCPU(fpending)	/* is it really still pending? */
 	jnc	doreti_next
@@ -233,6 +236,7 @@ doreti_fast:
 	 */
 	ALIGN_TEXT
 doreti_soft:
+	sti
 	bsfl	%ecx,%ecx		/* locate the next pending softint */
 	btrl	%ecx,PCPU(spending)	/* make sure its still pending */
 	jnc	doreti_next
@@ -240,9 +244,9 @@ doreti_soft:
 	pushl	%eax
 	pushl	%ecx
 	incl	TD_NEST_COUNT(%ebx)	/* prevent doreti/splz nesting */
-	subl	$TDPRI_CRIT,TD_PRI(%ebx) /* so we can preempt */
+	decl	TD_CRITCOUNT(%ebx)	/* so we can preempt */
 	call	sched_ithd		/* YYY must pull in imasks */
-	addl	$TDPRI_CRIT,TD_PRI(%ebx)
+	incl	TD_CRITCOUNT(%ebx)
 	decl	TD_NEST_COUNT(%ebx)
 	addl	$4,%esp
 	popl	%eax
@@ -264,9 +268,9 @@ doreti_ast:
 	movl	%eax,%esi		/* save cpl (can't use stack) */
 	movl	$T_ASTFLT,TF_TRAPNO(%esp)
 	pushl	%esp			/* pass frame by reference */
-	subl	$TDPRI_CRIT,TD_PRI(%ebx)
+	decl	TD_CRITCOUNT(%ebx)
 	call	trap
-	addl	$TDPRI_CRIT,TD_PRI(%ebx)
+	incl	TD_CRITCOUNT(%ebx)
 	addl	$4,%esp
 	movl	%esi,%eax		/* restore cpl for loop */
 	jmp	doreti_next
@@ -279,6 +283,7 @@ doreti_ipiq:
 	movl	%eax,%esi		/* save cpl (can't use stack) */
 	incl	PCPU(intr_nesting_level)
 	andl	$~RQF_IPIQ,PCPU(reqflags)
+	sti
 	subl	$8,%esp			/* add dummy vec and ppl */
 	pushl	%esp			/* pass frame by reference */
 	call	lwkt_process_ipiq_frame
@@ -291,6 +296,7 @@ doreti_timer:
 	movl	%eax,%esi		/* save cpl (can't use stack) */
 	incl	PCPU(intr_nesting_level)
 	andl	$~RQF_TIMER,PCPU(reqflags)
+	sti
 	subl	$8,%esp			/* add dummy vec and ppl */
 	pushl	%esp			/* pass frame by reference */
 	call	lapic_timer_process_frame
@@ -315,7 +321,7 @@ ENTRY(splz)
 	pushfl
 	pushl	%ebx
 	movl	PCPU(curthread),%ebx
-	addl	$TDPRI_CRIT,TD_PRI(%ebx)
+	incl	TD_CRITCOUNT(%ebx)
 	movl	$0,%eax
 
 splz_next:
@@ -335,7 +341,7 @@ splz_next:
 	cmpl	$0,%ecx
 	jnz	splz_soft
 
-	subl	$TDPRI_CRIT,TD_PRI(%ebx)
+	decl	TD_CRITCOUNT(%ebx)
 
 	/*
 	 * Nothing left to do, finish up.  Interrupts are still disabled.
@@ -357,6 +363,7 @@ splz_next:
 	ALIGN_TEXT
 splz_fast:
 	andl	PCPU(fpending),%ecx	/* only check fast ints */
+	sti
 	bsfl	%ecx, %ecx		/* locate the next dispatchable int */
 	btrl	%ecx, PCPU(fpending)	/* is it really still pending? */
 	jnc	splz_next
@@ -373,17 +380,17 @@ splz_fast:
 	 */
 	ALIGN_TEXT
 splz_soft:
+	sti
 	bsfl	%ecx,%ecx		/* locate the next pending softint */
 	btrl	%ecx,PCPU(spending)	/* make sure its still pending */
 	jnc	splz_next
 	addl	$FIRST_SOFTINT,%ecx	/* actual intr number */
-	sti
 	pushl	%eax
 	pushl	%ecx
-	subl	$TDPRI_CRIT,TD_PRI(%ebx)
+	decl	TD_CRITCOUNT(%ebx)
 	incl	TD_NEST_COUNT(%ebx)	/* prevent doreti/splz nesting */
 	call	sched_ithd		/* YYY must pull in imasks */
-	addl	$TDPRI_CRIT,TD_PRI(%ebx)
+	incl	TD_CRITCOUNT(%ebx)
 	decl	TD_NEST_COUNT(%ebx)	/* prevent doreti/splz nesting */
 	addl	$4,%esp
 	popl	%eax
@@ -392,6 +399,7 @@ splz_soft:
 #ifdef SMP
 splz_ipiq:
 	andl	$~RQF_IPIQ,PCPU(reqflags)
+	sti
 	pushl	%eax
 	call	lwkt_process_ipiq
 	popl	%eax
@@ -399,6 +407,7 @@ splz_ipiq:
 
 splz_timer:
 	andl	$~RQF_TIMER,PCPU(reqflags)
+	sti
 	pushl	%eax
 	call	lapic_timer_process
 	popl	%eax

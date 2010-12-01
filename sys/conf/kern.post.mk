@@ -19,6 +19,11 @@ tags:  kernel-tags
 install: kernel-install
 reinstall: kernel-reinstall
 
+# Often developers just want the kernel, don't let
+# -j builds leak into the modules until the kernel is done.
+#
+.ORDER: ${KERNEL}.stripped modules
+
 ${KERNEL}.stripped: ${FULLKERNEL}
 	${OBJCOPY} --strip-debug ${FULLKERNEL} ${KERNEL}.stripped
 
@@ -107,21 +112,32 @@ kernel-tags:
 # Note: when moving the existing kernel to .old, it is by default stripped
 # so we do not have two full debug environments sitting in / eating up space.
 #
+# Also note the .old might be a file and not a directory, so we have to
+# remove it first.
+#
 kernel-install: kernel-installable
-	@if [ ! -f ${SELECTEDKERNEL} ] ; then \
-		echo "You must build a kernel first." ; \
-		exit 1 ; \
+	@if [ ! -f ${SELECTEDKERNEL} ]; then			\
+		echo "You must build a kernel first.";		\
+		exit 1;						\
 	fi
-.  if exists(${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME})
+	@if [ -f ${DESTDIR}${DESTKERNDIR}.old ]; then		\
+		rm -f ${DESTDIR}${DESTKERNDIR}.old;		\
+	fi
+	mkdir -p ${DESTDIR}${DESTKERNDIR}.old
+.if exists(${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME})
 .ifndef NOFSCHG
 	-chflags noschg ${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME}
 .endif
 .    ifdef NO_KERNEL_OLD_STRIP
-	cp -p ${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME} ${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME}.old
+	cp -p ${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME} ${DESTDIR}${DESTKERNDIR}.old/${DESTKERNNAME}
 .    else
-	${OBJCOPY} --strip-debug ${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME} ${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME}.old
+	${OBJCOPY} --strip-debug ${DESTDIR}${DESTKERNDIR}/${DESTKERNNAME} ${DESTDIR}${DESTKERNDIR}.old/${DESTKERNNAME}
 .    endif
-.  endif
+.endif
+	@if [ -f ${DESTDIR}${DESTKERNDIR} ]; then		\
+		chflags noschg ${DESTDIR}${DESTKERNDIR};	\
+		rm -f ${DESTDIR}${DESTKERNDIR};			\
+	fi
 	mkdir -p ${DESTDIR}${DESTKERNDIR}
 .ifdef NOFSCHG
 	${INSTALL} -m 555 -o root -g wheel \
@@ -148,6 +164,17 @@ kernel-installable:
 		echo "kernel and modules have moved to /boot"; \
 		exit 1; \
 	fi
+# Skip this step for vkernels
+.if ${MACHINE_PLATFORM} != vkernel && ${MACHINE_PLATFORM} != vkernel64
+	@if [ ! -f ${DESTDIR}/boot/dloader.rc ]; then \
+		echo "You need to install a new ${DESTDIR}/boot before you"; \
+		echo "can install a new kernel, kernels are now installed"; \
+		echo "into a subdirectory along with their modules."; \
+		echo "You can do this with a buildworld / installworld"; \
+		echo "sequence."; \
+		exit 1; \
+	fi
+.endif
 	@exit 0
 
 .if !defined(MODULES_WITH_WORLD) && !defined(NO_MODULES)
@@ -190,31 +217,43 @@ modules-tags:
 # Note: when moving the existing modules to .old, they are by default stripped
 # so we do not have two full debug environments sitting in / eating up space.
 #
-modules-install:
+# We may have to remove deprecated kernel.old files before we can create
+# the kernel.old directory.
+#
+modules-install: kernel-installable
 .if !defined(NO_MODULES_OLD)
 .  ifdef NO_KERNEL_OLD_STRIP
-	set -- ${DESTDIR}${DESTKERNDIR}/${DESTMODULESNAME}/*; \
-	if [ -f "$$1" ]; then \
-		mkdir -p ${DESTDIR}${DESTKERNDIR}/${DESTMODULESNAME}.old; \
-		for file; do \
-		cp -p $$file ${DESTDIR}${DESTKERNDIR}/${DESTMODULESNAME}.old; \
-		done; \
+	set -- ${DESTDIR}${DESTKERNDIR}/*.ko;			\
+	if [ -f "$$1" ]; then					\
+		if [ -f ${DESTDIR}${DESTKERNDIR}.old ]; then	\
+		    rm -f ${DESTDIR}${DESTKERNDIR}.old; 	\
+		fi;						\
+		mkdir -p ${DESTDIR}${DESTKERNDIR}.old;		\
+		for file; do					\
+		cp -p $$file ${DESTDIR}${DESTKERNDIR}.old;	\
+		done;						\
 	fi
 .  else
-	set -- ${DESTDIR}${DESTKERNDIR}/${DESTMODULESNAME}/*; \
-	if [ -f "$$1" ]; then \
-		mkdir -p ${DESTDIR}${DESTKERNDIR}/${DESTMODULESNAME}.old; \
-		for file; do \
-		${OBJCOPY} --strip-debug $$file ${DESTDIR}${DESTKERNDIR}/${DESTMODULESNAME}.old/$${file##*/}; \
-		done; \
+	set -- ${DESTDIR}${DESTKERNDIR}/*.ko;			\
+	if [ -f "$$1" ]; then					\
+		if [ -f ${DESTDIR}${DESTKERNDIR}.old ]; then	\
+		    rm -f ${DESTDIR}${DESTKERNDIR}.old; 	\
+		fi;						\
+		mkdir -p ${DESTDIR}${DESTKERNDIR}.old;		\
+		for file; do					\
+		${OBJCOPY} --strip-debug $$file ${DESTDIR}${DESTKERNDIR}.old/$${file##*/}; \
+		done;						\
 	fi
 .  endif
 .endif
-	mkdir -p ${DESTDIR}${DESTKERNDIR}/${DESTMODULESNAME} # Ensure that the modules directory exists!
+.if exists(${DESTDIR}/${OLDMODULESDIR})
+	rm -rf ${DESTDIR}/${OLDMODULESDIR} # remove deprecated
+.endif
+	mkdir -p ${DESTDIR}${DESTKERNDIR} # Ensure that the modules directory exists!
 	cd $S ; env ${MKMODULESENV} ${MAKE} -f Makefile.modules install
 
 modules-reinstall:
-	mkdir -p ${DESTDIR}/${DESTKERNDIR}/${DESTMODULESNAME} # Ensure that the modules directory exists!
+	mkdir -p ${DESTDIR}/${DESTKERNDIR} # Ensure that the modules directory exists!
 	cd $S ; env ${MKMODULESENV} ${MAKE} -f Makefile.modules install
 
 config.o:

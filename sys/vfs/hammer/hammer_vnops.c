@@ -210,6 +210,8 @@ hammer_vop_fsync(struct vop_fsync_args *ap)
 	int waitfor = ap->a_waitfor;
 	int mode;
 
+	lwkt_gettoken(&hmp->fs_token);
+
 	/*
 	 * Fsync rule relaxation (default is either full synchronous flush
 	 * or REDO semantics with synchronous flush).
@@ -242,6 +244,7 @@ mode1:
 			break;
 		case 4:
 			/* ignore the fsync() system call */
+			lwkt_reltoken(&hmp->fs_token);
 			return(0);
 		default:
 			/* we have to do something */
@@ -262,6 +265,7 @@ mode1:
 			++hammer_count_fsyncs;
 			hammer_flusher_flush_undos(hmp, mode);
 			ip->redo_count = 0;
+			lwkt_reltoken(&hmp->fs_token);
 			return(0);
 		}
 
@@ -294,13 +298,14 @@ skip:
 		hammer_wait_inode(ip);
 		vn_lock(ap->a_vp, LK_EXCLUSIVE | LK_RETRY);
 	}
+	lwkt_reltoken(&hmp->fs_token);
 	return (ip->error);
 }
 
 /*
  * hammer_vop_read { vp, uio, ioflag, cred }
  *
- * MPALMOSTSAFE
+ * MPSAFE (for the cache safe does not require fs_token)
  */
 static
 int
@@ -308,6 +313,7 @@ hammer_vop_read(struct vop_read_args *ap)
 {
 	struct hammer_transaction trans;
 	hammer_inode_t ip;
+	hammer_mount_t hmp;
 	off_t offset;
 	struct buf *bp;
 	struct uio *uio;
@@ -316,12 +322,13 @@ hammer_vop_read(struct vop_read_args *ap)
 	int seqcount;
 	int ioseqcount;
 	int blksize;
-	int got_mplock;
 	int bigread;
+	int got_fstoken;
 
 	if (ap->a_vp->v_type != VREG)
 		return (EINVAL);
 	ip = VTOI(ap->a_vp);
+	hmp = ip->hmp;
 	error = 0;
 	uio = ap->a_uio;
 
@@ -335,26 +342,12 @@ hammer_vop_read(struct vop_read_args *ap)
 		seqcount = ioseqcount;
 
 	/*
-	 * Temporary hack until more of HAMMER can be made MPSAFE.
-	 */
-#ifdef SMP
-	if (curthread->td_mpcount) {
-		got_mplock = -1;
-		hammer_start_transaction(&trans, ip->hmp);
-	} else {
-		got_mplock = 0;
-	}
-#else
-	hammer_start_transaction(&trans, ip->hmp);
-	got_mplock = -1;
-#endif
-
-	/*
 	 * If reading or writing a huge amount of data we have to break
 	 * atomicy and allow the operation to be interrupted by a signal
 	 * or it can DOS the machine.
 	 */
 	bigread = (uio->uio_resid > 100 * 1024 * 1024);
+	got_fstoken = 0;
 
 	/*
 	 * Access the data typically in HAMMER_BUFSIZE blocks via the
@@ -388,9 +381,9 @@ hammer_vop_read(struct vop_read_args *ap)
 		/*
 		 * MPUNSAFE
 		 */
-		if (got_mplock == 0) {
-			got_mplock = 1;
-			get_mplock();
+		if (got_fstoken == 0) {
+			lwkt_gettoken(&hmp->fs_token);
+			got_fstoken = 1;
 			hammer_start_transaction(&trans, ip->hmp);
 		}
 
@@ -417,6 +410,13 @@ hammer_vop_read(struct vop_read_args *ap)
 			break;
 		}
 skip:
+		if ((hammer_debug_io & 0x0001) && (bp->b_flags & B_IODEBUG)) {
+			kprintf("doff %016jx read file %016jx@%016jx\n",
+				(intmax_t)bp->b_bio2.bio_offset,
+				(intmax_t)ip->obj_id,
+				(intmax_t)bp->b_loffset);
+		}
+		bp->b_flags &= ~B_IODEBUG;
 
 		/* bp->b_flags |= B_CLUSTEROK; temporarily disabled */
 		n = blksize - offset;
@@ -438,15 +438,14 @@ skip:
 	 * XXX only update the atime if we had to get the MP lock.
 	 * XXX hack hack hack, fixme.
 	 */
-	if (got_mplock) {
+	if (got_fstoken) {
 		if ((ip->flags & HAMMER_INODE_RO) == 0 &&
 		    (ip->hmp->mp->mnt_flag & MNT_NOATIME) == 0) {
 			ip->ino_data.atime = trans.time;
 			hammer_modify_inode(&trans, ip, HAMMER_INODE_ATIME);
 		}
 		hammer_done_transaction(&trans);
-		if (got_mplock > 0)
-			rel_mplock();
+		lwkt_reltoken(&hmp->fs_token);
 	}
 	return (error);
 }
@@ -486,6 +485,7 @@ hammer_vop_write(struct vop_write_args *ap)
 	/*
 	 * Create a transaction to cover the operations we perform.
 	 */
+	lwkt_gettoken(&hmp->fs_token);
 	hammer_start_transaction(&trans, hmp);
 	uio = ap->a_uio;
 
@@ -503,11 +503,13 @@ hammer_vop_write(struct vop_write_args *ap)
 	 */
 	if (uio->uio_offset < 0) {
 		hammer_done_transaction(&trans);
+		lwkt_reltoken(&hmp->fs_token);
 		return (EFBIG);
 	}
 	base_offset = uio->uio_offset + uio->uio_resid;	/* work around gcc-4 */
 	if (uio->uio_resid > 0 && base_offset <= uio->uio_offset) {
 		hammer_done_transaction(&trans);
+		lwkt_reltoken(&hmp->fs_token);
 		return (EFBIG);
 	}
 
@@ -804,11 +806,14 @@ hammer_vop_write(struct vop_write_args *ap)
 	}
 	hammer_done_transaction(&trans);
 	hammer_knote(ap->a_vp, kflags);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
 /*
  * hammer_vop_access { vp, mode, cred }
+ *
+ * MPSAFE - does not require fs_token
  */
 static
 int
@@ -830,6 +835,8 @@ hammer_vop_access(struct vop_access_args *ap)
 
 /*
  * hammer_vop_advlock { vp, id, op, fl, flags }
+ *
+ * MPSAFE - does not require fs_token
  */
 static
 int
@@ -843,7 +850,7 @@ hammer_vop_advlock(struct vop_advlock_args *ap)
 /*
  * hammer_vop_close { vp, fflag }
  *
- * We can only sync-on-close for normal closes.
+ * We can only sync-on-close for normal closes.  XXX disabled for now.
  */
 static
 int
@@ -883,20 +890,23 @@ hammer_vop_ncreate(struct vop_ncreate_args *ap)
 	struct hammer_inode *dip;
 	struct hammer_inode *nip;
 	struct nchandle *nch;
+	hammer_mount_t hmp;
 	int error;
 
 	nch = ap->a_nch;
 	dip = VTOI(ap->a_dvp);
+	hmp = dip->hmp;
 
 	if (dip->flags & HAMMER_INODE_RO)
 		return (EROFS);
-	if ((error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_CREATE)) != 0)
+	if ((error = hammer_checkspace(hmp, HAMMER_CHKSPC_CREATE)) != 0)
 		return (error);
 
 	/*
 	 * Create a transaction to cover the operations we perform.
 	 */
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 
 	/*
@@ -911,6 +921,7 @@ hammer_vop_ncreate(struct vop_ncreate_args *ap)
 		hkprintf("hammer_create_inode error %d\n", error);
 		hammer_done_transaction(&trans);
 		*ap->a_vpp = NULL;
+		lwkt_reltoken(&hmp->fs_token);
 		return (error);
 	}
 
@@ -941,6 +952,7 @@ hammer_vop_ncreate(struct vop_ncreate_args *ap)
 		}
 		hammer_knote(ap->a_dvp, NOTE_WRITE);
 	}
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -952,7 +964,7 @@ hammer_vop_ncreate(struct vop_ncreate_args *ap)
  * The atime field is stored in the B-Tree element and allowed to be
  * updated without cycling the element.
  *
- * MPSAFE
+ * MPSAFE - does not require fs_token
  */
 static
 int
@@ -1063,6 +1075,7 @@ hammer_vop_nresolve(struct vop_nresolve_args *ap)
 {
 	struct hammer_transaction trans;
 	struct namecache *ncp;
+	hammer_mount_t hmp;
 	hammer_inode_t dip;
 	hammer_inode_t ip;
 	hammer_tid_t asof;
@@ -1090,8 +1103,10 @@ hammer_vop_nresolve(struct vop_nresolve_args *ap)
 	nlen = ncp->nc_nlen;
 	flags = dip->flags & HAMMER_INODE_RO;
 	ispfs = 0;
+	hmp = dip->hmp;
 
-	hammer_simple_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_simple_transaction(&trans, hmp);
 	++hammer_stats_file_iopsr;
 
 	for (i = 0; i < nlen; ++i) {
@@ -1246,6 +1261,7 @@ hammer_vop_nresolve(struct vop_nresolve_args *ap)
 	}
 done:
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -1272,6 +1288,7 @@ hammer_vop_nlookupdotdot(struct vop_nlookupdotdot_args *ap)
 	struct hammer_transaction trans;
 	struct hammer_inode *dip;
 	struct hammer_inode *ip;
+	hammer_mount_t hmp;
 	int64_t parent_obj_id;
 	u_int32_t parent_obj_localization;
 	hammer_tid_t asof;
@@ -1279,11 +1296,13 @@ hammer_vop_nlookupdotdot(struct vop_nlookupdotdot_args *ap)
 
 	dip = VTOI(ap->a_dvp);
 	asof = dip->obj_asof;
+	hmp = dip->hmp;
 
 	/*
 	 * Whos are parent?  This could be the root of a pseudo-filesystem
 	 * whos parent is in another localization domain.
 	 */
+	lwkt_gettoken(&hmp->fs_token);
 	parent_obj_id = dip->ino_data.parent_obj_id;
 	if (dip->obj_id == HAMMER_OBJID_ROOT)
 		parent_obj_localization = dip->ino_data.ext.obj.parent_obj_localization;
@@ -1292,19 +1311,20 @@ hammer_vop_nlookupdotdot(struct vop_nlookupdotdot_args *ap)
 
 	if (parent_obj_id == 0) {
 		if (dip->obj_id == HAMMER_OBJID_ROOT &&
-		   asof != dip->hmp->asof) {
+		   asof != hmp->asof) {
 			parent_obj_id = dip->obj_id;
-			asof = dip->hmp->asof;
+			asof = hmp->asof;
 			*ap->a_fakename = kmalloc(19, M_TEMP, M_WAITOK);
 			ksnprintf(*ap->a_fakename, 19, "0x%016llx",
 				  (long long)dip->obj_asof);
 		} else {
 			*ap->a_vpp = NULL;
+			lwkt_reltoken(&hmp->fs_token);
 			return ENOENT;
 		}
 	}
 
-	hammer_simple_transaction(&trans, dip->hmp);
+	hammer_simple_transaction(&trans, hmp);
 	++hammer_stats_file_iopsr;
 
 	ip = hammer_get_inode(&trans, dip, parent_obj_id,
@@ -1317,6 +1337,7 @@ hammer_vop_nlookupdotdot(struct vop_nlookupdotdot_args *ap)
 		*ap->a_vpp = NULL;
 	}
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -1331,6 +1352,7 @@ hammer_vop_nlink(struct vop_nlink_args *ap)
 	struct hammer_inode *dip;
 	struct hammer_inode *ip;
 	struct nchandle *nch;
+	hammer_mount_t hmp;
 	int error;
 
 	if (ap->a_dvp->v_mount != ap->a_vp->v_mount)	
@@ -1339,6 +1361,7 @@ hammer_vop_nlink(struct vop_nlink_args *ap)
 	nch = ap->a_nch;
 	dip = VTOI(ap->a_dvp);
 	ip = VTOI(ap->a_vp);
+	hmp = dip->hmp;
 
 	if (dip->obj_localization != ip->obj_localization)
 		return(EXDEV);
@@ -1347,13 +1370,14 @@ hammer_vop_nlink(struct vop_nlink_args *ap)
 		return (EROFS);
 	if (ip->flags & HAMMER_INODE_RO)
 		return (EROFS);
-	if ((error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_CREATE)) != 0)
+	if ((error = hammer_checkspace(hmp, HAMMER_CHKSPC_CREATE)) != 0)
 		return (error);
 
 	/*
 	 * Create a transaction to cover the operations we perform.
 	 */
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 
 	/*
@@ -1375,6 +1399,7 @@ hammer_vop_nlink(struct vop_nlink_args *ap)
 	hammer_done_transaction(&trans);
 	hammer_knote(ap->a_vp, NOTE_LINK);
 	hammer_knote(ap->a_dvp, NOTE_WRITE);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -1392,20 +1417,23 @@ hammer_vop_nmkdir(struct vop_nmkdir_args *ap)
 	struct hammer_inode *dip;
 	struct hammer_inode *nip;
 	struct nchandle *nch;
+	hammer_mount_t hmp;
 	int error;
 
 	nch = ap->a_nch;
 	dip = VTOI(ap->a_dvp);
+	hmp = dip->hmp;
 
 	if (dip->flags & HAMMER_INODE_RO)
 		return (EROFS);
-	if ((error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_CREATE)) != 0)
+	if ((error = hammer_checkspace(hmp, HAMMER_CHKSPC_CREATE)) != 0)
 		return (error);
 
 	/*
 	 * Create a transaction to cover the operations we perform.
 	 */
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 
 	/*
@@ -1419,6 +1447,7 @@ hammer_vop_nmkdir(struct vop_nmkdir_args *ap)
 		hkprintf("hammer_mkdir error %d\n", error);
 		hammer_done_transaction(&trans);
 		*ap->a_vpp = NULL;
+		lwkt_reltoken(&hmp->fs_token);
 		return (error);
 	}
 	/*
@@ -1448,6 +1477,7 @@ hammer_vop_nmkdir(struct vop_nmkdir_args *ap)
 	hammer_done_transaction(&trans);
 	if (error == 0)
 		hammer_knote(ap->a_dvp, NOTE_WRITE | NOTE_LINK);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -1465,20 +1495,23 @@ hammer_vop_nmknod(struct vop_nmknod_args *ap)
 	struct hammer_inode *dip;
 	struct hammer_inode *nip;
 	struct nchandle *nch;
+	hammer_mount_t hmp;
 	int error;
 
 	nch = ap->a_nch;
 	dip = VTOI(ap->a_dvp);
+	hmp = dip->hmp;
 
 	if (dip->flags & HAMMER_INODE_RO)
 		return (EROFS);
-	if ((error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_CREATE)) != 0)
+	if ((error = hammer_checkspace(hmp, HAMMER_CHKSPC_CREATE)) != 0)
 		return (error);
 
 	/*
 	 * Create a transaction to cover the operations we perform.
 	 */
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 
 	/*
@@ -1493,6 +1526,7 @@ hammer_vop_nmknod(struct vop_nmknod_args *ap)
 	if (error) {
 		hammer_done_transaction(&trans);
 		*ap->a_vpp = NULL;
+		lwkt_reltoken(&hmp->fs_token);
 		return (error);
 	}
 
@@ -1521,11 +1555,14 @@ hammer_vop_nmknod(struct vop_nmknod_args *ap)
 	hammer_done_transaction(&trans);
 	if (error == 0)
 		hammer_knote(ap->a_dvp, NOTE_WRITE);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
 /*
  * hammer_vop_open { vp, mode, cred, fp }
+ *
+ * MPSAFE (does not require fs_token)
  */
 static
 int
@@ -1561,6 +1598,7 @@ hammer_vop_readdir(struct vop_readdir_args *ap)
 	struct hammer_transaction trans;
 	struct hammer_cursor cursor;
 	struct hammer_inode *ip;
+	hammer_mount_t hmp;
 	struct uio *uio;
 	hammer_base_elm_t base;
 	int error;
@@ -1575,6 +1613,7 @@ hammer_vop_readdir(struct vop_readdir_args *ap)
 	ip = VTOI(ap->a_vp);
 	uio = ap->a_uio;
 	saveoff = uio->uio_offset;
+	hmp = ip->hmp;
 
 	if (ap->a_ncookies) {
 		ncookies = uio->uio_resid / 16 + 1;
@@ -1588,7 +1627,8 @@ hammer_vop_readdir(struct vop_readdir_args *ap)
 		cookie_index = 0;
 	}
 
-	hammer_simple_transaction(&trans, ip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_simple_transaction(&trans, hmp);
 
 	/*
 	 * Handle artificial entries
@@ -1703,6 +1743,7 @@ done:
 			*ap->a_cookies = cookies;
 		}
 	}
+	lwkt_reltoken(&hmp->fs_token);
 	return(error);
 }
 
@@ -1716,12 +1757,16 @@ hammer_vop_readlink(struct vop_readlink_args *ap)
 	struct hammer_transaction trans;
 	struct hammer_cursor cursor;
 	struct hammer_inode *ip;
+	hammer_mount_t hmp;
 	char buf[32];
 	u_int32_t localization;
 	hammer_pseudofs_inmem_t pfsm;
 	int error;
 
 	ip = VTOI(ap->a_vp);
+	hmp = ip->hmp;
+
+	lwkt_gettoken(&hmp->fs_token);
 
 	/*
 	 * Shortcut if the symlink data was stuffed into ino_data.
@@ -1740,7 +1785,7 @@ hammer_vop_readlink(struct vop_readlink_args *ap)
 		    ip->obj_asof == HAMMER_MAX_TID &&
 		    ip->obj_localization == 0 &&
 		    strncmp(ptr, "@@PFS", 5) == 0) {
-			hammer_simple_transaction(&trans, ip->hmp);
+			hammer_simple_transaction(&trans, hmp);
 			bcopy(ptr + 5, buf, 5);
 			buf[5] = 0;
 			localization = strtoul(buf, NULL, 10) << 16;
@@ -1770,17 +1815,18 @@ hammer_vop_readlink(struct vop_readlink_args *ap)
 				bytes = strlen(buf);
 			}
 			if (pfsm)
-				hammer_rel_pseudofs(trans.hmp, pfsm);
+				hammer_rel_pseudofs(hmp, pfsm);
 			hammer_done_transaction(&trans);
 		}
 		error = uiomove(ptr, bytes, ap->a_uio);
+		lwkt_reltoken(&hmp->fs_token);
 		return(error);
 	}
 
 	/*
 	 * Long version
 	 */
-	hammer_simple_transaction(&trans, ip->hmp);
+	hammer_simple_transaction(&trans, hmp);
 	++hammer_stats_file_iopsr;
 	hammer_init_cursor(&trans, &cursor, &ip->cache[1], ip);
 
@@ -1813,6 +1859,7 @@ hammer_vop_readlink(struct vop_readlink_args *ap)
 	}
 	hammer_done_cursor(&cursor);
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 	return(error);
 }
 
@@ -1825,21 +1872,25 @@ hammer_vop_nremove(struct vop_nremove_args *ap)
 {
 	struct hammer_transaction trans;
 	struct hammer_inode *dip;
+	hammer_mount_t hmp;
 	int error;
 
 	dip = VTOI(ap->a_dvp);
+	hmp = dip->hmp;
 
 	if (hammer_nohistory(dip) == 0 &&
-	    (error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_REMOVE)) != 0) {
+	    (error = hammer_checkspace(hmp, HAMMER_CHKSPC_REMOVE)) != 0) {
 		return (error);
 	}
 
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 	error = hammer_dounlink(&trans, ap->a_nch, ap->a_dvp, ap->a_cred, 0, 0);
 	hammer_done_transaction(&trans);
 	if (error == 0)
 		hammer_knote(ap->a_dvp, NOTE_WRITE);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -1856,6 +1907,7 @@ hammer_vop_nrename(struct vop_nrename_args *ap)
 	struct hammer_inode *fdip;
 	struct hammer_inode *tdip;
 	struct hammer_inode *ip;
+	hammer_mount_t hmp;
 	struct hammer_cursor cursor;
 	int64_t namekey;
 	u_int32_t max_iterations;
@@ -1873,6 +1925,8 @@ hammer_vop_nrename(struct vop_nrename_args *ap)
 	ip = VTOI(fncp->nc_vp);
 	KKASSERT(ip != NULL);
 
+	hmp = ip->hmp;
+
 	if (fdip->obj_localization != tdip->obj_localization)
 		return(EXDEV);
 	if (fdip->obj_localization != ip->obj_localization)
@@ -1884,10 +1938,11 @@ hammer_vop_nrename(struct vop_nrename_args *ap)
 		return (EROFS);
 	if (ip->flags & HAMMER_INODE_RO)
 		return (EROFS);
-	if ((error = hammer_checkspace(fdip->hmp, HAMMER_CHKSPC_CREATE)) != 0)
+	if ((error = hammer_checkspace(hmp, HAMMER_CHKSPC_CREATE)) != 0)
 		return (error);
 
-	hammer_start_transaction(&trans, fdip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 
 	/*
@@ -1980,18 +2035,34 @@ retry:
 
 	/*
 	 * Cleanup and tell the kernel that the rename succeeded.
+	 *
+	 * NOTE: ip->vp, if non-NULL, cannot be directly referenced
+	 *	 without formally acquiring the vp since the vp might
+	 *	 have zero refs on it, or in the middle of a reclaim,
+	 *	 etc.
 	 */
         hammer_done_cursor(&cursor);
 	if (error == 0) {
 		cache_rename(ap->a_fnch, ap->a_tnch);
 		hammer_knote(ap->a_fdvp, NOTE_WRITE);
 		hammer_knote(ap->a_tdvp, NOTE_WRITE);
-		if (ip->vp)
-			hammer_knote(ip->vp, NOTE_RENAME);
+		while (ip->vp) {
+			struct vnode *vp;
+
+			error = hammer_get_vnode(ip, &vp);
+			if (error == 0 && vp) {
+				vn_unlock(vp);
+				hammer_knote(ip->vp, NOTE_RENAME);
+				vrele(vp);
+				break;
+			}
+			kprintf("Debug: HAMMER ip/vp race2 avoided\n");
+		}
 	}
 
 failed:
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -2004,21 +2075,25 @@ hammer_vop_nrmdir(struct vop_nrmdir_args *ap)
 {
 	struct hammer_transaction trans;
 	struct hammer_inode *dip;
+	hammer_mount_t hmp;
 	int error;
 
 	dip = VTOI(ap->a_dvp);
+	hmp = dip->hmp;
 
 	if (hammer_nohistory(dip) == 0 &&
-	    (error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_REMOVE)) != 0) {
+	    (error = hammer_checkspace(hmp, HAMMER_CHKSPC_REMOVE)) != 0) {
 		return (error);
 	}
 
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 	error = hammer_dounlink(&trans, ap->a_nch, ap->a_dvp, ap->a_cred, 0, 1);
 	hammer_done_transaction(&trans);
 	if (error == 0)
 		hammer_knote(ap->a_dvp, NOTE_WRITE | NOTE_LINK);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -2031,21 +2106,25 @@ hammer_vop_markatime(struct vop_markatime_args *ap)
 {
 	struct hammer_transaction trans;
 	struct hammer_inode *ip;
+	hammer_mount_t hmp;
 
 	ip = VTOI(ap->a_vp);
 	if (ap->a_vp->v_mount->mnt_flag & MNT_RDONLY)
 		return (EROFS);
 	if (ip->flags & HAMMER_INODE_RO)
 		return (EROFS);
-	if (ip->hmp->mp->mnt_flag & MNT_NOATIME)
+	hmp = ip->hmp;
+	if (hmp->mp->mnt_flag & MNT_NOATIME)
 		return (0);
-	hammer_start_transaction(&trans, ip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 
 	ip->ino_data.atime = trans.time;
 	hammer_modify_inode(&trans, ip, HAMMER_INODE_ATIME);
 	hammer_done_transaction(&trans);
 	hammer_knote(ap->a_vp, NOTE_ATTRIB);
+	lwkt_reltoken(&hmp->fs_token);
 	return (0);
 }
 
@@ -2057,8 +2136,9 @@ int
 hammer_vop_setattr(struct vop_setattr_args *ap)
 {
 	struct hammer_transaction trans;
-	struct vattr *vap;
 	struct hammer_inode *ip;
+	struct vattr *vap;
+	hammer_mount_t hmp;
 	int modflags;
 	int error;
 	int truncating;
@@ -2073,17 +2153,19 @@ hammer_vop_setattr(struct vop_setattr_args *ap)
 	ip = ap->a_vp->v_data;
 	modflags = 0;
 	kflags = 0;
+	hmp = ip->hmp;
 
 	if (ap->a_vp->v_mount->mnt_flag & MNT_RDONLY)
 		return(EROFS);
 	if (ip->flags & HAMMER_INODE_RO)
 		return (EROFS);
 	if (hammer_nohistory(ip) == 0 &&
-	    (error = hammer_checkspace(ip->hmp, HAMMER_CHKSPC_REMOVE)) != 0) {
+	    (error = hammer_checkspace(hmp, HAMMER_CHKSPC_REMOVE)) != 0) {
 		return (error);
 	}
 
-	hammer_start_transaction(&trans, ip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 	error = 0;
 
@@ -2289,6 +2371,7 @@ done:
 		hammer_modify_inode(&trans, ip, modflags);
 	hammer_done_transaction(&trans);
 	hammer_knote(ap->a_vp, kflags);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -2302,8 +2385,9 @@ hammer_vop_nsymlink(struct vop_nsymlink_args *ap)
 	struct hammer_transaction trans;
 	struct hammer_inode *dip;
 	struct hammer_inode *nip;
-	struct nchandle *nch;
 	hammer_record_t record;
+	struct nchandle *nch;
+	hammer_mount_t hmp;
 	int error;
 	int bytes;
 
@@ -2311,16 +2395,18 @@ hammer_vop_nsymlink(struct vop_nsymlink_args *ap)
 
 	nch = ap->a_nch;
 	dip = VTOI(ap->a_dvp);
+	hmp = dip->hmp;
 
 	if (dip->flags & HAMMER_INODE_RO)
 		return (EROFS);
-	if ((error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_CREATE)) != 0)
+	if ((error = hammer_checkspace(hmp, HAMMER_CHKSPC_CREATE)) != 0)
 		return (error);
 
 	/*
 	 * Create a transaction to cover the operations we perform.
 	 */
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 
 	/*
@@ -2334,6 +2420,7 @@ hammer_vop_nsymlink(struct vop_nsymlink_args *ap)
 	if (error) {
 		hammer_done_transaction(&trans);
 		*ap->a_vpp = NULL;
+		lwkt_reltoken(&hmp->fs_token);
 		return (error);
 	}
 
@@ -2388,6 +2475,7 @@ hammer_vop_nsymlink(struct vop_nsymlink_args *ap)
 		}
 	}
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 	return (error);
 }
 
@@ -2400,20 +2488,24 @@ hammer_vop_nwhiteout(struct vop_nwhiteout_args *ap)
 {
 	struct hammer_transaction trans;
 	struct hammer_inode *dip;
+	hammer_mount_t hmp;
 	int error;
 
 	dip = VTOI(ap->a_dvp);
+	hmp = dip->hmp;
 
 	if (hammer_nohistory(dip) == 0 &&
-	    (error = hammer_checkspace(dip->hmp, HAMMER_CHKSPC_CREATE)) != 0) {
+	    (error = hammer_checkspace(hmp, HAMMER_CHKSPC_CREATE)) != 0) {
 		return (error);
 	}
 
-	hammer_start_transaction(&trans, dip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_start_transaction(&trans, hmp);
 	++hammer_stats_file_iopsw;
 	error = hammer_dounlink(&trans, ap->a_nch, ap->a_dvp,
 				ap->a_cred, ap->a_flags, -1);
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 
 	return (error);
 }
@@ -2426,10 +2518,15 @@ int
 hammer_vop_ioctl(struct vop_ioctl_args *ap)
 {
 	struct hammer_inode *ip = ap->a_vp->v_data;
+	hammer_mount_t hmp = ip->hmp;
+	int error;
 
 	++hammer_stats_file_iopsr;
-	return(hammer_ioctl(ip, ap->a_command, ap->a_data,
-			    ap->a_fflag, ap->a_cred));
+	lwkt_gettoken(&hmp->fs_token);
+	error = hammer_ioctl(ip, ap->a_command, ap->a_data,
+			     ap->a_fflag, ap->a_cred);
+	lwkt_reltoken(&hmp->fs_token);
+	return (error);
 }
 
 static
@@ -2453,8 +2550,9 @@ hammer_vop_mountctl(struct vop_mountctl_args *ap)
 	KKASSERT(mp->mnt_data != NULL);
 	hmp = (struct hammer_mount *)mp->mnt_data;
 
-	switch(ap->a_op) {
+	lwkt_gettoken(&hmp->fs_token);
 
+	switch(ap->a_op) {
 	case MOUNTCTL_SET_EXPORT:
 		if (ap->a_ctllen != sizeof(struct export_args))
 			error = EINVAL;
@@ -2475,7 +2573,8 @@ hammer_vop_mountctl(struct vop_mountctl_args *ap)
 		usedbytes = *ap->a_res;
 
 		if (usedbytes > 0 && usedbytes < ap->a_buflen) {
-			usedbytes += vfs_flagstostr(hmp->hflags, extraopt, ap->a_buf,
+			usedbytes += vfs_flagstostr(hmp->hflags, extraopt,
+						    ap->a_buf,
 						    ap->a_buflen - usedbytes,
 						    &error);
 		}
@@ -2487,6 +2586,7 @@ hammer_vop_mountctl(struct vop_mountctl_args *ap)
 		error = vop_stdmountctl(ap);
 		break;
 	}
+	lwkt_reltoken(&hmp->fs_token);
 	return(error);
 }
 
@@ -2543,6 +2643,7 @@ hammer_vop_strategy_read(struct vop_strategy_args *ap)
 	struct hammer_transaction trans;
 	struct hammer_inode *ip;
 	struct hammer_inode *dip;
+	hammer_mount_t hmp;
 	struct hammer_cursor cursor;
 	hammer_base_elm_t base;
 	hammer_off_t disk_offset;
@@ -2560,6 +2661,7 @@ hammer_vop_strategy_read(struct vop_strategy_args *ap)
 	bio = ap->a_bio;
 	bp = bio->bio_buf;
 	ip = ap->a_vp->v_data;
+	hmp = ip->hmp;
 
 	/*
 	 * The zone-2 disk offset may have been set by the cluster code via
@@ -2570,7 +2672,9 @@ hammer_vop_strategy_read(struct vop_strategy_args *ap)
 	nbio = push_bio(bio);
 	if ((nbio->bio_offset & HAMMER_OFF_ZONE_MASK) ==
 	    HAMMER_ZONE_LARGE_DATA) {
-		error = hammer_io_direct_read(ip->hmp, nbio, NULL);
+		lwkt_gettoken(&hmp->fs_token);
+		error = hammer_io_direct_read(hmp, nbio, NULL);
+		lwkt_reltoken(&hmp->fs_token);
 		return (error);
 	}
 
@@ -2578,7 +2682,8 @@ hammer_vop_strategy_read(struct vop_strategy_args *ap)
 	 * Well, that sucked.  Do it the hard way.  If all the stars are
 	 * aligned we may still be able to issue a direct-read.
 	 */
-	hammer_simple_transaction(&trans, ip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_simple_transaction(&trans, hmp);
 	hammer_init_cursor(&trans, &cursor, &ip->cache[1], ip);
 
 	/*
@@ -2712,8 +2817,7 @@ hammer_vop_strategy_read(struct vop_strategy_args *ap)
 			KKASSERT((disk_offset & HAMMER_OFF_ZONE_MASK) ==
 				 HAMMER_ZONE_LARGE_DATA);
 			nbio->bio_offset = disk_offset;
-			error = hammer_io_direct_read(trans.hmp, nbio,
-						      cursor.leaf);
+			error = hammer_io_direct_read(hmp, nbio, cursor.leaf);
 			goto done;
 		} else if (n) {
 			error = hammer_ip_resolve_data(&cursor);
@@ -2774,6 +2878,7 @@ done:
 	}
 	hammer_done_cursor(&cursor);
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 	return(error);
 }
 
@@ -2798,6 +2903,7 @@ hammer_vop_bmap(struct vop_bmap_args *ap)
 {
 	struct hammer_transaction trans;
 	struct hammer_inode *ip;
+	hammer_mount_t hmp;
 	struct hammer_cursor cursor;
 	hammer_base_elm_t base;
 	int64_t rec_offset;
@@ -2814,6 +2920,7 @@ hammer_vop_bmap(struct vop_bmap_args *ap)
 
 	++hammer_stats_file_iopsr;
 	ip = ap->a_vp->v_data;
+	hmp = ip->hmp;
 
 	/*
 	 * We can only BMAP regular files.  We can't BMAP database files,
@@ -2833,7 +2940,8 @@ hammer_vop_bmap(struct vop_bmap_args *ap)
 	 * Scan the B-Tree to acquire blockmap addresses, then translate
 	 * to raw addresses.
 	 */
-	hammer_simple_transaction(&trans, ip->hmp);
+	lwkt_gettoken(&hmp->fs_token);
+	hammer_simple_transaction(&trans, hmp);
 #if 0
 	kprintf("bmap_beg %016llx ip->cache %p\n",
 		(long long)ap->a_loffset, ip->cache[1]);
@@ -2958,6 +3066,7 @@ hammer_vop_bmap(struct vop_bmap_args *ap)
 	}
 	hammer_done_cursor(&cursor);
 	hammer_done_transaction(&trans);
+	lwkt_reltoken(&hmp->fs_token);
 
 	/*
 	 * If we couldn't find any records or the records we did find were
@@ -3050,6 +3159,8 @@ hammer_vop_strategy_write(struct vop_strategy_args *ap)
 		return(EROFS);
 	}
 
+	lwkt_gettoken(&hmp->fs_token);
+
 	/*
 	 * Interlock with inode destruction (no in-kernel or directory
 	 * topology visibility).  If we queue new IO while trying to
@@ -3064,6 +3175,7 @@ hammer_vop_strategy_write(struct vop_strategy_args *ap)
 	    (HAMMER_INODE_DELETING|HAMMER_INODE_DELETED)) {
 		bp->b_resid = 0;
 		biodone(ap->a_bio);
+		lwkt_reltoken(&hmp->fs_token);
 		return(0);
 	}
 
@@ -3113,6 +3225,7 @@ hammer_vop_strategy_write(struct vop_strategy_args *ap)
 		bp->b_flags |= B_ERROR;
 		biodone(ap->a_bio);
 	}
+	lwkt_reltoken(&hmp->fs_token);
 	return(error);
 }
 
@@ -3129,6 +3242,7 @@ hammer_dounlink(hammer_transaction_t trans, struct nchandle *nch,
 	struct namecache *ncp;
 	hammer_inode_t dip;
 	hammer_inode_t ip;
+	hammer_mount_t hmp;
 	struct hammer_cursor cursor;
 	int64_t namekey;
 	u_int32_t max_iterations;
@@ -3143,6 +3257,7 @@ hammer_dounlink(hammer_transaction_t trans, struct nchandle *nch,
 	 */
 	dip = VTOI(dvp);
 	ncp = nch->ncp;
+	hmp = dip->hmp;
 
 	if (dip->flags & HAMMER_INODE_RO)
 		return (EROFS);
@@ -3199,7 +3314,7 @@ retry:
 	if (error == 0) {
 		hammer_unlock(&cursor.ip->lock);
 		ip = hammer_get_inode(trans, dip, cursor.data->entry.obj_id,
-				      dip->hmp->asof,
+				      hmp->asof,
 				      cursor.data->entry.localization,
 				      0, &error);
 		hammer_lock_sh(&cursor.ip->lock);
@@ -3271,14 +3386,28 @@ retry:
 			cache_setvp(nch, NULL);
 
 			/*
-			 * XXX locking.  Note: ip->vp might get ripped out
-			 * when we setunresolved() the nch since we had
-			 * no other reference to it.  In that case ip->vp
-			 * will be NULL.
+			 * NOTE: ip->vp, if non-NULL, cannot be directly
+			 *	 referenced without formally acquiring the
+			 *	 vp since the vp might have zero refs on it,
+			 *	 or in the middle of a reclaim, etc.
+			 *
+			 * NOTE: The cache_setunresolved() can rip the vp
+			 *	 out from under us since the vp may not have
+			 *	 any refs, in which case ip->vp will be NULL
+			 *	 from the outset.
 			 */
-			if (ip && ip->vp) {
-				hammer_knote(ip->vp, NOTE_DELETE);
-				cache_inval_vp(ip->vp, CINV_DESTROY);
+			while (ip && ip->vp) {
+				struct vnode *vp;
+
+				error = hammer_get_vnode(ip, &vp);
+				if (error == 0 && vp) {
+					vn_unlock(vp);
+					hammer_knote(ip->vp, NOTE_DELETE);
+					cache_inval_vp(ip->vp, CINV_DESTROY);
+					vrele(vp);
+					break;
+				}
+				kprintf("Debug: HAMMER ip/vp race1 avoided\n");
 			}
 		}
 		if (ip)
@@ -3297,7 +3426,6 @@ retry:
  ************************************************************************
  *
  */
-
 static int
 hammer_vop_fifoclose (struct vop_close_args *ap)
 {
@@ -3377,10 +3505,7 @@ hammer_vop_kqfilter(struct vop_kqfilter_args *ap)
 
 	kn->kn_hook = (caddr_t)vp;
 
-	/* XXX: kq token actually protects the list */
-	lwkt_gettoken(&vp->v_token);
 	knote_insert(&vp->v_pollinfo.vpi_kqinfo.ki_note, kn);
-	lwkt_reltoken(&vp->v_token);
 
 	return(0);
 }
@@ -3390,9 +3515,7 @@ filt_hammerdetach(struct knote *kn)
 {
 	struct vnode *vp = (void *)kn->kn_hook;
 
-	lwkt_gettoken(&vp->v_token);
 	knote_remove(&vp->v_pollinfo.vpi_kqinfo.ki_note, kn);
-	lwkt_reltoken(&vp->v_token);
 }
 
 static int
@@ -3400,12 +3523,19 @@ filt_hammerread(struct knote *kn, long hint)
 {
 	struct vnode *vp = (void *)kn->kn_hook;
 	hammer_inode_t ip = VTOI(vp);
+	hammer_mount_t hmp = ip->hmp;
+	off_t off;
 
 	if (hint == NOTE_REVOKE) {
 		kn->kn_flags |= (EV_EOF | EV_ONESHOT);
 		return(1);
 	}
-	kn->kn_data = ip->ino_data.size - kn->kn_fp->f_offset;
+	lwkt_gettoken(&hmp->fs_token);	/* XXX use per-ip-token */
+	off = ip->ino_data.size - kn->kn_fp->f_offset;
+	kn->kn_data = (off < INTPTR_MAX) ? off : INTPTR_MAX;
+	lwkt_reltoken(&hmp->fs_token);
+	if (kn->kn_sfflags & NOTE_OLDAPI)
+		return(1);
 	return (kn->kn_data != 0);
 }
 

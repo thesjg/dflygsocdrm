@@ -24,7 +24,6 @@
  * SUCH DAMAGE.
  *
  *	$FreeBSD: src/sys/dev/mlx/mlx.c,v 1.14.2.5 2001/09/11 09:49:53 kris Exp $
- *	$DragonFly: src/sys/dev/raid/mlx/mlx.c,v 1.25 2008/06/10 17:20:52 dillon Exp $
  */
 
 /*
@@ -50,10 +49,8 @@
 #include "mlxvar.h"
 #include "mlxreg.h"
 
-#define MLX_CDEV_MAJOR	130
-
 static struct dev_ops mlx_ops = {
-	{ "mlx", MLX_CDEV_MAJOR, 0 },
+	{ "mlx", 0, 0 },
 	.d_open =	mlx_open,
 	.d_close =	mlx_close,
 	.d_ioctl =	mlx_ioctl,
@@ -257,7 +254,7 @@ mlx_sglist_map(struct mlx_softc *sc)
      * contiguous slab.  We may need to switch to a more complex arrangement where
      * we allocate in smaller chunks and keep a lookup table from slot to bus address.
      */
-    error = bus_dmamem_alloc(sc->mlx_sg_dmat, (void **)&sc->mlx_sgtable, BUS_DMA_NOWAIT, &sc->mlx_sg_dmamap);
+    error = bus_dmamem_alloc(sc->mlx_sg_dmat, (void *)&sc->mlx_sgtable, BUS_DMA_NOWAIT, &sc->mlx_sg_dmamap);
     if (error) {
 	device_printf(sc->mlx_dev, "can't allocate s/g table\n");
 	return(ENOMEM);

@@ -59,8 +59,10 @@ static int chain_mplock = 0;
 static int bgl_yield = 10;
 static __int64_t mplock_contention_count = 0;
 
-SYSCTL_INT(_lwkt, OID_AUTO, chain_mplock, CTLFLAG_RW, &chain_mplock, 0, "");
-SYSCTL_INT(_lwkt, OID_AUTO, bgl_yield_delay, CTLFLAG_RW, &bgl_yield, 0, "");
+SYSCTL_INT(_lwkt, OID_AUTO, chain_mplock, CTLFLAG_RW, &chain_mplock, 0,
+    "Chain IPI's to other CPU's potentially needing the MP lock when it is yielded");
+SYSCTL_INT(_lwkt, OID_AUTO, bgl_yield_delay, CTLFLAG_RW, &bgl_yield, 0,
+    "Duration of delay when MP lock is temporarily yielded");
 SYSCTL_QUAD(_lwkt, OID_AUTO, mplock_contention_count, CTLFLAG_RW,
 	&mplock_contention_count, 0, "spinning due to MPLOCK contention");
 
@@ -85,7 +87,7 @@ KTR_INFO(KTR_GIANT_CONTENTION, giant, end, 1,
 		file, line)
 
 int	mp_lock;
-int	mp_lock_contention_mask;
+int	cpu_contention_mask;
 const char *mp_lock_holder_file;	/* debugging */
 int	mp_lock_holder_line;		/* debugging */
 
@@ -100,6 +102,29 @@ cpu_get_initial_mplock(void)
 }
 
 /*
+ * This code is called from the get_mplock() inline when the mplock
+ * is not already held.  td_mpcount has already been predisposed
+ * (incremented).
+ */
+void
+_get_mplock_predisposed(const char *file, int line)
+{
+	globaldata_t gd = mycpu;
+
+	if (gd->gd_intr_nesting_level) {
+		panic("Attempt to acquire mplock not already held "
+		      "in hard section, ipi or interrupt %s:%d",
+		      file, line);
+	}
+	if (atomic_cmpset_int(&mp_lock, -1, gd->gd_cpuid) == 0)
+		_get_mplock_contested(file, line);
+#ifdef INVARIANTS
+	mp_lock_holder_file = file;
+	mp_lock_holder_line = line;
+#endif
+}
+
+/*
  * Called when the MP lock could not be trvially acquired.  The caller
  * has already bumped td_mpcount.
  */
@@ -109,6 +134,7 @@ _get_mplock_contested(const char *file, int line)
 	globaldata_t gd = mycpu;
 	int ov;
 	int nv;
+	const void **stkframe = (const void **)&file;
 
 	++mplock_contention_count;
 	for (;;) {
@@ -120,6 +146,7 @@ _get_mplock_contested(const char *file, int line)
 			if (atomic_cmpset_int(&mp_lock, ov, gd->gd_cpuid))
 				break;
 		} else {
+			gd->gd_curthread->td_mplock_stallpc = stkframe[-1];
 			loggiant(beg);
 			lwkt_switch();
 			loggiant(end);
@@ -130,8 +157,9 @@ _get_mplock_contested(const char *file, int line)
 }
 
 /*
- * Called if td_mpcount went negative or if td_mpcount is 0 and we were
- * unable to release the MP lock.  Handles sanity checks and conflicts.
+ * Called if td_mpcount went negative or if td_mpcount + td_xpcount is 0
+ * and we were unable to release the MP lock.  Handles sanity checks
+ * and conflicts.
  *
  * It is possible for the inline release to have raced an interrupt which
  * get/rel'd the MP lock, causing the inline's cmpset to fail.  If this
@@ -142,15 +170,18 @@ void
 _rel_mplock_contested(void)
 {
 	globaldata_t gd = mycpu;
+	thread_t td = gd->gd_curthread;
 	int ov;
 
-	KKASSERT(gd->gd_curthread->td_mpcount >= 0);
-	for (;;) {
-		ov = mp_lock;
-		if (ov != gd->gd_cpuid)
-			break;
-		if (atomic_cmpset_int(&mp_lock, ov, -1))
-			break;
+	KKASSERT(td->td_mpcount >= 0);
+	if (td->td_mpcount + td->td_xpcount == 0) {
+		for (;;) {
+			ov = mp_lock;
+			if (ov != gd->gd_cpuid)
+				break;
+			if (atomic_cmpset_int(&mp_lock, ov, -1))
+				break;
+		}
 	}
 }
 
@@ -177,12 +208,14 @@ _try_mplock_contested(const char *file, int line)
 	KKASSERT(td->td_mpcount >= 0);
 	++mplock_contention_count;
 
-	for (;;) {
-		ov = mp_lock;
-		if (ov != gd->gd_cpuid)
-			break;
-		if (atomic_cmpset_int(&mp_lock, ov, -1))
-			break;
+	if (td->td_mpcount + td->td_xpcount == 0) {
+		for (;;) {
+			ov = mp_lock;
+			if (ov != gd->gd_cpuid)
+				break;
+			if (atomic_cmpset_int(&mp_lock, ov, -1))
+				break;
+		}
 	}
 }
 
@@ -199,26 +232,29 @@ _cpu_try_mplock_contested(const char *file, int line)
 
 /*
  * Temporarily yield the MP lock.  This is part of lwkt_user_yield()
- * which is kinda hackish.
+ * which is kinda hackish.  The MP lock cannot be yielded if inherited
+ * due to a preemption.
  */
 void
 yield_mplock(thread_t td)
 {
 	int savecnt;
 
-	savecnt = td->td_mpcount;
-	td->td_mpcount = 1;
-	rel_mplock();
-	DELAY(bgl_yield);
-	get_mplock();
-	td->td_mpcount = savecnt;
+	if (td->td_xpcount == 0) {
+		savecnt = td->td_mpcount;
+		td->td_mpcount = 1;
+		rel_mplock();
+		DELAY(bgl_yield);
+		get_mplock();
+		td->td_mpcount = savecnt;
+	}
 }
 
 #if 0
 
 /*
  * The rel_mplock() code will call this function after releasing the
- * last reference on the MP lock if mp_lock_contention_mask is non-zero.
+ * last reference on the MP lock if cpu_contention_mask is non-zero.
  *
  * We then chain an IPI to a single other cpu potentially needing the
  * lock.  This is a bit heuristical and we can wind up with IPIs flying
@@ -238,7 +274,7 @@ lwkt_mp_lock_uncontested(void)
     if (chain_mplock) {
 	gd = mycpu;
 	clr_mplock_contention_mask(gd);
-	mask = mp_lock_contention_mask;
+	mask = cpu_contention_mask;
 	tmpmask = ~((1 << gd->gd_cpuid) - 1);
 
 	if (mask) {
@@ -246,7 +282,7 @@ lwkt_mp_lock_uncontested(void)
 		    cpuid = bsfl(mask & tmpmask);
 	    else
 		    cpuid = bsfl(mask);
-	    atomic_clear_int(&mp_lock_contention_mask, 1 << cpuid);
+	    atomic_clear_int(&cpu_contention_mask, 1 << cpuid);
 	    dgd = globaldata_find(cpuid);
 	    lwkt_send_ipiq(dgd, lwkt_mp_lock_uncontested_remote, NULL);
 	}

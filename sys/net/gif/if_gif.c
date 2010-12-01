@@ -96,6 +96,7 @@ struct if_clone gif_cloner = IF_CLONE_INITIALIZER("gif", gif_clone_create,
     gif_clone_destroy, 0, IF_MAXUNIT);
 
 static int gifmodevent (module_t, int, void *);
+static void gif_clear_cache(struct gif_softc *sc);
 
 SYSCTL_DECL(_net_link);
 SYSCTL_NODE(_net_link, IFT_GIF, gif, CTLFLAG_RW, 0,
@@ -168,8 +169,8 @@ gifattach0(struct gif_softc *sc)
 void
 gif_clone_destroy(struct ifnet *ifp)
 {
-	int err;
 	struct gif_softc *sc = ifp->if_softc;
+	int err;
 
 	gif_delete_tunnel(&sc->gif_if);
 	LIST_REMOVE(sc, gif_list);
@@ -185,11 +186,31 @@ gif_clone_destroy(struct ifnet *ifp)
 		KASSERT(err == 0, ("Unexpected error detaching encap_cookie4"));
 	}
 #endif
+	gif_clear_cache(sc);
 
 	bpfdetach(ifp);
 	if_detach(ifp);
 
 	kfree(sc, M_GIF);
+}
+
+static void
+gif_clear_cache(struct gif_softc *sc)
+{
+	int n;
+
+	for (n = 0; n < ncpus; ++n) {
+		if (sc->gif_ro[n].ro_rt) {
+			RTFREE(sc->gif_ro[n].ro_rt);
+			sc->gif_ro[n].ro_rt = NULL;
+		}
+#ifdef INET6
+		if (sc->gif_ro6[n].ro_rt) {
+			RTFREE(sc->gif_ro6[n].ro_rt);
+			sc->gif_ro6[n].ro_rt = NULL;
+		}
+#endif
+	}
 }
 
 static int
@@ -329,7 +350,7 @@ gif_output_serialized(struct ifnet *ifp, struct mbuf *m, struct sockaddr *dst,
 		 */
 		uint32_t af = dst->sa_family;
 
-		bpf_ptap(ifp->if_bpf, m, &af, sizeof(4));
+		bpf_ptap(ifp->if_bpf, m, &af, sizeof(af));
 	}
 	ifp->if_opackets++;	
 	ifp->if_obytes += m->m_pkthdr.len;
@@ -427,7 +448,8 @@ gif_input(struct mbuf *m, int af, struct ifnet *ifp)
 
 	ifp->if_ipackets++;
 	ifp->if_ibytes += m->m_pkthdr.len;
-	netisr_dispatch(isr, m);
+	m->m_flags &= ~M_HASH;
+	netisr_queue(isr, m);
 
 	return;
 }
@@ -703,7 +725,7 @@ gif_set_tunnel(struct ifnet *ifp, struct sockaddr *src, struct sockaddr *dst)
 	}
 
 	/* XXX we can detach from both, but be polite just in case */
-	if (sc->gif_psrc)
+	if (sc->gif_psrc) {
 		switch (sc->gif_psrc->sa_family) {
 #ifdef INET
 		case AF_INET:
@@ -716,6 +738,8 @@ gif_set_tunnel(struct ifnet *ifp, struct sockaddr *src, struct sockaddr *dst)
 			break;
 #endif
 		}
+		gif_clear_cache(sc);
+	}
 
 	osrc = sc->gif_psrc;
 	sa = (struct sockaddr *)kmalloc(src->sa_len, M_IFADDR, M_WAITOK);
@@ -793,6 +817,7 @@ gif_delete_tunnel(struct ifnet *ifp)
 #ifdef INET6
 	in6_gif_detach(sc);
 #endif
+	gif_clear_cache(sc);
 
 	if (sc->gif_psrc && sc->gif_pdst)
 		ifp->if_flags |= IFF_RUNNING;

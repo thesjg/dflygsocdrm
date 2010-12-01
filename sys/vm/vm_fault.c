@@ -135,6 +135,7 @@ static int vm_fault_vpagetable(struct faultstate *, vm_pindex_t *, vpte_t, int);
 static int vm_fault_additional_pages (vm_page_t, int, int, vm_page_t *, int *);
 #endif
 static int vm_fault_ratelimit(struct vmspace *);
+static void vm_set_nosync(vm_page_t m, vm_map_entry_t entry);
 static void vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry,
 			int prot);
 
@@ -322,9 +323,17 @@ RetryFault:
 	 */
 	fs.map_generation = fs.map->timestamp;
 
-	if (fs.entry->eflags & MAP_ENTRY_NOFAULT) {
-		panic("vm_fault: fault on nofault entry, addr: %lx",
-		    (u_long)vaddr);
+	if (fs.entry->eflags & (MAP_ENTRY_NOFAULT | MAP_ENTRY_KSTACK)) {
+		if (fs.entry->eflags & MAP_ENTRY_NOFAULT) {
+			panic("vm_fault: fault on nofault entry, addr: %p",
+			      (void *)vaddr);
+		}
+		if ((fs.entry->eflags & MAP_ENTRY_KSTACK) &&
+		    vaddr >= fs.entry->start &&
+		    vaddr < fs.entry->start + PAGE_SIZE) {
+			panic("vm_fault: fault on stack guard, addr: %p",
+			      (void *)vaddr);
+		}
 	}
 
 	/*
@@ -789,6 +798,11 @@ RetryFault:
 	vm_page_flag_clear(fs.m, PG_ZERO);
 	if (fault_type & VM_PROT_WRITE)
 		vm_page_dirty(fs.m);
+
+	if (fault_flags & VM_FAULT_DIRTY)
+		vm_page_dirty(fs.m);
+	if (fault_flags & VM_FAULT_UNSWAP)
+		swap_pager_unswapped(fs.m);
 
 	/*
 	 * Indicate that the page was accessed.
@@ -1516,12 +1530,7 @@ skip:
 	 */
 	if (fs->prot & VM_PROT_WRITE) {
 		vm_object_set_writeable_dirty(fs->m->object);
-		if (fs->entry->eflags & MAP_ENTRY_NOSYNC) {
-			if (fs->m->dirty == 0)
-				vm_page_flag_set(fs->m, PG_NOSYNC);
-		} else {
-			vm_page_flag_clear(fs->m, PG_NOSYNC);
-		}
+		vm_set_nosync(fs->m, fs->entry);
 		if (fs->fault_flags & VM_FAULT_DIRTY) {
 			crit_enter();
 			vm_page_dirty(fs->m);
@@ -1578,7 +1587,8 @@ vm_fault_wire(vm_map_t map, vm_map_entry_t entry, boolean_t user_wire)
 	fictitious = entry->object.vm_object &&
 			((entry->object.vm_object->type == OBJT_DEVICE) ||
 			(entry->object.vm_object->type == OBJT_DRM));
-
+	if (entry->eflags & MAP_ENTRY_KSTACK)
+		start += PAGE_SIZE;
 	lwkt_gettoken(&vm_token);
 	vm_map_unlock(map);
 	map->timestamp++;
@@ -1634,6 +1644,8 @@ vm_fault_unwire(vm_map_t map, vm_map_entry_t entry)
 	fictitious = entry->object.vm_object &&
 			((entry->object.vm_object->type == OBJT_DEVICE) ||
 			(entry->object.vm_object->type == OBJT_DRM));
+	if (entry->eflags & MAP_ENTRY_KSTACK)
+		start += PAGE_SIZE;
 
 	/*
 	 * Since the pages are wired down, we must be able to get their
@@ -1960,6 +1972,22 @@ static int vm_prefault_pageorder[] = {
 	-4 * PAGE_SIZE, 4 * PAGE_SIZE
 };
 
+/*
+ * Set PG_NOSYNC if the map entry indicates so, but only if the page
+ * is not already dirty by other means.  This will prevent passive
+ * filesystem syncing as well as 'sync' from writing out the page.
+ */
+static void
+vm_set_nosync(vm_page_t m, vm_map_entry_t entry)
+{
+	if (entry->eflags & MAP_ENTRY_NOSYNC) {
+		if (m->dirty == 0)
+			vm_page_flag_set(m, PG_NOSYNC);
+	} else {
+		vm_page_flag_clear(m, PG_NOSYNC);
+	}
+}
+
 static void
 vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 {
@@ -2096,6 +2124,8 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 		 * (pages on the cache queue are not allowed to be mapped).
 		 */
 		if (allocated) {
+			if (pprot & VM_PROT_WRITE)
+				vm_set_nosync(m, entry);
 			pmap_enter(pmap, addr, m, pprot, 0);
 			vm_page_deactivate(m);
 			vm_page_wakeup(m);
@@ -2107,6 +2137,8 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 				vm_page_deactivate(m);
 			}
 			vm_page_busy(m);
+			if (pprot & VM_PROT_WRITE)
+				vm_set_nosync(m, entry);
 			pmap_enter(pmap, addr, m, pprot, 0);
 			vm_page_wakeup(m);
 		}

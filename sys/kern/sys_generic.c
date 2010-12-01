@@ -108,6 +108,8 @@ struct poll_kevent_copyin_args {
 	int		error;
 };
 
+static struct lwkt_token mioctl_token = LWKT_TOKEN_MP_INITIALIZER(mioctl_token);
+
 static int 	doselect(int nd, fd_set *in, fd_set *ou, fd_set *ex,
 			 struct timespec *ts, int *res);
 static int	dopoll(int nfds, struct pollfd *fds, struct timespec *ts,
@@ -544,16 +546,14 @@ dofilewrite(int fd, struct file *fp, struct uio *auio, int flags, size_t *res)
 /*
  * Ioctl system call
  *
- * MPALMOSTSAFE
+ * MPSAFE
  */
 int
 sys_ioctl(struct ioctl_args *uap)
 {
 	int error;
 
-	get_mplock();
 	error = mapped_ioctl(uap->fd, uap->com, uap->data, NULL, &uap->sysmsg);
-	rel_mplock();
 	return (error);
 }
 
@@ -567,6 +567,8 @@ struct ioctl_map_entry {
  * The true heart of all ioctl syscall handlers (native, emulation).
  * If map != NULL, it will be searched for a matching entry for com,
  * and appropriate conversions/conversion functions will be utilized.
+ *
+ * MPSAFE
  */
 int
 mapped_ioctl(int fd, u_long com, caddr_t uspc_data, struct ioctl_map *map,
@@ -601,6 +603,7 @@ mapped_ioctl(int fd, u_long com, caddr_t uspc_data, struct ioctl_map *map,
 
 		maskcmd = com & map->mask;
 
+		lwkt_gettoken(&mioctl_token);
 		LIST_FOREACH(e, &map->mapping, entries) {
 			for (iomc = e->cmd_ranges; iomc->start != 0 ||
 			     iomc->maptocmd != 0 || iomc->wrapfunc != NULL ||
@@ -616,6 +619,7 @@ mapped_ioctl(int fd, u_long com, caddr_t uspc_data, struct ioctl_map *map,
 			    iomc->wrapfunc != NULL || iomc->mapfunc != NULL)
 				break;
 		}
+		lwkt_reltoken(&mioctl_token);
 
 		if (iomc == NULL ||
 		    (iomc->start == 0 && iomc->maptocmd == 0
@@ -708,17 +712,17 @@ mapped_ioctl(int fd, u_long com, caddr_t uspc_data, struct ioctl_map *map,
 	switch (com) {
 	case FIONBIO:
 		if ((tmp = *(int *)data))
-			fp->f_flag |= FNONBLOCK;
+			atomic_set_int(&fp->f_flag, FNONBLOCK);
 		else
-			fp->f_flag &= ~FNONBLOCK;
+			atomic_clear_int(&fp->f_flag, FNONBLOCK);
 		error = 0;
 		break;
 
 	case FIOASYNC:
 		if ((tmp = *(int *)data))
-			fp->f_flag |= FASYNC;
+			atomic_set_int(&fp->f_flag, FASYNC);
 		else
-			fp->f_flag &= ~FASYNC;
+			atomic_clear_int(&fp->f_flag, FASYNC);
 		error = fo_ioctl(fp, FIOASYNC, (caddr_t)&tmp, cred, msg);
 		break;
 
@@ -746,6 +750,9 @@ done:
 	return(error);
 }
 
+/*
+ * MPSAFE
+ */
 int
 mapped_ioctl_register_handler(struct ioctl_map_handler *he)
 {
@@ -754,31 +761,41 @@ mapped_ioctl_register_handler(struct ioctl_map_handler *he)
 	KKASSERT(he != NULL && he->map != NULL && he->cmd_ranges != NULL &&
 		 he->subsys != NULL && *he->subsys != '\0');
 
-	ne = kmalloc(sizeof(struct ioctl_map_entry), M_IOCTLMAP, M_WAITOK);
+	ne = kmalloc(sizeof(struct ioctl_map_entry), M_IOCTLMAP,
+		     M_WAITOK | M_ZERO);
 
 	ne->subsys = he->subsys;
 	ne->cmd_ranges = he->cmd_ranges;
 
+	lwkt_gettoken(&mioctl_token);
 	LIST_INSERT_HEAD(&he->map->mapping, ne, entries);
+	lwkt_reltoken(&mioctl_token);
 
 	return(0);
 }
 
+/*
+ * MPSAFE
+ */
 int
 mapped_ioctl_unregister_handler(struct ioctl_map_handler *he)
 {
 	struct ioctl_map_entry *ne;
+	int error = EINVAL;
 
 	KKASSERT(he != NULL && he->map != NULL && he->cmd_ranges != NULL);
 
+	lwkt_gettoken(&mioctl_token);
 	LIST_FOREACH(ne, &he->map->mapping, entries) {
-		if (ne->cmd_ranges != he->cmd_ranges)
-			continue;
-		LIST_REMOVE(ne, entries);
-		kfree(ne, M_IOCTLMAP);
-		return(0);
+		if (ne->cmd_ranges == he->cmd_ranges) {
+			LIST_REMOVE(ne, entries);
+			kfree(ne, M_IOCTLMAP);
+			error = 0;
+			break;
+		}
 	}
-	return(EINVAL);
+	lwkt_reltoken(&mioctl_token);
+	return(error);
 }
 
 static int	nselcoll;	/* Select collisions since boot */
@@ -915,7 +932,7 @@ select_copyin(void *arg, struct kevent *kevp, int maxevents, int *events)
 			 */
 			fdp = skap->read_set;
 			filter = EVFILT_READ;
-			fflags = 0;
+			fflags = NOTE_OLDAPI;
 			if (fdp)
 				break;
 			++skap->active_set;
@@ -927,7 +944,7 @@ select_copyin(void *arg, struct kevent *kevp, int maxevents, int *events)
 			 */
 			fdp = skap->write_set;
 			filter = EVFILT_WRITE;
-			fflags = 0;
+			fflags = NOTE_OLDAPI;
 			if (fdp)
 				break;
 			++skap->active_set;
@@ -939,7 +956,7 @@ select_copyin(void *arg, struct kevent *kevp, int maxevents, int *events)
 			 */
 			fdp = skap->except_set;
 			filter = EVFILT_EXCEPT;
-			fflags = NOTE_OOB;
+			fflags = NOTE_OLDAPI | NOTE_OOB;
 			if (fdp)
 				break;
 			++skap->active_set;
@@ -1253,17 +1270,17 @@ poll_copyin(void *arg, struct kevent *kevp, int maxevents, int *events)
 		kev = &kevp[*events];
 		if (pfd->events & (POLLIN | POLLRDNORM)) {
 			EV_SET(kev++, pfd->fd, EVFILT_READ, EV_ADD|EV_ENABLE,
-			       0, 0, (void *)(uintptr_t)
+			       NOTE_OLDAPI, 0, (void *)(uintptr_t)
 				(pkap->lwp->lwp_kqueue_serial + pkap->pfds));
 		}
 		if (pfd->events & (POLLOUT | POLLWRNORM)) {
 			EV_SET(kev++, pfd->fd, EVFILT_WRITE, EV_ADD|EV_ENABLE,
-			       0, 0, (void *)(uintptr_t)
+			       NOTE_OLDAPI, 0, (void *)(uintptr_t)
 				(pkap->lwp->lwp_kqueue_serial + pkap->pfds));
 		}
 		if (pfd->events & (POLLPRI | POLLRDBAND)) {
 			EV_SET(kev++, pfd->fd, EVFILT_EXCEPT, EV_ADD|EV_ENABLE,
-			       NOTE_OOB, 0,
+			       NOTE_OLDAPI | NOTE_OOB, 0,
 			       (void *)(uintptr_t)
 				(pkap->lwp->lwp_kqueue_serial + pkap->pfds));
 		}
@@ -1482,6 +1499,11 @@ socket_wait_copyout(void *arg, struct kevent *kevp, int count, int *res)
 }
 
 extern	struct fileops socketops;
+
+/*
+ * NOTE: Callers of socket_wait() must already have a reference on the
+ *	 socket.
+ */
 int
 socket_wait(struct socket *so, struct timespec *ts, int *res)
 {

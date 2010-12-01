@@ -57,6 +57,7 @@
 #include <sys/buf2.h>
 #include <sys/thread2.h>
 #include <sys/sysref2.h>
+#include <sys/mplock2.h>
 
 static void vnode_terminate(struct vnode *vp);
 static boolean_t vnode_ctor(void *obj, void *private, int ocflags);
@@ -94,10 +95,10 @@ static enum { ROVER_MID1, ROVER_MID2 } rover_state = ROVER_MID2;
 
 int  freevnodes = 0;
 SYSCTL_INT(_debug, OID_AUTO, freevnodes, CTLFLAG_RD,
-		&freevnodes, 0, "");
+	&freevnodes, 0, "Number of free nodes");
 static int wantfreevnodes = 25;
 SYSCTL_INT(_debug, OID_AUTO, wantfreevnodes, CTLFLAG_RW,
-		&wantfreevnodes, 0, "");
+	&wantfreevnodes, 0, "Desired number of free vnodes");
 #ifdef TRACKVNODE
 static ulong trackvnode;
 SYSCTL_ULONG(_debug, OID_AUTO, trackvnode, CTLFLAG_RW,
@@ -173,9 +174,9 @@ __vbusy(struct vnode *vp)
 	if ((ulong)vp == trackvnode)
 		kprintf("__vbusy %p %08x\n", vp, vp->v_flag);
 #endif
-	spin_lock_wr(&vfs_spin);
+	spin_lock(&vfs_spin);
 	__vbusy_interlocked(vp);
-	spin_unlock_wr(&vfs_spin);
+	spin_unlock(&vfs_spin);
 }
 
 /*
@@ -195,7 +196,7 @@ __vfree(struct vnode *vp)
 		print_backtrace(-1);
 	}
 #endif
-	spin_lock_wr(&vfs_spin);
+	spin_lock(&vfs_spin);
 	KKASSERT((vp->v_flag & VFREE) == 0);
 
 	/*
@@ -214,7 +215,7 @@ __vfree(struct vnode *vp)
 	}
 	freevnodes++;
 	_vsetflags(vp, VFREE);
-	spin_unlock_wr(&vfs_spin);
+	spin_unlock(&vfs_spin);
 }
 
 /*
@@ -232,12 +233,12 @@ __vfreetail(struct vnode *vp)
 	if ((ulong)vp == trackvnode)
 		kprintf("__vfreetail %p %08x\n", vp, vp->v_flag);
 #endif
-	spin_lock_wr(&vfs_spin);
+	spin_lock(&vfs_spin);
 	KKASSERT((vp->v_flag & VFREE) == 0);
 	TAILQ_INSERT_TAIL(&vnode_free_list, vp, v_freelist);
 	freevnodes++;
 	_vsetflags(vp, VFREE);
-	spin_unlock_wr(&vfs_spin);
+	spin_unlock(&vfs_spin);
 }
 
 /*
@@ -328,13 +329,13 @@ void
 vdrop(struct vnode *vp)
 {
 	KKASSERT(vp->v_sysref.refcnt != 0 && vp->v_auxrefs > 0);
-	spin_lock_wr(&vp->v_spinlock);
+	spin_lock(&vp->v_spinlock);
 	atomic_subtract_int(&vp->v_auxrefs, 1);
 	if ((vp->v_flag & VCACHED) && vshouldfree(vp)) {
 		_vclrflags(vp, VCACHED);
 		__vfree(vp);
 	}
-	spin_unlock_wr(&vp->v_spinlock);
+	spin_unlock(&vp->v_spinlock);
 }
 
 /*
@@ -393,13 +394,13 @@ vnode_terminate(struct vnode *vp)
 		if (vp->v_mount)
 			VOP_INACTIVE(vp);
 	}
-	spin_lock_wr(&vp->v_spinlock);
+	spin_lock(&vp->v_spinlock);
 	KKASSERT((vp->v_flag & (VFREE|VCACHED)) == 0);
 	if (vshouldfree(vp))
 		__vfree(vp);
 	else
 		_vsetflags(vp, VCACHED); /* inactive but not yet free*/
-	spin_unlock_wr(&vp->v_spinlock);
+	spin_unlock(&vp->v_spinlock);
 	vx_unlock(vp);
 }
 
@@ -415,7 +416,7 @@ vnode_ctor(void *obj, void *private, int ocflags)
 {
 	struct vnode *vp = obj;
 
-	lwkt_token_init(&vp->v_token, 1);
+	lwkt_token_init(&vp->v_token, 1, "vnode");
 	lockinit(&vp->v_lock, "vnode", 0, 0);
 	ccms_dataspace_init(&vp->v_ccms);
 	TAILQ_INIT(&vp->v_namecache);
@@ -546,16 +547,16 @@ vget(struct vnode *vp, int flags)
 		 * We are allowed to reactivate the vnode while we hold
 		 * the VX lock, assuming it can be reactivated.
 		 */
-		spin_lock_wr(&vp->v_spinlock);
+		spin_lock(&vp->v_spinlock);
 		if (vp->v_flag & VFREE) {
 			__vbusy(vp);
 			sysref_activate(&vp->v_sysref);
-			spin_unlock_wr(&vp->v_spinlock);
+			spin_unlock(&vp->v_spinlock);
 			sysref_put(&vp->v_sysref);
 		} else if (vp->v_flag & VCACHED) {
 			_vclrflags(vp, VCACHED);
 			sysref_activate(&vp->v_sysref);
-			spin_unlock_wr(&vp->v_spinlock);
+			spin_unlock(&vp->v_spinlock);
 			sysref_put(&vp->v_sysref);
 		} else {
 			if (sysref_isinactive(&vp->v_sysref)) {
@@ -563,7 +564,7 @@ vget(struct vnode *vp, int flags)
 				kprintf("Warning vp %p reactivation race\n",
 					vp);
 			}
-			spin_unlock_wr(&vp->v_spinlock);
+			spin_unlock(&vp->v_spinlock);
 		}
 		_vclrflags(vp, VINACTIVE);
 		error = 0;
@@ -619,12 +620,12 @@ vx_get_nonblock(struct vnode *vp)
 void
 vx_put(struct vnode *vp)
 {
-	spin_lock_wr(&vp->v_spinlock);
+	spin_lock(&vp->v_spinlock);
 	if ((vp->v_flag & VCACHED) && vshouldfree(vp)) {
 		_vclrflags(vp, VCACHED);
 		__vfree(vp);
 	}
-	spin_unlock_wr(&vp->v_spinlock);
+	spin_unlock(&vp->v_spinlock);
 	lockmgr(&vp->v_lock, LK_RELEASE);
 	sysref_put(&vp->v_sysref);
 }
@@ -719,7 +720,7 @@ allocfreevnode(void)
 		 * This is very fragile code and I don't want to use
 		 * vhold here.
 		 */
-		spin_lock_wr(&vfs_spin);
+		spin_lock(&vfs_spin);
 		vnode_rover_locked();
 		vnode_rover_locked();
 		vp = TAILQ_FIRST(&vnode_free_list);
@@ -734,7 +735,7 @@ allocfreevnode(void)
 			TAILQ_REMOVE(&vnode_free_list, vp, v_freelist);
 			TAILQ_INSERT_TAIL(&vnode_free_list,
 					  vp, v_freelist);
-			spin_unlock_wr(&vfs_spin);
+			spin_unlock(&vfs_spin);
 			continue;
 		}
 
@@ -746,7 +747,7 @@ allocfreevnode(void)
 		 * the vnode.
 		 */
 		__vbusy_interlocked(vp);
-		spin_unlock_wr(&vfs_spin);
+		spin_unlock(&vfs_spin);
 #ifdef TRACKVNODE
 		if ((ulong)vp == trackvnode)
 			kprintf("allocfreevnode %p %08x\n", vp, vp->v_flag);
@@ -957,4 +958,3 @@ freesomevnodes(int n)
 	}
 	return(count);
 }
-

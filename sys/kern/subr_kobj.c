@@ -46,27 +46,13 @@
 
 static MALLOC_DEFINE(M_KOBJ, "kobj", "Kernel object structures");
 
-#ifdef KOBJ_STATS
-
-#include <sys/sysctl.h>
-
-u_int kobj_lookup_hits;
-u_int kobj_lookup_misses;
-
-SYSCTL_UINT(_kern, OID_AUTO, kobj_hits, CTLFLAG_RD,
-	   &kobj_lookup_hits, 0, "")
-SYSCTL_UINT(_kern, OID_AUTO, kobj_misses, CTLFLAG_RD,
-	   &kobj_lookup_misses, 0, "")
-
-#endif
-
 static struct lwkt_token kobj_token;
 static int kobj_next_id = 1;
 
 static void
 kobj_init_token(void *arg)
 {
-	lwkt_token_init(&kobj_token, 1);
+	lwkt_token_init(&kobj_token, 1, "kobj");
 }
 
 SYSINIT(kobj, SI_BOOT1_LOCK, SI_ORDER_ANY, kobj_init_token, NULL);
@@ -182,20 +168,29 @@ kobj_lookup_method(kobj_class_t cls,
 {
 	kobj_method_t *ce;
 
-#ifdef KOBJ_STATS
-	/*
-	 * Correct for the 'hit' assumption in KOBJOPLOOKUP and record
-	 * a 'miss'.
-	 */
-	kobj_lookup_hits--;
-	kobj_lookup_misses--;
-#endif
-
 	ce = kobj_lookup_method_mi(cls, desc);
 	if (!ce)
 		ce = desc->deflt;
 	*cep = ce;
 	return(ce);
+}
+
+/*
+ * This is called from the KOBJOPLOOKUP() macro in sys/kobj.h and
+ * replaces the original large body of the macro with a single
+ * procedure call.
+ */
+kobjop_t
+kobj_lookup_method_cache(kobj_class_t cls, kobj_method_t **cep,
+			 kobjop_desc_t desc)
+{
+	kobj_method_t *ce;
+
+	cep = &cep[desc->id & (KOBJ_CACHE_SIZE-1)];
+	ce = *cep;
+	if (ce->desc != desc)
+		ce = kobj_lookup_method(cls, cep, desc);
+	return(ce->func);
 }
 
 static void

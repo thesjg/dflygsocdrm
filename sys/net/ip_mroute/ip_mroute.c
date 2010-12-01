@@ -100,6 +100,9 @@ SYSCTL_OPAQUE(_net_inet_ip, OID_AUTO, viftable, CTLFLAG_RD,
 
 static u_char		nexpire[MFCTBLSIZ];
 
+struct lwkt_token mroute_token = LWKT_TOKEN_MP_INITIALIZER(mroute_token);
+
+
 static struct callout expire_upcalls_ch;
 static struct callout tbf_reprocess_q_ch;
 #define		EXPIRE_TIMEOUT	(hz / 4)	/* 4x / second		*/
@@ -519,16 +522,17 @@ get_sg_cnt(struct sioc_sg_req *req)
 {
     struct mfc *rt;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     rt = mfc_find(req->src.s_addr, req->grp.s_addr);
-    crit_exit();
     if (rt == NULL) {
 	req->pktcnt = req->bytecnt = req->wrong_if = 0xffffffff;
+	lwkt_reltoken(&mroute_token);
 	return EADDRNOTAVAIL;
     }
     req->pktcnt = rt->mfc_pkt_cnt;
     req->bytecnt = rt->mfc_byte_cnt;
     req->wrong_if = rt->mfc_wrong_if;
+    lwkt_reltoken(&mroute_token);
     return 0;
 }
 
@@ -610,7 +614,7 @@ X_ip_mrouter_done(void)
     struct mfc *rt;
     struct rtdetq *rte;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     /*
      * For each phyint in use, disable promiscuous reception of all IP
@@ -677,7 +681,7 @@ X_ip_mrouter_done(void)
 
     ip_mrouter = NULL;
 
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 
     if (mrtdebug)
 	log(LOG_DEBUG, "ip_mrouter_done\n");
@@ -816,14 +820,14 @@ add_vif(struct vifctl *vifcp)
 	    return EOPNOTSUPP;
 
 	/* Enable promiscuous reception of all IP multicasts from the if */
-	crit_enter();
+	lwkt_gettoken(&mroute_token);
 	error = if_allmulti(ifp, 1);
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	if (error)
 	    return error;
     }
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     /* define parameters for the tbf structure */
     vifp->v_tbf = v_tbf;
     GET_TIME(vifp->v_tbf->tbf_last_pkt_t);
@@ -846,10 +850,11 @@ add_vif(struct vifctl *vifcp)
     vifp->v_pkt_out   = 0;
     vifp->v_bytes_in  = 0;
     vifp->v_bytes_out = 0;
-    crit_exit();
 
     /* Adjust numvifs up if the vifi is higher than numvifs */
     if (numvifs <= vifcp->vifc_vifi) numvifs = vifcp->vifc_vifi + 1;
+
+    lwkt_reltoken(&mroute_token);
 
     if (mrtdebug)
 	log(LOG_DEBUG, "add_vif #%d, lcladdr %lx, %s %lx, thresh %x, rate %d\n",
@@ -877,7 +882,7 @@ del_vif(vifi_t vifi)
     if (vifp->v_lcl_addr.s_addr == INADDR_ANY)
 	return EADDRNOTAVAIL;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     if (!(vifp->v_flags & (VIFF_TUNNEL | VIFF_REGISTER)))
 	if_allmulti(vifp->v_ifp, 0);
@@ -914,7 +919,7 @@ del_vif(vifi_t vifi)
 	    break;
     numvifs = vifi;
 
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 
     return 0;
 }
@@ -980,16 +985,16 @@ add_mfc(struct mfcctl2 *mfccp)
 		(u_long)ntohl(mfccp->mfcc_mcastgrp.s_addr),
 		mfccp->mfcc_parent);
 
-	crit_enter();
+	lwkt_gettoken(&mroute_token);
 	update_mfc_params(rt, mfccp);
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	return 0;
     }
 
     /*
      * Find the entry for which the upcall was made and update
      */
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     hash = MFCHASH(mfccp->mfcc_origin.s_addr, mfccp->mfcc_mcastgrp.s_addr);
     for (rt = mfctable[hash], nstl = 0; rt; rt = rt->mfc_next) {
 
@@ -1051,7 +1056,7 @@ add_mfc(struct mfcctl2 *mfccp)
 	if (rt == NULL) {		/* no upcall, so make a new entry */
 	    rt = kmalloc(sizeof(*rt), M_MRTABLE, M_INTWAIT | M_NULLOK);
 	    if (rt == NULL) {
-		    crit_exit();
+		    lwkt_reltoken(&mroute_token);
 		    return ENOBUFS;
 	    }
 
@@ -1065,7 +1070,7 @@ add_mfc(struct mfcctl2 *mfccp)
 	    mfctable[hash] = rt;
 	}
     }
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
     return 0;
 }
 
@@ -1089,7 +1094,7 @@ del_mfc(struct mfcctl2 *mfccp)
 	log(LOG_DEBUG,"del_mfc orig %lx mcastgrp %lx\n",
 	    (u_long)ntohl(origin.s_addr), (u_long)ntohl(mcastgrp.s_addr));
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     hash = MFCHASH(origin.s_addr, mcastgrp.s_addr);
     for (nptr = &mfctable[hash]; (rt = *nptr) != NULL; nptr = &rt->mfc_next)
@@ -1098,7 +1103,7 @@ del_mfc(struct mfcctl2 *mfccp)
 		rt->mfc_stall == NULL)
 	    break;
     if (rt == NULL) {
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	return EADDRNOTAVAIL;
     }
 
@@ -1109,11 +1114,9 @@ del_mfc(struct mfcctl2 *mfccp)
      */
     list = rt->mfc_bw_meter;
     rt->mfc_bw_meter = NULL;
+    lwkt_reltoken(&mroute_token);
 
     kfree(rt, M_MRTABLE);
-
-    crit_exit();
-
     free_bw_list(list);
 
     return 0;
@@ -1212,14 +1215,15 @@ X_ip_mforward(struct ip *ip, struct ifnet *ifp, struct mbuf *m,
     /*
      * Determine forwarding vifs from the forwarding cache table
      */
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     ++mrtstat.mrts_mfc_lookups;
     rt = mfc_find(ip->ip_src.s_addr, ip->ip_dst.s_addr);
 
     /* Entry exists, so forward if necessary */
     if (rt != NULL) {
-	crit_exit();
-	return ip_mdq(m, ifp, rt, -1);
+	int ipres = ip_mdq(m, ifp, rt, -1);
+	lwkt_reltoken(&mroute_token);
+	return ipres;
     } else {
 	/*
 	 * If we don't have a route for packet's origin,
@@ -1246,7 +1250,7 @@ X_ip_mforward(struct ip *ip, struct ifnet *ifp, struct mbuf *m,
 	 */
 	rte = kmalloc((sizeof *rte), M_MRTABLE, M_INTWAIT | M_NULLOK);
 	if (rte == NULL) {
-		crit_exit();
+		lwkt_reltoken(&mroute_token);
 		return ENOBUFS;
 	}
 
@@ -1255,7 +1259,7 @@ X_ip_mforward(struct ip *ip, struct ifnet *ifp, struct mbuf *m,
 	    mb0 = m_pullup(mb0, hlen);
 	if (mb0 == NULL) {
 	    kfree(rte, M_MRTABLE);
-	    crit_exit();
+	    lwkt_reltoken(&mroute_token);
 	    return ENOBUFS;
 	}
 
@@ -1314,7 +1318,7 @@ fail1:
 fail:
 		kfree(rte, M_MRTABLE);
 		m_freem(mb0);
-		crit_exit();
+		lwkt_reltoken(&mroute_token);
 		return ENOBUFS;
 	    }
 
@@ -1356,7 +1360,7 @@ fail:
 non_fatal:
 		kfree(rte, M_MRTABLE);
 		m_freem(mb0);
-		crit_exit();
+		lwkt_reltoken(&mroute_token);
 		return 0;
 	    }
 
@@ -1368,7 +1372,7 @@ non_fatal:
 	rte->ifp 		= ifp;
 	rte->next		= NULL;
 
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	return 0;
     }
 }
@@ -1383,7 +1387,7 @@ expire_upcalls(void *unused)
     struct mfc *mfc, **nptr;
     int i;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     for (i = 0; i < MFCTBLSIZ; i++) {
 	if (nexpire[i] == 0)
 	    continue;
@@ -1432,7 +1436,7 @@ expire_upcalls(void *unused)
 	}
     }
     callout_reset(&expire_upcalls_ch, EXPIRE_TIMEOUT, expire_upcalls, NULL);
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
 /*
@@ -1704,16 +1708,19 @@ encap_send(struct ip *ip, struct vif *vifp, struct mbuf *m)
  *
  * This is similar to mroute_encapcheck() + mroute_encap_input() in -current.
  */
-static void
-X_ipip_input(struct mbuf *m, int off, int proto)
+static int
+X_ipip_input(struct mbuf **mp, int *offp, int proto)
 {
+    struct mbuf *m = *mp;
     struct ip *ip = mtod(m, struct ip *);
     int hlen = ip->ip_hl << 2;
 
     if (!have_encap_tunnel) {
-	rip_input(m, off, proto);
-	return;
+	rip_input(mp, offp, proto);
+	return(IPPROTO_DONE);
     }
+    *mp = NULL;
+
     /*
      * dump the packet if it's not to a multicast destination or if
      * we don't have an encapsulating tunnel with the source.
@@ -1724,7 +1731,7 @@ X_ipip_input(struct mbuf *m, int off, int proto)
     if (!IN_MULTICAST(ntohl(((struct ip *)((char *)ip+hlen))->ip_dst.s_addr))) {
 	++mrtstat.mrts_bad_tunnel;
 	m_freem(m);
-	return;
+	return(IPPROTO_DONE);
     }
     if (ip->ip_src.s_addr != last_encap_src) {
 	struct vif *vifp = viftable;
@@ -1747,7 +1754,7 @@ X_ipip_input(struct mbuf *m, int off, int proto)
 	if (mrtdebug)
 	    log(LOG_DEBUG, "ip_mforward: no tunnel with %lx\n",
 		(u_long)ntohl(ip->ip_src.s_addr));
-	return;
+	return(IPPROTO_DONE);
     }
 
     if (hlen > sizeof(struct ip))
@@ -1758,6 +1765,7 @@ X_ipip_input(struct mbuf *m, int off, int proto)
     m->m_pkthdr.rcvif = last_encap_vif->v_ifp;
 
     netisr_queue(NETISR_IP, m);
+    return(IPPROTO_DONE);
 }
 
 /*
@@ -1810,7 +1818,7 @@ tbf_queue(struct vif *vifp, struct mbuf *m)
 {
     struct tbf *t = vifp->v_tbf;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     if (t->tbf_t == NULL)	/* Queue was empty */
 	t->tbf_q = m;
@@ -1828,7 +1836,7 @@ tbf_queue(struct vif *vifp, struct mbuf *m)
 
     t->tbf_q_len++;
 
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
 /*
@@ -1839,7 +1847,7 @@ tbf_process_q(struct vif *vifp)
 {
     struct tbf *t = vifp->v_tbf;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     /* loop through the queue at the interface and send as many packets
      * as possible
@@ -1861,7 +1869,7 @@ tbf_process_q(struct vif *vifp)
 	m->m_nextpkt = NULL;
 	tbf_send_packet(vifp, m);
     }
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
 static void
@@ -1889,7 +1897,7 @@ tbf_dq_sel(struct vif *vifp, struct ip *ip)
     struct mbuf **np;
     struct tbf *t = vifp->v_tbf;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     p = priority(vifp, ip);
 
@@ -1905,21 +1913,21 @@ tbf_dq_sel(struct vif *vifp, struct ip *ip)
 	    /* It's impossible for the queue to be empty, but check anyways. */
 	    if (--t->tbf_q_len == 0)
 		t->tbf_t = NULL;
-	    crit_exit();
 	    mrtstat.mrts_drop_sel++;
+	    lwkt_reltoken(&mroute_token);
 	    return 1;
 	}
 	np = &m->m_nextpkt;
 	last = m;
     }
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
     return 0;
 }
 
 static void
 tbf_send_packet(struct vif *vifp, struct mbuf *m)
 {
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     if (vifp->v_flags & VIFF_TUNNEL)	/* If tunnel options */
 	ip_output(m, NULL, &vifp->v_route, IP_FORWARDING, NULL, NULL);
@@ -1945,7 +1953,7 @@ tbf_send_packet(struct vif *vifp, struct mbuf *m)
 	    log(LOG_DEBUG, "phyint_send on vif %d err %d\n",
 		(int)(vifp - viftable), error);
     }
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
 /* determine the current time and then
@@ -1959,7 +1967,7 @@ tbf_update_tokens(struct vif *vifp)
     u_long tm;
     struct tbf *t = vifp->v_tbf;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     GET_TIME(tp);
 
@@ -1980,7 +1988,7 @@ tbf_update_tokens(struct vif *vifp)
     if (t->tbf_n_tok > MAX_BKT_SIZE)
 	t->tbf_n_tok = MAX_BKT_SIZE;
 
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
 static int
@@ -2032,17 +2040,17 @@ X_ip_rsvp_vif(struct socket *so, struct sockopt *sopt)
     if (error)
 	return error;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     if (vifi < 0 || vifi >= numvifs) { /* Error if vif is invalid */
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	return EADDRNOTAVAIL;
     }
 
     if (sopt->sopt_name == IP_RSVP_VIF_ON) {
 	/* Check if socket is available. */
 	if (viftable[vifi].v_rsvpd != NULL) {
-	    crit_exit();
+	    lwkt_reltoken(&mroute_token);
 	    return EADDRINUSE;
 	}
 
@@ -2070,7 +2078,7 @@ X_ip_rsvp_vif(struct socket *so, struct sockopt *sopt)
 	    rsvp_on--;
 	}
     }
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
     return 0;
 }
 
@@ -2083,7 +2091,7 @@ X_ip_rsvp_force_done(struct socket *so)
     if (so->so_type != SOCK_RAW || so->so_proto->pr_protocol != IPPROTO_RSVP)
 	return;
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     /* The socket may be attached to more than one vif...this
      * is perfectly legal.
@@ -2101,29 +2109,27 @@ X_ip_rsvp_force_done(struct socket *so)
 	}
     }
 
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
-static void
-X_rsvp_input(struct mbuf *m, ...)
+static int
+X_rsvp_input(struct mbuf **mp, int *offp, int proto)
 {
     int vifi;
+    struct mbuf *m = *mp;
     struct ip *ip = mtod(m, struct ip *);
     struct sockaddr_in rsvp_src = { sizeof rsvp_src, AF_INET };
     struct ifnet *ifp;
-    int off, proto;
+    int off;
 #ifdef ALTQ
     /* support IP_RECVIF used by rsvpd rel4.2a1 */
     struct inpcb *inp;
     struct socket *so;
     struct mbuf *opts;
 #endif
-    __va_list ap;
 
-    __va_start(ap, m);
-    off = __va_arg(ap, int);
-    proto = __va_arg(ap, int);
-    __va_end(ap);
+    off = *offp;
+    *mp = NULL;
 
     if (rsvpdebug)
 	kprintf("rsvp_input: rsvp_on %d\n",rsvp_on);
@@ -2134,10 +2140,10 @@ X_rsvp_input(struct mbuf *m, ...)
      */
     if (!rsvp_on) {
 	m_freem(m);
-	return;
+	return(IPPROTO_DONE);
     }
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
 
     if (rsvpdebug)
 	kprintf("rsvp_input: check vifs\n");
@@ -2166,7 +2172,8 @@ X_rsvp_input(struct mbuf *m, ...)
 	if (ip_rsvpd != NULL) {
 	    if (rsvpdebug)
 		kprintf("rsvp_input: Sending packet up old-style socket\n");
-	    rip_input(m, off, proto);  /* xxx */
+	    *mp = m;
+	    rip_input(mp, offp, proto);  /* xxx */
 	} else {
 	    if (rsvpdebug && vifi == numvifs)
 		kprintf("rsvp_input: Can't find vif for packet.\n");
@@ -2174,8 +2181,8 @@ X_rsvp_input(struct mbuf *m, ...)
 		kprintf("rsvp_input: No socket defined for vif %d\n",vifi);
 	    m_freem(m);
 	}
-	crit_exit();
-	return;
+	lwkt_reltoken(&mroute_token);
+	return(IPPROTO_DONE);
     }
     rsvp_src.sin_addr = ip->ip_src;
 
@@ -2187,8 +2194,9 @@ X_rsvp_input(struct mbuf *m, ...)
     opts = NULL;
     inp = (struct inpcb *)so->so_pcb;
     if (inp->inp_flags & INP_CONTROLOPTS ||
-	inp->inp_socket->so_options & SO_TIMESTAMP)
+	inp->inp_socket->so_options & SO_TIMESTAMP) {
 	ip_savecontrol(inp, &opts, ip, m);
+    }
     if (ssb_appendaddr(&so->so_rcv,
 		     (struct sockaddr *)&rsvp_src,m, opts) == 0) {
 	m_freem(m);
@@ -2211,8 +2219,8 @@ X_rsvp_input(struct mbuf *m, ...)
 	    kprintf("rsvp_input: send packet up\n");
     }
 #endif /* !ALTQ */
-
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
+    return(IPPROTO_DONE);
 }
 
 /*
@@ -2277,10 +2285,10 @@ add_bw_upcall(struct bw_upcall *req)
     /*
      * Find if we have already same bw_meter entry
      */
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     mfc = mfc_find(req->bu_src.s_addr, req->bu_dst.s_addr);
     if (mfc == NULL) {
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	return EADDRNOTAVAIL;
     }
     for (x = mfc->mfc_bw_meter; x != NULL; x = x->bm_mfc_next) {
@@ -2289,11 +2297,11 @@ add_bw_upcall(struct bw_upcall *req)
 	    (x->bm_threshold.b_packets == req->bu_threshold.b_packets) &&
 	    (x->bm_threshold.b_bytes == req->bu_threshold.b_bytes) &&
 	    (x->bm_flags & BW_METER_USER_FLAGS) == flags)  {
-	    crit_exit();
+	    lwkt_reltoken(&mroute_token);
 	    return 0;		/* XXX Already installed */
 	}
     }
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
     
     /* Allocate the new bw_meter entry */
     x = kmalloc(sizeof(*x), M_BWMETER, M_INTWAIT);
@@ -2311,12 +2319,12 @@ add_bw_upcall(struct bw_upcall *req)
     x->bm_time_hash = BW_METER_BUCKETS;
     
     /* Add the new bw_meter entry to the front of entries for this MFC */
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     x->bm_mfc = mfc;
     x->bm_mfc_next = mfc->mfc_bw_meter;
     mfc->mfc_bw_meter = x;
     schedule_bw_meter(x, &now);
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
     
     return 0;
 }
@@ -2345,11 +2353,11 @@ del_bw_upcall(struct bw_upcall *req)
     if (!(mrt_api_config & MRT_MFC_BW_UPCALL))
 	return EOPNOTSUPP;
     
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     /* Find the corresponding MFC entry */
     mfc = mfc_find(req->bu_src.s_addr, req->bu_dst.s_addr);
     if (mfc == NULL) {
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	return EADDRNOTAVAIL;
     } else if (req->bu_flags & BW_UPCALL_DELETE_ALL) {
 	/*
@@ -2359,7 +2367,7 @@ del_bw_upcall(struct bw_upcall *req)
 	
 	list = mfc->mfc_bw_meter;
 	mfc->mfc_bw_meter = NULL;
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	free_bw_list(list);
 	return 0;
     } else {			/* Delete a single bw_meter entry */
@@ -2383,14 +2391,13 @@ del_bw_upcall(struct bw_upcall *req)
 		prev->bm_mfc_next = x->bm_mfc_next;	/* remove from middle*/
 	    else
 		x->bm_mfc->mfc_bw_meter = x->bm_mfc_next;/* new head of list */
-	    crit_exit();
-
 	    unschedule_bw_meter(x);
+	    lwkt_reltoken(&mroute_token);
 	    /* Free the bw_meter entry */
 	    kfree(x, M_BWMETER);
 	    return 0;
 	} else {
-	    crit_exit();
+	    lwkt_reltoken(&mroute_token);
 	    return EINVAL;
 	}
     }
@@ -2405,7 +2412,7 @@ bw_meter_receive_packet(struct bw_meter *x, int plen, struct timeval *nowp)
 {
     struct timeval delta;
     
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     delta = *nowp;
     BW_TIMEVALDECR(&delta, &x->bm_start_time);
     
@@ -2486,7 +2493,7 @@ bw_meter_receive_packet(struct bw_meter *x, int plen, struct timeval *nowp)
 	    x->bm_flags &= ~BW_METER_UPCALL_DELIVERED;
 	}
     }
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
 /*
@@ -2498,7 +2505,7 @@ bw_meter_prepare_upcall(struct bw_meter *x, struct timeval *nowp)
     struct timeval delta;
     struct bw_upcall *u;
     
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     
     /*
      * Compute the measured time interval 
@@ -2534,7 +2541,7 @@ bw_meter_prepare_upcall(struct bw_meter *x, struct timeval *nowp)
     if (x->bm_flags & BW_METER_LEQ)
 	u->bu_flags |= BW_UPCALL_LEQ;
     
-    crit_exit();
+    lwkt_reltoken(&mroute_token);
 }
 
 /*
@@ -2614,12 +2621,11 @@ schedule_bw_meter(struct bw_meter *x, struct timeval *nowp)
     /*
      * Reset the bw_meter entry
      */
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     x->bm_start_time = *nowp;
     x->bm_measured.b_packets = 0;
     x->bm_measured.b_bytes = 0;
     x->bm_flags &= ~BW_METER_UPCALL_DELIVERED;
-    crit_exit();
     
     /*
      * Compute the timeout hash value and insert the entry
@@ -2628,6 +2634,8 @@ schedule_bw_meter(struct bw_meter *x, struct timeval *nowp)
     x->bm_time_next = bw_meter_timers[time_hash];
     bw_meter_timers[time_hash] = x;
     x->bm_time_hash = time_hash;
+
+    lwkt_reltoken(&mroute_token);
 }
 
 /*
@@ -2690,7 +2698,7 @@ bw_meter_process(void)
     if (last_tv_sec == now.tv_sec)
 	return;		/* nothing to do */
 
-    crit_enter();
+    lwkt_gettoken(&mroute_token);
     loops = now.tv_sec - last_tv_sec;
     last_tv_sec = now.tv_sec;
     if (loops > BW_METER_BUCKETS)
@@ -2756,10 +2764,9 @@ bw_meter_process(void)
 	    schedule_bw_meter(x, &now);
 	}
     }
-    crit_exit();
-    
     /* Send all upcalls that are pending delivery */
     bw_upcalls_send();
+    lwkt_reltoken(&mroute_token);
 }
 
 /*
@@ -3014,24 +3021,19 @@ pim_register_send_rp(struct ip *ip, struct vif *vifp,
  * (used by PIM-SM): the PIM header is stripped off, and the inner packet
  * is passed to if_simloop().
  */
-void
-pim_input(struct mbuf *m, ...)
+int
+pim_input(struct mbuf **mp, int *offp, int proto)
 {
-    int off, proto;
+    struct mbuf *m = *mp;
     struct ip *ip = mtod(m, struct ip *);
     struct pim *pim;
     int minlen;
     int datalen = ip->ip_len;
     int ip_tos;
     int iphlen;
-    __va_list ap;
 
-    __va_start(ap, m);
-    off = __va_arg(ap, int);
-    proto = __va_arg(ap, int);
-    __va_end(ap);
-
-    iphlen = off;
+    iphlen = *offp;
+    *mp = NULL;
 
     /* Keep statistics */
     pimstat.pims_rcv_total_msgs++;
@@ -3045,7 +3047,7 @@ pim_input(struct mbuf *m, ...)
 	log(LOG_ERR, "pim_input: packet size too small %d from %lx\n",
 	    datalen, (u_long)ip->ip_src.s_addr);
 	m_freem(m);
-	return;
+	return(IPPROTO_DONE);
     }
     
     /*
@@ -3064,7 +3066,7 @@ pim_input(struct mbuf *m, ...)
     if ((m->m_flags & M_EXT || m->m_len < minlen) &&
 	(m = m_pullup(m, minlen)) == 0) {
 	log(LOG_ERR, "pim_input: m_pullup failure\n");
-	return;
+	return(IPPROTO_DONE);
     }
     /* m_pullup() may have given us a new mbuf so reset ip. */
     ip = mtod(m, struct ip *);
@@ -3089,7 +3091,7 @@ pim_input(struct mbuf *m, ...)
 	if (mrtdebug & DEBUG_PIM)
 	    log(LOG_DEBUG, "pim_input: invalid checksum");
 	m_freem(m);
-	return;
+	return(IPPROTO_DONE);
     }
 
     /* PIM version check */
@@ -3098,7 +3100,7 @@ pim_input(struct mbuf *m, ...)
 	log(LOG_ERR, "pim_input: incorrect version %d, expecting %d\n",
 	    PIM_VT_V(pim->pim_vt), PIM_VERSION);
 	m_freem(m);
-	return;
+	return(IPPROTO_DONE);
     }
     
     /* restore mbuf back to the outer IP */
@@ -3121,7 +3123,7 @@ pim_input(struct mbuf *m, ...)
 		log(LOG_DEBUG,
 		    "pim_input: register vif not set: %d\n", reg_vif_num);
 	    m_freem(m);
-	    return;
+	    return(IPPROTO_DONE);
 	}
 	
 	/*
@@ -3134,7 +3136,7 @@ pim_input(struct mbuf *m, ...)
 		"pim_input: register packet size too small %d from %lx\n",
 		datalen, (u_long)ip->ip_src.s_addr);
 	    m_freem(m);
-	    return;
+	    return(IPPROTO_DONE);
 	}
 	
 	reghdr = (u_int32_t *)(pim + 1);
@@ -3156,7 +3158,7 @@ pim_input(struct mbuf *m, ...)
 		    "of the inner packet\n", encap_ip->ip_v);
 	    }
 	    m_freem(m);
-	    return;
+	    return(IPPROTO_DONE);
 	}
 	
 	/* verify the inner packet is destined to a mcast group */
@@ -3168,7 +3170,7 @@ pim_input(struct mbuf *m, ...)
 		    "multicast %lx\n",
 		    (u_long)ntohl(encap_ip->ip_dst.s_addr));
 	    m_freem(m);
-	    return;
+	    return(IPPROTO_DONE);
 	}
 
 	/* If a NULL_REGISTER, pass it to the daemon */
@@ -3208,7 +3210,7 @@ pim_input(struct mbuf *m, ...)
 	    log(LOG_ERR,
 		"pim_input: pim register: could not copy register head\n");
 	    m_freem(m);
-	    return;
+	    return(IPPROTO_DONE);
 	}
 	
 	/* Keep statistics */
@@ -3244,9 +3246,10 @@ pim_input_to_daemon:
      * XXX: the outer IP header pkt size of a Register is not adjust to
      * reflect the fact that the inner multicast data is truncated.
      */
-    rip_input(m, iphlen, proto);
-
-    return;
+    *mp = m;
+    *offp = iphlen;
+    rip_input(mp, offp, proto);
+    return(IPPROTO_DONE);
 }
 #endif /* PIM */
 
@@ -3255,7 +3258,7 @@ ip_mroute_modevent(module_t mod, int type, void *unused)
 {
     switch (type) {
     case MOD_LOAD:
-	crit_enter();
+	lwkt_gettoken(&mroute_token);
 	/* XXX Protect against multiple loading */
 	ip_mcast_src = X_ip_mcast_src;
 	ip_mforward = X_ip_mforward;
@@ -3268,14 +3271,14 @@ ip_mroute_modevent(module_t mod, int type, void *unused)
 	legal_vif_num = X_legal_vif_num;
 	mrt_ioctl = X_mrt_ioctl;
 	rsvp_input_p = X_rsvp_input;
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	break;
 
     case MOD_UNLOAD:
 	if (ip_mrouter)
 	    return EINVAL;
 
-	crit_enter();
+	lwkt_gettoken(&mroute_token);
 	ip_mcast_src = NULL;
 	ip_mforward = NULL;
 	ip_mrouter_done = NULL;
@@ -3287,7 +3290,7 @@ ip_mroute_modevent(module_t mod, int type, void *unused)
 	legal_vif_num = NULL;
 	mrt_ioctl = NULL;
 	rsvp_input_p = NULL;
-	crit_exit();
+	lwkt_reltoken(&mroute_token);
 	break;
     }
     return 0;

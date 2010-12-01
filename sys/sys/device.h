@@ -267,10 +267,8 @@ struct dev_ops {
 #define D_CANFREE	0x00040000	/* can free blocks */
 #define D_TRACKCLOSE	0x00080000	/* track all closes */
 #define D_MASTER	0x00100000	/* used by pty/tty code */
-#define D_KQFILTER	0x00200000	/* has kqfilter entry */
-#define D_MPSAFE_READ	0x00400000	/* doesn't require mplock for reads */
-#define D_MPSAFE_WRITE	0x00800000	/* doesn't require mplock for writes */
-#define D_MPSAFE_IOCTL	0x01000000	/* doesn't require mplock for ioctls */
+#define D_UNUSED200000	0x00200000
+#define D_MPSAFE	0x00400000	/* all dev_d*() calls are MPSAFE */
 
 /*
  * A union of all possible argument structures.
@@ -385,10 +383,13 @@ cdev_t make_dev_covering(struct dev_ops *ops,  struct dev_ops *bops, int minor,
 	    uid_t uid, gid_t gid, int perms, const char *fmt, ...) __printflike(7, 8);
 cdev_t make_only_dev(struct dev_ops *ops, int minor, uid_t uid, gid_t gid,
 		int perms, const char *fmt, ...) __printflike(6, 7);
+cdev_t make_only_dev_covering(struct dev_ops *ops, struct dev_ops *bops, int minor,
+    uid_t uid, gid_t gid, int perms, const char *fmt, ...) __printflike(7,8);
 cdev_t make_only_devfs_dev(struct dev_ops *ops, int minor, uid_t uid, gid_t gid,
 	   int perms, const char *fmt, ...) __printflike(6, 7);
 void destroy_only_dev(cdev_t dev);
 int make_dev_alias(cdev_t target, const char *fmt, ...) __printflike(2, 3);
+int destroy_dev_alias(cdev_t target, const char *fmt, ...) __printflike(2, 3);
 cdev_t make_autoclone_dev(struct dev_ops *ops, struct devfs_bitmap *bitmap,
 	   d_clone_t *nhandler, uid_t uid, gid_t gid, int perms,
 	   const char *fmt, ...) __printflike(7, 8);

@@ -57,6 +57,9 @@
 #ifndef _SYS_SYSREF_H_
 #include <sys/sysref.h>
 #endif
+#ifndef _SYS_EVENT_H_
+#include <sys/event.h>
+#endif
 #include <libprop/proplib.h>
 
 #define SPECNAMELEN	63
@@ -102,6 +105,7 @@ struct cdev {
 	time_t		si_lastwrite;	/* time_second */
 	struct vm_object *si_object;	/* vm_pager support */
 	prop_dictionary_t si_dict;
+	struct kqinfo	si_kqinfo;	/* degenerate delegated knotes */
 };
 
 #define SI_UNUSED01	0x0001
@@ -110,6 +114,7 @@ struct cdev {
 #define SI_INTERCEPTED	0x0008	/* device ops was intercepted */
 #define SI_DEVFS_LINKED	0x0010
 #define	SI_REPROBE_TEST	0x0020
+#define SI_CANFREE	0x0040	/* basically just a propagated D_CANFREE */
 
 #define si_tty		__si_u.__si_tty.__sit_tty
 #define si_disk		__si_u.__si_disk.__sid_disk
@@ -178,12 +183,15 @@ void ldisc_deregister (int);
 struct swdevt {
 	udev_t	sw_dev;			/* For quasibogus swapdev reporting */
 	int	sw_flags;
-	int	sw_nblks;
+	int	sw_nblks;		/* Number of swap blocks on device */
+	int	sw_nused;		/* swap blocks used on device */
 	struct	vnode *sw_vp;
 	struct cdev *sw_device;
 };
+
 #define	SW_FREED	0x01
 #define	SW_SEQUENTIAL	0x02
+#define SW_CLOSING	0x04
 #define	sw_freed	sw_flags	/* XXX compat */
 
 #ifdef _KERNEL

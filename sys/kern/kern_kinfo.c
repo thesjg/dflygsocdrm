@@ -147,6 +147,7 @@ fill_kinfo_proc(struct proc *p, struct kinfo_proc *kp)
 	if (p->p_vmspace) {
 		kp->kp_vm_map_size = p->p_vmspace->vm_map.size;
 		kp->kp_vm_rssize = vmspace_resident_count(p->p_vmspace);
+		kp->kp_vm_prssize = vmspace_president_count(p->p_vmspace);
 		kp->kp_vm_swrss = p->p_vmspace->vm_swrss;
 		kp->kp_vm_tsize = p->p_vmspace->vm_tsize;
 		kp->kp_vm_dsize = p->p_vmspace->vm_dsize;
@@ -250,7 +251,7 @@ fill_kinfo_proc_kthread(struct thread *td, struct kinfo_proc *kp)
 
 	kp->kp_lwp.kl_tdprio = td->td_pri;
 	kp->kp_lwp.kl_rtprio.type = RTP_PRIO_THREAD;
-	kp->kp_lwp.kl_rtprio.prio = td->td_pri & TDPRI_MASK;
+	kp->kp_lwp.kl_rtprio.prio = td->td_pri;
 
 	kp->kp_lwp.kl_uticks = td->td_uticks;
 	kp->kp_lwp.kl_sticks = td->td_sticks;

@@ -39,7 +39,6 @@
  *	from: Utah $Hdr: mem.c 1.13 89/10/08$
  *	from: @(#)mem.c	7.2 (Berkeley) 5/9/91
  * $FreeBSD: src/sys/i386/i386/mem.c,v 1.79.2.9 2003/01/04 22:58:01 njl Exp $
- * $DragonFly: src/sys/kern/kern_memio.c,v 1.32 2008/07/23 16:39:28 dillon Exp $
  */
 
 /*
@@ -59,9 +58,11 @@
 #include <sys/priv.h>
 #include <sys/random.h>
 #include <sys/signalvar.h>
-#include <sys/signal2.h>
 #include <sys/uio.h>
 #include <sys/vnode.h>
+
+#include <sys/signal2.h>
+#include <sys/mplock2.h>
 
 #include <vm/vm.h>
 #include <vm/pmap.h>
@@ -78,7 +79,7 @@ static	d_kqfilter_t	mmkqfilter;
 
 #define CDEV_MAJOR 2
 static struct dev_ops mem_ops = {
-	{ "mem", CDEV_MAJOR, D_MEM | D_MPSAFE_READ | D_MPSAFE_WRITE | D_KQFILTER },
+	{ "mem", 0, D_MPSAFE },
 	.d_open =	mmopen,
 	.d_close =	mmclose,
 	.d_read =	mmread,
@@ -221,7 +222,7 @@ mmrw(cdev_t dev, struct uio *uio, int flags)
 		}
 		case 2:
 			/*
-			 * minor device 2 is EOF/RATHOLE 
+			 * minor device 2 (/dev/null) is EOF/RATHOLE
 			 */
 			if (uio->uio_rw == UIO_READ)
 				return (0);
@@ -365,17 +366,27 @@ static int
 mmioctl(struct dev_ioctl_args *ap)
 {
 	cdev_t dev = ap->a_head.a_dev;
+	int error;
+
+	get_mplock();
 
 	switch (minor(dev)) {
 	case 0:
-		return mem_ioctl(dev, ap->a_cmd, ap->a_data,
-				 ap->a_fflag, ap->a_cred);
+		error = mem_ioctl(dev, ap->a_cmd, ap->a_data,
+				  ap->a_fflag, ap->a_cred);
+		break;
 	case 3:
 	case 4:
-		return random_ioctl(dev, ap->a_cmd, ap->a_data,
-				    ap->a_fflag, ap->a_cred);
+		error = random_ioctl(dev, ap->a_cmd, ap->a_data,
+				     ap->a_fflag, ap->a_cred);
+		break;
+	default:
+		error = ENODEV;
+		break;
 	}
-	return (ENODEV);
+
+	rel_mplock();
+	return (error);
 }
 
 /*
@@ -533,6 +544,12 @@ mm_filter_read(struct knote *kn, long hint)
 	return (1);
 }
 
+static int
+mm_filter_write(struct knote *kn, long hint)
+{
+	return (1);
+}
+
 static void
 dummy_filter_detach(struct knote *kn) {}
 
@@ -541,6 +558,9 @@ static struct filterops random_read_filtops =
 
 static struct filterops mm_read_filtops =
         { FILTEROP_ISFD, NULL, dummy_filter_detach, mm_filter_read };
+
+static struct filterops mm_write_filtops =
+        { FILTEROP_ISFD, NULL, dummy_filter_detach, mm_filter_write };
 
 int
 mmkqfilter(struct dev_kqfilter_args *ap)
@@ -559,6 +579,9 @@ mmkqfilter(struct dev_kqfilter_args *ap)
 			kn->kn_fop = &mm_read_filtops;
 			break;
 		}
+		break;
+	case EVFILT_WRITE:
+		kn->kn_fop = &mm_write_filtops;
 		break;
 	default:
 		ap->a_result = EOPNOTSUPP;

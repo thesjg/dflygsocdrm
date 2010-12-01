@@ -79,14 +79,14 @@ storage_new(void)
 }
 
 int
-storage_get_mfs_status(const char *mountpoint, struct storage *s)
+storage_get_tmpfs_status(const char *mountpoint, struct storage *s)
 {
 	struct subpartition *sp;
 	sp = NULL;
 	for (sp = slice_subpartition_first(s->selected_slice);
 		sp != NULL; sp = subpartition_next(sp)) {
 		if(strcmp(subpartition_get_mountpoint(sp), mountpoint) == 0) {
-			if(subpartition_is_mfsbacked(sp) == 1) {
+			if(subpartition_is_tmpfsbacked(sp) == 1) {
 				return 1;
 			} else {
 				return 0;
@@ -109,7 +109,7 @@ storage_set_memsize(struct storage *s, unsigned long memsize)
 	s->ram = memsize;
 }
 
-unsigned long
+long
 storage_get_memsize(const struct storage *s)
 {
 	return(s->ram);
@@ -505,7 +505,8 @@ slices_free(struct slice *head)
 }
 
 struct subpartition *
-subpartition_new_hammer(struct slice *s, const char *mountpoint, long capacity)
+subpartition_new_hammer(struct slice *s, const char *mountpoint, long capacity,
+    int encrypted)
 {
 	struct subpartition *sp;
 
@@ -524,6 +525,7 @@ subpartition_new_hammer(struct slice *s, const char *mountpoint, long capacity)
 
 	sp->mountpoint = aura_strdup(mountpoint);
 	sp->capacity = capacity;
+	sp->encrypted = encrypted;
 	sp->type = FS_HAMMER;
 
 	/*
@@ -566,8 +568,8 @@ subpartition_new_hammer(struct slice *s, const char *mountpoint, long capacity)
  * "choose a reasonable default."
  */
 struct subpartition *
-subpartition_new(struct slice *s, const char *mountpoint, long capacity,
-		 int softupdates, long fsize, long bsize, int mfsbacked)
+subpartition_new_ufs(struct slice *s, const char *mountpoint, long capacity,
+    int encrypted, int softupdates, long fsize, long bsize, int tmpfsbacked)
 {
 	struct subpartition *sp, *sptmp;
 	int letter='d';
@@ -578,6 +580,7 @@ subpartition_new(struct slice *s, const char *mountpoint, long capacity,
 
 	sp->mountpoint = aura_strdup(mountpoint);
 	sp->capacity = capacity;
+	sp->encrypted = encrypted;
 	sp->type = FS_UFS;
 
 	if (fsize == -1) {
@@ -607,7 +610,7 @@ subpartition_new(struct slice *s, const char *mountpoint, long capacity,
 		sp->softupdates = softupdates;
 	}
 
-	sp->mfsbacked = mfsbacked;
+	sp->tmpfsbacked = tmpfsbacked;
 
 	sp->is_swap = 0;
 	if (strcasecmp(mountpoint, "swap") == 0)
@@ -639,7 +642,7 @@ subpartition_new(struct slice *s, const char *mountpoint, long capacity,
 
 	for (sptmp = s->subpartition_head; sptmp != NULL;
 	     sptmp = sptmp->next) {
-		if (sptmp->mfsbacked)
+		if (sptmp->tmpfsbacked)
 			sptmp->letter = '@';
 		else if (strcmp(sptmp->mountpoint, "/") == 0 ||
 			 strcmp(sptmp->mountpoint, "/dummy") == 0)
@@ -783,10 +786,16 @@ subpartition_get_bsize(const struct subpartition *sp)
 	return(sp->bsize);
 }
 
-unsigned long
+long
 subpartition_get_capacity(const struct subpartition *sp)
 {
 	return(sp->capacity);
+}
+
+int
+subpartition_is_encrypted(const struct subpartition *sp)
+{
+	return(sp->encrypted);
 }
 
 int
@@ -801,9 +810,9 @@ subpartition_is_softupdated(const struct subpartition *sp)
 	return(sp->softupdates);
 }
 int
-subpartition_is_mfsbacked(const struct subpartition *sp)
+subpartition_is_tmpfsbacked(const struct subpartition *sp)
 {
-	return(sp->mfsbacked);
+	return(sp->tmpfsbacked);
 }
 
 int
@@ -902,4 +911,37 @@ measure_activated_swap_from_disk(const struct i_fn_args *a,
 		swap += measure_activated_swap_from_slice(a, d, s);
 
 	return(swap);
+}
+
+void *
+swapoff_all(const struct i_fn_args *a)
+{
+	FILE *p;
+
+	if ((p = aura_popen("%s%s off; %s%s | %s%s \"^/dev\" | %s%s '{print $1;}' | %s%s %s%s", "r",
+		    a->os_root, cmd_name(a, "DUMPON"),
+		    a->os_root, cmd_name(a, "SWAPINFO"),
+		    a->os_root, cmd_name(a, "GREP"),
+		    a->os_root, cmd_name(a, "AWK"),
+		    a->os_root, cmd_name(a, "XARGS"),
+		    a->os_root, cmd_name(a, "SWAPOFF"))) != NULL)
+		aura_pclose(p);
+
+	return(p);
+}
+
+void *
+remove_all_mappings(const struct i_fn_args *a)
+{
+	FILE *p;
+
+	if ((p = aura_popen("%s%s -1 %sdev/mapper | %s%s -vw control | %s%s -n 1 %s%s luksClose", "r",
+		    a->os_root, cmd_name(a, "LS"),
+		    a->os_root,
+		    a->os_root, cmd_name(a, "GREP"),
+		    a->os_root, cmd_name(a, "XARGS"),
+		    a->os_root, cmd_name(a, "CRYPTSETUP"))) != NULL)
+		aura_pclose(p);
+
+	return(p);
 }

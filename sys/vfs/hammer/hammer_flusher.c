@@ -222,6 +222,8 @@ hammer_flusher_master_thread(void *arg)
 
 	hmp = arg;
 
+	lwkt_gettoken(&hmp->fs_token);
+
 	for (;;) {
 		/*
 		 * Do at least one flush cycle.  We may have to update the
@@ -264,6 +266,7 @@ hammer_flusher_master_thread(void *arg)
 	 */
 	hmp->flusher.td = NULL;
 	wakeup(&hmp->flusher.exiting);
+	lwkt_reltoken(&hmp->fs_token);
 	lwkt_exit();
 }
 
@@ -333,7 +336,7 @@ hammer_flusher_flush(hammer_mount_t hmp)
 
 			if (++hmp->check_yield > hammer_yield_check) {
 				hmp->check_yield = 0;
-				lwkt_user_yield();
+				lwkt_yield();
 			}
 
 			/*
@@ -438,6 +441,7 @@ hammer_flusher_slave_thread(void *arg)
 
 	info = arg;
 	hmp = info->hmp;
+	lwkt_gettoken(&hmp->fs_token);
 
 	for (;;) {
 		while (info->runstate == 0)
@@ -459,6 +463,7 @@ hammer_flusher_slave_thread(void *arg)
 	}
 	info->td = NULL;
 	wakeup(&info->td);
+	lwkt_reltoken(&hmp->fs_token);
 	lwkt_exit();
 }
 
@@ -472,9 +477,11 @@ hammer_flusher_clean_loose_ios(hammer_mount_t hmp)
 	 * loose ends - buffers without bp's aren't tracked by the kernel
 	 * and can build up, so clean them out.  This can occur when an
 	 * IO completes on a buffer with no references left.
+	 *
+	 * The io_token is needed to protect the list.
 	 */
 	if ((io = TAILQ_FIRST(&hmp->lose_list)) != NULL) {
-		crit_enter();	/* biodone() race */
+		lwkt_gettoken(&hmp->io_token);
 		while ((io = TAILQ_FIRST(&hmp->lose_list)) != NULL) {
 			KKASSERT(io->mod_list == &hmp->lose_list);
 			TAILQ_REMOVE(&hmp->lose_list, io, mod_entry);
@@ -483,7 +490,7 @@ hammer_flusher_clean_loose_ios(hammer_mount_t hmp)
 			buffer = (void *)io;
 			hammer_rel_buffer(buffer, 0);
 		}
-		crit_exit();
+		lwkt_reltoken(&hmp->io_token);
 	}
 }
 
@@ -614,8 +621,8 @@ hammer_flusher_finalize(hammer_transaction_t trans, int final)
 		hammer_io_flush(io, 0);
 		hammer_io_done_interlock(io);
 		hammer_rel_buffer((hammer_buffer_t)io, 0);
-		++count;
 		hammer_io_limit_backlog(hmp);
+		++count;
 	}
 
 	/*
@@ -744,6 +751,9 @@ hammer_flusher_finalize(hammer_transaction_t trans, int final)
 	 * by a crash up until the next flush cycle due to the first_offset
 	 * in the volume header for the UNDO FIFO not being adjusted until
 	 * the following flush cycle.
+	 *
+	 * No io interlock is needed, bioops callbacks will not mess with
+	 * meta data buffers.
 	 */
 	count = 0;
 	while ((io = TAILQ_FIRST(&hmp->meta_list)) != NULL) {
@@ -754,8 +764,8 @@ hammer_flusher_finalize(hammer_transaction_t trans, int final)
 		KKASSERT(io->type != HAMMER_STRUCTURE_VOLUME);
 		hammer_io_flush(io, 0);
 		hammer_rel_buffer((hammer_buffer_t)io, 0);
-		++count;
 		hammer_io_limit_backlog(hmp);
+		++count;
 	}
 
 	/*
@@ -847,6 +857,7 @@ hammer_flusher_flush_undos(hammer_mount_t hmp, int mode)
 		hammer_io_flush(io, hammer_undo_reclaim(io));
 		hammer_io_done_interlock(io);
 		hammer_rel_buffer((hammer_buffer_t)io, 0);
+		hammer_io_limit_backlog(hmp);
 		++count;
 	}
 	hammer_flusher_clean_loose_ios(hmp);

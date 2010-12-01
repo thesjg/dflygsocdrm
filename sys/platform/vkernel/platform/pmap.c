@@ -892,9 +892,11 @@ pmap_dispose_proc(struct proc *p)
  * No requirements.
  */
 void
-pmap_growkernel(vm_offset_t addr)
+pmap_growkernel(vm_offset_t kstart, vm_offset_t kend)
 {
-	addr = (addr + PAGE_SIZE * NPTEPG) & ~(PAGE_SIZE * NPTEPG - 1);
+	vm_offset_t addr;
+
+	addr = (kend + PAGE_SIZE * NPTEPG) & ~(PAGE_SIZE * NPTEPG - 1);
 
 	lwkt_gettoken(&vm_token);
 	if (addr > virtual_end - SEG_SIZE)
@@ -1345,6 +1347,7 @@ pmap_remove_entry(struct pmap *pmap, vm_page_t m, vm_offset_t va)
 
 	TAILQ_REMOVE(&m->md.pv_list, pv, pv_list);
 	m->md.pv_list_count--;
+	m->object->agg_pv_list_count--;
 	TAILQ_REMOVE(&pmap->pm_pvlist, pv, pv_plist);
 	if (TAILQ_EMPTY(&m->md.pv_list))
 		vm_page_flag_clear(m, PG_MAPPED | PG_WRITEABLE);
@@ -1375,6 +1378,7 @@ pmap_insert_entry(pmap_t pmap, vm_offset_t va, vm_page_t mpte, vm_page_t m)
 	TAILQ_INSERT_TAIL(&m->md.pv_list, pv, pv_list);
 	++pmap->pm_generation;
 	m->md.pv_list_count++;
+	m->object->agg_pv_list_count++;
 
 	crit_exit();
 }
@@ -1613,6 +1617,7 @@ pmap_remove_all(vm_page_t m)
 		TAILQ_REMOVE(&pv->pv_pmap->pm_pvlist, pv, pv_plist);
 		++pv->pv_pmap->pm_generation;
 		m->md.pv_list_count--;
+		m->object->agg_pv_list_count--;
 		if (TAILQ_EMPTY(&m->md.pv_list))
 			vm_page_flag_clear(m, PG_MAPPED | PG_WRITEABLE);
 		pmap_unuse_pt(pv->pv_pmap, pv->pv_va, pv->pv_ptem);
@@ -2564,6 +2569,7 @@ pmap_remove_pages(pmap_t pmap, vm_offset_t sva, vm_offset_t eva)
 		save_generation = ++pmap->pm_generation;
 
 		m->md.pv_list_count--;
+		m->object->agg_pv_list_count--;
 		TAILQ_REMOVE(&m->md.pv_list, pv, pv_list);
 		if (TAILQ_FIRST(&m->md.pv_list) == NULL)
 			vm_page_flag_clear(m, PG_MAPPED | PG_WRITEABLE);
@@ -3051,3 +3057,15 @@ pmap_addr_hint(vm_object_t obj, vm_offset_t addr, vm_size_t size)
 	return addr;
 }
 
+/*
+ * Used by kmalloc/kfree, page already exists at va
+ */
+vm_page_t
+pmap_kvtom(vm_offset_t va)
+{
+	vpte_t *ptep;
+
+	KKASSERT(va >= KvaStart && va < KvaEnd);
+	ptep = KernelPTA + (va >> PAGE_SHIFT);
+	return(PHYS_TO_VM_PAGE(*ptep & PG_FRAME));
+}

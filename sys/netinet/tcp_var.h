@@ -160,7 +160,8 @@ struct tcpcb {
 #define	TF_NEEDFIN	0x00000800	/* send FIN (implicit state) */
 #define	TF_NOPUSH	0x00001000	/* don't push */
 #define TF_SYNCACHE	0x00002000	/* syncache present */
-/* 0x00001000 - 0x00008000 were used for T/TCP */
+#define TF_SIGNATURE	0x00004000	/* require MD5 digests (RFC2385) */
+#define TF_FASTKEEP	0x00008000	/* use a faster tcp_keepidle */
 #define	TF_MORETOCOME	0x00010000	/* More data to be appended to sock */
 #define	TF_LQ_OVERFLOW	0x00020000	/* listen queue overflow */
 #define	TF_LASTIDLE	0x00040000	/* connection was previously idle */
@@ -273,6 +274,21 @@ struct tcpcb {
 #define	IN_FASTRECOVERY(tp)	(tp->t_flags & TF_FASTRECOVERY)
 #define	ENTER_FASTRECOVERY(tp)	tp->t_flags |= TF_FASTRECOVERY
 #define	EXIT_FASTRECOVERY(tp)	tp->t_flags &= ~TF_FASTRECOVERY
+
+#ifdef TCP_SIGNATURE
+/*
+ * Defines which are needed by the xform_tcp module and tcp_[in|out]put
+ * for SADB verification and lookup.
+ */
+#define TCP_SIGLEN      16      /* length of computed digest in bytes */
+#define TCP_KEYLEN_MIN  1       /* minimum length of TCP-MD5 key */
+#define TCP_KEYLEN_MAX  80      /* maximum length of TCP-MD5 key */
+/*
+ * Only a single SA per host may be specified at this time. An SPI is
+ * needed in order for the KEY_ALLOCSA() lookup to work.
+ */
+#define TCP_SIG_SPI     0x1000
+#endif /* TCP_SIGNATURE */
 
 /*
  * TCP statistics.
@@ -402,6 +418,8 @@ struct tcpopt {
 #define	TOF_SCALE		0x0020
 #define	TOF_SACK_PERMITTED	0x0040
 #define	TOF_SACK		0x0080
+#define TOF_SIGNATURE   0x0100          /* signature option present */
+#define TOF_SIGLEN      0x0200          /* sigature length valid (RFC2385) */
 	u_int32_t	to_tsval;
 	u_int32_t	to_tsecr;
 	u_int16_t	to_mss;
@@ -432,6 +450,8 @@ struct syncache {
 #define SCF_TIMESTAMP		0x04		/* negotiated timestamps */
 #define SCF_UNREACH		0x10		/* icmp unreachable received */
 #define	SCF_SACK_PERMITTED	0x20		/* saw SACK permitted option */
+#define SCF_SIGNATURE   0x40    /* send MD5 digests */
+#define SCF_MARKER		0x80		/* not a real entry */
 	TAILQ_ENTRY(syncache) sc_hash;
 	TAILQ_ENTRY(syncache) sc_timerq;
 };
@@ -546,6 +566,8 @@ extern	int tcp_minmss;
 extern	int tcp_delack_enabled;
 extern	int path_mtu_discovery;
 
+union netmsg;
+
 int	 tcp_addrcpu(in_addr_t faddr, in_port_t fport,
 	    in_addr_t laddr, in_port_t lport);
 struct lwkt_port *
@@ -555,18 +577,15 @@ struct lwkt_port *tcp_addrport0(void);
 void	 tcp_canceltimers (struct tcpcb *);
 struct tcpcb *
 	 tcp_close (struct tcpcb *);
-void	 tcpmsg_service_loop (void *);
-void	 tcp_ctlinput (int, struct sockaddr *, void *);
-int	 tcp_ctloutput (struct socket *, struct sockopt *);
-struct lwkt_port *
-	 tcp_cport(int cpu);
+void	 tcp_ctlinput(union netmsg *);
+void	 tcp_ctloutput(union netmsg *);
 struct tcpcb *
 	 tcp_drop (struct tcpcb *, int);
 void	 tcp_drain (void);
 void	 tcp_fasttimo (void);
 void	 tcp_init (void);
 void	 tcp_thread_init (void);
-void	 tcp_input (struct mbuf *, ...);
+int	 tcp_input (struct mbuf **, int *, int);
 void	 tcp_mss (struct tcpcb *, int);
 int	 tcp_mssopt (struct tcpcb *);
 void	 tcp_drop_syn_sent (struct inpcb *, int);
@@ -608,14 +627,13 @@ void	 tcp_fillheaders (struct tcpcb *, void *, void *);
 struct lwkt_port *
 	 tcp_soport(struct socket *, struct sockaddr *, struct mbuf **);
 struct lwkt_port *
-	 tcp_soport_attach(struct socket *);
-struct lwkt_port *
 	 tcp_ctlport(int, struct sockaddr *, void *);
 struct tcpcb *
 	 tcp_timers (struct tcpcb *, int);
 void	 tcp_trace (short, short, struct tcpcb *, void *, struct tcphdr *,
 			int);
 void	 tcp_xmit_bandwidth_limit(struct tcpcb *tp, tcp_seq ack_seq);
+void	 tcp_timer_keep_activity(struct tcpcb *tp, int thflags);
 void	 syncache_init(void);
 void	 syncache_unreach(struct in_conninfo *, struct tcphdr *);
 int	 syncache_expand(struct in_conninfo *, struct tcphdr *,
@@ -626,6 +644,11 @@ void	 syncache_chkrst(struct in_conninfo *, struct tcphdr *);
 void	 syncache_badack(struct in_conninfo *);
 void	 syncache_destroy(struct tcpcb *tp);
 
+#ifdef TCP_SIGNATURE
+int tcpsignature_apply(void *fstate, void *data, unsigned int len);
+int tcpsignature_compute(struct mbuf *m, int len, int tcpoptlen,
+		u_char *buf, u_int direction);
+#endif /* TCP_SIGNATURE */
 
 extern	struct pr_usrreqs tcp_usrreqs;
 extern	u_long tcp_sendspace;

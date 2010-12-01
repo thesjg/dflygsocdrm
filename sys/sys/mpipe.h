@@ -40,6 +40,9 @@
 #ifndef _SYS_MALLOC_H_
 #include <sys/malloc.h>
 #endif
+#ifndef _SYS_THREAD_H_
+#include <sys/thread.h>
+#endif
 
 /*
  * Pipeline memory allocations with persistent store capabilities.  This
@@ -83,6 +86,7 @@ struct malloc_pipe {
     int		total_count;	/* total outstanding allocations incl free */
     int		ary_count;	/* guarenteed allocation count */
     int		max_count;	/* maximum count (M_NOWAIT used beyond nom) */
+    lwkt_token	token;
     void	**array;	/* array[ary_count] */
     void	(*deconstruct)(struct malloc_pipe *, void *buf);
 };

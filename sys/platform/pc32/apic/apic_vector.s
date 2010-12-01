@@ -1,10 +1,8 @@
 /*
  *	from: vector.s, 386BSD 0.1 unknown origin
  * $FreeBSD: src/sys/i386/isa/apic_vector.s,v 1.47.2.5 2001/09/01 22:33:38 tegge Exp $
- * $DragonFly: src/sys/platform/pc32/apic/apic_vector.s,v 1.39 2008/08/02 01:14:43 dillon Exp $
  */
 
-#include "use_npx.h"
 #include "opt_auto_eoi.h"
 
 #include <machine/asmacros.h>
@@ -118,7 +116,7 @@
 	APIC_IMASK_UNLOCK ;						\
 8: ;									\
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 
 /*
  * Fast interrupt call handlers run in the following sequence:
@@ -147,8 +145,8 @@ IDTVEC(vec_name) ;							\
 	pushl	%eax ;							\
 	testl	$-1,TD_NEST_COUNT(%ebx) ;				\
 	jne	1f ;							\
-	cmpl	$TDPRI_CRIT,TD_PRI(%ebx) ;				\
-	jl	2f ;							\
+	testl	$-1,TD_CRITCOUNT(%ebx) ;				\
+	je	2f ;							\
 1: ;									\
 	/* in critical section, make interrupt pending */		\
 	/* set the pending bit and return, leave interrupt masked */	\
@@ -160,9 +158,10 @@ IDTVEC(vec_name) ;							\
 	andl	$~IRQ_LBIT(irq_num),PCPU(fpending) ;			\
 	pushl	$irq_num ;						\
 	pushl	%esp ;			 /* pass frame by reference */	\
-	addl	$TDPRI_CRIT,TD_PRI(%ebx) ;				\
+	incl	TD_CRITCOUNT(%ebx) ;					\
+	sti ;								\
 	call	ithread_fast_handler ;	 /* returns 0 to unmask */	\
-	subl	$TDPRI_CRIT,TD_PRI(%ebx) ;				\
+	decl	TD_CRITCOUNT(%ebx) ;					\
 	addl	$8, %esp ;						\
 	UNMASK_IRQ(irq_num) ;						\
 5: ;									\
@@ -190,22 +189,24 @@ Xspuriousint:
 
 /*
  * Handle TLB shootdowns.
+ *
+ * NOTE: Interrupts remain disabled.
  */
 	.text
 	SUPERALIGN_TEXT
 	.globl	Xinvltlb
 Xinvltlb:
-	pushl	%eax
-
-	movl	%cr3, %eax		/* invalidate the TLB */
-	movl	%eax, %cr3
-
-	ss				/* stack segment, avoid %ds load */
+	PUSH_FRAME
 	movl	$0, lapic_eoi		/* End Of Interrupt to APIC */
+	FAKE_MCOUNT(15*4(%esp))
 
-	popl	%eax
-	iret
+	subl	$8,%esp			/* make same as interrupt frame */
+	pushl	%esp			/* pass frame by reference */
+	call	smp_invltlb_intr
+	addl	$12,%esp
 
+	MEXITCOUNT
+	jmp	doreti_syscall_ret
 
 /*
  * Executed by a CPU when it receives an Xcpustop IPI from another CPU,
@@ -249,9 +250,13 @@ Xcpustop:
 	 * Indicate that we have stopped and loop waiting for permission
 	 * to start again.  We must still process IPI events while in a
 	 * stopped state.
+	 *
+	 * Interrupts must remain enabled for non-IPI'd per-cpu interrupts
+	 * (e.g. Xtimer, Xinvltlb).
 	 */
 	MPLOCKED
 	btsl	%eax, stopped_cpus	/* stopped_cpus |= (1<<id) */
+	sti
 1:
 	andl	$~RQF_IPIQ,PCPU(reqflags)
 	pushl	%eax
@@ -299,14 +304,15 @@ Xipiq:
 
 	incl    PCPU(cnt) + V_IPI
 	movl	PCPU(curthread),%ebx
-	cmpl	$TDPRI_CRIT,TD_PRI(%ebx)
-	jge	1f
+	testl	$-1,TD_CRITCOUNT(%ebx)
+	jne	1f
 	subl	$8,%esp			/* make same as interrupt frame */
 	pushl	%esp			/* pass frame by reference */
 	incl	PCPU(intr_nesting_level)
-	addl	$TDPRI_CRIT,TD_PRI(%ebx)
+	incl	TD_CRITCOUNT(%ebx)
+	sti
 	call	lwkt_process_ipiq_frame
-	subl	$TDPRI_CRIT,TD_PRI(%ebx)
+	decl	TD_CRITCOUNT(%ebx)
 	decl	PCPU(intr_nesting_level)
 	addl	$12,%esp
 	pushl	$0			/* CPL for frame (REMOVED) */
@@ -315,8 +321,7 @@ Xipiq:
 1:
 	orl	$RQF_IPIQ,PCPU(reqflags)
 	MEXITCOUNT
-	POP_FRAME
-	iret
+	jmp	doreti_syscall_ret
 
 	.text
 	SUPERALIGN_TEXT
@@ -328,16 +333,17 @@ Xtimer:
 
 	incl    PCPU(cnt) + V_TIMER
 	movl	PCPU(curthread),%ebx
-	cmpl	$TDPRI_CRIT,TD_PRI(%ebx)
-	jge	1f
+	testl	$-1,TD_CRITCOUNT(%ebx)
+	jne	1f
 	testl	$-1,TD_NEST_COUNT(%ebx)
 	jne	1f
 	subl	$8,%esp			/* make same as interrupt frame */
 	pushl	%esp			/* pass frame by reference */
 	incl	PCPU(intr_nesting_level)
-	addl	$TDPRI_CRIT,TD_PRI(%ebx)
+	incl	TD_CRITCOUNT(%ebx)
+	sti
 	call	lapic_timer_process_frame
-	subl	$TDPRI_CRIT,TD_PRI(%ebx)
+	decl	TD_CRITCOUNT(%ebx)
 	decl	PCPU(intr_nesting_level)
 	addl	$12,%esp
 	pushl	$0			/* CPL for frame (REMOVED) */
@@ -346,10 +352,9 @@ Xtimer:
 1:
 	orl	$RQF_TIMER,PCPU(reqflags)
 	MEXITCOUNT
-	POP_FRAME
-	iret
+	jmp	doreti_syscall_ret
 
-#ifdef APIC_IO
+#ifdef SMP /* APIC-IO */
 
 MCOUNT_LABEL(bintr)
 	FAST_INTR(0,apic_fastintr0)

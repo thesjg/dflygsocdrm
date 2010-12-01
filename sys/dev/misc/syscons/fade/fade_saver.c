@@ -1,4 +1,6 @@
 /*-
+ * (MPSAFE)
+ *
  * Copyright (c) 1995-1998 Søren Schmidt
  * All rights reserved.
  *
@@ -35,6 +37,7 @@
 #include <sys/module.h>
 #include <sys/consio.h>
 #include <sys/fbio.h>
+#include <sys/thread.h>
 
 #include <dev/video/fb/fbreg.h>
 #include <dev/video/fb/splashreg.h>
@@ -49,6 +52,7 @@ fade_saver(video_adapter_t *adp, int blank)
 	static int count = 0;
 	u_char pal[256*3];
 	int i;
+
 
 	if (blank) {
 		blanked = TRUE;
@@ -87,8 +91,9 @@ static int
 fade_init(video_adapter_t *adp)
 {
 	if (!ISPALAVAIL(adp->va_flags)
-	    && (*vidsw[adp->va_index]->blank_display)(adp, V_DISPLAY_ON) != 0)
+	    && (*vidsw[adp->va_index]->blank_display)(adp, V_DISPLAY_ON) != 0) {
 		return ENODEV;
+	}
 	blanked = FALSE;
 	return 0;
 }

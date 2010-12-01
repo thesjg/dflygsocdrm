@@ -59,9 +59,11 @@
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/socketops.h>
-#include <sys/thread2.h>
 #include <sys/uio.h>
 #include <sys/un.h>
+
+#include <sys/thread2.h>
+#include <sys/socketvar2.h>
 
 #include <netgraph/ng_message.h>
 #include <netgraph/netgraph.h>
@@ -612,8 +614,8 @@ ng_ksocket_newhook(node_p node, hook_p hook, const char *name0)
 		/* Add our hook for incoming data and other events */
 		priv->so->so_upcallarg = (caddr_t)node;
 		priv->so->so_upcall = ng_ksocket_incoming;
-		priv->so->so_rcv.ssb_flags |= SSB_UPCALL;
-		priv->so->so_snd.ssb_flags |= SSB_UPCALL;
+		atomic_set_int(&priv->so->so_rcv.ssb_flags, SSB_UPCALL);
+		atomic_set_int(&priv->so->so_snd.ssb_flags, SSB_UPCALL);
 	}
 
 	/* OK */
@@ -732,7 +734,7 @@ ng_ksocket_rcvmsg(node_p node, struct ng_mesg *msg,
 			if ((so->so_state & SS_ISCONNECTING) != 0)
 				ERROUT(EALREADY);
 			if ((error = soconnect(so, sa, td)) != 0) {
-				so->so_state &= ~SS_ISCONNECTING;
+				soclrstate(so, SS_ISCONNECTING);
 				ERROUT(error);
 			}
 			if ((so->so_state & SS_ISCONNECTING) != 0) {
@@ -936,8 +938,8 @@ ng_ksocket_rmnode(node_p node)
 	/* Close our socket (if any) */
 	if (priv->so != NULL) {
 		priv->so->so_upcall = NULL;
-		priv->so->so_rcv.ssb_flags &= ~SSB_UPCALL;
-		priv->so->so_snd.ssb_flags &= ~SSB_UPCALL;
+		atomic_clear_int(&priv->so->so_rcv.ssb_flags, SSB_UPCALL);
+		atomic_clear_int(&priv->so->so_snd.ssb_flags, SSB_UPCALL);
 		soclose(priv->so, FNONBLOCK);
 		priv->so = NULL;
 	}
@@ -1006,7 +1008,7 @@ ng_ksocket_incoming(struct socket *so, void *arg, int waitflag)
 	if (priv->flags & KSF_CONNECTING) {
 		if ((error = so->so_error) != 0) {
 			so->so_error = 0;
-			so->so_state &= ~SS_ISCONNECTING;
+			soclrstate(so, SS_ISCONNECTING);
 		}
 		if (!(so->so_state & SS_ISCONNECTING)) {
 			NG_MKMESSAGE(response, NGM_KSOCKET_COOKIE,
@@ -1132,16 +1134,20 @@ ng_ksocket_check_accept(priv_p priv)
 	struct socket *const head = priv->so;
 	int error;
 
+	lwkt_gettoken(&head->so_rcv.ssb_token);
 	if ((error = head->so_error) != 0) {
 		head->so_error = 0;
+		lwkt_reltoken(&head->so_rcv.ssb_token);
 		return error;
 	}
 	if (TAILQ_EMPTY(&head->so_comp)) {
 		if (head->so_state & SS_CANTRCVMORE)
-			return ECONNABORTED;
-		return EWOULDBLOCK;
+			error = ECONNABORTED;
+		else
+			error = EWOULDBLOCK;
 	}
-	return 0;
+	lwkt_reltoken(&head->so_rcv.ssb_token);
+	return error;
 }
 
 /*
@@ -1160,16 +1166,21 @@ ng_ksocket_finish_accept(priv_p priv, struct ng_mesg **rptr)
 	priv_p priv2;
 	int len;
 
+	lwkt_getpooltoken(head);
 	so = TAILQ_FIRST(&head->so_comp);
-	if (so == NULL)		/* Should never happen */
+	if (so == NULL)	{	/* Should never happen */
+		lwkt_relpooltoken(head);
 		return;
+	}
 	TAILQ_REMOVE(&head->so_comp, so, so_list);
 	head->so_qlen--;
+	soclrstate(so, SS_COMP);
+	so->so_head = NULL;
+	soreference(so);
+
+	lwkt_relpooltoken(head);
 
 	/* XXX KNOTE(&head->so_rcv.ssb_sel.si_note, 0); */
-
-	so->so_state &= ~SS_COMP;
-	so->so_head = NULL;
 
 	soaccept(so, &sa);
 
@@ -1206,8 +1217,8 @@ ng_ksocket_finish_accept(priv_p priv, struct ng_mesg **rptr)
 
 	so->so_upcallarg = (caddr_t)node2;
 	so->so_upcall = ng_ksocket_incoming;
-	so->so_rcv.ssb_flags |= SSB_UPCALL;
-	so->so_snd.ssb_flags |= SSB_UPCALL;
+	atomic_set_int(&so->so_rcv.ssb_flags, SSB_UPCALL);
+	atomic_set_int(&so->so_snd.ssb_flags, SSB_UPCALL);
 
 	/* Fill in the response data and send it or return it to the caller */
 	resp_data = (struct ng_ksocket_accept *)resp->data;

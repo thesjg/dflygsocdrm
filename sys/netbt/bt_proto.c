@@ -77,7 +77,6 @@ struct protosw btsw[] = {
 		.pr_output = 0,
 		.pr_ctlinput = 0,
 		.pr_ctloutput = hci_ctloutput,
-		.pr_mport = cpu0_soport,
 		.pr_ctlport = NULL,
 		.pr_init = 0,
 		.pr_fasttimo =	0,
@@ -94,7 +93,6 @@ struct protosw btsw[] = {
 		.pr_output = 0,
 		.pr_ctlinput = 0,
 		.pr_ctloutput = sco_ctloutput,
-		.pr_mport = cpu0_soport,
 		.pr_ctlport = NULL,
 		.pr_init = 0,
 		.pr_fasttimo =	0,
@@ -112,7 +110,6 @@ struct protosw btsw[] = {
 		.pr_output = 0,
 		.pr_ctlinput = 0,
 		.pr_ctloutput = l2cap_ctloutput,
-		.pr_mport = cpu0_soport,
 		.pr_ctlport = NULL,
 		.pr_init = 0,
 		.pr_fasttimo =	0,
@@ -129,7 +126,6 @@ struct protosw btsw[] = {
 		.pr_output = 0,
 		.pr_ctlinput = 0,
 		.pr_ctloutput = rfcomm_ctloutput,
-		.pr_mport = cpu0_soport,
 		.pr_ctlport = NULL,
 		.pr_init = 0,
 		.pr_fasttimo =	0,
@@ -239,8 +235,7 @@ SYSCTL_INT(_net_bluetooth_sco, OID_AUTO, recvspace, CTLFLAG_RW, &sco_recvspace,
 static void
 netisr_netbt_setup(void *dummy __unused)
 {
-	netisr_register(NETISR_BLUETOOTH, cpu0_portfn, pktinfo_portfn_cpu0,
-			btintr, NETISR_FLAG_NOTMPSAFE);
+	netisr_register(NETISR_BLUETOOTH, btintr, NULL);
 }
 
 SYSINIT(netbt_setup, SI_BOOT2_KLD, SI_ORDER_ANY, netisr_netbt_setup, NULL);

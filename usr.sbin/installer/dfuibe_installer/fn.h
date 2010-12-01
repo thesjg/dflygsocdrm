@@ -50,12 +50,12 @@
 
 void		 fn_select_disk(struct i_fn_args *);
 void		 fn_select_slice(struct i_fn_args *);
+void		 fn_get_passphrase(struct i_fn_args *);
 
 /* Configure an Installed System (only) */
 
 void 		 fn_root_passwd(struct i_fn_args *);
 void 		 fn_add_user(struct i_fn_args *);
-void		 fn_cvsup_sources(struct i_fn_args *);
 void		 fn_install_packages(struct i_fn_args *);
 void		 fn_remove_packages(struct i_fn_args *);
 void		 fn_select_services(struct i_fn_args *);
@@ -78,9 +78,7 @@ void		 fn_show_dmesg(struct i_fn_args *);
 void		 fn_show_pciconf(struct i_fn_args *);
 void		 fn_show_pnpinfo(struct i_fn_args *);
 void		 fn_show_natacontrol(struct i_fn_args *);
-void		 fn_memtest(struct i_fn_args *);
 
-void		 view_memtest_log(struct i_fn_args *);
 void		 show_ifconfig(struct dfui_connection *, char *);
 
 /* LiveCD Utilties: Disk Utilities */
@@ -95,7 +93,6 @@ void		 fn_wipe_start_of_disk(struct i_fn_args *);
 void		 fn_wipe_start_of_slice(struct i_fn_args *);
 void		 fn_format_msdos_floppy(struct i_fn_args *);
 void		 fn_create_cdboot_floppy(struct i_fn_args *);
-void		 fn_create_memtest86_floppy(struct i_fn_args *);
 
 int		 format_slice(struct i_fn_args *);
 

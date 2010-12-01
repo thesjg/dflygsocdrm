@@ -1,5 +1,7 @@
 /*
- * Copyright (c) 2003,2004 The DragonFly Project.  All rights reserved.
+ * (MPSAFE)
+ *
+ * Copyright (c) 2003,2004,2010 The DragonFly Project.  All rights reserved.
  * 
  * This code is derived from software contributed to The DragonFly Project
  * by Matthew Dillon <dillon@backplane.com> and David Xu <davidxu@freebsd.org>
@@ -65,7 +67,6 @@
 #include <vm/vm_kern.h>
 
 #include <vm/vm_page2.h>
-#include <sys/mplock2.h>
 
 static void umtx_sleep_page_action_cow(vm_page_t m, vm_page_action_t action);
 
@@ -95,8 +96,6 @@ static void umtx_sleep_page_action_cow(vm_page_t m, vm_page_action_t action);
  * copy-on-write.  We register an event on the VM page to catch COWs.
  *
  * umtx_sleep { const int *ptr, int value, int timeout }
- *
- * MPALMOSTSAFE
  */
 int
 sys_umtx_sleep(struct umtx_sleep_args *uap)
@@ -119,7 +118,7 @@ sys_umtx_sleep(struct umtx_sleep_args *uap)
      * Otherwise the physical page we sleep on my not match the page
      * being woken up.
      */
-    get_mplock();
+    lwkt_gettoken(&vm_token);
     m = vm_fault_page_quick((vm_offset_t)uap->ptr, VM_PROT_READ|VM_PROT_WRITE, &error);
     if (m == NULL) {
 	error = EFAULT;
@@ -141,11 +140,11 @@ sys_umtx_sleep(struct umtx_sleep_args *uap)
 	crit_enter();
 	tsleep_interlock(waddr, PCATCH | PDOMAIN_UMTX);
 	if (*(int *)(lwbuf_kva(lwb) + offset) == uap->value) {
-	    vm_page_init_action(&action, umtx_sleep_page_action_cow, waddr);
-	    vm_page_register_action(m, &action, VMEVENT_COW);
+	    vm_page_init_action(m, &action, umtx_sleep_page_action_cow, waddr);
+	    vm_page_register_action(&action, VMEVENT_COW);
 	    error = tsleep(waddr, PCATCH | PINTERLOCKED | PDOMAIN_UMTX,
 			   "umtxsl", timeout);
-	    vm_page_unregister_action(m, &action);
+	    vm_page_unregister_action(&action);
 	} else {
 	    error = EBUSY;
 	}
@@ -161,7 +160,7 @@ sys_umtx_sleep(struct umtx_sleep_args *uap)
     /*vm_page_dirty(m); we don't actually dirty the page */
     vm_page_unhold(m);
 done:
-    rel_mplock();
+    lwkt_reltoken(&vm_token);
     return(error);
 }
 
@@ -173,7 +172,9 @@ done:
 static void
 umtx_sleep_page_action_cow(vm_page_t m, vm_page_action_t action)
 {
+    lwkt_gettoken(&vm_token);
     wakeup_domain(action->data, PDOMAIN_UMTX);
+    lwkt_reltoken(&vm_token);
 }
 
 /*
@@ -184,8 +185,6 @@ umtx_sleep_page_action_cow(vm_page_t m, vm_page_action_t action)
  *
  * XXX assumes that the physical address space does not exceed the virtual
  * address space.
- *
- * MPALMOSTSAFE
  */
 int
 sys_umtx_wakeup(struct umtx_wakeup_args *uap)
@@ -198,7 +197,7 @@ sys_umtx_wakeup(struct umtx_wakeup_args *uap)
     cpu_mfence();
     if ((vm_offset_t)uap->ptr & (sizeof(int) - 1))
 	return (EFAULT);
-    get_mplock();
+    lwkt_gettoken(&vm_token);
     m = vm_fault_page_quick((vm_offset_t)uap->ptr, VM_PROT_READ, &error);
     if (m == NULL) {
 	error = EFAULT;
@@ -216,7 +215,7 @@ sys_umtx_wakeup(struct umtx_wakeup_args *uap)
     vm_page_unhold(m);
     error = 0;
 done:
-    rel_mplock();
+    lwkt_reltoken(&vm_token);
     return(error);
 }
 

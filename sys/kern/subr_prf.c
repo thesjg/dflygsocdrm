@@ -58,6 +58,11 @@
 #include <sys/sysctl.h>
 #include <sys/lock.h>
 #include <sys/ctype.h>
+#include <sys/eventhandler.h>
+#include <sys/kthread.h>
+
+#include <sys/thread2.h>
+#include <sys/spinlock2.h>
 
 #ifdef DDB
 #include <ddb/ddb.h>
@@ -70,9 +75,10 @@
  */
 #include <machine/stdarg.h>
 
-#define TOCONS	0x01
-#define TOTTY	0x02
-#define TOLOG	0x04
+#define TOCONS		0x01
+#define TOTTY		0x02
+#define TOLOG		0x04
+#define TOWAKEUP	0x08
 
 /* Max number conversion buffer length: a u_quad_t in base 2, plus NUL byte. */
 #define MAXNBUF	(sizeof(intmax_t) * NBBY + 1)
@@ -92,7 +98,6 @@ extern	int log_open;
 
 struct	tty *constty;			/* pointer to console "window" tty */
 
-static void (*v_putc)(int) = cnputc;	/* routine to putc on virtual console */
 static void  msglogchar(int c, int pri);
 static void  msgaddchar(int c, void *dummy);
 static void  kputchar (int ch, void *arg);
@@ -102,6 +107,9 @@ static void  snprintf_func (int ch, void *arg);
 
 static int consintr = 1;		/* Ok to handle console interrupts? */
 static int msgbufmapped;		/* Set when safe to use msgbuf */
+static struct spinlock cons_spin = SPINLOCK_INITIALIZER(cons_spin);
+static thread_t constty_td = NULL;
+
 int msgbuftrigger;
 
 static int      log_console_output = 1;
@@ -150,7 +158,6 @@ uprintf(const char *fmt, ...)
 tpr_t
 tprintf_open(struct proc *p)
 {
-
 	if ((p->p_flag & P_CONTROLT) && p->p_session->s_ttyvp) {
 		sess_hold(p->p_session);
 		return ((tpr_t) p->p_session);
@@ -284,8 +291,6 @@ log_console(struct uio *uio)
 
 /*
  * Output to the console.
- *
- * NOT YET ENTIRELY MPSAFE
  */
 int
 kprintf(const char *fmt, ...)
@@ -301,9 +306,7 @@ kprintf(const char *fmt, ...)
 	pca.tty = NULL;
 	pca.flags = TOCONS | TOLOG;
 	pca.pri = -1;
-	cons_lock();
 	retval = kvcprintf(fmt, kputchar, &pca, 10, ap);
-	cons_unlock();
 	__va_end(ap);
 	if (!panicstr)
 		msgbuftrigger = 1;
@@ -323,9 +326,7 @@ kvprintf(const char *fmt, __va_list ap)
 	pca.tty = NULL;
 	pca.flags = TOCONS | TOLOG;
 	pca.pri = -1;
-	cons_lock();
 	retval = kvcprintf(fmt, kputchar, &pca, 10, ap);
-	cons_unlock();
 	if (!panicstr)
 		msgbuftrigger = 1;
 	consintr = savintr;		/* reenable interrupts */
@@ -359,11 +360,13 @@ krateprintf(struct krate *rate, const char *fmt, ...)
 }
 
 /*
- * Print a character on console or users terminal.  If destination is
- * the console then the last bunch of characters are saved in msgbuf for
- * inspection later.
+ * Print a character to the dmesg log, the console, and/or the user's
+ * terminal.
  *
- * NOT YET ENTIRELY MPSAFE, EVEN WHEN LOGGING JUST TO THE SYSCONSOLE.
+ * NOTE: TOTTY does not require nonblocking operation, but TOCONS
+ * 	 and TOLOG do.  When we have a constty we still output to
+ *	 the real console but we have a monitoring thread which
+ *	 we wakeup which tracks the log.
  */
 static void
 kputchar(int c, void *arg)
@@ -371,19 +374,19 @@ kputchar(int c, void *arg)
 	struct putchar_arg *ap = (struct putchar_arg*) arg;
 	int flags = ap->flags;
 	struct tty *tp = ap->tty;
+
 	if (panicstr)
 		constty = NULL;
-	if ((flags & TOCONS) && tp == NULL && constty) {
-		tp = constty;
-		flags |= TOTTY;
-	}
-	if ((flags & TOTTY) && tp && tputchar(c, tp) < 0 &&
-	    (flags & TOCONS) && tp == constty)
-		constty = NULL;
+	if ((flags & TOCONS) && tp == NULL && constty)
+		flags |= TOLOG | TOWAKEUP;
+	if ((flags & TOTTY) && tputchar(c, tp) < 0)
+		ap->flags &= ~TOTTY;
 	if ((flags & TOLOG))
 		msglogchar(c, ap->pri);
-	if ((flags & TOCONS) && constty == NULL && c != '\0')
-		(*v_putc)(c);
+	if ((flags & TOCONS) && c)
+		cnputc(c);
+	if (flags & TOWAKEUP)
+		wakeup(constty_td);
 }
 
 /*
@@ -557,10 +560,13 @@ ksprintn(char *nbuf, uintmax_t num, int base, int *lenp, int upper)
  *		("%6D", ptr, ":")   -> XX:XX:XX:XX:XX:XX
  *		("%*D", len, ptr, " " -> XX XX XX XX ...
  */
+
+#define PCHAR(c) {int cc=(c); if(func) (*func)(cc,arg); else *d++=cc; retval++;}
+
 int
-kvcprintf(char const *fmt, void (*func)(int, void*), void *arg, int radix, __va_list ap)
+kvcprintf(char const *fmt, void (*func)(int, void*), void *arg,
+	  int radix, __va_list ap)
 {
-#define PCHAR(c) {int cc=(c); if (func) (*func)(cc,arg); else *d++ = cc; retval++; }
 	char nbuf[MAXNBUF];
 	char *d;
 	const char *p, *percent, *q;
@@ -572,6 +578,21 @@ kvcprintf(char const *fmt, void (*func)(int, void*), void *arg, int radix, __va_
 	int dwidth, upper;
 	char padc;
 	int retval = 0, stop = 0;
+	int usespin;
+
+	/*
+	 * Make a supreme effort to avoid reentrant panics or deadlocks.
+	 *
+	 * NOTE!  Do nothing that would access mycpu/gd/fs unless the
+	 *	  function is the normal kputchar(), which allows us to
+	 *	  use this function for very early debugging with a special
+	 *	  function.
+	 */
+	if (func == kputchar) {
+		if (mycpu->gd_flags & GDF_KPRINTF)
+			return(0);
+		atomic_set_long(&mycpu->gd_flags, GDF_KPRINTF);
+	}
 
 	num = 0;
 	if (!func)
@@ -585,12 +606,20 @@ kvcprintf(char const *fmt, void (*func)(int, void*), void *arg, int radix, __va_
 	if (radix < 2 || radix > 36)
 		radix = 10;
 
+	usespin = (func == kputchar &&
+		   panic_cpu_gd != mycpu &&
+		   (((struct putchar_arg *)arg)->flags & TOTTY) == 0);
+	if (usespin) {
+		crit_enter_hard();
+		spin_lock(&cons_spin);
+	}
+
 	for (;;) {
 		padc = ' ';
 		width = 0;
 		while ((ch = (u_char)*fmt++) != '%' || stop) {
 			if (ch == '\0')
-				return (retval);
+				goto done;
 			PCHAR(ch);
 		}
 		percent = fmt - 1;
@@ -863,8 +892,109 @@ number:
 			break;
 		}
 	}
-#undef PCHAR
+done:
+	/*
+	 * Cleanup reentrancy issues.
+	 */
+	if (func == kputchar)
+		atomic_clear_long(&mycpu->gd_flags, GDF_KPRINTF);
+	if (usespin) {
+		spin_unlock(&cons_spin);
+		crit_exit_hard();
+	}
+	return (retval);
 }
+
+#undef PCHAR
+
+/*
+ * Called from the panic code to try to get the console working
+ * again in case we paniced inside a kprintf().
+ */
+void
+kvcreinitspin(void)
+{
+	spin_init(&cons_spin);
+	atomic_clear_long(&mycpu->gd_flags, GDF_KPRINTF);
+}
+
+/*
+ * Console support thread for constty intercepts.  This is needed because
+ * console tty intercepts can block.  Instead of having kputchar() attempt
+ * to directly write to the console intercept we just force it to log
+ * and wakeup this baby to track and dump the log to constty.
+ */
+static void
+constty_daemon(void)
+{
+	int rindex = -1;
+	int windex = -1;
+        struct msgbuf *mbp;
+	struct tty *tp;
+
+        EVENTHANDLER_REGISTER(shutdown_pre_sync, shutdown_kproc,
+                              constty_td, SHUTDOWN_PRI_FIRST);
+        constty_td->td_flags |= TDF_SYSTHREAD;
+
+        for (;;) {
+                kproc_suspend_loop();
+
+		crit_enter();
+		mbp = msgbufp;
+		if (mbp == NULL || msgbufmapped == 0 ||
+		    windex == mbp->msg_bufx) {
+			tsleep(constty_td, 0, "waiting", hz*60);
+			crit_exit();
+			continue;
+		}
+		windex = mbp->msg_bufx;
+		crit_exit();
+
+		/*
+		 * Get message buf FIFO indices.  rindex is tracking.
+		 */
+		if ((tp = constty) == NULL) {
+			rindex = mbp->msg_bufx;
+			continue;
+		}
+
+		/*
+		 * Don't blow up if the message buffer is broken
+		 */
+		if (windex < 0 || windex >= mbp->msg_size)
+			continue;
+		if (rindex < 0 || rindex >= mbp->msg_size)
+			rindex = windex;
+
+		/*
+		 * And dump it.  If constty gets stuck will give up.
+		 */
+		while (rindex != windex) {
+			if (tputchar((uint8_t)mbp->msg_ptr[rindex], tp) < 0) {
+				constty = NULL;
+				rindex = mbp->msg_bufx;
+				break;
+			}
+			if (++rindex >= mbp->msg_size)
+				rindex = 0;
+                        if (tp->t_outq.c_cc >= tp->t_ohiwat) {
+				tsleep(constty_daemon, 0, "blocked", hz / 10);
+				if (tp->t_outq.c_cc >= tp->t_ohiwat) {
+					rindex = windex;
+					break;
+				}
+			}
+		}
+	}
+}
+
+static struct kproc_desc constty_kp = {
+        "consttyd",
+	constty_daemon,
+        &constty_td
+};
+SYSINIT(bufdaemon, SI_SUB_KTHREAD_UPDATE, SI_ORDER_ANY,
+        kproc_start, &constty_kp)
 
 /*
  * Put character in log buffer with a particular priority.
@@ -1051,3 +1181,57 @@ DB_SHOW_COMMAND(msgbuf, db_show_msgbuf)
 }
 
 #endif /* DDB */
+
+
+void
+hexdump(const void *ptr, int length, const char *hdr, int flags)
+{
+	int i, j, k;
+	int cols;
+	const unsigned char *cp;
+	char delim;
+
+	if ((flags & HD_DELIM_MASK) != 0)
+		delim = (flags & HD_DELIM_MASK) >> 8;
+	else
+		delim = ' ';
+
+	if ((flags & HD_COLUMN_MASK) != 0)
+		cols = flags & HD_COLUMN_MASK;
+	else
+		cols = 16;
+
+	cp = ptr;
+	for (i = 0; i < length; i+= cols) {
+		if (hdr != NULL)
+			kprintf("%s", hdr);
+
+		if ((flags & HD_OMIT_COUNT) == 0)
+			kprintf("%04x  ", i);
+
+		if ((flags & HD_OMIT_HEX) == 0) {
+			for (j = 0; j < cols; j++) {
+				k = i + j;
+				if (k < length)
+					kprintf("%c%02x", delim, cp[k]);
+				else
+					kprintf("   ");
+			}
+		}
+
+		if ((flags & HD_OMIT_CHARS) == 0) {
+			kprintf("  |");
+			for (j = 0; j < cols; j++) {
+				k = i + j;
+				if (k >= length)
+					kprintf(" ");
+				else if (cp[k] >= ' ' && cp[k] <= '~')
+					kprintf("%c", cp[k]);
+				else
+					kprintf(".");
+			}
+			kprintf("|");
+		}
+		kprintf("\n");
+	}
+}

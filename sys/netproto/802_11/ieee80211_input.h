@@ -46,16 +46,17 @@
 #define	IEEE80211_VERIFY_LENGTH(_len, _minlen, _action) do {		\
 	if ((_len) < (_minlen)) {					\
 		IEEE80211_DISCARD(vap, IEEE80211_MSG_ELEMID,		\
-		    wh, NULL, "ie too short, got %d, expected %d",	\
-		    (_len), (_minlen));					\
+		    wh, NULL, "ie too short, got %jd, expected %jd",	\
+		    (intmax_t)(_len), (intmax_t)(_minlen));		\
 		vap->iv_stats.is_rx_elem_toosmall++;			\
 		_action;						\
 	}								\
 } while (0)
 
-#ifdef IEEE80211_DEBUG
 void	ieee80211_ssid_mismatch(struct ieee80211vap *, const char *tag,
 	uint8_t mac[IEEE80211_ADDR_LEN], uint8_t *ssid);
+
+#ifdef IEEE80211_DEBUG
 
 #define	IEEE80211_VERIFY_SSID(_ni, _ssid, _action) do {			\
 	if ((_ssid)[1] != 0 &&						\

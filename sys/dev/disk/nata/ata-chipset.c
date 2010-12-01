@@ -187,6 +187,7 @@ static void ata_via_family_setmode(device_t dev, int mode);
 static struct ata_chip_id *ata_match_chip(device_t dev, struct ata_chip_id *index);
 static struct ata_chip_id *ata_find_chip(device_t dev, struct ata_chip_id *index, int slot);
 static int ata_setup_interrupt(device_t dev);
+static void ata_teardown_interrupt(device_t dev);
 static int ata_serialize(device_t dev, int flags);
 static void ata_print_cable(device_t dev, u_int8_t *who);
 static int ata_atapi(device_t dev);
@@ -309,9 +310,9 @@ ata_sata_phy_event(void *context, int dummy)
 		    device_delete_child(tp->dev, children[i]);
 	    kfree(children, M_TEMP);
 	}    
-	spin_lock_wr(&ch->state_mtx);
+	spin_lock(&ch->state_mtx);
 	ch->state = ATA_IDLE;
-	spin_unlock_wr(&ch->state_mtx);
+	spin_unlock(&ch->state_mtx);
 	if (bootverbose)
 	    device_printf(tp->dev, "DISCONNECTED\n");
     }
@@ -1876,8 +1877,10 @@ ata_intel_chipinit(device_t dev)
 	    ctlr->r_rid2 = PCIR_BAR(0);
 	    if (!(ctlr->r_res2 = bus_alloc_resource_any(dev, ctlr->r_type2,
 							&ctlr->r_rid2,
-							RF_ACTIVE)))
+							RF_ACTIVE))) {
+		ata_teardown_interrupt(dev);
 		return ENXIO;
+	    }
 	    ctlr->channels = 4;
 	    ctlr->allocate = ata_intel_31244_allocate;
 	    ctlr->reset = ata_intel_31244_reset;
@@ -2517,8 +2520,10 @@ ata_jmicron_chipinit(device_t dev)
 	pci_write_config(dev, 0x40, 0x80c0a131, 4);
 	pci_write_config(dev, 0x80, 0x01200000, 4);
 
-	if ((error = ata_ahci_chipinit(dev)))
+	if ((error = ata_ahci_chipinit(dev))) {
+	    ata_teardown_interrupt(dev);
 	    return error;
+	}
 
 	ctlr->allocate = ata_jmicron_allocate;
 	ctlr->reset = ata_jmicron_reset;
@@ -2706,8 +2711,10 @@ ata_marvell_edma_chipinit(device_t dev)
     ctlr->r_type1 = SYS_RES_MEMORY;
     ctlr->r_rid1 = PCIR_BAR(0);
     if (!(ctlr->r_res1 = bus_alloc_resource_any(dev, ctlr->r_type1,
-						&ctlr->r_rid1, RF_ACTIVE)))
+						&ctlr->r_rid1, RF_ACTIVE))) {
+	ata_teardown_interrupt(dev);
 	return ENXIO;
+    }
 
     /* mask all host controller interrupts */
     ATA_OUTL(ctlr->r_res1, 0x01d64, 0x00000000);
@@ -3993,14 +4000,14 @@ ata_promise_mio_reset(device_t dev)
 		  ~0x00003f9f) | (ch->unit + 1));
 
 	/* softreset HOST module */ /* XXX SOS what about other outstandings */
-	spin_lock_wr(&hpktp->mtx);
+	spin_lock(&hpktp->mtx);
 	ATA_OUTL(ctlr->r_res2, 0xc012c,
 		 (ATA_INL(ctlr->r_res2, 0xc012c) & ~0x00000f9f) | (1 << 11));
 	DELAY(10);
 	ATA_OUTL(ctlr->r_res2, 0xc012c,
 		 (ATA_INL(ctlr->r_res2, 0xc012c) & ~0x00000f9f));
 	hpktp->busy = 0;
-	spin_unlock_wr(&hpktp->mtx);
+	spin_unlock(&hpktp->mtx);
 	ata_generic_reset(dev);
 	break;
 
@@ -4292,7 +4299,7 @@ ata_promise_queue_hpkt(struct ata_pci_controller *ctlr, u_int32_t hpkt)
 {
     struct ata_promise_sx4 *hpktp = device_get_ivars(ctlr->dev);
 
-    spin_lock_wr(&hpktp->mtx);
+    spin_lock(&hpktp->mtx);
     if (hpktp->busy) {
 	struct host_packet *hp = 
 	    kmalloc(sizeof(struct host_packet), M_TEMP, M_INTWAIT | M_ZERO);
@@ -4303,7 +4310,7 @@ ata_promise_queue_hpkt(struct ata_pci_controller *ctlr, u_int32_t hpkt)
 	hpktp->busy = 1;
 	ATA_OUTL(ctlr->r_res2, 0x000c0100, hpkt);
     }
-    spin_unlock_wr(&hpktp->mtx);
+    spin_unlock(&hpktp->mtx);
 }
 
 static void
@@ -4312,7 +4319,7 @@ ata_promise_next_hpkt(struct ata_pci_controller *ctlr)
     struct ata_promise_sx4 *hpktp = device_get_ivars(ctlr->dev);
     struct host_packet *hp;
 
-    spin_lock_wr(&hpktp->mtx);
+    spin_lock(&hpktp->mtx);
     if ((hp = TAILQ_FIRST(&hpktp->queue))) {
 	TAILQ_REMOVE(&hpktp->queue, hp, chain);
 	ATA_OUTL(ctlr->r_res2, 0x000c0100, hp->addr);
@@ -4320,7 +4327,7 @@ ata_promise_next_hpkt(struct ata_pci_controller *ctlr)
     }
     else
 	hpktp->busy = 0;
-    spin_unlock_wr(&hpktp->mtx);
+    spin_unlock(&hpktp->mtx);
 }
 
 
@@ -4370,8 +4377,10 @@ ata_serverworks_chipinit(device_t dev)
 	ctlr->r_type2 = SYS_RES_MEMORY;
 	ctlr->r_rid2 = PCIR_BAR(5);
 	if (!(ctlr->r_res2 = bus_alloc_resource_any(dev, ctlr->r_type2,
-						    &ctlr->r_rid2, RF_ACTIVE)))
+						    &ctlr->r_rid2, RF_ACTIVE))){
+	    ata_teardown_interrupt(dev);
 	    return ENXIO;
+	}
 
 	ctlr->channels = ctlr->chip->cfg2;
 	ctlr->allocate = ata_serverworks_allocate;
@@ -4559,14 +4568,17 @@ ata_sii_chipinit(device_t dev)
 	ctlr->r_type1 = SYS_RES_MEMORY;
 	ctlr->r_rid1 = PCIR_BAR(0);
 	if (!(ctlr->r_res1 = bus_alloc_resource_any(dev, ctlr->r_type1,
-						    &ctlr->r_rid1, RF_ACTIVE)))
+						    &ctlr->r_rid1, RF_ACTIVE))){
+	    ata_teardown_interrupt(dev);
 	    return ENXIO;
+	}
 
 	ctlr->r_rid2 = PCIR_BAR(2);
 	ctlr->r_type2 = SYS_RES_MEMORY;
 	if (!(ctlr->r_res2 = bus_alloc_resource_any(dev, ctlr->r_type2,
 						    &ctlr->r_rid2, RF_ACTIVE))){
 	    bus_release_resource(dev, ctlr->r_type1, ctlr->r_rid1,ctlr->r_res1);
+	    ata_teardown_interrupt(dev);
 	    return ENXIO;
 	}
 	ctlr->allocate = ata_siiprb_allocate;
@@ -4589,8 +4601,10 @@ ata_sii_chipinit(device_t dev)
 	ctlr->r_type2 = SYS_RES_MEMORY;
 	ctlr->r_rid2 = PCIR_BAR(5);
 	if (!(ctlr->r_res2 = bus_alloc_resource_any(dev, ctlr->r_type2,
-						    &ctlr->r_rid2, RF_ACTIVE)))
+						    &ctlr->r_rid2, RF_ACTIVE))){
+	    ata_teardown_interrupt(dev);
 	    return ENXIO;
+	}
 
 	if (ctlr->chip->cfg2 & SIISETCLK) {
 	    if ((pci_read_config(dev, 0x8a, 1) & 0x30) != 0x10)
@@ -5293,6 +5307,7 @@ ata_sis_chipinit(device_t dev)
 	ctlr->setmode = ata_sata_setmode;
 	return 0;
     default:
+	ata_teardown_interrupt(dev);
 	return ENXIO;
     }
     ctlr->setmode = ata_sis_setmode;
@@ -5758,10 +5773,26 @@ ata_setup_interrupt(device_t dev)
 	if ((bus_setup_intr(dev, ctlr->r_irq, ATA_INTR_FLAGS,
 			    ata_generic_intr, ctlr, &ctlr->handle, NULL))) {
 	    device_printf(dev, "unable to setup interrupt\n");
+	    bus_release_resource(dev, SYS_RES_IRQ, rid, ctlr->r_irq);
+	    ctlr->r_irq = 0;
 	    return ENXIO;
 	}
     }
     return 0;
+}
+
+static void
+ata_teardown_interrupt(device_t dev)
+{
+    struct ata_pci_controller *ctlr = device_get_softc(dev);
+
+    if (!ctlr->legacy) {
+	if (ctlr->r_irq) {
+	    bus_teardown_intr(dev, ctlr->r_irq, ctlr->handle);
+	    bus_release_resource(dev, SYS_RES_IRQ, ATA_IRQ_RID, ctlr->r_irq);
+	    ctlr->r_irq = 0;
+	}
+    }
 }
 
 struct ata_serialize {
@@ -5791,7 +5822,7 @@ ata_serialize(device_t dev, int flags)
     else
 	serial = device_get_ivars(ctlr->dev);
 
-    spin_lock_wr(&serial->locked_mtx);
+    spin_lock(&serial->locked_mtx);
     switch (flags) {
     case ATA_LF_LOCK:
 	if (serial->locked_ch == -1)
@@ -5806,7 +5837,7 @@ ata_serialize(device_t dev, int flags)
 	    if (serial->restart_ch != -1) {
 		if ((ch = ctlr->interrupt[serial->restart_ch].argument)) {
 		    serial->restart_ch = -1;
-		    spin_unlock_wr(&serial->locked_mtx);
+		    spin_unlock(&serial->locked_mtx);
 		    ata_start(ch->dev);
 		    return -1;
 		}
@@ -5818,7 +5849,7 @@ ata_serialize(device_t dev, int flags)
 	break;
     }
     res = serial->locked_ch;
-    spin_unlock_wr(&serial->locked_mtx);
+    spin_unlock(&serial->locked_mtx);
     return res;
 }
 

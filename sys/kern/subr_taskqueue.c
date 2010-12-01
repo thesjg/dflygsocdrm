@@ -83,13 +83,13 @@ TQ_LOCK_UNINIT(struct taskqueue *tq)
 static __inline void
 TQ_LOCK(struct taskqueue *tq)
 {
-	spin_lock_wr(&tq->tq_lock);
+	spin_lock(&tq->tq_lock);
 }
 
 static __inline void
 TQ_UNLOCK(struct taskqueue *tq)
 {
-	spin_unlock_wr(&tq->tq_lock);
+	spin_unlock(&tq->tq_lock);
 }
 
 static __inline void
@@ -339,12 +339,14 @@ taskqueue_start_threads(struct taskqueue **tqp, int count, int pri, int ncpu,
 
 		if (count == 1) {
 			error = lwkt_create(taskqueue_thread_loop, tqp,
-			    &tq->tq_threads[i], NULL, TDF_STOPREQ | TDF_MPSAFE,
-			    cpu, "%s", ktname);
+					    &tq->tq_threads[i], NULL,
+					    TDF_STOPREQ, cpu,
+					    "%s", ktname);
 		} else {
 			error = lwkt_create(taskqueue_thread_loop, tqp,
-			    &tq->tq_threads[i], NULL, TDF_STOPREQ | TDF_MPSAFE,
-			    cpu, "%s_%d", ktname, i);
+					    &tq->tq_threads[i], NULL,
+					    TDF_STOPREQ, cpu,
+					    "%s_%d", ktname, i);
 		}
 		if (error) {
 			kprintf("%s: kthread_add(%s): error %d", __func__,

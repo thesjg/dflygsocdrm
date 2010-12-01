@@ -1,4 +1,6 @@
 /*
+ * (MPSAFE)
+ *
  * Copyright (c) 1990 University of Utah.
  * Copyright (c) 1991 The Regents of the University of California.
  * All rights reserved.
@@ -123,7 +125,11 @@ vnode_pager_alloc(void *handle, off_t length, vm_prot_t prot, off_t offset,
 	    vnode_pbuf_freecnt = nswbuf / 2 + 1;
 	}
 
-	vp = (struct vnode *) handle;
+	/*
+	 * Serialize potential vnode/object teardowns and interlocks
+	 */
+	vp = (struct vnode *)handle;
+	lwkt_gettoken(&vmobj_token);
 
 	/*
 	 * Prevent race condition when allocating the object. This
@@ -174,7 +180,7 @@ vnode_pager_alloc(void *handle, off_t length, vm_prot_t prot, off_t offset,
 		if (vp->v_mount && (vp->v_mount->mnt_kern_flag & MNTK_NOMSYNC))
 			object->flags |= OBJ_NOMSYNC;
 	} else {
-		object->ref_count++;
+		object->ref_count++;	/* protected  by vmobj_token */
 		if (object->size != lsize) {
 			kprintf("vnode_pager_alloc: Warning, objsize "
 				"mismatch %jd/%jd vp=%p obj=%p\n",
@@ -190,13 +196,15 @@ vnode_pager_alloc(void *handle, off_t length, vm_prot_t prot, off_t offset,
 				vp, object);
 		}
 	}
-	vref(vp);
 
+	vref(vp);
 	vclrflags(vp, VOLOCK);
 	if (vp->v_flag & VOWANT) {
 		vclrflags(vp, VOWANT);
 		wakeup(vp);
 	}
+	lwkt_reltoken(&vmobj_token);
+
 	return (object);
 }
 
@@ -210,6 +218,11 @@ vm_object_t
 vnode_pager_reference(struct vnode *vp)
 {
 	vm_object_t object;
+
+	/*
+	 * Serialize potential vnode/object teardowns and interlocks
+	 */
+	lwkt_gettoken(&vmobj_token);
 
 	/*
 	 * Prevent race condition when allocating the object. This
@@ -235,7 +248,7 @@ vnode_pager_reference(struct vnode *vp)
 	 * NULL returns if it does not.
 	 */
 	if (object) {
-		object->ref_count++;
+		object->ref_count++;	/* protected by vmobj_token */
 		vref(vp);
 	}
 
@@ -244,6 +257,8 @@ vnode_pager_reference(struct vnode *vp)
 		vclrflags(vp, VOWANT);
 		wakeup(vp);
 	}
+
+	lwkt_reltoken(&vmobj_token);
 	return (object);
 }
 
@@ -818,6 +833,8 @@ vnode_pager_lock(vm_object_t object)
 {
 	struct thread *td = curthread;	/* XXX */
 	int error;
+
+	ASSERT_LWKT_TOKEN_HELD(&vm_token);
 
 	for (; object != NULL; object = object->backing_object) {
 		if (object->type != OBJT_VNODE)

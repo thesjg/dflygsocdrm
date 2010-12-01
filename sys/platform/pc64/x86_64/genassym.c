@@ -178,6 +178,7 @@ ASSYM(TD_LWP, offsetof(struct thread, td_lwp));
 ASSYM(TD_PCB, offsetof(struct thread, td_pcb));
 ASSYM(TD_SP, offsetof(struct thread, td_sp));
 ASSYM(TD_PRI, offsetof(struct thread, td_pri));
+ASSYM(TD_CRITCOUNT, offsetof(struct thread, td_critcount));
 ASSYM(TD_MACH, offsetof(struct thread, td_mach));
 ASSYM(TD_WCHAN, offsetof(struct thread, td_wchan));
 ASSYM(TD_NEST_COUNT, offsetof(struct thread, td_nest_count));
@@ -195,7 +196,6 @@ ASSYM(MDGLOBALDATA_BASEALLOC_PAGES, MDGLOBALDATA_BASEALLOC_PAGES);
 
 ASSYM(GD_PRIVATE_TSS, offsetof(struct mdglobaldata, gd_private_tss));
 ASSYM(GD_SCRATCH_RSP, offsetof(struct mdglobaldata, gd_scratch_rsp));
-ASSYM(GD_RSP0, offsetof(struct mdglobaldata, gd_rsp0));
 ASSYM(GD_USER_FS, offsetof(struct mdglobaldata, gd_user_fs));
 ASSYM(GD_USER_GS, offsetof(struct mdglobaldata, gd_user_gs));
 ASSYM(GD_INTR_NESTING_LEVEL, offsetof(struct mdglobaldata, mi.gd_intr_nesting_level));
@@ -236,7 +236,6 @@ ASSYM(MSR_FSBASE, MSR_FSBASE);
 
 ASSYM(MACHINTR_INTREN, offsetof(struct machintr_abi, intren));
 
-ASSYM(TDPRI_CRIT, TDPRI_CRIT);
 ASSYM(TDPRI_INT_SUPPORT, TDPRI_INT_SUPPORT);
 #ifdef SMP
 ASSYM(CPUMASK_LOCK, CPUMASK_LOCK);
@@ -245,5 +244,8 @@ ASSYM(CPUMASK_LOCK, CPUMASK_LOCK);
 #ifdef SMP
 ASSYM(AIMI_APIC_ADDRESS, offsetof(struct apic_intmapinfo, apic_address));
 ASSYM(AIMI_REDIRINDEX, offsetof(struct apic_intmapinfo, redirindex));
+ASSYM(AIMI_FLAGS, offsetof(struct apic_intmapinfo, flags));
 ASSYM(AIMI_SIZE, sizeof(struct apic_intmapinfo));
+ASSYM(AIMI_FLAG_LEVEL, AIMI_FLAG_LEVEL);
+ASSYM(AIMI_FLAG_MASKED, AIMI_FLAG_MASKED);
 #endif

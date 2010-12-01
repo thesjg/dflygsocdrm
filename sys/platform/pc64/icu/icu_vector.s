@@ -50,8 +50,6 @@
 #include "assym.s"
 #include "icu_ipl.h"
 
-#ifndef APIC_IO
-
 #define ICU_IMR_OFFSET		1	/* IO_ICU{1,2} + 1 */
 
 #define	ICU_EOI			0x20	/* XXX - define elsewhere */
@@ -136,14 +134,14 @@
 	SUPERALIGN_TEXT ; 						\
 IDTVEC(vec_name) ; 							\
 	ICU_PUSH_FRAME ;						\
-	FAKE_MCOUNT(15*4(%esp)) ; 					\
+	FAKE_MCOUNT(TF_RIP(%rsp)) ; 					\
 	MASK_IRQ(icu, irq_num) ;					\
 	enable_icus ;							\
 	movq	PCPU(curthread),%rbx ;					\
 	testl	$-1,TD_NEST_COUNT(%rbx) ;				\
 	jne	1f ;							\
-	cmpl	$TDPRI_CRIT,TD_PRI(%rbx) ;				\
-	jl	2f ;							\
+	testl	$-1,TD_CRITCOUNT(%rbx) ;				\
+	je	2f ;							\
 1: ;									\
 	/* set pending bit and return, leave interrupt masked */	\
 	orl	$IRQ_LBIT(irq_num),PCPU(fpending) ;			\
@@ -154,9 +152,10 @@ IDTVEC(vec_name) ; 							\
 	andl	$~IRQ_LBIT(irq_num),PCPU(fpending) ;			\
 	pushq	$irq_num ;						\
 	movq	%rsp,%rdi ;		/* rdi = call argument */	\
-	addl	$TDPRI_CRIT,TD_PRI(%rbx) ;				\
+	incl	TD_CRITCOUNT(%rbx) ;					\
+	sti ;								\
 	call	ithread_fast_handler ;	/* returns 0 to unmask int */	\
-	subl	$TDPRI_CRIT,TD_PRI(%rbx) ;				\
+	decl	TD_CRITCOUNT(%rbx) ;					\
 	addq	$8,%rsp ;		/* intr frame -> trap frame */	\
 	UNMASK_IRQ(icu, irq_num) ;					\
 5: ;									\
@@ -202,5 +201,3 @@ MCOUNT_LABEL(eintr)
 	.data
 
 	.text
-
-#endif

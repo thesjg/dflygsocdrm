@@ -145,10 +145,8 @@ ieee80211_defrag(struct ieee80211_node *ni, struct mbuf *m, int hdrspace)
 		m_freem(m);
 		return NULL;
 	}
-	IEEE80211_NODE_LOCK(ni->ni_table);
 	mfrag = ni->ni_rxfrag[0];
 	ni->ni_rxfrag[0] = NULL;
-	IEEE80211_NODE_UNLOCK(ni->ni_table);
 
 	/*
 	 * Validate new fragment is in order and
@@ -604,7 +602,7 @@ ieee80211_parse_beacon(struct ieee80211_node *ni, struct mbuf *m,
 	      scan->bintval <= IEEE80211_BINTVAL_MAX)) {
 		IEEE80211_DISCARD(vap,
 		    IEEE80211_MSG_ELEMID | IEEE80211_MSG_INPUT,
-		    wh, NULL, "bogus beacon interval", scan->bintval);
+		    wh, NULL, "bogus beacon interval %u", scan->bintval);
 		vap->iv_stats.is_rx_badbintval++;
 		scan->status |= IEEE80211_BPARSE_BINTVAL_INVALID;
 	}
@@ -716,7 +714,11 @@ ieee80211_parse_action(struct ieee80211_node *ni, struct mbuf *m)
 	return 0;
 }
 
-#ifdef IEEE80211_DEBUG
+/*
+ * Modules may be compiled with debugging even if wlan isn't
+ */
+/*#ifdef IEEE80211_DEBUG*/
+#if 1
 /*
  * Debugging support.
  */

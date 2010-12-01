@@ -57,20 +57,10 @@
 #include <machine/cpufunc.h>
 #endif
 
-/*
- * SPECIAL NOTE!  Obtaining a spinlock does not enter a critical section
- * or protect against FAST interrupts but it will prevent thread preemption.
- * Because the spinlock code path is ultra critical, we do not check for
- * LWKT reschedule requests (due to an interrupt thread not being able to
- * preempt).
- */
-
 #ifdef SMP
 
-extern int spin_trylock_wr_contested(globaldata_t gd, struct spinlock *mtx,
-    int value);
-extern void spin_lock_wr_contested(struct spinlock *mtx, int value);
-extern void spin_lock_rd_contested(struct spinlock *mtx);
+extern int spin_trylock_wr_contested2(globaldata_t gd);
+extern void spin_lock_wr_contested2(struct spinlock *mtx);
 
 #endif
 
@@ -81,24 +71,28 @@ extern void spin_lock_rd_contested(struct spinlock *mtx);
  * TRUE on success.
  */
 static __inline boolean_t
-spin_trylock_wr(struct spinlock *mtx)
+spin_trylock(struct spinlock *mtx)
 {
 	globaldata_t gd = mycpu;
 	int value;
 
+	++gd->gd_curthread->td_critcount;
+	cpu_ccfence();
 	++gd->gd_spinlocks_wr;
 	if ((value = atomic_swap_int(&mtx->lock, SPINLOCK_EXCLUSIVE)) != 0)
-		return (spin_trylock_wr_contested(gd, mtx, value));
+		return (spin_trylock_wr_contested2(gd));
 	return (TRUE);
 }
 
 #else
 
 static __inline boolean_t
-spin_trylock_wr(struct spinlock *mtx)
+spin_trylock(struct spinlock *mtx)
 {
 	globaldata_t gd = mycpu;
 
+	++gd->gd_curthread->td_critcount;
+	cpu_ccfence();
 	++gd->gd_spinlocks_wr;
 	return (TRUE);
 }
@@ -106,100 +100,28 @@ spin_trylock_wr(struct spinlock *mtx)
 #endif
 
 /*
- * Obtain an exclusive spinlock and return.  Shortcut the case where the only
- * cached read lock was from our own cpu (it can just be cleared).
+ * Obtain an exclusive spinlock and return.
  */
 static __inline void
-spin_lock_wr_quick(globaldata_t gd, struct spinlock *mtx)
+spin_lock_quick(globaldata_t gd, struct spinlock *mtx)
 {
 #ifdef SMP
 	int value;
 #endif
 
+	++gd->gd_curthread->td_critcount;
+	cpu_ccfence();
 	++gd->gd_spinlocks_wr;
 #ifdef SMP
-	if ((value = atomic_swap_int(&mtx->lock, SPINLOCK_EXCLUSIVE)) != 0) {
-		value &= ~gd->gd_cpumask;
-		if (value)
-			spin_lock_wr_contested(mtx, value);
-	}
+	if ((value = atomic_swap_int(&mtx->lock, SPINLOCK_EXCLUSIVE)) != 0)
+		spin_lock_wr_contested2(mtx);
 #endif
 }
 
 static __inline void
-spin_lock_wr(struct spinlock *mtx)
+spin_lock(struct spinlock *mtx)
 {
-	spin_lock_wr_quick(mycpu, mtx);
-}
-
-#if 0
-
-/*
- * Upgrade a shared spinlock to exclusive.  Return TRUE if we were
- * able to upgrade without another exclusive holder getting in before
- * us, FALSE otherwise.
- */
-static __inline int
-spin_lock_upgrade(struct spinlock *mtx)
-{
-	globaldata_t gd = mycpu;
-#ifdef SMP
-	int value;
-#endif
-
-	++gd->gd_spinlocks_wr;
-#ifdef SMP
-	value = atomic_swap_int(&mtx->lock, SPINLOCK_EXCLUSIVE);
-	cpu_sfence();
-#endif
-	gd->gd_spinlock_rd = NULL;
-#ifdef SMP
-	value &= ~gd->gd_cpumask;
-	if (value) {
-		spin_lock_wr_contested(mtx, value);
-		if (value & SPINLOCK_EXCLUSIVE)
-			return (FALSE);
-		XXX regain original shared lock?
-	}
-	return (TRUE);
-#endif
-}
-
-#endif
-
-/*
- * Obtain a shared spinlock and return.  This is a critical code path.
- *
- * The vast majority of the overhead is in the cpu_mfence() (5ns vs 1ns for
- * the entire rest of the procedure).  Unfortunately we have to ensure that
- * spinlock pointer is written out before we check the cpumask to interlock
- * against an exclusive spinlock that clears the cpumask and then checks
- * the spinlock pointer.
- *
- * But what is EXTREMELY important here is that we do not have to perform
- * a locked bus cycle on the spinlock itself if the shared bit for our cpu
- * is already found to be set.  We only need the mfence, and the mfence is
- * local to the cpu and never conflicts with other cpu's.
- *
- * This means that multiple parallel shared acessors (e.g. filedescriptor
- * table lookups, namecache lookups) run at full speed and incur NO cache
- * contention at all.  It is the difference between 10ns and 40-100ns.
- */
-static __inline void
-spin_lock_rd_quick(globaldata_t gd, struct spinlock *mtx)
-{
-	gd->gd_spinlock_rd = mtx;
-#ifdef SMP
-	cpu_mfence();
-	if ((mtx->lock & gd->gd_cpumask) == 0)
-		spin_lock_rd_contested(mtx);
-#endif
-}
-
-static __inline void
-spin_lock_rd(struct spinlock *mtx)
-{
-	spin_lock_rd_quick(mycpu,mtx);
+	spin_lock_quick(mycpu, mtx);
 }
 
 /*
@@ -208,39 +130,21 @@ spin_lock_rd(struct spinlock *mtx)
  * cleared.
  */
 static __inline void
-spin_unlock_wr_quick(globaldata_t gd, struct spinlock *mtx)
+spin_unlock_quick(globaldata_t gd, struct spinlock *mtx)
 {
 #ifdef SMP
 	mtx->lock = 0;
 #endif
 	KKASSERT(gd->gd_spinlocks_wr > 0);
 	--gd->gd_spinlocks_wr;
+	cpu_ccfence();
+	--gd->gd_curthread->td_critcount;
 }
 
 static __inline void
-spin_unlock_wr(struct spinlock *mtx)
+spin_unlock(struct spinlock *mtx)
 {
-	spin_unlock_wr_quick(mycpu, mtx);
-}
-
-/*
- * Release a shared spinlock.  We leave the shared bit set in the spinlock
- * as a cache and simply clear the spinlock pointer for the cpu.  This
- * fast-paths another shared lock later at the cost of an exclusive lock
- * having to check per-cpu spinlock pointers to determine when there are no
- * shared holders remaining.
- */
-static __inline void
-spin_unlock_rd_quick(globaldata_t gd, struct spinlock *mtx)
-{
-	KKASSERT(gd->gd_spinlock_rd == mtx);
-	gd->gd_spinlock_rd = NULL;
-}
-
-static __inline void
-spin_unlock_rd(struct spinlock *mtx)
-{
-	spin_unlock_rd_quick(mycpu, mtx);
+	spin_unlock_quick(mycpu, mtx);
 }
 
 static __inline void

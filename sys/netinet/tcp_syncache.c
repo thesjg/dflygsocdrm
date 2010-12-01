@@ -72,6 +72,7 @@
  * $DragonFly: src/sys/netinet/tcp_syncache.c,v 1.35 2008/11/22 11:03:35 sephe Exp $
  */
 
+#include "opt_inet.h"
 #include "opt_inet6.h"
 #include "opt_ipsec.h"
 
@@ -161,7 +162,7 @@ static struct syncache *syncookie_lookup(struct in_conninfo *,
 #define TCP_SYNCACHE_BUCKETLIMIT	30
 
 struct netmsg_sc_timer {
-	struct netmsg nm_netmsg;
+	struct netmsg_base base;
 	struct msgrec *nm_mrec;		/* back pointer to containing msgrec */
 };
 
@@ -183,10 +184,12 @@ struct tcp_syncache {
 };
 static struct tcp_syncache tcp_syncache;
 
+TAILQ_HEAD(syncache_list, syncache);
+
 struct tcp_syncache_percpu {
 	struct syncache_head	*hashbase;
 	u_int			cache_count;
-	TAILQ_HEAD(, syncache)	timerq[SYNCACHE_MAXREXMTS + 1];
+	struct syncache_list	timerq[SYNCACHE_MAXREXMTS + 1];
 	struct callout		tt_timerq[SYNCACHE_MAXREXMTS + 1];
 	struct msgrec		mrec[SYNCACHE_MAXREXMTS + 1];
 };
@@ -243,7 +246,6 @@ syncache_timeout(struct tcp_syncache_percpu *syncache_percpu,
 {
 	sc->sc_rxtslot = slot;
 	sc->sc_rxttime = ticks + TCPTV_RTOBASE * tcp_backoff[slot];
-	crit_enter();
 	TAILQ_INSERT_TAIL(&syncache_percpu->timerq[slot], sc, sc_timerq);
 	if (!callout_active(&syncache_percpu->tt_timerq[slot])) {
 		callout_reset(&syncache_percpu->tt_timerq[slot],
@@ -251,7 +253,6 @@ syncache_timeout(struct tcp_syncache_percpu *syncache_percpu,
 			      syncache_timer,
 			      &syncache_percpu->mrec[slot]);
 	}
-	crit_exit();
 }
 
 static void
@@ -331,10 +332,10 @@ syncache_init(void)
 			callout_init(&syncache_percpu->tt_timerq[i]);
 
 			syncache_percpu->mrec[i].slot = i;
-			syncache_percpu->mrec[i].port = tcp_cport(cpu);
+			syncache_percpu->mrec[i].port = cpu_portfn(cpu);
 			syncache_percpu->mrec[i].msg.nm_mrec =
-			    &syncache_percpu->mrec[i];
-			netmsg_init(&syncache_percpu->mrec[i].msg.nm_netmsg,
+				    &syncache_percpu->mrec[i];
+			netmsg_init(&syncache_percpu->mrec[i].msg.base,
 				    NULL, &syncache_null_rport,
 				    0, syncache_timer_handler);
 		}
@@ -371,6 +372,8 @@ syncache_insert(struct syncache *sc, struct syncache_head *sch)
 		 */
 		for (i = SYNCACHE_MAXREXMTS; i >= 0; i--) {
 			sc2 = TAILQ_FIRST(&syncache_percpu->timerq[i]);
+			while (sc2 && (sc2->sc_flags & SCF_MARKER))
+				sc2 = TAILQ_NEXT(sc2, sc_timerq);
 			if (sc2 != NULL)
 				break;
 		}
@@ -399,6 +402,7 @@ syncache_destroy(struct tcpcb *tp)
 
 	syncache_percpu = &tcp_syncache_percpu[mycpu->gd_cpuid];
 	sc = NULL;
+
 	for (i = 0; i < tcp_syncache.hashsize; i++) {
 		bucket = &syncache_percpu->hashbase[i];
 		TAILQ_FOREACH(sc, &bucket->sch_bucket, sc_hash) {
@@ -409,7 +413,6 @@ syncache_destroy(struct tcpcb *tp)
 			}
 		}
 	}
-	kprintf("Warning: delete stale syncache for tp=%p, sc=%p\n", tp, sc);
 }
 
 static void
@@ -453,9 +456,7 @@ syncache_drop(struct syncache *sc, struct syncache_head *sch)
 	 * are fairly long, taking an unneeded callout does not detrimentally
 	 * effect performance.
 	 */
-	crit_enter();
 	TAILQ_REMOVE(&syncache_percpu->timerq[sc->sc_rxtslot], sc, sc_timerq);
-	crit_exit();
 
 	syncache_free(sc);
 }
@@ -473,7 +474,7 @@ syncache_timer(void *p)
 {
 	struct netmsg_sc_timer *msg = p;
 
-	lwkt_sendmsg(msg->nm_mrec->port, &msg->nm_netmsg.nm_lmsg);
+	lwkt_sendmsg(msg->nm_mrec->port, &msg->base.lmsg);
 }
 
 /*
@@ -488,24 +489,40 @@ syncache_timer(void *p)
  * a timer has been deactivated here can it be restarted by syncache_timeout().
  */
 static void
-syncache_timer_handler(netmsg_t netmsg)
+syncache_timer_handler(netmsg_t msg)
 {
 	struct tcp_syncache_percpu *syncache_percpu;
-	struct syncache *sc, *nsc;
+	struct syncache *sc;
+	struct syncache marker;
+	struct syncache_list *list;
 	struct inpcb *inp;
 	int slot;
 
-	slot = ((struct netmsg_sc_timer *)netmsg)->nm_mrec->slot;
+	slot = ((struct netmsg_sc_timer *)msg)->nm_mrec->slot;
 	syncache_percpu = &tcp_syncache_percpu[mycpu->gd_cpuid];
 
-	crit_enter();
-	nsc = TAILQ_FIRST(&syncache_percpu->timerq[slot]);
-	while (nsc != NULL) {
-		if (ticks < nsc->sc_rxttime)
+	list = &syncache_percpu->timerq[slot];
+
+	/*
+	 * Use a marker to keep our place in the scan.  syncache_drop()
+	 * can block and cause any next pointer we cache to become stale.
+	 */
+	marker.sc_flags = SCF_MARKER;
+	TAILQ_INSERT_HEAD(list, &marker, sc_timerq);
+
+	while ((sc = TAILQ_NEXT(&marker, sc_timerq)) != NULL) {
+		/*
+		 * Move the marker.
+		 */
+		TAILQ_REMOVE(list, &marker, sc_timerq);
+		TAILQ_INSERT_AFTER(list, sc, &marker, sc_timerq);
+
+		if (sc->sc_flags & SCF_MARKER)
+			continue;
+
+		if (ticks < sc->sc_rxttime)
 			break;	/* finished because timerq sorted by time */
-		sc = nsc;
 		if (sc->sc_tp == NULL) {
-			nsc = TAILQ_NEXT(sc, sc_timerq);
 			syncache_drop(sc, NULL);
 			tcpstat.tcps_sc_stale++;
 			continue;
@@ -515,7 +532,6 @@ syncache_timer_handler(netmsg_t netmsg)
 		    slot >= tcp_syncache.rexmt_limit ||
 		    inp == NULL ||
 		    inp->inp_gencnt != sc->sc_inp_gencnt) {
-			nsc = TAILQ_NEXT(sc, sc_timerq);
 			syncache_drop(sc, NULL);
 			tcpstat.tcps_sc_stale++;
 			continue;
@@ -526,20 +542,20 @@ syncache_timer_handler(netmsg_t netmsg)
 		 * entry on the timer chain until it has completed.
 		 */
 		syncache_respond(sc, NULL);
-		nsc = TAILQ_NEXT(sc, sc_timerq);
 		tcpstat.tcps_sc_retransmitted++;
-		TAILQ_REMOVE(&syncache_percpu->timerq[slot], sc, sc_timerq);
+		TAILQ_REMOVE(list, sc, sc_timerq);
 		syncache_timeout(syncache_percpu, sc, slot + 1);
 	}
-	if (nsc != NULL)
-		callout_reset(&syncache_percpu->tt_timerq[slot],
-		    nsc->sc_rxttime - ticks, syncache_timer,
-		    &syncache_percpu->mrec[slot]);
-	else
-		callout_deactivate(&syncache_percpu->tt_timerq[slot]);
-	crit_exit();
+	TAILQ_REMOVE(list, &marker, sc_timerq);
 
-	lwkt_replymsg(&netmsg->nm_lmsg, 0);
+	if (sc != NULL) {
+		callout_reset(&syncache_percpu->tt_timerq[slot],
+			      sc->sc_rxttime - ticks, syncache_timer,
+			      &syncache_percpu->mrec[slot]);
+	} else {
+		callout_deactivate(&syncache_percpu->tt_timerq[slot]);
+	}
+	lwkt_replymsg(&msg->base.lmsg, 0);
 }
 
 /*
@@ -591,8 +607,9 @@ syncache_chkrst(struct in_conninfo *inc, struct tcphdr *th)
 	struct syncache_head *sch;
 
 	sc = syncache_lookup(inc, &sch);
-	if (sc == NULL)
+	if (sc == NULL) {
 		return;
+	}
 	/*
 	 * If the RST bit is set, check the sequence number to see
 	 * if this is a valid reset segment.
@@ -680,6 +697,9 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	 * as they would have been set up if we had created the
 	 * connection when the SYN arrived.  If we can't create
 	 * the connection, abort it.
+	 *
+	 * Set the protocol processing port for the socket to the current
+	 * port (that the connection came in on).
 	 */
 	so = sonewconn(lso, SS_ISCONNECTED);
 	if (so == NULL) {
@@ -690,12 +710,6 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 		tcpstat.tcps_listendrop++;
 		goto abort;
 	}
-
-	/*
-	 * Set the protocol processing port for the socket to the current
-	 * port (that the connection came in on).
-	 */
-	sosetport(so, &curthread->td_msgport);
 
 	/*
 	 * Insert new socket into hash list.
@@ -725,7 +739,7 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 		inp->inp_lport = 0;
 		goto abort;
 	}
-	linp = so->so_pcb;
+	linp = lso->so_pcb;
 #ifdef IPSEC
 	/* copy old policy into new socket's */
 	if (ipsec_copy_policy(linp->inp_sp, inp->inp_sp))
@@ -802,6 +816,11 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 		port = tcp_addrport(inp->inp_faddr.s_addr, inp->inp_fport,
 				    inp->inp_laddr.s_addr, inp->inp_lport);
 	}
+	if (port != &curthread->td_msgport) {
+		print_backtrace(-1);
+		kprintf("TCP PORT MISMATCH %p vs %p\n",
+			port, &curthread->td_msgport);
+	}
 	/*KKASSERT(port == &curthread->td_msgport);*/
 
 	tp = intotcpcb(inp);
@@ -830,6 +849,12 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	}
 	if (sc->sc_flags & SCF_SACK_PERMITTED)
 		tp->t_flags |= TF_SACK_PERMITTED;
+
+#ifdef TCP_SIGNATURE
+	if (sc->sc_flags & SCF_SIGNATURE)
+		tp->t_flags |= TF_SIGNATURE;
+#endif /* TCP_SIGNATURE */
+
 
 	tcp_mss(tp, sc->sc_peer_mss);
 
@@ -991,10 +1016,8 @@ syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		sc->sc_tp = tp;
 		sc->sc_inp_gencnt = tp->t_inpcb->inp_gencnt;
 		if (syncache_respond(sc, m) == 0) {
-			crit_enter();
 			TAILQ_REMOVE(&syncache_percpu->timerq[sc->sc_rxtslot],
 				     sc, sc_timerq);
-			crit_exit();
 			syncache_timeout(syncache_percpu, sc, sc->sc_rxtslot);
 			tcpstat.tcps_sndacks++;
 			tcpstat.tcps_sndtotal++;
@@ -1066,6 +1089,17 @@ syncache_add(struct in_conninfo *inc, struct tcpopt *to, struct tcphdr *th,
 		sc->sc_flags |= SCF_SACK_PERMITTED;
 	if (tp->t_flags & TF_NOOPT)
 		sc->sc_flags = SCF_NOOPT;
+#ifdef TCP_SIGNATURE
+	/*
+	 * If listening socket requested TCP digests, and received SYN
+	 * contains the option, flag this in the syncache so that
+	 * syncache_respond() will do the right thing with the SYN+ACK.
+	 * XXX Currently we always record the option by default and will
+	 * attempt to use it in syncache_respond().
+	 */
+	if (to->to_flags & TOF_SIGNATURE)
+		sc->sc_flags = SCF_SIGNATURE;
+#endif /* TCP_SIGNATURE */
 
 	if (syncache_respond(sc, m) == 0) {
 		syncache_insert(sc, sch);
@@ -1122,6 +1156,10 @@ syncache_respond(struct syncache *sc, struct mbuf *m)
 		    ((sc->sc_flags & SCF_TIMESTAMP) ? TCPOLEN_TSTAMP_APPA : 0) +
 		    ((sc->sc_flags & SCF_SACK_PERMITTED) ?
 			TCPOLEN_SACK_PERMITTED_ALIGNED : 0);
+#ifdef TCP_SIGNATURE
+				optlen += ((sc->sc_flags & SCF_SIGNATURE) ?
+						(TCPOLEN_SIGNATURE + 2) : 0);
+#endif /* TCP_SIGNATURE */
 	}
 	tlen = hlen + sizeof(struct tcphdr) + optlen;
 
@@ -1221,6 +1259,26 @@ syncache_respond(struct syncache *sc, struct mbuf *m)
 		*lp   = htonl(sc->sc_tsrecent);
 		optp += TCPOLEN_TSTAMP_APPA;
 	}
+
+#ifdef TCP_SIGNATURE
+	/*
+	 * Handle TCP-MD5 passive opener response.
+	 */
+	if (sc->sc_flags & SCF_SIGNATURE) {
+		u_int8_t *bp = optp;
+		int i;
+
+		*bp++ = TCPOPT_SIGNATURE;
+		*bp++ = TCPOLEN_SIGNATURE;
+		for (i = 0; i < TCP_SIGLEN; i++)
+			*bp++ = 0;
+		tcpsignature_compute(m, 0, optlen,
+				optp + 2, IPSEC_DIR_OUTBOUND);
+		*bp++ = TCPOPT_NOP;
+		*bp++ = TCPOPT_EOL;
+		optp += TCPOLEN_SIGNATURE + 2;
+}
+#endif /* TCP_SIGNATURE */
 
 	if (sc->sc_flags & SCF_SACK_PERMITTED) {
 		*((u_int32_t *)optp) = htonl(TCPOPT_SACK_PERMITTED_ALIGNED);

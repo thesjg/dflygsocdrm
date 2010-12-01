@@ -506,13 +506,18 @@ nfs_write(struct vop_write_args *ap)
 #endif
 	if (vp->v_type != VREG)
 		return (EIO);
+
+	lwkt_gettoken(&nmp->nm_token);
+
 	if (np->n_flag & NWRITEERR) {
 		np->n_flag &= ~NWRITEERR;
+		lwkt_reltoken(&nmp->nm_token);
 		return (np->n_error);
 	}
 	if ((nmp->nm_flag & NFSMNT_NFSV3) != 0 &&
-	    (nmp->nm_state & NFSSTA_GOTFSINFO) == 0)
+	    (nmp->nm_state & NFSSTA_GOTFSINFO) == 0) {
 		(void)nfs_fsinfo(nmp, vp, td);
+	}
 
 	/*
 	 * Synchronously flush pending buffers if we are in synchronous
@@ -524,7 +529,7 @@ nfs_write(struct vop_write_args *ap)
 			error = nfs_flush(vp, MNT_WAIT, td, 0);
 			/* error = nfs_vinvalbuf(vp, V_SAVE, 1); */
 			if (error)
-				return (error);
+				goto  done;
 		}
 	}
 
@@ -537,16 +542,22 @@ restart:
 		np->n_attrstamp = 0;
 		error = VOP_GETATTR(vp, &vattr);
 		if (error)
-			return (error);
+			goto done;
 		uio->uio_offset = np->n_size;
 	}
 
-	if (uio->uio_offset < 0)
-		return (EINVAL);
-	if ((uio->uio_offset + uio->uio_resid) > nmp->nm_maxfilesize)
-		return (EFBIG);
-	if (uio->uio_resid == 0)
-		return (0);
+	if (uio->uio_offset < 0) {
+		error = EINVAL;
+		goto done;
+	}
+	if ((uio->uio_offset + uio->uio_resid) > nmp->nm_maxfilesize) {
+		error = EFBIG;
+		goto done;
+	}
+	if (uio->uio_resid == 0) {
+		error = 0;
+		goto done;
+	}
 
 	/*
 	 * We need to obtain the rslock if we intend to modify np->n_size
@@ -570,7 +581,8 @@ restart:
 			/* not reached */
 		case EINTR:
 		case ERESTART:
-			return(EINTR);
+			error = EINTR;
+			goto done;
 			/* not reached */
 		default:
 			break;
@@ -587,7 +599,8 @@ restart:
 		lwpsignal(td->td_proc, td->td_lwp, SIGXFSZ);
 		if (haverslock)
 			nfs_rsunlock(np);
-		return (EFBIG);
+		error = EFBIG;
+		goto done;
 	}
 
 	biosize = vp->v_mount->mnt_stat.f_iosize;
@@ -773,6 +786,8 @@ again:
 	if (haverslock)
 		nfs_rsunlock(np);
 
+done:
+	lwkt_reltoken(&nmp->nm_token);
 	return (error);
 }
 
@@ -926,7 +941,7 @@ nfs_asyncio(struct vnode *vp, struct bio *bio)
 }
 
 /*
- * nfs_dio()	- Execute a BIO operation synchronously.  The BIO will be
+ * nfs_doio()	- Execute a BIO operation synchronously.  The BIO will be
  *		  completed and its error returned.  The caller is responsible
  *		  for brelse()ing it.  ONLY USE FOR BIO_SYNC IOs!  Otherwise
  *		  our error probe will be against an invalid pointer.
@@ -1041,7 +1056,6 @@ nfs_doio(struct vnode *vp, struct bio *bio, struct thread *td)
 	 * XXX This is having problems, give up for now.
 	 */
 	if (vn_cache_strategy(vp, bio)) {
-		kprintf("X");
 		error = biowait(&bio->bio_buf->b_bio1, "nfsrsw");
 		return (error);
 	}
@@ -1359,6 +1373,8 @@ nfs_readrpc_bio_done(nfsm_info_t info)
 
 	KKASSERT(info->state == NFSM_STATE_DONE);
 
+	lwkt_gettoken(&nmp->nm_token);
+
 	if (info->v3) {
 		ERROROUT(nfsm_postop_attr(info, info->vp, &attrflag,
 					 NFS_LATTR_NOSHRINK));
@@ -1397,6 +1413,7 @@ nfs_readrpc_bio_done(nfsm_info_t info)
 	bp->b_resid = 0;
 	/* bp->b_resid = bp->b_bcount - retlen; */
 nfsmout:
+	lwkt_reltoken(&nmp->nm_token);
 	kfree(info, M_NFSREQ);
 	if (error) {
 		bp->b_error = error;
@@ -1508,6 +1525,8 @@ nfs_writerpc_bio_done(nfsm_info_t info)
 	int error;
 	int len = bp->b_resid;	/* b_resid was set to shortened length */
 	u_int32_t *tl;
+
+	lwkt_gettoken(&nmp->nm_token);
 
 	if (info->v3) {
 		/*
@@ -1624,6 +1643,8 @@ nfsmout:
 	}
 	if (info->info_writerpc.must_commit)
 		nfs_clearcommit(info->vp->v_mount);
+	lwkt_reltoken(&nmp->nm_token);
+
 	kfree(info, M_NFSREQ);
 	if (error) {
 		bp->b_flags |= B_ERROR;
@@ -1689,6 +1710,8 @@ nfs_commitrpc_bio_done(nfsm_info_t info)
 	int wccflag = NFSV3_WCCRATTR;
 	int error = 0;
 
+	lwkt_gettoken(&nmp->nm_token);
+
 	ERROROUT(nfsm_wcc_data(info, info->vp, &wccflag));
 	if (error == 0) {
 		NULLOUT(tl = nfsm_dissect(info, NFSX_V3WRITEVERF));
@@ -1714,5 +1737,6 @@ nfsmout:
 	} else {
 		nfs_writerpc_bio(info->vp, bio);
 	}
+	lwkt_reltoken(&nmp->nm_token);
 }
 

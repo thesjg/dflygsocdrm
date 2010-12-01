@@ -31,7 +31,6 @@
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  * 
- * $DragonFly: src/sys/dev/virtual/disk/vdisk.c,v 1.8 2008/03/20 02:14:56 dillon Exp $
  */
 
 /*
@@ -67,8 +66,6 @@ struct vkd_softc {
 	int fd;
 };
 
-#define CDEV_MAJOR	97
-
 static void vkd_io_thread(cothread_t cotd);
 static void vkd_io_intr(cothread_t cotd);
 static void vkd_doio(struct vkd_softc *sc, struct bio *bio);
@@ -77,7 +74,7 @@ static d_strategy_t	vkdstrategy;
 static d_open_t		vkdopen;
 
 static struct dev_ops vkd_ops = {
-	{ "vkd", CDEV_MAJOR, D_DISK },
+	{ "vkd", 0, D_DISK },
         .d_open =	vkdopen,
         .d_close =	nullclose,
         .d_read =	physread,
@@ -101,6 +98,16 @@ vkdinit(void *dummy __unused)
 			continue;
 		if (dsk->fd < 0 || fstat(dsk->fd, &st) < 0)
 			continue;
+
+		/*
+		 * Devices may return a st_size of 0, try to use
+		 * lseek.
+		 */
+		if (st.st_size == 0) {
+			st.st_size = lseek(dsk->fd, 0L, SEEK_END);
+			if (st.st_size == -1)
+				st.st_size = 0;
+		}
 
 		/* and create a new device */
 		sc = kmalloc(sizeof(*sc), M_DEVBUF, M_WAITOK | M_ZERO);
@@ -145,7 +152,19 @@ vkdopen(struct dev_open_args *ap)
 
 	dev = ap->a_head.a_dev;
 	sc = dev->si_drv1;
-	if (fstat(sc->fd, &st) < 0 || st.st_size == 0)
+	if (fstat(sc->fd, &st) < 0)
+		return(ENXIO);
+
+	/*
+	 * Devices may return a st_size of 0, try to use
+	 * lseek.
+	 */
+	if (st.st_size == 0) {
+		st.st_size = lseek(sc->fd, 0L, SEEK_END);
+		if (st.st_size == -1)
+			st.st_size = 0;
+	}
+	if (st.st_size == 0)
 		return(ENXIO);
 
 /*
@@ -187,17 +206,26 @@ vkd_io_intr(cothread_t cotd)
 {
 	struct vkd_softc *sc;
 	struct bio *bio;
+	TAILQ_HEAD(, bio) tmpq;
 
 	sc = cotd->arg;
 
+	/*
+	 * We can't call back into the kernel while holding cothread!
+	 */
+	TAILQ_INIT(&tmpq);
 	cothread_lock(cotd, 0);
-	while (!TAILQ_EMPTY(&sc->cotd_done)) {
-		bio = TAILQ_FIRST(&sc->cotd_done);
+	while ((bio = TAILQ_FIRST(&sc->cotd_done)) != NULL) {
 		TAILQ_REMOVE(&sc->cotd_done, bio, bio_act);
+		TAILQ_INSERT_TAIL(&tmpq, bio, bio_act);
+	}
+	cothread_unlock(cotd, 0);
+
+	while ((bio = TAILQ_FIRST(&tmpq)) != NULL) {
+		TAILQ_REMOVE(&tmpq, bio, bio_act);
 		devstat_end_transaction_buf(&sc->stats, bio->bio_buf);
 		biodone(bio);
 	}
-	cothread_unlock(sc->cotd, 0);
 }
 
 /*

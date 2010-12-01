@@ -50,6 +50,7 @@ struct devdesc
 typedef int	(bootblk_cmd_t)(int argc, char *argv[]);
 extern char	*command_errmsg;	
 extern char	command_errbuf[];	/* XXX blah, length */
+extern int	CurrentCondition;
 #define CMD_OK		0
 #define CMD_ERROR	1
 
@@ -71,7 +72,8 @@ int	bf_run(char *line);
 int	autoboot(int timeout, char *prompt);
 void	autoboot_maybe(void);
 int	getrootmount(char *rootdev);
-int	rel_open(const char *path, int flags);
+int	rel_open(const char *path, char **abspathp, int flags);
+int	rel_stat(const char *path, struct stat *st);
 int	chdir(const char *path);
 
 /* misc.c */
@@ -264,11 +266,17 @@ struct bootblk_command
     const char		*c_name;
     const char		*c_desc;
     bootblk_cmd_t	*c_fn;
+    int			c_cond;
 };
 
 #define COMMAND_SET(tag, key, desc, func)				\
     static bootblk_cmd_t func;						\
-    static struct bootblk_command _cmd_ ## tag = { key, desc, func };	\
+    static struct bootblk_command _cmd_ ## tag = { key, desc, func, 0 };\
+    DATA_SET(Xcommand_set, _cmd_ ## tag)
+
+#define COMMAND_SET_COND(tag, key, desc, func)				\
+    static bootblk_cmd_t func;						\
+    static struct bootblk_command _cmd_ ## tag = { key, desc, func, 1 };\
     DATA_SET(Xcommand_set, _cmd_ ## tag)
 
 SET_DECLARE(Xcommand_set, struct bootblk_command);

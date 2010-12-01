@@ -26,6 +26,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
+ * $FreeBSD: src/sys/dev/dpt/dpt.h,v 1.8.2.1 2000/08/07 18:48:14 peter Exp $
  */
 
 /*
@@ -40,15 +41,10 @@
  */
 
 
-#ident "$FreeBSD: src/sys/dev/dpt/dpt.h,v 1.8.2.1 2000/08/07 18:48:14 peter Exp $"
-#ident "$DragonFly: src/sys/dev/raid/dpt/dpt.h,v 1.4 2004/02/16 20:13:26 dillon Exp $"
-
 #ifndef _DPT_H
 #define _DPT_H
 
 #include <sys/ioccom.h>
-
-#define DPT_CDEV_MAJOR 88
 
 #undef DPT_USE_DLM_SWI
 

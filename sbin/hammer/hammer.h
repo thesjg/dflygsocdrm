@@ -82,6 +82,7 @@ void hammer_cmd_show(hammer_tid_t node_offset, u_int32_t lo,
 		int64_t obj_id, int depth,
 		hammer_base_elm_t left_bound, hammer_base_elm_t right_bound);
 void hammer_cmd_show_undo(void);
+void hammer_cmd_recover(const char *target_dir);
 void hammer_cmd_checkmap(void);
 void hammer_cmd_prune(char **av, int ac);
 void hammer_cmd_softprune(char **av, int ac, int everything_opt);
@@ -115,6 +116,9 @@ void hammer_cmd_get_version(char **av, int ac);
 void hammer_cmd_set_version(char **av, int ac);
 void hammer_cmd_volume_add(char **av, int ac);
 void hammer_cmd_volume_del(char **av, int ac);
+void hammer_cmd_volume_list(char **av, int ac);
+void hammer_cmd_dedup_simulate(char **av, int ac);
+void hammer_cmd_dedup(char **av, int ac);
 
 void hammer_get_cycle(hammer_base_elm_t base, hammer_tid_t *tidp);
 void hammer_set_cycle(hammer_base_elm_t base, hammer_tid_t tid);
@@ -122,4 +126,3 @@ void hammer_reset_cycle(void);
 
 int getpfs(struct hammer_ioc_pseudofs_rw *pfs, const char *path);
 void relpfs(int fd, struct hammer_ioc_pseudofs_rw *pfs);
-

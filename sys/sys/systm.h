@@ -181,11 +181,12 @@ void	init_param2 (int physpages);
 void	tablefull (const char *);
 int	kvcprintf (char const *, void (*)(int, void*), void *, int,
 		      __va_list) __printflike(1, 0);
+void	kvcreinitspin(void);
 int	log (int, const char *, ...) __printflike(2, 3);
 void	logwakeup (void);
 void	log_console (struct uio *);
 int	kprintf (const char *, ...) __printflike(1, 2);
-int	kprintf0(const char *, ...) __printflike(1, 2);
+void	kprintf0 (const char *, ...) __printflike(1, 2);
 void	krateprintf (struct krate *, const char *, ...) __printflike(2, 3);
 int	ksnprintf (char *, size_t, const char *, ...) __printflike(3, 4);
 int	ksnrprintf (char *, size_t, int, const char *, ...) __printflike(4, 5);
@@ -201,6 +202,12 @@ int	kvasnrprintf (char **, size_t, int, const char *,
 int     kvsprintf (char *buf, const char *,
 			__va_list) __printflike(2, 0);
 int	ttyprintf (struct tty *, const char *, ...) __printflike(2, 3);
+void	hexdump (const void *ptr, int length, const char *hdr, int flags);
+#define	HD_COLUMN_MASK	0xff
+#define	HD_DELIM_MASK	0xff00
+#define	HD_OMIT_COUNT	(1 << 16)
+#define	HD_OMIT_HEX	(1 << 17)
+#define	HD_OMIT_CHARS	(1 << 18)
 int	ksscanf (const char *, char const *, ...) __scanflike(2, 3);
 int	kvsscanf (const char *, char const *, __va_list) __scanflike(2, 0);
 void	kvasfree(char **);
@@ -249,13 +256,6 @@ void	DRIVERSLEEP(int usec);
 void	startprofclock (struct proc *);
 void	stopprofclock (struct proc *);
 void	setstatclockrate (int hzrate);
-
-/*
- * Console I/O spinlocks - these typically also hard-disable interrupts
- * for the duration.
- */
-void	cons_lock(void); 
-void	cons_unlock(void);
 
 /*
  * Kernel environment support functions and sundry.
@@ -343,6 +343,7 @@ int	rm_at_fork (forklist_fn function);
 typedef void (*watchdog_tickle_fn) (void);
 
 extern watchdog_tickle_fn	wdog_tickler;
+extern struct globaldata	*panic_cpu_gd;
 
 /* 
  * Common `proc' functions are declared here so that proc.h can be included

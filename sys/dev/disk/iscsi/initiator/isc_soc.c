@@ -54,9 +54,11 @@
 #include <sys/user.h>
 #include <signal.h>
 #include <sys/eventhandler.h>
-#include <sys/mutex.h>
-#include <sys/mutex2.h>
 #include <sys/socketops.h>
+
+#include <sys/thread2.h>
+#include <sys/mutex2.h>
+#include <sys/mplock2.h>
 
 #include <bus/cam/cam.h>
 #include <bus/cam/cam_ccb.h>
@@ -578,6 +580,7 @@ isc_soc(void *vp)
      struct socket	*so = sp->soc;
      int		error;
 
+     get_mplock();
      debug_called(8);
 
      sp->td = curthread;
@@ -608,7 +611,7 @@ isc_soc(void *vp)
 	  }
      }
      sdebug(2, "terminated, flags=%x so_state=%x error=%d proc=%p",
-	    sp->flags, so->so_state, error, sp->proc);
+	    sp->flags, so ? so->so_state : 0, error, sp->proc);
      if((sp->proc != NULL) && sp->signal) {
 	  PROC_LOCK(sp->proc);
 	  ksignal(sp->proc, sp->signal);
@@ -631,14 +634,15 @@ isc_soc(void *vp)
 
      sdebug(2, "dropped ISC_CON_RUNNING");
 
-     kthread_exit();
+     rel_mplock();
 }
 
 void
 isc_stop_receiver(isc_session_t *sp)
 {
      debug_called(8);
-     sdebug(3, "sp=%p sp->soc=%p", sp, sp? sp->soc: 0);
+     debug(3, "sp=%p sp->sid=%d sp->soc=%p", sp, sp ? sp->sid : 0,
+	  sp ? sp->soc : NULL);
      iscsi_lock_ex(&sp->io_mtx);
      sp->flags &= ~ISC_LINK_UP;
      if (sp->flags & ISC_CON_RUNNING) {
@@ -647,7 +651,7 @@ isc_stop_receiver(isc_session_t *sp)
      iscsi_unlock_ex(&sp->io_mtx);
 
      if (sp->soc)
-	     soshutdown(sp->soc, SHUT_RD);
+	  soshutdown(sp->soc, SHUT_RD);
 
      iscsi_lock_ex(&sp->io_mtx);
      sdebug(3, "soshutdown");
@@ -660,8 +664,8 @@ isc_stop_receiver(isc_session_t *sp)
 
      if (sp->fp != NULL) {
 	  fdrop(sp->fp);
-	 sp->fp = NULL;
-    }
+	  sp->fp = NULL;
+     }
      /* sofree(sp->soc); fp deals with socket termination */
      sp->soc = NULL;
 

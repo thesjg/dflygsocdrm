@@ -102,7 +102,7 @@ struct udev_softc {
 } udevctx;
 
 static struct dev_ops udev_dev_ops = {
-	{ "udev", 0, D_KQFILTER },
+	{ "udev", 0, 0 },
 	.d_open = udev_dev_open,
 	.d_close = udev_dev_close,
 	.d_read = udev_dev_read,
@@ -209,6 +209,8 @@ udev_init_dict_event(cdev_t dev, const char *key)
 	if ((error = _udev_dict_set_cstr(dict, "name", dev->si_name)))
 		goto error_out;
 	if ((error = _udev_dict_set_uint(dict, "devnum", dev->si_inode)))
+		goto error_out;
+	if ((error = _udev_dict_set_uint(dict, "devtype", (dev_dflags(dev) & D_TYPEMASK))))
 		goto error_out;
 	if ((error = _udev_dict_set_uint(dict, "kptr", kptr)))
 		goto error_out;
@@ -356,6 +358,8 @@ udev_init_dict(cdev_t dev)
 	if ((error = _udev_dict_set_uint(dict, "devnum", dev->si_inode)))
 		goto error_out;
 	if ((error = _udev_dict_set_uint(dict, "kptr", kptr)))
+		goto error_out;
+	if ((error = _udev_dict_set_uint(dict, "devtype", (dev_dflags(dev) & D_TYPEMASK))))
 		goto error_out;
 
 	/* XXX: The next 3 are marginallly useful, if at all */

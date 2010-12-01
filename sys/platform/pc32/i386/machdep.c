@@ -38,8 +38,6 @@
  * $FreeBSD: src/sys/i386/i386/machdep.c,v 1.385.2.30 2003/05/31 08:48:05 alc Exp $
  */
 
-#include "use_apm.h"
-#include "use_ether.h"
 #include "use_npx.h"
 #include "use_isa.h"
 #include "opt_atalk.h"
@@ -54,6 +52,7 @@
 #include "opt_perfmon.h"
 #include "opt_swap.h"
 #include "opt_userconfig.h"
+#include "opt_apic.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -117,6 +116,8 @@
 #include <sys/random.h>
 #include <sys/ptrace.h>
 #include <machine/sigframe.h>
+
+#include <sys/machintr.h>
 
 #define PHYSMAP_ENTRIES		10
 
@@ -192,7 +193,8 @@ sysctl_hw_availpages(SYSCTL_HANDLER_ARGS)
 SYSCTL_PROC(_hw, OID_AUTO, availpages, CTLTYPE_INT|CTLFLAG_RD,
 	0, 0, sysctl_hw_availpages, "I", "");
 
-vm_paddr_t Maxmem = 0;
+vm_paddr_t Maxmem;
+vm_paddr_t Realmem;
 
 vm_paddr_t phys_avail[PHYSMAP_ENTRIES*2+2];
 vm_paddr_t dump_avail[PHYSMAP_ENTRIES*2+2];
@@ -224,7 +226,8 @@ cpu_startup(void *dummy)
 	perfmon_init();
 #endif
 	kprintf("real memory  = %ju (%ju MB)\n",
-		(intmax_t)ptoa(Maxmem), (intmax_t)ptoa(Maxmem) / 1024 / 1024);
+		(intmax_t)Realmem,
+		(intmax_t)Realmem / 1024 / 1024);
 	/*
 	 * Display any holes after the first chunk of extended memory.
 	 */
@@ -297,7 +300,8 @@ again:
 		kprintf("Warning: nbufs capped at %d\n", nbuf);
 	}
 
-	nswbuf = max(min(nbuf/4, 256), 16);
+	/* limit to 128 on i386 */
+	nswbuf = max(min(nbuf/4, 128), 16);
 #ifdef NSWBUF_MIN
 	if (nswbuf < NSWBUF_MIN)
 		nswbuf = NSWBUF_MIN;
@@ -753,7 +757,7 @@ sendupcall(struct vmupcall *vu, int morepending)
 	 */
 	vu->vu_pending = 0;
 	upcall.upc_pending = morepending;
-	crit_count += TDPRI_CRIT;
+	++crit_count;
 	copyout(&upcall.upc_pending, &lp->lwp_upcall->upc_pending, 
 		sizeof(upcall.upc_pending));
 	copyout(&crit_count, (char *)upcall.upc_uthread + upcall.upc_critoff,
@@ -811,7 +815,7 @@ fetchupcall(struct vmupcall *vu, int morepending, void *rsp)
 		crit_count = 0;
 		if (error == 0)
 			error = copyin((char *)upcall.upc_uthread + upcall.upc_critoff, &crit_count, sizeof(int));
-		crit_count += TDPRI_CRIT;
+		++crit_count;
 		if (error == 0)
 			error = copyout(&crit_count, (char *)upcall.upc_uthread + upcall.upc_critoff, sizeof(int));
 		regs->tf_eax = (register_t)vu->vu_func;
@@ -869,12 +873,15 @@ cpu_halt(void)
  * check for pending interrupts due to entering and exiting its own 
  * critical section.
  *
- * Note on cpu_idle_hlt:  On an SMP system we rely on a scheduler IPI
- * to wake a HLTed cpu up.  However, there are cases where the idlethread
- * will be entered with the possibility that no IPI will occur and in such
- * cases lwkt_switch() sets TDF_IDLE_NOHLT.
+ * NOTE: On an SMP system we rely on a scheduler IPI to wake a HLTed cpu up.
+ *	 However, there are cases where the idlethread will be entered with
+ *	 the possibility that no IPI will occur and in such cases
+ *	 lwkt_switch() sets TDF_IDLE_NOHLT.
+ *
+ * NOTE: cpu_idle_hlt again defaults to 2 (use ACPI sleep states).  Set to
+ *	 1 to just use hlt and for debugging purposes.
  */
-static int	cpu_idle_hlt = 1;
+static int	cpu_idle_hlt = 2;
 static int	cpu_idle_hltcnt;
 static int	cpu_idle_spincnt;
 SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_hlt, CTLFLAG_RW,
@@ -903,7 +910,7 @@ cpu_idle(void)
 	struct thread *td = curthread;
 
 	crit_exit();
-	KKASSERT(td->td_pri < TDPRI_CRIT);
+	KKASSERT(td->td_critcount == 0);
 	for (;;) {
 		/*
 		 * See if there are any LWKTs ready to go.
@@ -919,18 +926,24 @@ cpu_idle(void)
 		    (td->td_flags & TDF_IDLE_NOHLT) == 0) {
 			__asm __volatile("cli");
 			splz();
-			if (!lwkt_runnable())
-			    cpu_idle_hook();
+			if (!lwkt_runnable()) {
+				if (cpu_idle_hlt == 1)
+					cpu_idle_default_hook();
+				else
+					cpu_idle_hook();
+			}
 #ifdef SMP
 			else
-			    __asm __volatile("pause");
+				handle_cpu_contention_mask();
 #endif
+			__asm __volatile("sti");
 			++cpu_idle_hltcnt;
 		} else {
 			td->td_flags &= ~TDF_IDLE_NOHLT;
 			splz();
 #ifdef SMP
-			__asm __volatile("sti; pause");
+			__asm __volatile("sti");
+			handle_cpu_contention_mask();
 #else
 			__asm __volatile("sti");
 #endif
@@ -947,9 +960,14 @@ cpu_idle(void)
  * we let the scheduler spin.
  */
 void
-cpu_mplock_contested(void)
+handle_cpu_contention_mask(void)
 {
-	cpu_pause();
+	cpumask_t mask;
+
+	mask = cpu_contention_mask;
+	cpu_ccfence();
+	if (mask && bsfl(mask) != mycpu->gd_cpuid)
+		DELAY(2);
 }
 
 /*
@@ -1512,17 +1530,22 @@ int15e820:
 		if (smap->length == 0)
 			goto next_run;
 
-		if (smap->base >= 0xffffffff) {
+		Realmem += smap->length;
+
+		if (smap->base >= 0xffffffffLLU) {
 			kprintf("%ju MB of memory above 4GB ignored\n",
-			    (uintmax_t)(smap->length / 1024 / 1024));
+				(uintmax_t)(smap->length / 1024 / 1024));
 			goto next_run;
 		}
 
 		for (i = 0; i <= physmap_idx; i += 2) {
 			if (smap->base < physmap[i + 1]) {
-				if (boothowto & RB_VERBOSE)
-					kprintf(
-	"Overlapping or non-montonic memory region, ignoring second region\n");
+				if (boothowto & RB_VERBOSE) {
+					kprintf("Overlapping or non-montonic "
+						"memory region, ignoring "
+						"second region\n");
+				}
+				Realmem -= smap->length;
 				goto next_run;
 			}
 		}
@@ -1534,8 +1557,8 @@ int15e820:
 
 		physmap_idx += 2;
 		if (physmap_idx == PHYSMAP_ENTRIES*2) {
-			kprintf(
-		"Too many segments in the physical address map, giving up\n");
+			kprintf("Too many segments in the physical "
+				"address map, giving up\n");
 			break;
 		}
 		physmap[physmap_idx] = smap->base;
@@ -1560,8 +1583,8 @@ next_run:
 		}
 
 		if (basemem > 640) {
-			kprintf("Preposterous BIOS basemem of %uK, truncating to 640K\n",
-				basemem);
+			kprintf("Preposterous BIOS basemem of %uK, "
+				"truncating to 640K\n", basemem);
 			basemem = 640;
 		}
 
@@ -1827,6 +1850,19 @@ do_next:
 	avail_end = phys_avail[pa_indx];
 }
 
+#ifdef SMP
+#ifdef APIC_IO
+int apic_io_enable = 1; /* Enabled by default for kernels compiled w/APIC_IO */
+#else
+int apic_io_enable = 0; /* Disabled by default for kernels compiled without */
+#endif
+TUNABLE_INT("hw.apic_io_enable", &apic_io_enable);
+extern struct machintr_abi MachIntrABI_APIC;
+#endif
+
+extern struct machintr_abi MachIntrABI_ICU;
+struct machintr_abi MachIntrABI;
+
 /*
  * IDT VECTORS:
  *	0	Divide by zero
@@ -1879,6 +1915,17 @@ init386(int first)
 	}
 	if (bootinfo.bi_envp)
 		kern_envp = (caddr_t)bootinfo.bi_envp + KERNBASE;
+
+	/*
+	 * Setup MachIntrABI
+	 * XXX: Where is the correct place for it?
+	 */
+	MachIntrABI = MachIntrABI_ICU;
+#ifdef SMP
+	TUNABLE_INT_FETCH("hw.apic_io_enable", &apic_io_enable);
+	if (apic_io_enable)
+		MachIntrABI = MachIntrABI_APIC;
+#endif
 
 	/*
 	 * start with one cpu.  Note: with one cpu, ncpus2_shift, ncpus2_mask,
@@ -2099,7 +2146,7 @@ cpu_gdinit(struct mdglobaldata *gd, int cpu)
 	lwkt_init_thread(&gd->mi.gd_idlethread, 
 			gd->mi.gd_prvspace->idlestack, 
 			sizeof(gd->mi.gd_prvspace->idlestack), 
-			TDF_MPSAFE, &gd->mi);
+			0, &gd->mi);
 	lwkt_set_comm(&gd->mi.gd_idlethread, "idle_%d", cpu);
 	gd->mi.gd_idlethread.td_switch = cpu_lwkt_switch;
 	gd->mi.gd_idlethread.td_sp -= sizeof(void *);
@@ -2553,9 +2600,6 @@ outb(u_int port, u_char data)
 /* critical region when masking or unmasking interupts */
 struct spinlock_deprecated imen_spinlock;
 
-/* Make FAST_INTR() routines sequential */
-struct spinlock_deprecated fast_intr_spinlock;
-
 /* critical region for old style disable_intr/enable_intr */
 struct spinlock_deprecated mpintr_spinlock;
 
@@ -2567,9 +2611,6 @@ struct spinlock_deprecated mcount_spinlock;
 
 /* locks com (tty) data/hardware accesses: a FASTINTR() */
 struct spinlock_deprecated com_spinlock;
-
-/* locks kernel kprintfs */
-struct spinlock_deprecated cons_spinlock;
 
 /* lock regions around the clock hardware */
 struct spinlock_deprecated clock_spinlock;
@@ -2592,14 +2633,12 @@ init_locks(void)
 #endif
 	/* DEPRECATED */
 	spin_lock_init(&mcount_spinlock);
-	spin_lock_init(&fast_intr_spinlock);
 	spin_lock_init(&intr_spinlock);
 	spin_lock_init(&mpintr_spinlock);
 	spin_lock_init(&imen_spinlock);
 	spin_lock_init(&smp_rv_spinlock);
 	spin_lock_init(&com_spinlock);
 	spin_lock_init(&clock_spinlock);
-	spin_lock_init(&cons_spinlock);
 
 	/* our token pool needs to work early */
 	lwkt_token_pool_init();
