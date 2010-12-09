@@ -147,7 +147,6 @@ struct drm_device;
 #define DRM_UT_CORE 		0x01
 #define DRM_UT_DRIVER		0x02
 #define DRM_UT_KMS		0x04
-
 /*
  * Three debug levels are defined.
  * drm_core, drm_driver, drm_kms
@@ -331,7 +330,7 @@ do {										\
 	if (!_DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock) ||	\
 	    _file_priv->master->lock.file_priv != _file_priv)	{		\
 		DRM_ERROR( "%s called without lock held, held  %d owner %p %p\n",\
-			   __FUNCTION__, _DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock),\
+			   __func__, _DRM_LOCK_IS_HELD(_file_priv->master->lock.hw_lock->lock),\
 			   _file_priv->master->lock.file_priv, _file_priv);	\
 		return -EINVAL;							\
 	}									\
