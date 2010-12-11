@@ -178,6 +178,7 @@
 #define   MI_OVERLAY_OFF	(0x2<<21)
 #define MI_LOAD_SCAN_LINES_INCL MI_INSTR(0x12, 0)
 #define MI_DISPLAY_FLIP		MI_INSTR(0x14, 2)
+#define MI_DISPLAY_FLIP_I915	MI_INSTR(0x14, 1)
 #define   MI_DISPLAY_FLIP_PLANE(n) ((n) << 20)
 #define MI_STORE_DWORD_IMM	MI_INSTR(0x20, 1)
 #define   MI_MEM_VIRTUAL	(1 << 22) /* 965+ only */
@@ -357,6 +358,70 @@
 #define LM_BURST_LENGTH     0x00000700
 #define LM_FIFO_WATERMARK   0x0000001F
 #define MI_ARB_STATE	0x020e4 /* 915+ only */
+#define   MI_ARB_MASK_SHIFT	  16	/* shift for enable bits */
+
+/* Make render/texture TLB fetches lower priorty than associated data
+ *   fetches. This is not turned on by default
+ */
+#define   MI_ARB_RENDER_TLB_LOW_PRIORITY	(1 << 15)
+
+/* Isoch request wait on GTT enable (Display A/B/C streams).
+ * Make isoch requests stall on the TLB update. May cause
+ * display underruns (test mode only)
+ */
+#define   MI_ARB_ISOCH_WAIT_GTT			(1 << 14)
+
+/* Block grant count for isoch requests when block count is
+ * set to a finite value.
+ */
+#define   MI_ARB_BLOCK_GRANT_MASK		(3 << 12)
+#define   MI_ARB_BLOCK_GRANT_8			(0 << 12)	/* for 3 display planes */
+#define   MI_ARB_BLOCK_GRANT_4			(1 << 12)	/* for 2 display planes */
+#define   MI_ARB_BLOCK_GRANT_2			(2 << 12)	/* for 1 display plane */
+#define   MI_ARB_BLOCK_GRANT_0			(3 << 12)	/* don't use */
+
+/* Enable render writes to complete in C2/C3/C4 power states.
+ * If this isn't enabled, render writes are prevented in low
+ * power states. That seems bad to me.
+ */
+#define   MI_ARB_C3_LP_WRITE_ENABLE		(1 << 11)
+
+/* This acknowledges an async flip immediately instead
+ * of waiting for 2TLB fetches.
+ */
+#define   MI_ARB_ASYNC_FLIP_ACK_IMMEDIATE	(1 << 10)
+
+/* Enables non-sequential data reads through arbiter
+ */
+#define   MI_ARB_DUAL_DATA_PHASE_DISABLE       	(1 << 9)
+
+/* Disable FSB snooping of cacheable write cycles from binner/render
+ * command stream
+ */
+#define   MI_ARB_CACHE_SNOOP_DISABLE		(1 << 8)
+
+/* Arbiter time slice for non-isoch streams */
+#define   MI_ARB_TIME_SLICE_MASK		(7 << 5)
+#define   MI_ARB_TIME_SLICE_1			(0 << 5)
+#define   MI_ARB_TIME_SLICE_2			(1 << 5)
+#define   MI_ARB_TIME_SLICE_4			(2 << 5)
+#define   MI_ARB_TIME_SLICE_6			(3 << 5)
+#define   MI_ARB_TIME_SLICE_8			(4 << 5)
+#define   MI_ARB_TIME_SLICE_10			(5 << 5)
+#define   MI_ARB_TIME_SLICE_14			(6 << 5)
+#define   MI_ARB_TIME_SLICE_16			(7 << 5)
+
+/* Low priority grace period page size */
+#define   MI_ARB_LOW_PRIORITY_GRACE_4KB		(0 << 4)	/* default */
+#define   MI_ARB_LOW_PRIORITY_GRACE_8KB		(1 << 4)
+
+/* Disable display A/B trickle feed */
+#define   MI_ARB_DISPLAY_TRICKLE_FEED_DISABLE	(1 << 2)
+
+/* Set display plane priority */
+#define   MI_ARB_DISPLAY_PRIORITY_A_B		(0 << 0)	/* display A > display B */
+#define   MI_ARB_DISPLAY_PRIORITY_B_A		(1 << 0)	/* display B > display A */
+
 #define CACHE_MODE_0	0x02120 /* 915+ only */
 #define   CM0_MASK_SHIFT          16
 #define   CM0_IZ_OPT_DISABLE      (1<<6)
@@ -367,7 +432,9 @@
 #define   CM0_RC_OP_FLUSH_DISABLE (1<<0)
 #define BB_ADDR		0x02140 /* 8 bytes */
 #define GFX_FLSH_CNTL	0x02170 /* 915+ only */
-
+#define ECOSKPD		0x021d0
+#define   ECO_GATING_CX_ONLY	(1<<3)
+#define   ECO_FLIP_DONE		(1<<0)
 
 /*
  * Framebuffer compression (915+ only)
@@ -1768,6 +1835,7 @@
 #define   DP_LINK_TRAIN_MASK		(3 << 28)
 #define   DP_LINK_TRAIN_SHIFT		28
 
+#ifndef __linux__ /* Taken out for Linux 2.6.34.7 */
 /* CPT Link training mode */
 #define   DP_LINK_TRAIN_PAT_1_CPT	(0 << 8)
 #define   DP_LINK_TRAIN_PAT_2_CPT	(1 << 8)
@@ -1775,6 +1843,7 @@
 #define   DP_LINK_TRAIN_OFF_CPT		(3 << 8)
 #define   DP_LINK_TRAIN_MASK_CPT	(7 << 8)
 #define   DP_LINK_TRAIN_SHIFT_CPT	8
+#endif /* __linux__ */
 
 /* Signal voltages. These are mostly controlled by the other end */
 #define   DP_VOLTAGE_0_4		(0 << 25)
@@ -1936,10 +2005,14 @@
 /* Display & cursor control */
 
 /* dithering flag on Ironlake */
-#define PIPE_ENABLE_DITHER		(1 << 4)
+#define PIPE_ENABLE_DITHER	(1 << 4)
+
+#ifndef __linux__ /* only used in pre-2.6.34.7 intel_display.c */
 #define PIPE_DITHER_TYPE_MASK		(3 << 2)
 #define PIPE_DITHER_TYPE_SPATIAL	(0 << 2)
 #define PIPE_DITHER_TYPE_ST01		(1 << 2)
+#endif /* !__linux__ */
+
 /* Pipe A */
 #define PIPEADSL		0x70000
 #define PIPEACONF		0x70008
