@@ -103,9 +103,6 @@ struct drm_i915_gem_phys_object {
 };
 
 typedef struct _drm_i915_ring_buffer {
-#if 0
-	int tail_mask;
-#endif /* __linux__ */
 	unsigned long Size;
 	u8 *virtual_start;
 	int head;
@@ -144,6 +141,7 @@ struct drm_i915_master_private {
 
 struct drm_i915_fence_reg {
 	struct drm_gem_object *obj;
+/* 2.6.34.7 revise i915_gem.c to remove the following */
 	struct list_head lru_list;
 };
 
@@ -152,6 +150,7 @@ struct sdvo_device_mapping {
 	u8 slave_addr;
 	u8 dvo_wiring;
 	u8 initialized;
+/* 2.6.34.7 intel_bios.h has another version of ddc_pin */
 	u8 ddc_pin;
 };
 
@@ -193,7 +192,11 @@ struct drm_i915_error_state {
 
 struct drm_i915_display_funcs {
 	void (*dpms)(struct drm_crtc *crtc, int mode);
+#ifdef __linux__
+	bool (*fbc_enabled)(struct drm_crtc *crtc);
+#else
 	bool (*fbc_enabled)(struct drm_device *dev);
+#endif /* __linux__ */
 	void (*enable_fbc)(struct drm_crtc *crtc, unsigned long interval);
 	void (*disable_fbc)(struct drm_device *dev);
 	int (*get_display_clock_speed)(struct drm_device *dev);
@@ -260,7 +263,11 @@ typedef struct drm_i915_private {
 	void __iomem *regs;
 
 /* add a bsd member equivalent ? */
+#ifdef __linux__
+	struct pci_dev *bridge_dev;
+#else
 	DRM_DEVICE_T bridge_dev;
+#endif /* __linux__ */
 	drm_i915_ring_buffer_t ring;
 
 	drm_dma_handle_t *status_page_dmah;
@@ -276,7 +283,6 @@ typedef struct drm_i915_private {
 	struct drm_gem_object *pwrctx;
 
 	struct resource mch_res;
-	int mch_id;
 
 	unsigned int cpp;
 	int back_offset;
@@ -287,7 +293,11 @@ typedef struct drm_i915_private {
 	wait_queue_head_t irq_queue;
 	atomic_t irq_received;
 	/** Protects user_irq_refcount and irq_mask_reg */
+#ifdef __linux__
+	spinlock_t user_irq_lock;
+#else
 	DRM_SPINTYPE user_irq_lock;
+#endif /* __linux__ */
 	/** Refcount for i915_user_irq_get() versus i915_user_irq_put(). */
 	int user_irq_refcount;
 	u32 trace_irq_seqno;
@@ -375,9 +385,6 @@ typedef struct drm_i915_private {
 	u32 saveDSPACNTR;
 	u32 saveDSPBCNTR;
 	u32 saveDSPARB;
-#ifndef __linux__
-	u32 saveRENDERSTANDBY;
-#endif /* __linux__ */
 	u32 saveHWS;
 	u32 savePIPEACONF;
 	u32 savePIPEBCONF;
@@ -472,10 +479,6 @@ typedef struct drm_i915_private {
 	u32 saveFDI_RXA_IMR;
 	u32 saveFDI_RXB_IMR;
 	u32 saveCACHE_MODE_0;
-#ifndef __linux__
-	u32 saveD_STATE;
-	u32 saveCG_2D_DIS;
-#endif /* __linux__ */
 	u32 saveMI_ARB_STATE;
 	u32 saveSWF0[16];
 	u32 saveSWF1[16];
@@ -652,6 +655,7 @@ typedef struct drm_i915_private {
 	struct drm_crtc *plane_to_crtc_mapping[2];
 	struct drm_crtc *pipe_to_crtc_mapping[2];
 	wait_queue_head_t pending_flip_queue;
+	bool flip_pending_is_done;
 
 	/* Reclocking support */
 	bool render_reclock_avail;
@@ -678,16 +682,17 @@ typedef struct drm_i915_private {
 
 	struct drm_mm_node *compressed_fb;
 	struct drm_mm_node *compressed_llb;
+	/* Omitted in 2.6.34.7 */
 	/* list of fbdev register on this device */
 	struct intel_fbdev *fbdev;
 } drm_i915_private_t;
 
 /** driver private structure attached to each drm_gem_object */
 struct drm_i915_gem_object {
-	struct drm_gem_object base;
-#if 0
 	struct drm_gem_object *obj;
-#endif
+#ifndef __linux__ /* Not in Linux 2.6.34.7 */
+	struct drm_gem_object base;
+#endif /* !__linux__ */
 
 	/** Current space allocated to this object in the GTT, if any. */
 	struct drm_mm_node *gtt_space;
@@ -696,6 +701,9 @@ struct drm_i915_gem_object {
 	struct list_head list;
 	/** This object's place on GPU write list */
 	struct list_head gpu_write_list;
+
+	/** This object's place on the fenced object LRU */
+	struct list_head fence_list;
 
 	/**
 	 * This is set if the object is on the active or flushing lists
@@ -789,7 +797,11 @@ struct drm_i915_gem_object {
 	DRM_PAGE_T *pages_legacy;
 };
 
+#ifdef __linux__
+#define to_intel_bo(x) ((struct drm_i915_gem_object *) (x)->driver_private)
+#else /* not in Linux 2.6.34.7 */
 #define to_intel_bo(x) container_of(x, struct drm_i915_gem_object, base)
+#endif /* __linux__ */
 
 /**
  * Request queue structure.
@@ -817,10 +829,6 @@ struct drm_i915_gem_request {
 
 struct drm_i915_file_private {
 	struct {
-#if 0
-		uint32_t last_gem_seqno;
-		uint32_t last_gem_throttle_seqno;
-#endif /* __linux__ */
 		struct list_head request_list;
 	} mm;
 };
@@ -1031,6 +1039,12 @@ void i915_debugfs_cleanup(struct drm_minor *minor);
 extern int i915_save_state(struct drm_device *dev);
 extern int i915_restore_state(struct drm_device *dev);
 
+#if __linux__ /* why redundant? */
+/* i915_suspend.c */
+extern int i915_save_state(struct drm_device *dev);
+extern int i915_restore_state(struct drm_device *dev);
+#endif /* __linux__ */
+
 #ifdef CONFIG_ACPI
 /* i915_opregion.c */
 extern int intel_opregion_init(struct drm_device *dev, int resume);
@@ -1070,12 +1084,17 @@ extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 		LOCK_TEST_WITH_RETURN(dev, file_priv);			\
 } while (0)
 
-#if 0 /* Now defined in drm_porting_layer.h */
-#if defined(__FreeBSD__) || defined(__DragonFly__)
-typedef boolean_t bool;
-#endif
-#endif
-
+#ifdef __linux__
+#define I915_READ(reg)          readl(dev_priv->regs + (reg))
+#define I915_WRITE(reg, val)     writel(val, dev_priv->regs + (reg))
+#define I915_READ16(reg)	readw(dev_priv->regs + (reg))
+#define I915_WRITE16(reg, val)	writel(val, dev_priv->regs + (reg))
+#define I915_READ8(reg)		readb(dev_priv->regs + (reg))
+#define I915_WRITE8(reg, val)	writeb(val, dev_priv->regs + (reg))
+#define I915_WRITE64(reg, val)	writeq(val, dev_priv->regs + (reg))
+#define I915_READ64(reg)	readq(dev_priv->regs + (reg))
+#define POSTING_READ(reg)	(void)I915_READ(reg)
+#else /* !__linux__ */
 #define I915_READ(reg)		DRM_READ32(dev_priv->mmio_map, (reg))
 #define I915_WRITE(reg,val)	DRM_WRITE32(dev_priv->mmio_map, (reg), (val))
 #define I915_READ16(reg)	DRM_READ16(dev_priv->mmio_map, (reg))
@@ -1085,6 +1104,7 @@ typedef boolean_t bool;
 #define I915_WRITE64(reg,val)	DRM_WRITE64(dev_priv->mmio_map, (reg), (val))
 #define I915_READ64(reg)	DRM_READ64(dev_priv->mmio_map, (reg))
 #define POSTING_READ(reg)	(void)I915_READ(reg)
+#endif /* __linux__ */
 
 #define I915_VERBOSE 0
 
@@ -1176,8 +1196,8 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 
 #define INTEL_INFO(dev)	(((struct drm_i915_private *) (dev)->dev_private)->info)
 
-#define IS_I830(dev) ((dev)->pci_device == 0x3577)
-#define IS_845G(dev) ((dev)->pci_device == 0x2562)
+#define IS_I830(dev)		((dev)->pci_device == 0x3577)
+#define IS_845G(dev)		((dev)->pci_device == 0x2562)
 
 #ifdef DRM_NEWER_PCIID
 #define IS_I85X(dev)		(INTEL_INFO(dev)->is_i85x)
@@ -1185,11 +1205,7 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 #define IS_I85X(dev) ((dev)->pci_device == 0x3582)
 #endif /* DRM_NEWER_PCIID */
 
-#if 0 /* does not appear to be used anywhere */
-#define IS_I855(dev) ((dev)->pci_device == 0x3582)
-#endif /* !__linux__ */
-
-#define IS_I865G(dev) ((dev)->pci_device == 0x2572)
+#define IS_I865G(dev)		((dev)->pci_device == 0x2572)
 #define IS_GEN2(dev)		(INTEL_INFO(dev)->is_i8xx)
 
 #ifdef DRM_NEWER_PCIID
