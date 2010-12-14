@@ -4086,7 +4086,6 @@ static struct drm_display_mode load_detect_mode = {
 };
 
 struct drm_crtc *intel_get_load_detect_pipe(struct intel_encoder *intel_encoder,
-					    struct drm_connector *connector,
 					    struct drm_display_mode *mode,
 					    int *dpms_mode)
 {
@@ -4145,7 +4144,7 @@ struct drm_crtc *intel_get_load_detect_pipe(struct intel_encoder *intel_encoder,
 	}
 
 	encoder->crtc = crtc;
-	connector->encoder = encoder;
+	intel_encoder->base.encoder = encoder;
 	intel_encoder->load_detect_temp = true;
 
 	intel_crtc = to_intel_crtc(crtc);
@@ -4171,8 +4170,7 @@ struct drm_crtc *intel_get_load_detect_pipe(struct intel_encoder *intel_encoder,
 	return crtc;
 }
 
-void intel_release_load_detect_pipe(struct intel_encoder *intel_encoder,
-				    struct drm_connector *connector, int dpms_mode)
+void intel_release_load_detect_pipe(struct intel_encoder *intel_encoder, int dpms_mode)
 {
 	struct drm_encoder *encoder = &intel_encoder->enc;
 	struct drm_device *dev = encoder->dev;
@@ -4182,7 +4180,7 @@ void intel_release_load_detect_pipe(struct intel_encoder *intel_encoder,
 
 	if (intel_encoder->load_detect_temp) {
 		encoder->crtc = NULL;
-		connector->encoder = NULL;
+		intel_encoder->base.encoder = NULL;
 		intel_encoder->load_detect_temp = false;
 		crtc->enabled = drm_helper_crtc_in_use(crtc);
 		drm_helper_disable_unused_functions(dev);

@@ -1340,9 +1340,9 @@ intel_tv_detect(struct drm_connector *connector)
 {
 	struct drm_crtc *crtc;
 	struct drm_display_mode mode;
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 	struct intel_tv_priv *tv_priv = intel_encoder->dev_priv;
+	struct drm_encoder *encoder = &intel_encoder->enc;
 	int dpms_mode;
 	int type = tv_priv->type;
 
@@ -1352,12 +1352,10 @@ intel_tv_detect(struct drm_connector *connector)
 	if (encoder->crtc && encoder->crtc->enabled) {
 		type = intel_tv_detect_type(encoder->crtc, intel_encoder);
 	} else {
-		crtc = intel_get_load_detect_pipe(intel_encoder, connector,
-						  &mode, &dpms_mode);
+		crtc = intel_get_load_detect_pipe(intel_encoder, &mode, &dpms_mode);
 		if (crtc) {
 			type = intel_tv_detect_type(crtc, intel_encoder);
-			intel_release_load_detect_pipe(intel_encoder, connector,
-						       dpms_mode);
+			intel_release_load_detect_pipe(intel_encoder, dpms_mode);
 		} else
 			type = -1;
 	}

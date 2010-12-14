@@ -216,15 +216,12 @@ int intel_get_pipe_from_crtc_id(struct drm_device *dev, void *data,
 extern void intel_wait_for_vblank(struct drm_device *dev);
 extern struct drm_crtc *intel_get_crtc_from_pipe(struct drm_device *dev, int pipe);
 
-#ifdef __linux__ /* legacy revised in Linux 2.6.34.7 */
-
 extern struct drm_crtc *intel_get_load_detect_pipe(struct intel_encoder *intel_encoder,
 						   struct drm_display_mode *mode,
 						   int *dpms_mode);
 extern void intel_release_load_detect_pipe(struct intel_encoder *intel_encoder,
 					   int dpms_mode);
-
-#else
+#if 0
 
 extern struct drm_crtc *intel_get_load_detect_pipe(struct intel_encoder *intel_encoder,
 						   struct drm_connector *connector,
