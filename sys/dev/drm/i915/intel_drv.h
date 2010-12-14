@@ -175,9 +175,8 @@ struct i2c_adapter *intel_i2c_create(struct drm_device *dev, const u32 reg,
 				     const char *name);
 void intel_i2c_destroy(struct i2c_adapter *adapter);
 
-#ifdef __linux__ /* revised in Linux 2.6.34.7 */
 int intel_ddc_get_modes(struct intel_encoder *intel_encoder);
-#else
+#if 0
 int intel_ddc_get_modes(struct drm_connector *c, struct i2c_adapter *adapter);
 #endif /* __linux__ */
 

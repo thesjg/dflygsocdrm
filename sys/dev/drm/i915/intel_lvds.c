@@ -572,13 +572,12 @@ static enum drm_connector_status intel_lvds_detect(struct drm_connector *connect
 static int intel_lvds_get_modes(struct drm_connector *connector)
 {
 	struct drm_device *dev = connector->dev;
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret = 0;
 
 	if (dev_priv->lvds_edid_good) {
-		ret = intel_ddc_get_modes(connector, intel_encoder->ddc_bus);
+		ret = intel_ddc_get_modes(intel_encoder);
 
 		if (ret)
 			return ret;
@@ -922,7 +921,6 @@ void intel_lvds_init(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct intel_encoder *intel_encoder;
-	struct intel_connector *intel_connector;
 	struct drm_connector *connector;
 	struct drm_encoder *encoder;
 	struct drm_display_mode *scan; /* *modes, *bios_mode; */
@@ -958,27 +956,19 @@ void intel_lvds_init(struct drm_device *dev)
 		return;
 	}
 
-	intel_connector = malloc(sizeof(struct intel_connector), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-	if (!intel_connector) {
-		free(intel_encoder, DRM_MEM_DRIVER);
-		return;
-	}
-
-	connector = &intel_connector->base;
+	connector = &intel_encoder->base;
 	encoder = &intel_encoder->enc;
-	drm_connector_init(dev, &intel_connector->base, &intel_lvds_connector_funcs,
+	drm_connector_init(dev, &intel_encoder->base, &intel_lvds_connector_funcs,
 			   DRM_MODE_CONNECTOR_LVDS);
 
 	drm_encoder_init(dev, &intel_encoder->enc, &intel_lvds_enc_funcs,
 			 DRM_MODE_ENCODER_LVDS);
 
-	drm_mode_connector_attach_encoder(&intel_connector->base, &intel_encoder->enc);
+	drm_mode_connector_attach_encoder(&intel_encoder->base, &intel_encoder->enc);
 	intel_encoder->type = INTEL_OUTPUT_LVDS;
 
 	intel_encoder->clone_mask = (1 << INTEL_LVDS_CLONE_BIT);
 	intel_encoder->crtc_mask = (1 << 1);
-	if (IS_I965G(dev))
-		intel_encoder->crtc_mask |= (1 << 0);
 	drm_encoder_helper_add(encoder, &intel_lvds_helper_funcs);
 	drm_connector_helper_add(connector, &intel_lvds_connector_helper_funcs);
 	connector->display_info.subpixel_order = SubPixelHorizontalRGB;
@@ -993,7 +983,7 @@ void intel_lvds_init(struct drm_device *dev)
 	 * the initial panel fitting mode will be FULL_SCREEN.
 	 */
 
-	drm_connector_attach_property(&intel_connector->base,
+	drm_connector_attach_property(&intel_encoder->base,
 				      dev->mode_config.scaling_mode_property,
 				      DRM_MODE_SCALE_FULLSCREEN);
 	lvds_priv->fitting_mode = DRM_MODE_SCALE_FULLSCREEN;
@@ -1021,7 +1011,7 @@ void intel_lvds_init(struct drm_device *dev)
 	 */
 	dev_priv->lvds_edid_good = true;
 
-	if (!intel_ddc_get_modes(connector, intel_encoder->ddc_bus))
+	if (!intel_ddc_get_modes(intel_encoder))
 		dev_priv->lvds_edid_good = false;
 
 	list_for_each_entry(scan, &connector->probed_modes, head) {
@@ -1107,5 +1097,4 @@ failed:
 	drm_connector_cleanup(connector);
 	drm_encoder_cleanup(encoder);
 	free(intel_encoder, DRM_MEM_DRIVER);
-	free(intel_connector, DRM_MEM_DRIVER);
 }

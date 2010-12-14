@@ -160,14 +160,13 @@ intel_hdmi_detect(struct drm_connector *connector)
 
 static int intel_hdmi_get_modes(struct drm_connector *connector)
 {
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 
 	/* We should parse the EDID data and find out if it's an HDMI sink so
 	 * we can send audio to it.
 	 */
 
-	return intel_ddc_get_modes(connector, intel_encoder->ddc_bus);
+	return intel_ddc_get_modes(intel_encoder);
 }
 
 static void intel_hdmi_destroy(struct drm_connector *connector)

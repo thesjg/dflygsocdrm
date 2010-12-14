@@ -226,8 +226,7 @@ static enum drm_connector_status intel_dvo_detect(struct drm_connector *connecto
 
 static int intel_dvo_get_modes(struct drm_connector *connector)
 {
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 	struct intel_dvo_device *dvo = intel_encoder->dev_priv;
 
 	/* We should probably have an i2c driver get_modes function for those
@@ -235,7 +234,7 @@ static int intel_dvo_get_modes(struct drm_connector *connector)
 	 * (TV-out, for example), but for now with just TMDS and LVDS,
 	 * that's not the case.
 	 */
-	intel_ddc_get_modes(connector, intel_encoder->ddc_bus);
+	intel_ddc_get_modes(intel_encoder);
 	if (!list_empty(&connector->probed_modes))
 		return 1;
 

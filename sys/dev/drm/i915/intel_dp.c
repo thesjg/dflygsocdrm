@@ -1270,16 +1270,15 @@ intel_dp_detect(struct drm_connector *connector)
 
 static int intel_dp_get_modes(struct drm_connector *connector)
 {
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
-	struct drm_device *dev = intel_encoder->enc.dev;
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
+	struct drm_device *dev = intel_encoder->base.dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	int ret;
 
 	/* We should parse the EDID data and find out if it has an audio sink
 	 */
 
-	ret = intel_ddc_get_modes(connector, intel_encoder->ddc_bus);
+	ret = intel_ddc_get_modes(intel_encoder);
 	if (ret)
 		return ret;
 

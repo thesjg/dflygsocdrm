@@ -1626,13 +1626,12 @@ static enum drm_connector_status intel_sdvo_detect(struct drm_connector *connect
 
 static void intel_sdvo_get_ddc_modes(struct drm_connector *connector)
 {
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 	struct intel_sdvo_priv *sdvo_priv = intel_encoder->dev_priv;
 	int num_modes;
 
 	/* set the bus switch and get the modes */
-	num_modes = intel_ddc_get_modes(connector, intel_encoder->ddc_bus);
+	num_modes = intel_ddc_get_modes(intel_encoder);
 
 	/*
 	 * Mac mini hack.  On this device, the DVI-I connector shares one DDC
@@ -1642,10 +1641,17 @@ static void intel_sdvo_get_ddc_modes(struct drm_connector *connector)
 	 */
 	if (num_modes == 0 &&
 	    sdvo_priv->analog_ddc_bus &&
-	    !intel_analog_is_connected(connector->dev)) {
+	    !intel_analog_is_connected(intel_encoder->base.dev)) {
+		struct i2c_adapter *digital_ddc_bus;
+
 		/* Switch to the analog ddc bus and try that
 		 */
-		(void) intel_ddc_get_modes(connector, sdvo_priv->analog_ddc_bus);
+		digital_ddc_bus = intel_encoder->ddc_bus;
+		intel_encoder->ddc_bus = sdvo_priv->analog_ddc_bus;
+
+		(void) intel_ddc_get_modes(intel_encoder);
+
+		intel_encoder->ddc_bus = digital_ddc_bus;
 	}
 }
 
@@ -1759,8 +1765,7 @@ static void intel_sdvo_get_tv_modes(struct drm_connector *connector)
 
 static void intel_sdvo_get_lvds_modes(struct drm_connector *connector)
 {
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 	struct drm_i915_private *dev_priv = connector->dev->dev_private;
 	struct intel_sdvo_priv *sdvo_priv = intel_encoder->dev_priv;
 	struct drm_display_mode *newmode;
@@ -1770,7 +1775,7 @@ static void intel_sdvo_get_lvds_modes(struct drm_connector *connector)
 	 * Assume that the preferred modes are
 	 * arranged in priority order.
 	 */
-	intel_ddc_get_modes(connector, intel_encoder->ddc_bus);
+	intel_ddc_get_modes(intel_encoder);
 	if (list_empty(&connector->probed_modes) == false)
 		goto end;
 
