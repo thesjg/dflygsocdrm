@@ -122,7 +122,7 @@ struct detailed_non_pixel {
 		struct detailed_data_string str;
 		struct detailed_data_monitor_range range;
 		struct detailed_data_wpindex color;
-		struct std_timing timings[6];
+		struct std_timing timings[5];
 		struct cvt_timing cvt[4];
 	} data;
 } __attribute__((packed));
@@ -202,5 +202,8 @@ struct edid {
 } __attribute__((packed));
 
 #define EDID_PRODUCT_ID(e) ((e)->prod_code[0] | ((e)->prod_code[1] << 8))
+
+/* define the number of Extension EDID block */
+#define DRM_MAX_EDID_EXT_NUM 4
 
 #endif /* __DRM_EDID_H__ */

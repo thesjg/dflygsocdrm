@@ -273,6 +273,8 @@ struct drm_framebuffer {
 	unsigned int depth;
 	int bits_per_pixel;
 	int flags;
+	struct fb_info *fbdev;
+	u32 pseudo_palette[17];
 	struct list_head filp_head;
 	/* if you are using the helper */
 	void *helper_private;
@@ -369,6 +371,9 @@ struct drm_crtc_funcs {
  * @enabled: is this CRTC enabled?
  * @x: x position on screen
  * @y: y position on screen
+ * @desired_mode: new desired mode
+ * @desired_x: desired x for desired_mode
+ * @desired_y: desired y for desired_mode
  * @funcs: CRTC control functions
  *
  * Each CRTC may have one or more connectors associated with it.  This structure
@@ -388,6 +393,8 @@ struct drm_crtc {
 	struct drm_display_mode mode;
 
 	int x, y;
+	struct drm_display_mode *desired_mode;
+	int desired_x, desired_y;
 	const struct drm_crtc_funcs *funcs;
 
 	/* CRTC gamma size for reporting to userspace */
@@ -527,6 +534,7 @@ struct drm_connector {
 	uint32_t encoder_ids[DRM_CONNECTOR_MAX_ENCODER];
 	uint32_t force_encoder_id;
 	struct drm_encoder *encoder; /* currently active encoder */
+	void *fb_helper_private;
 };
 
 /**
@@ -550,12 +558,19 @@ struct drm_mode_set {
 	struct drm_connector **connectors;
 	size_t num_connectors;
 };
-
 /**
  * struct drm_mode_config_funcs - configure CRTCs for a given screen layout
+ * @resize: adjust CRTCs as necessary for the proposed layout
+ *
+ * Currently only a resize hook is available.  DRM will call back into the
+ * driver with a new screen width and height.  If the driver can't support
+ * the proposed size, it can return false.  Otherwise it should adjust
+ * the CRTC<->connector mappings as needed and update its view of the screen.
  */
 struct drm_mode_config_funcs {
 	struct drm_framebuffer *(*fb_create)(struct drm_device *dev, struct drm_file *file_priv, struct drm_mode_fb_cmd *mode_cmd);
+	int (*fb_changed)(struct drm_device *dev);
+/* removed in Linux 2.6.34.7 */
 	void (*output_poll_changed)(struct drm_device *dev);
 };
 
@@ -588,6 +603,9 @@ struct drm_mode_config {
 	struct list_head crtc_list;
 
 	struct list_head property_list;
+
+	/* in-kernel framebuffers - hung of filp_head in drm_framebuffer */
+	struct list_head fb_kernel_list;
 
 	int min_width, min_height;
 	int max_width, max_height;
@@ -666,6 +684,8 @@ extern void drm_fb_release(struct drm_file *file_priv);
 extern int drm_mode_group_init_legacy_group(struct drm_device *dev, struct drm_mode_group *group);
 extern struct edid *drm_get_edid(struct drm_connector *connector,
 				 struct i2c_adapter *adapter);
+extern int drm_do_probe_ddc_edid(struct i2c_adapter *adapter,
+				 unsigned char *buf, int len);
 extern int drm_add_edid_modes(struct drm_connector *connector, struct edid *edid);
 extern void drm_mode_probed_add(struct drm_connector *connector, struct drm_display_mode *mode);
 extern void drm_mode_remove(struct drm_connector *connector, struct drm_display_mode *mode);
