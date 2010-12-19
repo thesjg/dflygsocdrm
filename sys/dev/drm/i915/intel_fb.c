@@ -53,17 +53,29 @@ struct intel_fbdev {
 	struct drm_display_mode *our_mode;
 };
 
+struct intelfb_par {
+	struct drm_fb_helper helper;
+	struct intel_framebuffer *intel_fb;
+	struct drm_display_mode *our_mode;
+};
+
 #ifdef __linux__
 static struct fb_ops intelfb_ops = {
 	.owner = THIS_MODULE,
 	.fb_check_var = drm_fb_helper_check_var,
 	.fb_set_par = drm_fb_helper_set_par,
+	.fb_setcolreg = drm_fb_helper_setcolreg,
 	.fb_fillrect = cfb_fillrect,
 	.fb_copyarea = cfb_copyarea,
 	.fb_imageblit = cfb_imageblit,
 	.fb_pan_display = drm_fb_helper_pan_display,
 	.fb_blank = drm_fb_helper_blank,
 	.fb_setcmap = drm_fb_helper_setcmap,
+};
+
+static struct drm_fb_helper_funcs intel_fb_helper_funcs = {
+	.gamma_set = intel_crtc_fb_gamma_set,
+	.gamma_get = intel_crtc_fb_gamma_get,
 };
 #endif /* __linux__ */
 
@@ -240,7 +252,9 @@ int intel_fbdev_destroy(struct drm_device *dev,
 #endif /* __linux__ */
 	}
 
+#if 0 /* UNIMPLEMENTED synch drm_fb_helper */
 	drm_fb_helper_fini(&ifbdev->helper);
+#endif
 
 	drm_framebuffer_cleanup(&ifb->base);
 	if (ifb->obj)
@@ -261,11 +275,13 @@ int intel_fbdev_init(struct drm_device *dev)
 	dev_priv->fbdev = ifbdev;
 	ifbdev->helper.funcs = &intel_fb_helper_funcs;
 
+#if 0 /* UNIMPLEMENTED synch drm_fb_helper */
 	drm_fb_helper_init(dev, &ifbdev->helper, 2,
 			   INTELFB_CONN_LIMIT);
 
 	drm_fb_helper_single_add_all_connectors(&ifbdev->helper);
 	drm_fb_helper_initial_config(&ifbdev->helper, 32);
+#endif
 	return 0;
 }
 
@@ -284,5 +300,7 @@ MODULE_LICENSE("GPL and additional rights");
 void intel_fb_output_poll_changed(struct drm_device *dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
+#if 0 /* UNIMPLEMENTED synch drm_fb_helper */
 	drm_fb_helper_hotplug_event(&dev_priv->fbdev->helper);
+#endif
 }

@@ -3145,6 +3145,16 @@ struct DRM_FB_PIXMAP {
 	uint32_t scan_align;
 };
 
+/*file drm_fb_helper.h, function drm_fb_helper_setcmap() */
+struct fb_cmap {
+	uint16_t *red;
+	uint16_t *green;
+	uint16_t *blue;
+	uint16_t *transp;
+	int start;
+	int len;
+};
+
 /*file drm_fb_helper.h, function drm_fb_helper_blank() */
 struct fb_info {
 	struct fb_var_screeninfo var;
@@ -3158,16 +3168,8 @@ struct fb_info {
 	void *screen_base;
 	unsigned long screen_size;
 	struct DRM_FB_PIXMAP pixmap;
-};
-
-/*file drm_fb_helper.h, function drm_fb_helper_setcmap() */
-struct fb_cmap {
-	uint16_t *red;
-	uint16_t *green;
-	uint16_t *blue;
-	uint16_t *transp;
-	int start;
-	int len;
+/* file drm_fb_helper.h and drm_fb_helper.c */
+	struct fb_cmap cmap;
 };
 
 /* file drm_fb_helper.c, function drm_fb_helper_parse_command_line() */
@@ -3194,6 +3196,20 @@ unregister_framebuffer(struct fb_info *info) {
 static __inline__ struct fb_info *
 framebuffer_alloc(unsigned long isZero, struct device *device) {
 	return malloc(sizeof(struct fb_info), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+}
+
+/* file drm_fb_helper.c, function drm_fb_helper_single_fb_probe */
+static __inline__ int
+fb_alloc_cmap(
+	struct fb_cmap *cmap,
+	uint32_t gamma_size,
+	uint32_t flags
+) {
+	return 0;
+}
+
+static __inline__ void
+fb_dealloc_cmap(struct fb_cmap *cmap) {
 }
 
 /*
@@ -3449,7 +3465,7 @@ wait_event_interruptible_timeout(
 }
 
 /**********************************************************
- * ACPI                                                   *
+ * NOTIFIER                                               *
  **********************************************************/
 
 /* file i915_opregion.c, function intel_opregion_video_event */
@@ -3462,6 +3478,33 @@ wait_event_interruptible_timeout(
 struct notifier_block {
 	int (*notifier_call)(struct notifier_block *nb, unsigned long val, void *data);
 };
+
+/* file drm_fp_helper.c, function drm_fb_helper_single_fb_probe */
+struct atomic_notifier_head {
+	int placeholder;
+};
+
+extern struct atomic_notifier_head panic_notifier_list;
+
+static __inline__ void
+atomic_notifier_chain_register(
+	struct atomic_notifier_head *panic_notifier_list,
+	struct notifier_block *paniced
+) {
+	;
+}
+
+static __inline__ void
+atomic_notifier_chain_unregister(
+	struct atomic_notifier_head *panic_notifier_list,
+	struct notifier_block *paniced
+) {
+	;
+}
+
+/**********************************************************
+ * ACPI                                                   *
+ **********************************************************/
 
 static __inline__ int
 register_acpi_notifier(struct notifier_block *nb) {

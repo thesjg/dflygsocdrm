@@ -334,7 +334,9 @@ int radeon_parse_options(char *options)
 
 void radeon_fb_output_poll_changed(struct radeon_device *rdev)
 {
+#if 0 /* UNIMPLEMENTED drm_fb_helper.c synch */
 	drm_fb_helper_hotplug_event(&rdev->mode_info.rfbdev->helper);
+#endif
 }
 
 static int radeon_fbdev_destroy(struct drm_device *dev, struct radeon_fbdev *rfbdev)
