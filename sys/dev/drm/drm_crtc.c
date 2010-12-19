@@ -507,6 +507,7 @@ void drm_connector_cleanup(struct drm_connector *connector)
 	list_for_each_entry_safe(mode, t, &connector->user_modes, head)
 		drm_mode_remove(connector, mode);
 
+	free(connector->fb_helper_private, DRM_MEM_DRIVER);
 	mutex_lock(&dev->mode_config.mutex);
 	drm_mode_object_put(dev, &connector->base);
 	list_del(&connector->head);
@@ -878,6 +879,7 @@ void drm_mode_config_init(struct drm_device *dev)
 	mutex_init(&dev->mode_config.mutex);
 	mutex_init(&dev->mode_config.idr_mutex);
 	INIT_LIST_HEAD(&dev->mode_config.fb_list);
+	INIT_LIST_HEAD(&dev->mode_config.fb_kernel_list);
 	INIT_LIST_HEAD(&dev->mode_config.crtc_list);
 	INIT_LIST_HEAD(&dev->mode_config.connector_list);
 	INIT_LIST_HEAD(&dev->mode_config.encoder_list);
@@ -2430,7 +2432,7 @@ int drm_mode_connector_update_edid_property(struct drm_connector *connector,
 					    struct edid *edid)
 {
 	struct drm_device *dev = connector->dev;
-	int ret = 0, size;
+	int ret = 0;
 
 	if (connector->edid_blob_ptr)
 		drm_property_destroy_blob(dev, connector->edid_blob_ptr);
@@ -2442,9 +2444,7 @@ int drm_mode_connector_update_edid_property(struct drm_connector *connector,
 		return ret;
 	}
 
-	size = EDID_LENGTH * (1 + edid->extensions);
-	connector->edid_blob_ptr = drm_property_create_blob(connector->dev,
-							    size, edid);
+	connector->edid_blob_ptr = drm_property_create_blob(connector->dev, 128, edid);
 
 	ret = drm_connector_property_set_value(connector,
 					       dev->mode_config.edid_property,
@@ -2580,9 +2580,7 @@ int drm_mode_gamma_set_ioctl(struct drm_device *dev,
 	struct drm_mode_crtc_lut *crtc_lut = data;
 	struct drm_mode_object *obj;
 	struct drm_crtc *crtc;
-#ifdef __linux__ /* UNIMPLEMENTED */
 	void *r_base, *g_base, *b_base;
-#endif
 	int size;
 	int ret = 0;
 
@@ -2601,33 +2599,25 @@ int drm_mode_gamma_set_ioctl(struct drm_device *dev,
 	}
 
 	size = crtc_lut->gamma_size * (sizeof(uint16_t));
-#ifdef __linux__ /* UNIMPLEMENTED */
 	r_base = crtc->gamma_store;
 	if (copy_from_user(r_base, (void __user *)(unsigned long)crtc_lut->red, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
-#endif
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	g_base = r_base + size;
 	if (copy_from_user(g_base, (void __user *)(unsigned long)crtc_lut->green, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
-#endif
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	b_base = g_base + size;
 	if (copy_from_user(b_base, (void __user *)(unsigned long)crtc_lut->blue, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
-#endif
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	crtc->funcs->gamma_set(crtc, r_base, g_base, b_base, crtc->gamma_size);
-#endif
 
 out:
 	mutex_unlock(&dev->mode_config.mutex);
@@ -2641,9 +2631,7 @@ int drm_mode_gamma_get_ioctl(struct drm_device *dev,
 	struct drm_mode_crtc_lut *crtc_lut = data;
 	struct drm_mode_object *obj;
 	struct drm_crtc *crtc;
-#ifdef __linux__ /* UNIMPLEMENTED */
 	void *r_base, *g_base, *b_base;
-#endif
 	int size;
 	int ret = 0;
 
@@ -2662,29 +2650,23 @@ int drm_mode_gamma_get_ioctl(struct drm_device *dev,
 	}
 
 	size = crtc_lut->gamma_size * (sizeof(uint16_t));
-#ifdef __linux__ /* UNIMPLEMENTED */
 	r_base = crtc->gamma_store;
 	if (copy_to_user((void __user *)(unsigned long)crtc_lut->red, r_base, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
-#endif
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	g_base = r_base + size;
 	if (copy_to_user((void __user *)(unsigned long)crtc_lut->green, g_base, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
-#endif
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	b_base = g_base + size;
 	if (copy_to_user((void __user *)(unsigned long)crtc_lut->blue, b_base, size)) {
 		ret = -EFAULT;
 		goto out;
 	}
-#endif
 out:
 	mutex_unlock(&dev->mode_config.mutex);
 	return ret;
