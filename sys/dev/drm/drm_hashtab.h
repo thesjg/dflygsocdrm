@@ -60,7 +60,7 @@ struct drm_open_hash {
 #ifndef __linux__
 	LIST_HEAD(drm_hash_item_list, drm_hash_item) *table;
 #endif
-	unsigned int  size;
+	unsigned int size;
 	unsigned int order;
 #ifdef __linux__
 	unsigned int fill;

@@ -360,7 +360,7 @@ typedef int drm_ioctl_compat_t(struct file *filp, unsigned int cmd,
 #endif
 
 #define DRM_AUTH	0x1
-#define DRM_MASTER	0x2
+#define	DRM_MASTER	0x2
 #define DRM_ROOT_ONLY	0x4
 #define DRM_CONTROL_ALLOW 0x8
 #define DRM_UNLOCKED	0x10
@@ -597,8 +597,8 @@ struct drm_device_dma {
 struct drm_agp_mem {
 	unsigned long handle;		/**< handle */
 	DRM_AGP_MEM *memory;
-	unsigned long      bound; /* address */
-	int                pages;
+	unsigned long bound;		/**< address */
+	int pages;
 	struct list_head head;
 };
 
@@ -708,9 +708,9 @@ struct drm_ctx_list {
 #define DRM_ATI_GART_MAIN 1
 #define DRM_ATI_GART_FB   2
 
-#define DRM_ATI_GART_PCI  1
+#define DRM_ATI_GART_PCI 1
 #define DRM_ATI_GART_PCIE 2
-#define DRM_ATI_GART_IGP  3
+#define DRM_ATI_GART_IGP 3
 
 struct drm_ati_pcigart_info {
 	int gart_table_location;
@@ -791,11 +791,7 @@ struct drm_gem_object {
 	void *driver_private;
 };
 
-#ifdef __linux__
 #include "drm_crtc.h"
-#else
-#include "drm_crtc.h"
-#endif
 
 /* per-master structure */
 struct drm_master {
@@ -1049,7 +1045,8 @@ struct drm_pending_vblank_event {
 };
 
 /** 
- * DRM device functions structure
+ * DRM device structure. This structure represent a complete card that
+ * may contain multiple heads.
  */
 struct drm_device {
 	struct list_head driver_item;	/**< list of devices per driver */
@@ -1602,8 +1599,6 @@ extern void drm_core_reclaim_buffers(struct drm_device *dev,
 				     struct drm_file *filp);
 
 /* IRQ support (drm_irq.h) */
-/* shared */
-/* IRQ support (drm_irq.c) */
 extern int drm_control(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 extern irqreturn_t drm_irq_handler(DRM_IRQ_ARGS);
@@ -1621,15 +1616,13 @@ extern u32 drm_vblank_count(struct drm_device *dev, int crtc);
 extern void drm_handle_vblank(struct drm_device *dev, int crtc);
 extern int drm_vblank_get(struct drm_device *dev, int crtc);
 extern void drm_vblank_put(struct drm_device *dev, int crtc);
-extern void drm_vblank_cleanup(struct drm_device *dev);
-extern int drm_modeset_ctl(struct drm_device *dev, void *data,
-			   struct drm_file *file_priv);
-
-/* new */
 extern void drm_vblank_off(struct drm_device *dev, int crtc);
+extern void drm_vblank_cleanup(struct drm_device *dev);
 /* Modesetting support */
 extern void drm_vblank_pre_modeset(struct drm_device *dev, int crtc);
 extern void drm_vblank_post_modeset(struct drm_device *dev, int crtc);
+extern int drm_modeset_ctl(struct drm_device *dev, void *data,
+			   struct drm_file *file_priv);
 
 				/* AGP/GART support (drm_agpsupport.h) */
 extern struct drm_agp_head *drm_agp_init(struct drm_device *dev);
@@ -1689,7 +1682,9 @@ extern struct class *drm_class;
 extern struct proc_dir_entry *drm_proc_root;
 extern struct dentry *drm_debugfs_root;
 
+#ifndef __linux__
 extern int drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
+#endif /* __linux__ */
 
 extern struct idr drm_minors_idr;
 
@@ -1714,10 +1709,10 @@ extern int drm_debugfs_cleanup(struct drm_minor *minor);
 				/* Info file support */
 extern int drm_name_info(struct seq_file *m, void *data);
 extern int drm_vm_info(struct seq_file *m, void *data);
+extern int drm_queues_info(struct seq_file *m, void *data);
 extern int drm_bufs_info(struct seq_file *m, void *data);
 extern int drm_vblank_info(struct seq_file *m, void *data);
 extern int drm_clients_info(struct seq_file *m, void* data);
-extern int drm_queues_info(struct seq_file *m, void *data);
 extern int drm_gem_name_info(struct seq_file *m, void *data);
 extern int drm_gem_object_info(struct seq_file *m, void* data);
 
@@ -1726,8 +1721,6 @@ extern int drm_vma_info(struct seq_file *m, void *data);
 #endif
 
 				/* Scatter Gather Support (drm_scatter.h) */
-/* shared */
-/* Scatter Gather Support (drm_scatter.c) */
 extern void drm_sg_cleanup(struct drm_sg_mem * entry);
 extern int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
@@ -1736,21 +1729,15 @@ extern int drm_sg_free(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 
 			       /* ATI PCIGART support (ati_pcigart.h) */
-/* shared */
-/* ATI PCIGART support (ati_pcigart.c) */
 extern int drm_ati_pcigart_init(struct drm_device *dev,
 				struct drm_ati_pcigart_info * gart_info);
 extern int drm_ati_pcigart_cleanup(struct drm_device *dev,
 				   struct drm_ati_pcigart_info * gart_info);
+
 extern drm_dma_handle_t *drm_pci_alloc(struct drm_device *dev, size_t size,
 				       size_t align);
-
-/* consistent PCI memory functions (drm_pci.c) */
-extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
-
-/* new */
-
 extern void __drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
+extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 
 			       /* sysfs support (drm_sysfs.c) */
 struct drm_sysfs_class;
@@ -1863,47 +1850,6 @@ extern int drm_sysctl_cleanup(struct drm_minor *minor);
 /* DMA support (drm_dma.c) */
 int	drm_dma(struct drm_device *dev, void *data, struct drm_file *file_priv);
 
-#if 0
-/* Inline replacements for drm_alloc and friends */
-static __inline__ void *
-drm_alloc(size_t size, struct malloc_type *area)
-{
-	return malloc(size, area, M_NOWAIT);
-}
-
-static __inline__ void *
-drm_calloc(size_t nmemb, size_t size, struct malloc_type *area)
-{
-	return malloc(size * nmemb, area, M_NOWAIT | M_ZERO);
-}
-
-static __inline__ void
-drm_free(void *pt, size_t size, struct malloc_type *area)
-{
-	free(pt, area);
-}
-#endif
-
-#if 0
-/* Inline replacements for DRM_IOREMAP macros */
-static __inline__ void
-drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev)
-{
-	map->handle = drm_ioremap_wc(dev, map);
-}
-static __inline__ void
-drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
-{
-	map->handle = drm_ioremap(dev, map);
-}
-static __inline__ void
-drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
-{
-	if ( map->handle && map->size )
-		drm_ioremapfree(map);
-}
-#endif
-
 #ifdef DRM_NEWER_USER_TOKEN
 
 static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
@@ -1930,7 +1876,7 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 
 #endif
 
-static __inline__ void drm_core_dropmap(struct drm_map *map)
+static __inline__ void drm_core_dropmap(struct drm_local_map *map)
 {
 }
 
