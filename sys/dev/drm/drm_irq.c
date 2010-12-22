@@ -223,6 +223,27 @@ err:
 	drm_vblank_cleanup(dev);
 	return ret;
 }
+EXPORT_SYMBOL(drm_vblank_init);
+
+static void drm_irq_vgaarb_nokms(void *cookie, bool state)
+{
+	struct drm_device *dev = cookie;
+
+	if (dev->driver->vgaarb_irq) {
+		dev->driver->vgaarb_irq(dev, state);
+		return;
+	}
+
+	if (!dev->irq_enabled)
+		return;
+
+	if (state)
+		dev->driver->irq_uninstall(dev);
+	else {
+		dev->driver->irq_preinstall(dev);
+		dev->driver->irq_postinstall(dev);
+	}
+}
 
 /**
  * Install IRQ handler.
@@ -608,6 +629,67 @@ out:
 	return ret;
 }
 
+static void destroy_event(struct drm_pending_event *e) {
+	free(e, DRM_MEM_DRIVER);
+}
+
+static int drm_queue_vblank_event(struct drm_device *dev, int pipe,
+				  union drm_wait_vblank *vblwait,
+				  struct drm_file *file_priv)
+{
+	struct drm_pending_vblank_event *e;
+	struct timeval now;
+	unsigned long flags;
+	unsigned int seq;
+
+	e = malloc(sizeof *e, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+	if (e == NULL)
+		return -ENOMEM;
+
+	e->pipe = pipe;
+	e->event.base.type = DRM_EVENT_VBLANK;
+	e->event.base.length = sizeof e->event;
+	e->event.user_data = vblwait->request.signal;
+	e->base.event = &e->event.base;
+	e->base.file_priv = file_priv;
+	e->base.destroy = (void (*) (struct drm_pending_event *)) destroy_event;
+
+	microtime(&now);
+	spin_lock_irqsave(&dev->event_lock, flags);
+
+	if (file_priv->event_space < sizeof e->event) {
+		spin_unlock_irqrestore(&dev->event_lock, flags);
+		free(e, DRM_MEM_DRIVER);
+		return -ENOMEM;
+	}
+
+	file_priv->event_space -= sizeof e->event;
+	seq = drm_vblank_count(dev, pipe);
+	if ((vblwait->request.type & _DRM_VBLANK_NEXTONMISS) &&
+	    (seq - vblwait->request.sequence) <= (1 << 23)) {
+		vblwait->request.sequence = seq + 1;
+		vblwait->reply.sequence = vblwait->request.sequence;
+	}
+
+	DRM_DEBUG("event on vblank count %d, current %d, crtc %d\n",
+		  vblwait->request.sequence, seq, pipe);
+
+	e->event.sequence = vblwait->request.sequence;
+	if ((seq - vblwait->request.sequence) <= (1 << 23)) {
+		e->event.tv_sec = now.tv_sec;
+		e->event.tv_usec = now.tv_usec;
+		drm_vblank_put(dev, e->pipe);
+		list_add_tail(&e->base.link, &e->base.file_priv->event_list);
+		wake_up_interruptible(&e->base.file_priv->event_wait);
+	} else {
+		list_add_tail(&e->base.link, &dev->vblank_event_list);
+	}
+
+	spin_unlock_irqrestore(&dev->event_lock, flags);
+
+	return 0;
+}
+
 /**
  * Wait for VBLANK.
  *
@@ -711,27 +793,6 @@ done:
 	return ret;
 }
 
-/**
- * drm_handle_vblank - handle a vblank event
- * @dev: DRM device
- * @crtc: where this event occurred
- *
- * Drivers should call this routine in their vblank interrupt handlers to
- * update the vblank counter and send any signals that may be pending.
- */
-void drm_handle_vblank(struct drm_device *dev, int crtc)
-{
-	if (!dev->num_crtcs)
-		return;
-
-	atomic_add_rel_32(&dev->_vblank_count[crtc], 1);
-	DRM_WAKEUP(&dev->vbl_queue[crtc]);
-#ifdef __linux__
-	drm_handle_vblank_events(dev, crtc);
-#endif /* __linux__ */
-}
-
-#ifdef __linux__ /* enable when update drm_handle_vblank */
 void drm_handle_vblank_events(struct drm_device *dev, int crtc)
 {
 	struct drm_pending_vblank_event *e, *t;
@@ -767,4 +828,23 @@ void drm_handle_vblank_events(struct drm_device *dev, int crtc)
 
 	spin_unlock_irqrestore(&dev->event_lock, flags);
 }
+
+/**
+ * drm_handle_vblank - handle a vblank event
+ * @dev: DRM device
+ * @crtc: where this event occurred
+ *
+ * Drivers should call this routine in their vblank interrupt handlers to
+ * update the vblank counter and send any signals that may be pending.
+ */
+void drm_handle_vblank(struct drm_device *dev, int crtc)
+{
+	if (!dev->num_crtcs)
+		return;
+
+	atomic_add_rel_32(&dev->_vblank_count[crtc], 1);
+	DRM_WAKEUP(&dev->vbl_queue[crtc]);
+#ifdef __linux__
+	drm_handle_vblank_events(dev, crtc);
 #endif /* __linux__ */
+}

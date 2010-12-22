@@ -161,29 +161,44 @@ EXPORT_SYMBOL(drm_gem_object_init);
 struct drm_gem_object *
 drm_gem_object_alloc(struct drm_device *dev, size_t size)
 {
+	vm_object_t object;
 	struct drm_gem_object *obj;
+
+	BUG_ON((size & (PAGE_SIZE - 1)) != 0);
 
 	obj = malloc(sizeof(*obj), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!obj)
-		goto free;
+		goto afterfree;
 
-	if (drm_gem_object_init(dev, obj, size) != 0)
+	obj->dev = dev;
+#ifdef __linux__
+	obj->filp = shmem_file_setup("drm mm object", size, VM_NORESERVE);
+	if (IS_ERR(obj->filp))
 		goto free;
+#else
+/* should a reference be taken? */
+	obj->object = vm_object_allocate(OBJT_DEFAULT, atop(round_page(size)));
+	if (!obj->object)
+		goto free;
+#endif
 
+	kref_init(&obj->refcount);
+	kref_init(&obj->handlecount);
+	obj->size = size;
 	if (dev->driver->gem_init_object != NULL &&
 	    dev->driver->gem_init_object(obj) != 0) {
 		goto fput;
 	}
+	atomic_inc(&dev->object_count);
+	atomic_add(obj->size, &dev->object_memory);
 	return obj;
 fput:
-	/* Object_init mangles the global counters - readjust them. */
-	atomic_dec(&dev->object_count);
-	atomic_sub(obj->size, &dev->object_memory);
 #ifdef __linux__
 	fput(obj->filp);
 #endif
 free:
 	free(obj, DRM_MEM_DRIVER);
+afterfree: /* legacy does not seem wise to free if malloc fails */
 	return NULL;
 }
 EXPORT_SYMBOL(drm_gem_object_alloc);
@@ -445,6 +460,20 @@ drm_gem_object_release(struct drm_gem_object *obj)
 }
 EXPORT_SYMBOL(drm_gem_object_release);
 
+static void
+drm_gem_object_free_common(struct drm_gem_object *obj)
+{
+	struct drm_device *dev = obj->dev;
+#ifdef __linux__
+	fput(obj->filp);
+#else
+	vm_object_deallocate(obj->object);
+#endif
+	atomic_dec(&dev->object_count);
+	atomic_sub(obj->size, &dev->object_memory);
+	free(obj, DRM_MEM_DRIVER);
+}
+
 /**
  * Called after the last reference to the object has been lost.
  * Must be called holding struct_ mutex
@@ -461,6 +490,8 @@ drm_gem_object_free(struct kref *kref)
 
 	if (dev->driver->gem_free_object != NULL)
 		dev->driver->gem_free_object(obj);
+
+	drm_gem_object_free_common(obj);
 }
 EXPORT_SYMBOL(drm_gem_object_free);
 
@@ -483,6 +514,8 @@ drm_gem_object_free_unlocked(struct kref *kref)
 		dev->driver->gem_free_object(obj);
 		mutex_unlock(&dev->struct_mutex);
 	}
+
+	drm_gem_object_free_common(obj);
 }
 EXPORT_SYMBOL(drm_gem_object_free_unlocked);
 
