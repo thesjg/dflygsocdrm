@@ -1051,8 +1051,9 @@ void i8xx_disable_fbc(struct drm_device *dev)
 	DRM_DEBUG_KMS("disabled FBC\n");
 }
 
-static bool i8xx_fbc_enabled(struct drm_device *dev)
+static bool i8xx_fbc_enabled(struct drm_crtc *crtc)
 {
+	struct drm_device *dev = crtc->dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	return I915_READ(FBC_CONTROL) & FBC_CTL_EN;
@@ -1109,21 +1110,12 @@ void g4x_disable_fbc(struct drm_device *dev)
 	DRM_DEBUG_KMS("disabled FBC\n");
 }
 
-static bool g4x_fbc_enabled(struct drm_device *dev)
+static bool g4x_fbc_enabled(struct drm_crtc *crtc)
 {
+	struct drm_device *dev = crtc->dev;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
 	return I915_READ(DPFC_CONTROL) & DPFC_CTL_EN;
-}
-
-bool intel_fbc_enabled(struct drm_device *dev)
-{
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	if (!dev_priv->display.fbc_enabled)
-		return false;
-
-	return dev_priv->display.fbc_enabled(dev);
 }
 
 void intel_enable_fbc(struct drm_crtc *crtc, unsigned long interval)
@@ -1180,7 +1172,9 @@ static void intel_update_fbc(struct drm_crtc *crtc,
 	if (!i915_powersave)
 		return;
 
-	if (!I915_HAS_FBC(dev))
+	if (!dev_priv->display.fbc_enabled ||
+	    !dev_priv->display.enable_fbc ||
+	    !dev_priv->display.disable_fbc)
 		return;
 
 	if (!crtc->fb)
@@ -1227,25 +1221,28 @@ static void intel_update_fbc(struct drm_crtc *crtc,
 		goto out_disable;
 	}
 
-	if (intel_fbc_enabled(dev)) {
+	if (dev_priv->display.fbc_enabled(crtc)) {
 		/* We can re-enable it in this case, but need to update pitch */
-		if ((fb->pitch > dev_priv->cfb_pitch) ||
-		    (obj_priv->fence_reg != dev_priv->cfb_fence) ||
-		    (plane != dev_priv->cfb_plane))
-			intel_disable_fbc(dev);
+		if (fb->pitch > dev_priv->cfb_pitch)
+			dev_priv->display.disable_fbc(dev);
+		if (obj_priv->fence_reg != dev_priv->cfb_fence)
+			dev_priv->display.disable_fbc(dev);
+		if (plane != dev_priv->cfb_plane)
+			dev_priv->display.disable_fbc(dev);
 	}
 
-	/* Now try to turn it back on if possible */
-	if (!intel_fbc_enabled(dev))
-		intel_enable_fbc(crtc, 500);
+	if (!dev_priv->display.fbc_enabled(crtc)) {
+		/* Now try to turn it back on if possible */
+		dev_priv->display.enable_fbc(crtc, 500);
+	}
 
 	return;
 
 out_disable:
 	DRM_DEBUG_KMS("unsupported config, disabling FBC\n");
 	/* Multiple disables should be harmless */
-	if (intel_fbc_enabled(dev))
-		intel_disable_fbc(dev);
+	if (dev_priv->display.fbc_enabled(crtc))
+		dev_priv->display.disable_fbc(dev);
 }
 
 static int
@@ -5233,7 +5230,8 @@ static void intel_init_display(struct drm_device *dev)
 	else
 		dev_priv->display.dpms = i9xx_crtc_dpms;
 
-	if (I915_HAS_FBC(dev)) {
+	/* Only mobile has FBC, leave pointers NULL for other chips */
+	if (IS_MOBILE(dev)) {
 		if (IS_GM45(dev)) {
 			dev_priv->display.fbc_enabled = g4x_fbc_enabled;
 			dev_priv->display.enable_fbc = g4x_enable_fbc;

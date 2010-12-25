@@ -192,11 +192,7 @@ struct drm_i915_error_state {
 
 struct drm_i915_display_funcs {
 	void (*dpms)(struct drm_crtc *crtc, int mode);
-#ifdef __linux__
 	bool (*fbc_enabled)(struct drm_crtc *crtc);
-#else
-	bool (*fbc_enabled)(struct drm_device *dev);
-#endif /* __linux__ */
 	void (*enable_fbc)(struct drm_crtc *crtc, unsigned long interval);
 	void (*disable_fbc)(struct drm_device *dev);
 	int (*get_display_clock_speed)(struct drm_device *dev);
@@ -1068,7 +1064,6 @@ extern void i8xx_disable_fbc(struct drm_device *dev);
 extern void g4x_disable_fbc(struct drm_device *dev);
 extern void intel_disable_fbc(struct drm_device *dev);
 extern void intel_enable_fbc(struct drm_crtc *crtc, unsigned long interval);
-extern bool intel_fbc_enabled(struct drm_device *dev);
 
 extern void intel_detect_pch (struct drm_device *dev);
 extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
