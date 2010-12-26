@@ -424,6 +424,9 @@ static enum drm_connector_status intel_crt_detect(struct drm_connector *connecto
 
 static void intel_crt_destroy(struct drm_connector *connector)
 {
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
+
+	intel_i2c_destroy(intel_encoder->ddc_bus);
 #ifdef __linux__
 	drm_sysfs_connector_remove(connector);
 #endif /* __linux__ */
@@ -492,16 +495,12 @@ static const struct drm_connector_funcs intel_crt_connector_funcs = {
 static const struct drm_connector_helper_funcs intel_crt_connector_helper_funcs = {
 	.mode_valid = intel_crt_mode_valid,
 	.get_modes = intel_crt_get_modes,
-	.best_encoder = intel_attached_encoder,
+	.best_encoder = intel_best_encoder,
 };
 
 static void intel_crt_enc_destroy(struct drm_encoder *encoder)
 {
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
-
-	intel_i2c_destroy(intel_encoder->ddc_bus);
 	drm_encoder_cleanup(encoder);
-	free(intel_encoder, DRM_MEM_DRIVER);
 }
 
 static const struct drm_encoder_funcs intel_crt_enc_funcs = {
@@ -512,7 +511,6 @@ void intel_crt_init(struct drm_device *dev)
 {
 	struct drm_connector *connector;
 	struct intel_encoder *intel_encoder;
-	struct intel_connector *intel_connector;
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	u32 i2c_reg;
 
@@ -520,20 +518,14 @@ void intel_crt_init(struct drm_device *dev)
 	if (!intel_encoder)
 		return;
 
-	intel_connector = malloc(sizeof(struct intel_connector), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-	if (!intel_connector) {
-		free(intel_encoder, DRM_MEM_DRIVER);
-		return;
-	}
-
-	connector = &intel_connector->base;
-	drm_connector_init(dev, &intel_connector->base,
+	connector = &intel_encoder->base;
+	drm_connector_init(dev, &intel_encoder->base,
 			   &intel_crt_connector_funcs, DRM_MODE_CONNECTOR_VGA);
 
 	drm_encoder_init(dev, &intel_encoder->enc, &intel_crt_enc_funcs,
 			 DRM_MODE_ENCODER_DAC);
 
-	drm_mode_connector_attach_encoder(&intel_connector->base,
+	drm_mode_connector_attach_encoder(&intel_encoder->base,
 					  &intel_encoder->enc);
 
 	/* Set up the DDC bus. */
@@ -566,11 +558,6 @@ void intel_crt_init(struct drm_device *dev)
 #ifdef __linux__
 	drm_sysfs_connector_add(connector);
 #endif /* __linux__ */
-
-	if (I915_HAS_HOTPLUG(dev))
-		connector->polled = DRM_CONNECTOR_POLL_HPD;
-	else
-		connector->polled = DRM_CONNECTOR_POLL_CONNECT;
 
 	dev_priv->hotplug_supported_mask |= CRT_HOTPLUG_INT_STATUS;
 }

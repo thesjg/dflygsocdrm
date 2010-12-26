@@ -3133,6 +3133,13 @@ struct fb_var_screeninfo {
 	uint32_t activate;
 	uint32_t height;
 	uint32_t width;
+/* file intel_fb.c, function intelfb_resize() */
+	int hsync_len;
+	int vsync_len;
+	int right_margin;
+	int left_margin;
+	int lower_margin;
+	int upper_margin;
 };
 
 /* file radeon_fb.c, function radeonfb_create() */
@@ -3196,6 +3203,12 @@ unregister_framebuffer(struct fb_info *info) {
 static __inline__ struct fb_info *
 framebuffer_alloc(unsigned long isZero, struct device *device) {
 	return malloc(sizeof(struct fb_info), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+}
+
+/* file i915/intel_fb.c, function intelfb_remove() */
+static __inline__ void
+framebuffer_release(struct fb_info *info) {
+	;
 }
 
 /* file drm_fb_helper.c, function drm_fb_helper_single_fb_probe */
