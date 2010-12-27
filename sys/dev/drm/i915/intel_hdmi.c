@@ -42,6 +42,7 @@
 
 struct intel_hdmi_priv {
 	u32 sdvox_reg;
+	u32 save_SDVOX;
 	bool has_hdmi_sink;
 };
 
@@ -65,12 +66,8 @@ static void intel_hdmi_mode_set(struct drm_encoder *encoder,
 	if (hdmi_priv->has_hdmi_sink)
 		sdvox |= SDVO_AUDIO_ENABLE;
 
-	if (intel_crtc->pipe == 1) {
-		if (HAS_PCH_CPT(dev))
-			sdvox |= PORT_TRANS_B_SEL_CPT;
-		else
-			sdvox |= SDVO_PIPE_B_SELECT;
-	}
+	if (intel_crtc->pipe == 1)
+		sdvox |= SDVO_PIPE_B_SELECT;
 
 	I915_WRITE(hdmi_priv->sdvox_reg, sdvox);
 	POSTING_READ(hdmi_priv->sdvox_reg);
@@ -112,6 +109,27 @@ static void intel_hdmi_dpms(struct drm_encoder *encoder, int mode)
 	}
 }
 
+static void intel_hdmi_save(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
+	struct intel_hdmi_priv *hdmi_priv = intel_encoder->dev_priv;
+
+	hdmi_priv->save_SDVOX = I915_READ(hdmi_priv->sdvox_reg);
+}
+
+static void intel_hdmi_restore(struct drm_connector *connector)
+{
+	struct drm_device *dev = connector->dev;
+	struct drm_i915_private *dev_priv = dev->dev_private;
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
+	struct intel_hdmi_priv *hdmi_priv = intel_encoder->dev_priv;
+
+	I915_WRITE(hdmi_priv->sdvox_reg, hdmi_priv->save_SDVOX);
+	POSTING_READ(hdmi_priv->sdvox_reg);
+}
+
 static int intel_hdmi_mode_valid(struct drm_connector *connector,
 				 struct drm_display_mode *mode)
 {
@@ -136,14 +154,13 @@ static bool intel_hdmi_mode_fixup(struct drm_encoder *encoder,
 static enum drm_connector_status
 intel_hdmi_detect(struct drm_connector *connector)
 {
-	struct drm_encoder *encoder = intel_attached_encoder(connector);
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 	struct intel_hdmi_priv *hdmi_priv = intel_encoder->dev_priv;
 	struct edid *edid = NULL;
 	enum drm_connector_status status = connector_status_disconnected;
 
 	hdmi_priv->has_hdmi_sink = false;
-	edid = drm_get_edid(connector,
+	edid = drm_get_edid(&intel_encoder->base,
 			    intel_encoder->ddc_bus);
 
 	if (edid) {
@@ -151,7 +168,7 @@ intel_hdmi_detect(struct drm_connector *connector)
 			status = connector_status_connected;
 			hdmi_priv->has_hdmi_sink = drm_detect_hdmi_monitor(edid);
 		}
-		connector->display_info.raw_edid = NULL;
+		intel_encoder->base.display_info.raw_edid = NULL;
 		free(edid, DRM_MEM_DRIVER);
 	}
 
@@ -171,11 +188,15 @@ static int intel_hdmi_get_modes(struct drm_connector *connector)
 
 static void intel_hdmi_destroy(struct drm_connector *connector)
 {
+	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
+
+	if (intel_encoder->i2c_bus)
+		intel_i2c_destroy(intel_encoder->i2c_bus);
 #ifdef __linux__
 	drm_sysfs_connector_remove(connector);
 #endif /* __linux__ */
 	drm_connector_cleanup(connector);
-	free(connector, DRM_MEM_DRIVER);
+	free(intel_encoder, DRM_MEM_DRIVER);
 }
 
 static const struct drm_encoder_helper_funcs intel_hdmi_helper_funcs = {
@@ -188,6 +209,8 @@ static const struct drm_encoder_helper_funcs intel_hdmi_helper_funcs = {
 
 static const struct drm_connector_funcs intel_hdmi_connector_funcs = {
 	.dpms = drm_helper_connector_dpms,
+	.save = intel_hdmi_save,
+	.restore = intel_hdmi_restore,
 	.detect = intel_hdmi_detect,
 	.fill_modes = drm_helper_probe_single_connector_modes,
 	.destroy = intel_hdmi_destroy,
@@ -196,17 +219,12 @@ static const struct drm_connector_funcs intel_hdmi_connector_funcs = {
 static const struct drm_connector_helper_funcs intel_hdmi_connector_helper_funcs = {
 	.get_modes = intel_hdmi_get_modes,
 	.mode_valid = intel_hdmi_mode_valid,
-	.best_encoder = intel_attached_encoder,
+	.best_encoder = intel_best_encoder,
 };
 
 static void intel_hdmi_enc_destroy(struct drm_encoder *encoder)
 {
-	struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
-
-	if (intel_encoder->i2c_bus)
-		intel_i2c_destroy(intel_encoder->i2c_bus);
 	drm_encoder_cleanup(encoder);
-	free(intel_encoder, DRM_MEM_DRIVER);
 }
 
 static const struct drm_encoder_funcs intel_hdmi_enc_funcs = {
@@ -218,7 +236,6 @@ void intel_hdmi_init(struct drm_device *dev, int sdvox_reg)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_connector *connector;
 	struct intel_encoder *intel_encoder;
-	struct intel_connector *intel_connector;
 	struct intel_hdmi_priv *hdmi_priv;
 
 	intel_encoder = malloc((sizeof(struct intel_encoder) +
@@ -226,22 +243,15 @@ void intel_hdmi_init(struct drm_device *dev, int sdvox_reg)
 	if (!intel_encoder)
 		return;
 
-	intel_connector = malloc(sizeof(struct intel_connector), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-	if (!intel_connector) {
-		free(intel_encoder, DRM_MEM_DRIVER);
-		return;
-	}
-
 	hdmi_priv = (struct intel_hdmi_priv *)(intel_encoder + 1);
 
-	connector = &intel_connector->base;
+	connector = &intel_encoder->base;
 	drm_connector_init(dev, connector, &intel_hdmi_connector_funcs,
 			   DRM_MODE_CONNECTOR_HDMIA);
 	drm_connector_helper_add(connector, &intel_hdmi_connector_helper_funcs);
 
 	intel_encoder->type = INTEL_OUTPUT_HDMI;
 
-	connector->polled = DRM_CONNECTOR_POLL_HPD;
 	connector->interlace_allowed = 0;
 	connector->doublescan_allowed = 0;
 	intel_encoder->crtc_mask = (1 << 0) | (1 << 1);
@@ -281,7 +291,7 @@ void intel_hdmi_init(struct drm_device *dev, int sdvox_reg)
 			 DRM_MODE_ENCODER_TMDS);
 	drm_encoder_helper_add(&intel_encoder->enc, &intel_hdmi_helper_funcs);
 
-	drm_mode_connector_attach_encoder(&intel_connector->base,
+	drm_mode_connector_attach_encoder(&intel_encoder->base,
 					  &intel_encoder->enc);
 #ifdef __linux__
 	drm_sysfs_connector_add(connector);
@@ -301,7 +311,6 @@ void intel_hdmi_init(struct drm_device *dev, int sdvox_reg)
 err_connector:
 	drm_connector_cleanup(connector);
 	free(intel_encoder, DRM_MEM_DRIVER);
-	free(intel_connector, DRM_MEM_DRIVER);
 
 	return;
 }
