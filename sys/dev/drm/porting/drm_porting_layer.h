@@ -602,20 +602,21 @@ typedef uint32_t gfp_t;
 #endif
 #define GFP_KERNEL   M_WAITOK
 
-#define __GFP_COLD      0x0004
-#define __GFP_COMP      0x0008
-#define __GFP_DMA32     0x0010
-#define __GFP_HIGHMEM   0x0020
-#define __GFP_NORETRY   0x0040
-#define __GFP_NOWARN    0x0080
-#define __GFP_ZERO      0x0100
+#define __GFP_COLD        0x0004
+#define __GFP_COMP        0x0008
+#define __GFP_DMA32       0x0010
+#define __GFP_HIGHMEM     0x0020
+#define __GFP_NORETRY     0x0040
+#define __GFP_NOWARN      0x0080
+#define __GFP_ZERO        0x0100
+#define __GFP_RECLAIMABLE 0x0200
 
 /* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
-#define GFP_DMA32       0x0200
+#define GFP_DMA32       0x0400
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
-#define GFP_HIGHUSER    0x0400
-#define GFP_USER        0x0800
+#define GFP_HIGHUSER    0x0800
+#define GFP_USER        0x01000
 
 /**********************************************************
  * SIGNALS AND INTERRUPTS                                 *
