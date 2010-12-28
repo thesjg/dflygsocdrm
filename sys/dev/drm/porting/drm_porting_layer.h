@@ -295,6 +295,19 @@ div_u64(uint64_t temp, uint32_t link_clock) {
 /* file intel_display.c, function ironlake_update_wm() */
 #define DIV_ROUND_UP(x, y)  ((x) + (y) - 1) / (y)
 
+/* file i915/intel_sdvo.c, function intel_sdvo_select_ddc_bus() */
+static __inline__ unsigned int
+hweight16(uint16_t mask) {
+	unsigned int num_bits = 0;
+	int i;
+	for (i = 0; i < 16; i++) {
+		if ((mask & (1 << i)) != 0) {
+			num_bits++;
+		}
+	}
+	return num_bits;
+}
+
 /**********************************************************
  * Atomic instructions                                    *
  **********************************************************/
@@ -2528,6 +2541,12 @@ struct device {
 	struct device *parent;
 };
 
+/* file i915/intel_sdvo.c, function intel_sdvo_output_setup() */
+static __inline__ int
+device_is_registered(struct device *dev) {
+	return 0;
+}
+
 /* file drm_edid.c, function do_get_edid() */
 /*
  * Function actually takes
@@ -3616,6 +3635,38 @@ acpi_lid_notifier_unregister(struct notifier_block *lid_notifier) {
 #define ACPI_DIGITAL_OUTPUT	0x0004
 #define ACPI_LVDS_OUTPUT	0x0008
 #define ACPI_OTHER_OUTPUT	0x0010
+
+/**********************************************************
+ * DMI                                                    *
+ **********************************************************/
+
+/* file i915/intel_sdvo.c */
+struct drm_dmi_match {
+	uint32_t attribute;
+	char *value;
+};
+
+#define DMI_MATCH(attr, val) \
+{ \
+	.attribute = attr, \
+	.value = val, \
+}
+
+#define DMI_SYS_VENDOR		0x01
+#define DMI_PRODUCT_NAME	0x02
+
+/* file i915/intel_sdvo.c */
+struct dmi_system_id {
+	int (*callback)(const struct dmi_system_id *id);
+	char *ident;
+	struct drm_dmi_match matches[2];
+};
+
+/* file i915/intel_sdvo.c, function intel_sdvo_output_setup() */
+static __inline__ int
+dmi_check_system(struct dmi_system_id intel_sdvo_bad_tv[]) {
+	return 1;
+}
 
 #endif /* __KERNEL__ */
 #endif
