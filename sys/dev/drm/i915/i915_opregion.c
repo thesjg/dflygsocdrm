@@ -149,6 +149,7 @@ struct opregion_asle {
 #define ACPI_DIGITAL_OUTPUT (3<<8)
 #define ACPI_LVDS_OUTPUT (4<<8)
 
+/* legacy change compensates for CONFIG_ACPI in i915_drv.h */
 #ifdef CONFIG_ACPI
 
 static u32 asle_set_backlight(struct drm_device *dev, u32 bclp)

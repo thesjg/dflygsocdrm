@@ -3629,14 +3629,6 @@ acpi_lid_notifier_unregister(struct notifier_block *lid_notifier) {
 	;
 }
 
-/* file i915_opregion.c, function intel_didl_outputs */
-
-#define ACPI_VGA_OUTPUT		0x0001
-#define ACPI_TV_OUTPUT		0x0002
-#define ACPI_DIGITAL_OUTPUT	0x0004
-#define ACPI_LVDS_OUTPUT	0x0008
-#define ACPI_OTHER_OUTPUT	0x0010
-
 /**********************************************************
  * DMI                                                    *
  **********************************************************/

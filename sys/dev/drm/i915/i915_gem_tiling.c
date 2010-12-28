@@ -286,11 +286,6 @@ i915_gem_set_tiling(struct drm_device *dev, void *data,
 		return -EINVAL;
 	}
 
-	if (obj_priv->pin_count) {
-		drm_gem_object_unreference_unlocked(obj);
-		return -EBUSY;
-	}
-
 	if (args->tiling_mode == I915_TILING_NONE) {
 		args->swizzle_mode = I915_BIT_6_SWIZZLE_NONE;
 		args->stride = 0;
@@ -447,7 +442,20 @@ i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 
 	if (obj_priv->bit_17 == NULL)
 		return;
-
+#ifdef __linux__
+	for (i = 0; i < page_count; i++) {
+		char new_bit_17 = page_to_phys(obj_priv->pages[i]) >> 17;
+		if ((new_bit_17 & 0x1) !=
+		    (test_bit(i, obj_priv->bit_17) != 0)) {
+			int ret = i915_gem_swizzle_page(obj_priv->pages[i]);
+			if (ret != 0) {
+				DRM_ERROR("Failed to swizzle page\n");
+				return;
+			}
+			set_page_dirty(obj_priv->pages[i]);
+		}
+	}
+#else /* !__linux__ */
 	vm_object_t object = obj->object;
 	vm_page_t p;
 	int k;
@@ -465,6 +473,7 @@ i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 			drm_set_page_dirty(p);
 		}
 	}
+#endif /* __linux__ */
 }
 
 void
