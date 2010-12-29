@@ -59,7 +59,7 @@
 	 I915_RENDER_COMMAND_PARSER_ERROR_INTERRUPT)
 
 /** Interrupts that we mask and unmask at runtime. */
-#define I915_INTERRUPT_ENABLE_VAR	(I915_USER_INTERRUPT)
+#define I915_INTERRUPT_ENABLE_VAR (I915_USER_INTERRUPT)
 
 #define I915_PIPE_VBLANK_STATUS	(PIPE_START_VBLANK_INTERRUPT_STATUS |\
 				 PIPE_VBLANK_INTERRUPT_STATUS)
@@ -179,13 +179,9 @@ void intel_enable_asle (struct drm_device *dev)
 
 	if (HAS_PCH_SPLIT(dev))
 		ironlake_enable_display_irq(dev_priv, DE_GSE);
-	else {
+	else
 		i915_enable_pipestat(dev_priv, 1,
 				     I915_LEGACY_BLC_EVENT_ENABLE);
-		if (IS_I965G(dev))
-			i915_enable_pipestat(dev_priv, 0,
-					     I915_LEGACY_BLC_EVENT_ENABLE);
-	}
 }
 
 /**
@@ -270,18 +266,20 @@ static void i915_hotplug_work_func(struct work_struct *work)
 						    hotplug_work);
 	struct drm_device *dev = dev_priv->dev;
 	struct drm_mode_config *mode_config = &dev->mode_config;
-	struct drm_encoder *encoder;
+	struct drm_connector *connector;
 
-	if (mode_config->num_encoder) {
-		list_for_each_entry(encoder, &mode_config->encoder_list, head) {
-			struct intel_encoder *intel_encoder = enc_to_intel_encoder(encoder);
-
+	if (mode_config->num_connector) {
+		list_for_each_entry(connector, &mode_config->connector_list, head) {
+			struct intel_encoder *intel_encoder = to_intel_encoder(connector);
+	
 			if (intel_encoder->hot_plug)
 				(*intel_encoder->hot_plug) (intel_encoder);
 		}
 	}
 	/* Just fire off a uevent and let userspace tell us what to do */
-	drm_helper_hpd_irq_event(dev);
+#ifdef __linux__
+	drm_sysfs_hotplug_event(dev);
+#endif
 }
 
 static void i915_handle_rps_change(struct drm_device *dev)
@@ -371,8 +369,12 @@ irqreturn_t ironlake_irq_handler(struct drm_device *dev)
 #endif
 		DRM_WAKEUP(&dev_priv->irq_queue);
 		dev_priv->hangcheck_count = 0;
+#ifdef __linux__
+		mod_timer(&dev_priv->hangcheck_timer, jiffies + DRM_I915_HANGCHECK_PERIOD);
+#else
 		callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
 			i915_hangcheck_elapsed, dev);
+#endif
 	}
 
 	if (de_iir & DE_GSE)
@@ -477,15 +479,11 @@ i915_error_object_create(struct drm_device *dev,
 
 		if (d == NULL)
 			goto unwind;
-#ifdef __linux__
 		local_irq_save(flags);
-#endif
 		s = kmap_atomic(src_priv->pages[page], KM_IRQ0);
 		memcpy(d, s, PAGE_SIZE);
 		kunmap_atomic(s, KM_IRQ0);
-#ifdef __linux__
 		local_irq_restore(flags);
-#endif
 		dst->pages[page] = d;
 	}
 	dst->page_count = page_count;
@@ -634,7 +632,7 @@ static void i915_capture_error_state(struct drm_device *dev)
 	batchbuffer[1] = NULL;
 	count = 0;
 	list_for_each_entry(obj_priv, &dev_priv->mm.active_list, list) {
-		struct drm_gem_object *obj = &obj_priv->base;
+		struct drm_gem_object *obj = obj_priv->obj;
 
 		if (batchbuffer[0] == NULL &&
 		    bbaddr >= obj_priv->gtt_offset &&
@@ -670,7 +668,7 @@ static void i915_capture_error_state(struct drm_device *dev)
 	if (error->active_bo) {
 		int i = 0;
 		list_for_each_entry(obj_priv, &dev_priv->mm.active_list, list) {
-			struct drm_gem_object *obj = &obj_priv->base;
+			struct drm_gem_object *obj = obj_priv->obj;
 
 			error->active_bo[i].size = obj->size;
 			error->active_bo[i].name = obj->name;
@@ -923,7 +921,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 
 		ret = IRQ_HANDLED;
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 		/* Consume port.  Then clear IIR or we'll miss events */
 		if ((I915_HAS_HOTPLUG(dev)) &&
 		    (iir & I915_DISPLAY_PORT_INTERRUPT)) {
@@ -951,45 +949,56 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		}
 
 		if (iir & I915_USER_INTERRUPT) {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 			u32 seqno = i915_get_gem_seqno(dev);
 			dev_priv->mm.irq_gem_seqno = seqno;
 			trace_i915_gem_request_complete(dev, seqno);
 #endif /* __linux__*/
 			DRM_WAKEUP(&dev_priv->irq_queue);
 			dev_priv->hangcheck_count = 0;
+#ifdef __linux__
+			mod_timer(&dev_priv->hangcheck_timer, jiffies + DRM_I915_HANGCHECK_PERIOD);
+#else
 			callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
 				i915_hangcheck_elapsed, dev);
+#endif
 
 		}
 
-#ifdef __linux__
-		if (iir & I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT)
+#ifdef __linux__ /* UNIMPLEMENTED */
+		if (iir & I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT) {
 			intel_prepare_page_flip(dev, 0);
+			if (dev_priv->flip_pending_is_done)
+				intel_finish_page_flip_plane(dev, 0);
+		}
 
-		if (iir & I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT)
+		if (iir & I915_DISPLAY_PLANE_B_FLIP_PENDING_INTERRUPT) {
+			if (dev_priv->flip_pending_is_done)
+				intel_finish_page_flip_plane(dev, 1);
 			intel_prepare_page_flip(dev, 1);
+		}
 #endif /* __linux__ */
 
 		if (pipea_stats & vblank_status) {
 			vblank++;
 			drm_handle_vblank(dev, 0);
-#ifdef __linux__
-			intel_finish_page_flip(dev, 0);
+#ifdef __linux__ /* UNIMPLEMENTED */
+			if (!dev_priv->flip_pending_is_done)
+				intel_finish_page_flip(dev, 0);
 #endif
 		}
 
 		if (pipeb_stats & vblank_status) {
 			vblank++;
 			drm_handle_vblank(dev, 1);
-#ifdef __linux__
-			intel_finish_page_flip(dev, 1);
+#ifdef __linux__ /* UNIMPLEMENTED */
+			if (!dev_priv->flip_pending_is_done)
+				intel_finish_page_flip(dev, 1);
 #endif
 		}
 
-#ifdef __linux__
-		if ((pipea_stats & I915_LEGACY_BLC_EVENT_STATUS) ||
-		    (pipeb_stats & I915_LEGACY_BLC_EVENT_STATUS) ||
+#ifdef __linux__ /* UNIMPLEMENTED */
+		if ((pipeb_stats & I915_LEGACY_BLC_EVENT_STATUS) ||
 		    (iir & I915_ASLE_INTERRUPT))
 			opregion_asle_intr(dev);
 #endif /* __linux__ */
@@ -1105,8 +1114,10 @@ static int i915_wait_irq(struct drm_device * dev, int irq_nr)
 		    READ_BREADCRUMB(dev_priv) >= irq_nr);
 	i915_user_irq_put(dev);
 
+#ifndef __linux__ /* porting legacy change */
 	if (ret == -ERESTART)
 		DRM_DEBUG("restarting syscall\n");
+#endif
 
 	if (ret == -EBUSY) {
 		DRM_ERROR("EBUSY -- rec: %d emitted: %d\n",
