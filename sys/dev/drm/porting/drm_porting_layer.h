@@ -412,7 +412,7 @@ free(void *addr, struct malloc_type *type)
 #define KERN_WARNING "warning::"
 
 /* file drm_crtc_helper, function drm_encoder_crtc_ok() */
-#define WARN(cond, ...) if (cond) kprintf(__VA_ARGS__)
+#define WARN(cond, ...)  do { if (cond) kprintf(__VA_ARGS__); } while (0)
 
 /* file i915_gem.c */
 #define WARN_ON(cond)  if (cond) DRM_ERROR("\n")
@@ -734,7 +734,7 @@ preempt_enable(void) {
 #define spinlock_t	struct lock
 #define spin_lock(l)   lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
 #define spin_unlock(u) lockmgr(u, LK_RELEASE)
-#define spin_lock_init(l) lockinit(l, "spin_lock_init", 0, LK_CANRECURSE)
+#define spin_lock_init(l) lockinit(l, "slinit", 0, LK_CANRECURSE)
 
 /* drm_drawable.c drm_addraw() and previous drmP.h */
 #define spin_lock_irqsave(l, irqflags) \
@@ -3038,6 +3038,15 @@ vga_switcheroo_register_client(
 	return 0;
 }
 
+/* file i915/i915_dma.c, function i915_driver_unload() */
+static __inline__ void 
+vga_switcheroo_unregister_client(
+	struct pci_dev *pdev
+) {
+	;
+}
+
+/* file i915/i915_dma.c, function i915_driver_lastclose() */
 /* file radeon_kms.c, function radeon_driver_firstopen_kms() */
 static __inline__ int
 vga_switcheroo_process_delayed_switch(void) {
@@ -3444,6 +3453,7 @@ i2c_del_driver(struct i2c_driver *driver) {
  * MSI                                                    *
  **********************************************************/
 
+/* file i915_dma.c, function () */
 /* file radeon_irq_kms.c, function radeon_irq_kms_init() */
 static __inline__ int
 pci_enable_msi(struct pci_dev *pdev) {

@@ -1846,7 +1846,10 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		pci_enable_msi(dev->pdev);
 #endif
 
+#if 0
 	DRM_SPININIT(&dev_priv->user_irq_lock, "userirq");
+#endif
+	spin_lock_init(&dev_priv->user_irq_lock);
 	spin_lock_init(&dev_priv->error_lock);
 	dev_priv->user_irq_refcount = 0;
 	dev_priv->trace_irq_seqno = 0;
@@ -1948,10 +1951,6 @@ int i915_driver_unload(struct drm_device *dev)
 		pci_disable_msi(dev->pdev);
 #endif /* __linux__ */
 
-#if 0 /* now called in i915_dma_cleanup in i915_driver_lastclose */
-	i915_free_hws(dev);
-#endif /* !__linux__ */
-
 #ifdef __linux__
 	if (dev_priv->regs != NULL)
 		iounmap(dev_priv->regs);
@@ -1960,7 +1959,7 @@ int i915_driver_unload(struct drm_device *dev)
 #endif /* __linux__ */
 
 #ifdef __linux__
-	intel_opregion_free(dev);
+	intel_opregion_free(dev, 0);
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 		intel_modeset_cleanup(dev);
