@@ -45,15 +45,20 @@
 #include "drm_crtc_helper.h"
 #else /* __linux__ */
 #include "drm_pciids.h"
+#include "drm_crtc_helper.h"
 #endif /* __linux__ */
 
 static int i915_modeset = -1;
+module_param_named(modeset, i915_modeset, int, 0400);
 
 unsigned int i915_fbpercrtc = 0;
+module_param_named(fbpercrtc, i915_fbpercrtc, int, 0400);
 
 unsigned int i915_powersave = 1;
+module_param_named(powersave, i915_powersave, int, 0400);
 
 unsigned int i915_lvds_downclock = 0;
+module_param_named(lvds_downclock, i915_lvds_downclock, int, 0400);
 
 static struct drm_driver driver;
 
@@ -202,39 +207,9 @@ static DRM_PCI_DEVICE_ID pciidlist[] = {
 };
 #endif /* DRM_NEWER_PCIID */
 
-#ifdef __linux__
 #if defined(CONFIG_DRM_I915_KMS)
 MODULE_DEVICE_TABLE(pci, pciidlist);
 #endif
-
-#define INTEL_PCH_DEVICE_ID_MASK	0xff00
-#define INTEL_PCH_CPT_DEVICE_ID_TYPE	0x1c00
-
-void intel_detect_pch (struct drm_device *dev)
-{
-	struct drm_i915_private *dev_priv = dev->dev_private;
-	struct pci_dev *pch;
-
-	/*
-	 * The reason to probe ISA bridge instead of Dev31:Fun0 is to
-	 * make graphics device passthrough work easy for VMM, that only
-	 * need to expose ISA bridge to let driver know the real hardware
-	 * underneath. This is a requirement from virtualization team.
-	 */
-	pch = pci_get_class(PCI_CLASS_BRIDGE_ISA << 8, NULL);
-	if (pch) {
-		if (pch->vendor == PCI_VENDOR_ID_INTEL) {
-			int id;
-			id = pch->device & INTEL_PCH_DEVICE_ID_MASK;
-
-			if (id == INTEL_PCH_CPT_DEVICE_ID_TYPE) {
-				dev_priv->pch_type = PCH_CPT;
-				DRM_DEBUG_KMS("Found CougarPoint PCH\n");
-			}
-		}
-		pci_dev_put(pch);
-	}
-}
 
 static int i915_drm_freeze(struct drm_device *dev)
 {
@@ -370,16 +345,25 @@ int i965_reset(struct drm_device *dev, u8 flags)
 		 * Clear the reset bit after a while and wait for hardware status
 		 * bit (bit 1) to be set
 		 */
+#if 0
 		pci_read_config_byte(dev->pdev, GDRST, &gdrst);
 		pci_write_config_byte(dev->pdev, GDRST, gdrst | flags | ((flags == GDRST_FULL) ? 0x1 : 0x0));
 		udelay(50);
 		pci_write_config_byte(dev->pdev, GDRST, gdrst & 0xfe);
+#endif
+		gdrst = (u8)pci_read_config(dev_priv->bridge_dev, GDRST, 1);
+		pci_write_config(dev_priv->bridge_dev, GDRST, gdrst | flags | ((flags == GDRST_FULL) ? 0x1 : 0x0), 1);
+		udelay(50);
+		pci_write_config(dev_priv->bridge_dev, GDRST, gdrst & 0xfe, 1);
 
 		/* ...we don't want to loop forever though, 500ms should be plenty */
 	       timeout = jiffies + msecs_to_jiffies(500);
 		do {
 			udelay(100);
+#if 0
 			pci_read_config_byte(dev->pdev, GDRST, &gdrst);
+#endif
+			gdrst = (u8)pci_read_config(dev_priv->bridge_dev, GDRST, 1);
 		} while ((gdrst & 0x1) && time_after(timeout, jiffies));
 
 		if (gdrst & 0x1) {
@@ -389,6 +373,7 @@ int i965_reset(struct drm_device *dev, u8 flags)
 		}
 	} else {
 		DRM_ERROR("Error occurred. Don't know how to reset this chip.\n");
+		mutex_unlock(&dev->struct_mutex);
 		return -ENODEV;
 	}
 
@@ -538,7 +523,6 @@ static struct vm_operations_struct i915_gem_vm_ops = {
 	.open = drm_gem_vm_open,
 	.close = drm_gem_vm_close,
 };
-#endif /* __linux__ */
 
 static int i915_suspend_legacy(device_t kdev)
 {

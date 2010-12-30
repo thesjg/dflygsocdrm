@@ -1065,7 +1065,6 @@ extern void g4x_disable_fbc(struct drm_device *dev);
 extern void intel_disable_fbc(struct drm_device *dev);
 extern void intel_enable_fbc(struct drm_crtc *crtc, unsigned long interval);
 
-extern void intel_detect_pch (struct drm_device *dev);
 extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 
 /**

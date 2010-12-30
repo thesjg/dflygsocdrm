@@ -56,6 +56,9 @@
 /* file drm_stub.c */
 #define module_param_named(arg, ...)
 
+/* file i915_drv.c */
+#define MODULE_DEVICE_TABLE(arg, ...)
+
 /* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
 /* file drm_drv.c, struct drm_stub_fops */
 struct module {
@@ -142,6 +145,11 @@ module_exit(void (*func)(void)) {
 
 #ifndef __iomem
 #define __iomem
+#endif
+
+/* file i915_drv.c, function i915_pci_probe() */
+#ifndef __devinit
+#define __devinit
 #endif
 
 /* Used in older version of radeon_drm.h */
@@ -2170,6 +2178,7 @@ struct vm_fault {
 };
 
 /* file drm_vm.c, struct drm_vm_ops */
+/* file i915_drv.c, struct i915_gem_vm_ops */
 /* file radeon_ttm.c, function radeon_ttm_fault() */
 struct vm_operations_struct {
 	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
@@ -2651,8 +2660,9 @@ dma_free_coherent(
 #define PCI_VENDOR_ID_APPLE 0x0001
 
 /* i915_drv.c */
-#define PCI_ANY_ID 0xffff
+#define PCI_ANY_ID            0xffff
 #define PCI_CLASS_DISPLAY_VGA 0x0000
+#define PCI_D3hot             0x0002
 
 /* drmP.h drm_stub.h */
 /* file drm_drv.c, function drm_init() */
@@ -2773,6 +2783,12 @@ pci_name(struct pci_dev *pdev) {
 	return "0";
 }
 
+/* file i915_drv.c, function i915_drm_freeze() */
+static __inline__ void
+pci_save_state(struct pci_dev *pdev) {
+	;
+}
+
 /* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
 /* file radeon_gart.c, function radeon_gart_unbind() */
 #define PCI_DMA_BIDIRECTIONAL 0x0001
@@ -2792,6 +2808,12 @@ pci_unmap_rom(
 	struct pci_dev *pdev,
 	u8 *bios
 ) {
+	;
+}
+
+/* file i915_drv.c, function i915_suspend() */
+static __inline__ void
+pci_set_power_state(struct pci_dev *pdev, uint32_t flag) {
 	;
 }
 
@@ -3064,6 +3086,28 @@ vga_switcheroo_client_fb_set(
 	;
 }
 
+
+/**********************************************************
+ * POWER MANAGEMENT                                       *
+ **********************************************************/
+
+typedef struct pm_message {
+	uint32_t event;
+} pm_message_t;
+
+#define PM_EVENT_SUSPEND        0x0001
+#define PM_EVENT_PRETHAW        0x0002
+
+/* file i915_drv.c */
+struct dev_pm_ops {
+	int (*suspend)(struct device *dev);
+	int (*resume)(struct device *dev);
+	int (*freeze)(struct device *dev);
+	int (*thaw)(struct device *dev);
+	int (*poweroff)(struct device *dev);
+	int (*restore)(struct device *dev);
+};
+
 /**********************************************************
  * FRAMEBUFFER                                            *
  **********************************************************/
@@ -3264,8 +3308,6 @@ extern const char *fb_mode_option;
 struct edi {
 	int placeholder;
 };
-
-typedef unsigned long pm_message_t;
 
 /*
  * Non-Linux from drmP.h
