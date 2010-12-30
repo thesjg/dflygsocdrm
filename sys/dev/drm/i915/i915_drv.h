@@ -38,8 +38,6 @@
 #include <linux/io-mapping.h>
 #endif /* __linux__ */
 
-#define DRM_MCH_ID 5
-
 /* General customization:
  */
 
@@ -49,7 +47,7 @@
 #define DRIVER_DESC		"Intel Graphics"
 #define DRIVER_DATE		"20080730"
 
-#ifdef __linux__ /* enum pipe namespace clash? */
+#ifdef __linux__ /* legacy change, enum pipe namespace clash? */
 enum pipe {
 	PIPE_A = 0,
 	PIPE_B,
@@ -141,8 +139,6 @@ struct drm_i915_master_private {
 
 struct drm_i915_fence_reg {
 	struct drm_gem_object *obj;
-/* 2.6.34.7 revise i915_gem.c to remove the following */
-	struct list_head lru_list;
 };
 
 struct sdvo_device_mapping {
@@ -150,8 +146,6 @@ struct sdvo_device_mapping {
 	u8 slave_addr;
 	u8 dvo_wiring;
 	u8 initialized;
-/* 2.6.34.7 intel_bios.h has another version of ddc_pin */
-	u8 ddc_pin;
 };
 
 struct drm_i915_error_state {
@@ -367,13 +361,11 @@ typedef struct drm_i915_private {
 	struct drm_i915_error_state *first_error;
 	struct work_struct error_work;
 	struct workqueue_struct *wq;
+/* legacy change addition while workqueue_struct ported */
 	struct taskqueue *wq_legacy;
 
 	/* Display functions */
 	struct drm_i915_display_funcs display;
-
-	/* PCH chipset type */
-	enum intel_pch pch_type;
 
 	/* Register state */
 	bool modeset_on_lid;
@@ -678,9 +670,6 @@ typedef struct drm_i915_private {
 
 	struct drm_mm_node *compressed_fb;
 	struct drm_mm_node *compressed_llb;
-	/* Omitted in 2.6.34.7 */
-	/* list of fbdev register on this device */
-	struct intel_fbdev *fbdev;
 } drm_i915_private_t;
 
 /** driver private structure attached to each drm_gem_object */
@@ -868,7 +857,7 @@ extern int i915_emit_box(struct drm_device *dev,
 extern int i965_reset(struct drm_device *dev, u8 flags);
 
 /* i915_irq.c */
-/* API change */
+/* API legacy change */
 /* callout in DragonFly BSD takes void * not unsigned long as arg */
 void i915_hangcheck_elapsed(void *data);
 void i915_destroy_error_state(struct drm_device *dev);
@@ -960,8 +949,6 @@ int i915_gem_get_aperture_ioctl(struct drm_device *dev, void *data,
 				struct drm_file *file_priv);
 void i915_gem_load(struct drm_device *dev);
 int i915_gem_init_object(struct drm_gem_object *obj);
-struct drm_gem_object * i915_gem_alloc_object(struct drm_device *dev,
-					      size_t size);
 void i915_gem_free_object(struct drm_gem_object *obj);
 int i915_gem_object_pin(struct drm_gem_object *obj, uint32_t alignment);
 void i915_gem_object_unpin(struct drm_gem_object *obj);
@@ -1062,10 +1049,6 @@ extern void intel_modeset_cleanup(struct drm_device *dev);
 extern int intel_modeset_vga_set_state(struct drm_device *dev, bool state);
 extern void i8xx_disable_fbc(struct drm_device *dev);
 extern void g4x_disable_fbc(struct drm_device *dev);
-extern void intel_disable_fbc(struct drm_device *dev);
-extern void intel_enable_fbc(struct drm_crtc *crtc, unsigned long interval);
-
-extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 
 /**
  * Lock test for when it's just for synchronization of ring access.
@@ -1343,8 +1326,10 @@ extern int i915_wait_ring(struct drm_device * dev, int n, const char *caller);
 			    IS_GEN6(dev))
 #define HAS_PIPE_CONTROL(dev) (IS_IRONLAKE(dev) || IS_GEN6(dev))
 
+#if 0
 #define INTEL_PCH_TYPE(dev) (((struct drm_i915_private *)(dev)->dev_private)->pch_type)
 #define HAS_PCH_CPT(dev) (INTEL_PCH_TYPE(dev) == PCH_CPT)
+#endif
 
 #define PRIMARY_RINGBUFFER_SIZE         (128*1024)
 

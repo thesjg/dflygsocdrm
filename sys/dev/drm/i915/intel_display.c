@@ -1136,26 +1136,6 @@ static bool g4x_fbc_enabled(struct drm_crtc *crtc)
 	return I915_READ(DPFC_CONTROL) & DPFC_CTL_EN;
 }
 
-void intel_enable_fbc(struct drm_crtc *crtc, unsigned long interval)
-{
-	struct drm_i915_private *dev_priv = crtc->dev->dev_private;
-
-	if (!dev_priv->display.enable_fbc)
-		return;
-
-	dev_priv->display.enable_fbc(crtc, interval);
-}
-
-void intel_disable_fbc(struct drm_device *dev)
-{
-	struct drm_i915_private *dev_priv = dev->dev_private;
-
-	if (!dev_priv->display.disable_fbc)
-		return;
-
-	dev_priv->display.disable_fbc(dev);
-}
-
 /**
  * intel_update_fbc - enable/disable FBC as needed
  * @crtc: CRTC to point the compressor at
@@ -4683,7 +4663,6 @@ intel_user_framebuffer_create(struct drm_device *dev,
 static const struct drm_mode_config_funcs intel_mode_funcs = {
 	.fb_create = intel_user_framebuffer_create,
 	.fb_changed = intelfb_probe,
-	.output_poll_changed = intel_fb_output_poll_changed,
 };
 
 static struct drm_gem_object *
@@ -5069,32 +5048,6 @@ void intel_modeset_cleanup(struct drm_device *dev)
 	mutex_unlock(&dev->struct_mutex);
 
 	drm_mode_config_cleanup(dev);
-}
-
-
-/*
- * Return which encoder is currently attached for connector.
- */
-struct drm_encoder *intel_attached_encoder (struct drm_connector *connector)
-{
-	struct drm_mode_object *obj;
-	struct drm_encoder *encoder;
-	int i;
-
-	for (i = 0; i < DRM_CONNECTOR_MAX_ENCODER; i++) {
-		if (connector->encoder_ids[i] == 0)
-			break;
-
-		obj = drm_mode_object_find(connector->dev,
-                                           connector->encoder_ids[i],
-                                           DRM_MODE_OBJECT_ENCODER);
-		if (!obj)
-			continue;
-
-		encoder = obj_to_encoder(obj);
-		return encoder;
-	}
-	return NULL;
 }
 
 /* current intel driver doesn't take advantage of encoders

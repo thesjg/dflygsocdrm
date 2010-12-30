@@ -46,13 +46,6 @@
 #include "i915_drm.h"
 #include "i915_drv.h"
 
-struct intel_fbdev {
-	struct drm_fb_helper helper;
-	struct intel_framebuffer ifb;
-	struct list_head fbdev_list;
-	struct drm_display_mode *our_mode;
-};
-
 struct intelfb_par {
 	struct drm_fb_helper helper;
 	struct intel_framebuffer *intel_fb;
@@ -265,76 +258,6 @@ out_unref:
 	mutex_unlock(&dev->struct_mutex);
 out:
 	return ret;
-}
-
-int intel_fbdev_destroy(struct drm_device *dev,
-			struct intel_fbdev *ifbdev)
-{
-	struct fb_info *info;
-	struct intel_framebuffer *ifb = &ifbdev->ifb;
-
-	if (ifbdev->helper.fbdev) {
-		info = ifbdev->helper.fbdev;
-		unregister_framebuffer(info);
-		iounmap(info->screen_base);
-#ifdef __linux__
-		if (info->cmap.len)
-			fb_dealloc_cmap(&info->cmap);
-		framebuffer_release(info);
-#endif /* __linux__ */
-	}
-
-#if 0 /* UNIMPLEMENTED synch drm_fb_helper */
-	drm_fb_helper_fini(&ifbdev->helper);
-#endif
-
-	drm_framebuffer_cleanup(&ifb->base);
-	if (ifb->obj)
-		drm_gem_object_unreference_unlocked(ifb->obj);
-
-	return 0;
-}
-
-int intel_fbdev_init(struct drm_device *dev)
-{
-	struct intel_fbdev *ifbdev;
-	drm_i915_private_t *dev_priv = dev->dev_private;
-
-	ifbdev = malloc(sizeof(struct intel_fbdev), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-	if (!ifbdev)
-		return -ENOMEM;
-
-	dev_priv->fbdev = ifbdev;
-	ifbdev->helper.funcs = &intel_fb_helper_funcs;
-
-#if 0 /* UNIMPLEMENTED synch drm_fb_helper */
-	drm_fb_helper_init(dev, &ifbdev->helper, 2,
-			   INTELFB_CONN_LIMIT);
-
-	drm_fb_helper_single_add_all_connectors(&ifbdev->helper);
-	drm_fb_helper_initial_config(&ifbdev->helper, 32);
-#endif
-	return 0;
-}
-
-void intel_fbdev_fini(struct drm_device *dev)
-{
-	drm_i915_private_t *dev_priv = dev->dev_private;
-	if (!dev_priv->fbdev)
-		return;
-
-	intel_fbdev_destroy(dev, dev_priv->fbdev);
-	free(dev_priv->fbdev, DRM_MEM_DRIVER);
-	dev_priv->fbdev = NULL;
-}
-MODULE_LICENSE("GPL and additional rights");
-
-void intel_fb_output_poll_changed(struct drm_device *dev)
-{
-	drm_i915_private_t *dev_priv = dev->dev_private;
-#if 0 /* UNIMPLEMENTED synch drm_fb_helper */
-	drm_fb_helper_hotplug_event(&dev_priv->fbdev->helper);
-#endif
 }
 
 int intelfb_probe(struct drm_device *dev)
