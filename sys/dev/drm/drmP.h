@@ -203,8 +203,6 @@ extern void drm_ut_debug_printk(unsigned int request_level,
 #define DRIVER_GEM         0x1000
 #define DRIVER_MODESET     0x2000
 
-/* DRIVER_DMA_QUEUE formerly 0x100 but sets no feature in legacy */
-
 /***********************************************************************/
 /** \name Begin the DRM... */
 /*@{*/
@@ -1044,7 +1042,7 @@ struct drm_pending_vblank_event {
 	struct drm_event_vblank event;
 };
 
-/** 
+/**
  * DRM device structure. This structure represent a complete card that
  * may contain multiple heads.
  */
@@ -1390,6 +1388,7 @@ extern struct drm_file	*drm_find_file_by_proc(struct drm_device *dev,
 extern int drm_mmap(struct file *filp, struct vm_area_struct *vma);
 extern int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma);
 extern void drm_vm_open_locked(struct vm_area_struct *vma);
+extern void drm_vm_close_locked(struct vm_area_struct *vma);
 extern resource_size_t drm_core_get_map_ofs(struct drm_local_map * map);
 extern resource_size_t drm_core_get_reg_ofs(struct drm_device *dev);
 extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
@@ -1399,8 +1398,9 @@ extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
 #include "drm_memory.h"
 #endif
 
-/* shared functions */
 extern void drm_mem_init(void);
+extern int drm_mem_info(char *buf, char **start, off_t offset,
+			int request, int *eof, void *data);
 
 /* Neither declaration below appears to be used in any version of drm */
 #ifdef __linux__
@@ -1414,10 +1414,6 @@ drm_realloc(void *oldpt, size_t oldsize, size_t size,
 }
 #endif
 
-/* newer functions */
-
-extern int drm_mem_info(char *buf, char **start, off_t offset,
-			int request, int *eof, void *data);
 extern DRM_AGP_MEM *drm_alloc_agp(struct drm_device *dev, int pages, u32 type);
 extern int drm_free_agp(DRM_AGP_MEM * handle, int pages);
 extern int drm_bind_agp(DRM_AGP_MEM * handle, unsigned int start);
@@ -1426,12 +1422,12 @@ extern DRM_AGP_MEM *drm_agp_bind_pages(struct drm_device *dev,
 				       unsigned long num_pages,
 				       uint32_t gtt_offset,
 				       uint32_t type);
+extern int drm_unbind_agp(DRM_AGP_MEM * handle);
 extern DRM_AGP_MEM *drm_agp_bind_object(struct drm_device *dev,
 				       vm_object_t object,
 				       unsigned long num_pages,
 				       uint32_t gtt_offset,
 				       uint32_t type);
-extern int drm_unbind_agp(DRM_AGP_MEM * handle);
 
 /* Memory management support (drm_memory.c) */
 /* legacy functions */
@@ -1444,9 +1440,6 @@ int	drm_mtrr_add(unsigned long offset, size_t size, int flags);
 int	drm_mtrr_del(int handle, unsigned long offset, size_t size, int flags);
 
 				/* Misc. IOCTL support (drm_ioctl.h) */
-/* shared */
-/* Misc. IOCTL support (drm_ioctl.c) */
-/* shared */
 extern int drm_irq_by_busid(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
 extern int drm_getunique(struct drm_device *dev, void *data,
@@ -1465,8 +1458,6 @@ extern int drm_noop(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv);
 
 				/* Context IOCTL support (drm_context.h) */
-/* shared */
-/* Context IOCTL support (drm_context.c) */
 extern int drm_resctx(struct drm_device *dev, void *data,
 		      struct drm_file *file_priv);
 extern int drm_addctx(struct drm_device *dev, void *data,
@@ -1491,12 +1482,17 @@ extern int drm_setsareactx(struct drm_device *dev, void *data,
 extern int drm_getsareactx(struct drm_device *dev, void *data,
 			   struct drm_file *file_priv);
 
-/* Drawable IOCTL support (drm_drawable.h) */
-/* shared */
+				/* Drawable IOCTL support (drm_drawable.h) */
 extern int drm_adddraw(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 extern int drm_rmdraw(struct drm_device *dev, void *data,
 		      struct drm_file *file_priv);
+extern int drm_update_drawable_info(struct drm_device *dev, void *data,
+				    struct drm_file *file_priv);
+#ifndef __linux__ /* legacy */
+int	drm_update_draw(struct drm_device *dev, void *data,
+			struct drm_file *file_priv);
+#endif /* !__linux__ */
 #ifdef __linux__
 /* drm_drawable_t is defined in drm.h to be unsigned int */
 extern struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev,
@@ -1507,15 +1503,6 @@ struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev,
 #endif
 extern void drm_drawable_free_all(struct drm_device *dev);
 
-/* new */
-extern int drm_update_drawable_info(struct drm_device *dev, void *data,
-				    struct drm_file *file_priv);
-
-/* legacy */
-/* Drawable IOCTL support (drm_drawable.c) */
-int	drm_update_draw(struct drm_device *dev, void *data,
-			struct drm_file *file_priv);
-
 				/* Authentication IOCTL support (drm_auth.h) */
 /* Authentication IOCTL support (drm_auth.c) */
 extern int drm_getmagic(struct drm_device *dev, void *data,
@@ -1525,13 +1512,12 @@ extern int drm_authmagic(struct drm_device *dev, void *data,
 
 /* Cache management (drm_cache.c) */
 void drm_clflush_pages(struct page *pages[], unsigned long num_pages);
+
+/* legacy added */
 extern uint32_t cpu_clflush_line_size;
 extern void drm_clflush(volatile void *data);
 
-	/* Locking IOCTL support (drm_lock.h) */
-/* shared */
-/* Locking IOCTL support (drm_lock.c) */
-/* Locking IOCTL support (drm_drv.c) */
+				/* Locking IOCTL support (drm_lock.h) */
 extern int drm_lock(struct drm_device *dev, void *data,
 		    struct drm_file *file_priv);
 extern int drm_unlock(struct drm_device *dev, void *data,
@@ -1554,9 +1540,6 @@ int	drm_lock_transfer(struct drm_lock_data *lock_data,
 extern int drm_i_have_hw_lock(struct drm_device *dev, struct drm_file *file_priv);
 
 				/* Buffer management support (drm_bufs.h) */
-
-/* shared */
-/* Buffer management support (drm_bufs.c) */
 extern int drm_addbufs_agp(struct drm_device *dev, struct drm_buf_desc * request);
 extern int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc * request);
 #ifdef DRM_NEWER_USER_TOKEN
@@ -1598,7 +1581,7 @@ extern void drm_free_buffer(struct drm_device *dev, struct drm_buf * buf);
 extern void drm_core_reclaim_buffers(struct drm_device *dev,
 				     struct drm_file *filp);
 
-/* IRQ support (drm_irq.h) */
+				/* IRQ support (drm_irq.h) */
 extern int drm_control(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 extern irqreturn_t drm_irq_handler(DRM_IRQ_ARGS);
@@ -1650,19 +1633,25 @@ extern int drm_agp_unbind_ioctl(struct drm_device *dev, void *data,
 extern int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request);
 extern int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
+#ifdef __linux__
+extern DRM_AGP_MEM *drm_agp_allocate_memory(struct agp_bridge_data *bridge, size_t pages, u32 type);
+#else /* legacy change */
 extern DRM_AGP_MEM *drm_agp_allocate_memory(DRM_AGP_BRIDGE_DATA_T bridge, size_t pages, u32 type);
+#endif
 extern int drm_agp_free_memory(DRM_AGP_MEM * handle);
 extern int drm_agp_bind_memory(DRM_AGP_MEM * handle, off_t start);
 extern int drm_agp_unbind_memory(DRM_AGP_MEM * handle);
 extern void drm_agp_chipset_flush(struct drm_device *dev);
 
-/* legacy */
+/* legacy change */
 DRM_DEVICE_T drm_agp_find_bridge(void *data);
 extern void drm_agp_copy_info(DRM_AGP_BRIDGE_DATA_T bridge, DRM_AGP_KERN *agp_info);
-int	drm_device_is_agp(struct drm_device *dev);
-int	drm_device_is_pcie(struct drm_device *dev);
 
 				/* Stub support (drm_stub.h) */
+#ifndef __linux__
+extern DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device, DRM_PCI_DEVICE_ID *idlist);
+extern int drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
+#endif /* __linux__ */
 extern int drm_setmaster_ioctl(struct drm_device *dev, void *data,
 			       struct drm_file *file_priv);
 extern int drm_dropmaster_ioctl(struct drm_device *dev, void *data,
@@ -1670,10 +1659,13 @@ extern int drm_dropmaster_ioctl(struct drm_device *dev, void *data,
 struct drm_master *drm_master_create(struct drm_minor *minor);
 extern struct drm_master *drm_master_get(struct drm_master *master);
 extern void drm_master_put(struct drm_master **master);
+#ifdef __linux__
+extern int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
+		       struct drm_driver *driver);
+extern void drm_put_dev(struct drm_device *dev);
+#else /* legacy change */
 extern int drm_get_dev(DRM_GET_DEV_ARGS);
 extern void drm_put_dev(struct drm_device *dev);
-#ifndef __linux__
-extern DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device, DRM_PCI_DEVICE_ID *idlist);
 #endif /* __linux__ */
 extern int drm_put_minor(struct drm_minor **minor);
 extern unsigned int drm_debug;
@@ -1681,10 +1673,6 @@ extern unsigned int drm_debug;
 extern struct class *drm_class;
 extern struct proc_dir_entry *drm_proc_root;
 extern struct dentry *drm_debugfs_root;
-
-#ifndef __linux__
-extern int drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
-#endif /* __linux__ */
 
 extern struct idr drm_minors_idr;
 
@@ -1781,8 +1769,12 @@ drm_gem_object_unreference(struct drm_gem_object *obj)
 static inline void
 drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
 {
-	if (obj != NULL)
-		kref_put(&obj->refcount, drm_gem_object_free_unlocked);
+	if (obj != NULL) {
+		struct drm_device *dev = obj->dev;
+		mutex_lock(&dev->struct_mutex);
+		kref_put(&obj->refcount, drm_gem_object_free);
+		mutex_unlock(&dev->struct_mutex);
+	}
 }
 
 int drm_gem_handle_create(struct drm_file *file_priv,
@@ -1862,7 +1854,7 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 	return NULL;
 }
 
-#else
+#else /* DRM_NEWER_USER_TOKEN */
 
 static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 							 unsigned long offset)
@@ -1874,7 +1866,30 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 	return NULL;
 }
 
-#endif
+#endif /* DRM_NEWER_USER_TOKEN */
+
+#ifdef __linux__
+static __inline__ int drm_device_is_agp(struct drm_device *dev)
+{
+	if (dev->driver->device_is_agp != NULL) {
+		int err = (*dev->driver->device_is_agp) (dev);
+
+		if (err != 2) {
+			return err;
+		}
+	}
+
+	return pci_find_capability(dev->pdev, PCI_CAP_ID_AGP);
+}
+
+static __inline__ int drm_device_is_pcie(struct drm_device *dev)
+{
+	return pci_find_capability(dev->pdev, PCI_CAP_ID_EXP);
+}
+#else /* __linux__ legacy change*/
+extern int drm_device_is_agp(struct drm_device *dev);
+extern int drm_device_is_pcie(struct drm_device *dev);
+#endif /* __linux__ */
 
 static __inline__ void drm_core_dropmap(struct drm_local_map *map)
 {
