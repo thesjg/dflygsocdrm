@@ -122,7 +122,11 @@ struct detailed_non_pixel {
 		struct detailed_data_string str;
 		struct detailed_data_monitor_range range;
 		struct detailed_data_wpindex color;
+#ifdef __linux__ /* Linux 2.6.35.9 */
 		struct std_timing timings[6];
+#else /* Linux 2.6.34.7 */
+		struct std_timing timings[5];
+#endif
 		struct cvt_timing cvt[4];
 	} data;
 } __attribute__((packed));

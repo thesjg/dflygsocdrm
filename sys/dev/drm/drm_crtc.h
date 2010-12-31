@@ -558,6 +558,7 @@ struct drm_mode_set {
 	struct drm_connector **connectors;
 	size_t num_connectors;
 };
+
 /**
  * struct drm_mode_config_funcs - configure CRTCs for a given screen layout
  * @resize: adjust CRTCs as necessary for the proposed layout

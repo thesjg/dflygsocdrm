@@ -1,4 +1,13 @@
-/*-
+/**
+ * \file ati_pcigart.c
+ * ATI PCI GART support
+ *
+ * \author Gareth Hughes <gareth@valinux.com>
+ */
+
+/*
+ * Created: Wed Dec 13 21:52:19 2000 by gareth@valinux.com
+ *
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
@@ -20,10 +29,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
  * DEALINGS IN THE SOFTWARE.
- *
- * Authors:
- *   Gareth Hughes <gareth@valinux.com>
- *
  */
 
 /** @file ati_pcigart.c
@@ -55,9 +60,8 @@ drm_ati_alloc_pcigart_table_cb(void *arg, bus_dma_segment_t *segs,
 	dmah->busaddr = segs[0].ds_addr;
 }
 
-static int
-drm_ati_alloc_pcigart_table(struct drm_device *dev,
-			    struct drm_ati_pcigart_info *gart_info)
+static int drm_ati_alloc_pcigart_table(struct drm_device *dev,
+				       struct drm_ati_pcigart_info *gart_info)
 {
 	struct drm_dma_handle *dmah;
 	int flags, ret;
@@ -67,9 +71,6 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 	if (dmah == NULL)
 		return ENOMEM;
 
-#ifndef DRM_NEWER_LOCK
-//	DRM_UNLOCK();
-#endif
 	ret = bus_dma_tag_create(NULL, PAGE_SIZE, 0, /* tag, align, boundary */
 	    gart_info->table_mask, BUS_SPACE_MAXADDR, /* lowaddr, highaddr */
 	    NULL, NULL, /* filtfunc, filtfuncargs */
@@ -95,9 +96,6 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 		free(dmah, DRM_MEM_DMA);
 		return ENOMEM;
 	}
-#ifndef DRM_NEWER_LOCK
-//	DRM_LOCK();
-#endif
 
 	ret = bus_dmamap_load(dmah->tag, dmah->map, dmah->vaddr,
 	    gart_info->table_size, drm_ati_alloc_pcigart_table_cb, dmah,
@@ -114,9 +112,8 @@ drm_ati_alloc_pcigart_table(struct drm_device *dev,
 	return 0;
 }
 
-static void
-drm_ati_free_pcigart_table(struct drm_device *dev,
-			   struct drm_ati_pcigart_info *gart_info)
+static void drm_ati_free_pcigart_table(struct drm_device *dev,
+				       struct drm_ati_pcigart_info *gart_info)
 {
 	struct drm_dma_handle *dmah = gart_info->dmah;
 
@@ -126,9 +123,7 @@ drm_ati_free_pcigart_table(struct drm_device *dev,
 	gart_info->dmah = NULL;
 }
 
-int
-drm_ati_pcigart_cleanup(struct drm_device *dev,
-			struct drm_ati_pcigart_info *gart_info)
+int drm_ati_pcigart_cleanup(struct drm_device *dev, struct drm_ati_pcigart_info *gart_info)
 {
 	/* we need to support large memory configurations */
 	if (dev->sg == NULL) {
@@ -146,10 +141,9 @@ drm_ati_pcigart_cleanup(struct drm_device *dev,
 
 	return 1;
 }
+EXPORT_SYMBOL(drm_ati_pcigart_cleanup);
 
-int
-drm_ati_pcigart_init(struct drm_device *dev,
-		     struct drm_ati_pcigart_info *gart_info)
+int drm_ati_pcigart_init(struct drm_device *dev, struct drm_ati_pcigart_info *gart_info)
 {
 	void *address = NULL;
 	unsigned long pages;
@@ -230,3 +224,4 @@ drm_ati_pcigart_init(struct drm_device *dev,
 	gart_info->bus_addr = bus_address;
 	return ret;
 }
+EXPORT_SYMBOL(drm_ati_pcigart_init);

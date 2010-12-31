@@ -975,6 +975,7 @@ struct drm_driver {
 #define DRM_MINOR_CONTROL 2
 #define DRM_MINOR_RENDER 3
 
+
 /**
  * debugfs node list. This structure represents a debugfs file to
  * be created by the drm core
@@ -1270,7 +1271,11 @@ struct drm_device {
 
 static inline int drm_dev_to_irq(struct drm_device *dev)
 {
+#ifdef __linux__
+	return dev->pdev->irq;
+#else
 	return dev->irq;
+#endif
 }
 
 static __inline__ int drm_core_check_feature(struct drm_device *dev,
@@ -1285,7 +1290,7 @@ static __inline__ int drm_core_check_feature(struct drm_device *dev,
 #endif /* __alpha__ */
 #else /* drm_get_pic_domain unused previously in legacy drm */
 #define drm_get_pci_domain(dev) 0
-#endif
+#endif /* __linux__ */
 
 #if __OS_HAS_AGP
 static inline int drm_core_has_AGP(struct drm_device *dev)
@@ -1769,12 +1774,17 @@ drm_gem_object_unreference(struct drm_gem_object *obj)
 static inline void
 drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
 {
+#ifdef __linux__ /* Linux 2.6.35.9 */
 	if (obj != NULL) {
 		struct drm_device *dev = obj->dev;
 		mutex_lock(&dev->struct_mutex);
 		kref_put(&obj->refcount, drm_gem_object_free);
 		mutex_unlock(&dev->struct_mutex);
 	}
+#else
+	if (obj != NULL)
+		kref_put(&obj->refcount, drm_gem_object_free_unlocked);
+#endif
 }
 
 int drm_gem_handle_create(struct drm_file *file_priv,
