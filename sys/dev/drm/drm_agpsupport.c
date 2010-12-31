@@ -128,6 +128,7 @@ EXPORT_SYMBOL(drm_agp_info);
 int drm_agp_info_ioctl(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv)
 {
+#if 0
 	struct drm_agp_info info;
 	int err;
 
@@ -136,6 +137,14 @@ int drm_agp_info_ioctl(struct drm_device *dev, void *data,
 		return err;
 
 	*(struct drm_agp_info *) data = info;
+#endif
+	struct drm_agp_info *info = data;
+	int err;
+
+	err = drm_agp_info(dev, info);
+	if (err)
+		return err;
+
 	return 0;
 }
 
@@ -323,8 +332,8 @@ int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
  *
  * Walks through drm_agp_head::memory until finding a matching handle.
  */
-static struct drm_agp_mem * drm_agp_lookup_entry(struct drm_device *dev,
-					    unsigned long handle)
+static struct drm_agp_mem *drm_agp_lookup_entry(struct drm_device * dev,
+					   unsigned long handle)
 {
 	struct drm_agp_mem *entry;
 
