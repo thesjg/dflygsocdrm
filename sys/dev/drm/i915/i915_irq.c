@@ -80,7 +80,7 @@ ironlake_enable_graphics_irq(drm_i915_private_t *dev_priv, u32 mask)
 	}
 }
 
-static inline void
+void
 ironlake_disable_graphics_irq(drm_i915_private_t *dev_priv, u32 mask)
 {
 	if ((dev_priv->gt_irq_mask_reg & mask) != mask) {
@@ -121,7 +121,7 @@ i915_enable_irq(drm_i915_private_t *dev_priv, u32 mask)
 	}
 }
 
-static inline void
+void
 i915_disable_irq(drm_i915_private_t *dev_priv, u32 mask)
 {
 	if ((dev_priv->irq_mask_reg & mask) != mask) {

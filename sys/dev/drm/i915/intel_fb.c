@@ -46,6 +46,13 @@
 #include "i915_drm.h"
 #include "i915_drv.h"
 
+struct intel_fbdev {
+	struct drm_fb_helper helper;
+	struct intel_framebuffer ifb;
+	struct list_head fbdev_list;
+	struct drm_display_mode *our_mode;
+};
+
 struct intelfb_par {
 	struct drm_fb_helper helper;
 	struct intel_framebuffer *intel_fb;
