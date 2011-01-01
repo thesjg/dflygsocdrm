@@ -161,7 +161,11 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 	struct thread *p = curthread;
 #endif /* !__linux__ */
 	struct drm_device *dev = NULL;
+#ifdef __linux__
+	int minor_id = iminor(inode);
+#else
 	int minor_id = minor(kdev);
+#endif
 	struct drm_minor *minor;
 	int retcode = 0;
 
@@ -172,7 +176,7 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 #else
 		DRM_ERROR("No minor for %d\n", minor_id);
 		return ENODEV;
-#endif /* __linux__ */
+#endif
 	}
 
 #ifdef __linux__
@@ -183,12 +187,12 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 		DRM_ERROR("No minor device for %d\n", minor_id);
 		return ENODEV;
 	}
-#endif /* __linux__ */
-
 	dev = DRIVER_SOFTC(minor_id);
 	if (minor && (dev != minor->dev)) {
 		DRM_ERROR("Minor device != softc device for %d\n", minor_id);
+		return ENODEV;
 	}
+#endif
 
 #ifdef __linux__
 	retcode = drm_open_helper(inode, filp, dev);
@@ -199,7 +203,7 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
 		spin_lock(&dev->count_lock);
 
-#ifndef __linux__ /* legacy change device open */
+#ifndef __linux__ /* legacy change balanced in drm_close_legacy */
 		device_busy(dev->device);
 #endif
 
@@ -316,14 +320,14 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 #endif
 {
 	int minor_id = minor(kdev);
-	struct drm_file *priv;
 	struct drm_file *find_priv;
+	struct drm_file *priv;
 	int ret;
 
 	if (flags & O_EXCL)
 		return EBUSY; /* No exclusive opens */
 	if (!drm_cpu_valid())
-		return -EINVAL;
+		return EINVAL;
 
 	dev->flags = flags;
 
@@ -337,12 +341,21 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	priv->refs = 1;
 	priv->minor_legacy = minor_id;
 
+#ifdef __linux__
+	priv->uid = current_euid();
+	priv->pid = task_pid_nr(current);
+#else
 	priv->uid = p->td_proc->p_ucred->cr_svuid;
 	priv->pid = p->td_proc->p_pid;
+#endif
 	priv->minor = idr_find(&drm_minors_idr, minor_id);
 	priv->ioctl_count = 0;
 	/* for compatibility root is always authenticated */
+#ifdef __linux__
+	priv->authenticated = capable(CAP_SYS_ADMIN);
+#else
 	priv->authenticated = DRM_SUSER(p);
+#endif
 	priv->lock_count = 0;
 
 	INIT_LIST_HEAD(&priv->lhead);
@@ -351,6 +364,7 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	init_waitqueue_head(&priv->event_wait);
 	priv->event_space = 4096; /* set aside 4k for event buffer */
 
+#ifndef __linux__ /* legacy required because no file open state */
 	spin_lock(&dev->file_priv_lock);
         find_priv = drm_find_file_by_proc(dev, p);
         if (find_priv) {
@@ -366,6 +380,7 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 		ret = 0;
 		goto out_free;
 	}
+#endif /* !__linux__ */
 
 	if (dev->driver->driver_features & DRIVER_GEM)
 		drm_gem_open(dev, priv);
@@ -379,14 +394,16 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 
 	/* if there is no current master make this fd it */
 	mutex_lock(&dev->struct_mutex);
+#ifndef __linux__ /* legacy can be made redundant */
 	kdev->si_drv1 = dev;
 	priv->master_legacy = TAILQ_EMPTY(&dev->files);
+#endif
 	if (!priv->minor->master) {
 		/* create a new master */
 		priv->minor->master = drm_master_create(priv->minor);
 		if (!priv->minor->master) {
 			mutex_unlock(&dev->struct_mutex);
-			ret = -ENOMEM;
+			ret = ENOMEM;
 			goto out_free;
 		}
 
@@ -749,7 +766,7 @@ done:
 				  atomic_read(&dev->ioctl_count));
 			spin_unlock(&dev->count_lock);
 			unlock_kernel();
-			return -EBUSY;
+			return EBUSY;
 		}
 		spin_unlock(&dev->count_lock);
 		unlock_kernel();
