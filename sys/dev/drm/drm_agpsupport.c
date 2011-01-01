@@ -159,6 +159,13 @@ int drm_agp_info_ioctl(struct drm_device *dev, void *data,
  */
 int drm_agp_acquire(struct drm_device * dev)
 {
+	if (!dev->agp)
+		return ENODEV;
+	if (dev->agp->acquired)
+		return EBUSY;
+	if (agp_acquire(dev->agp->agpdev))
+		return ENODEV;
+#if 0
 	int retcode;
 
 	if (!dev->agp || dev->agp->acquired)
@@ -167,7 +174,7 @@ int drm_agp_acquire(struct drm_device * dev)
 	retcode = agp_acquire(dev->agp->agpdev);
 	if (retcode)
 		return retcode;
-
+#endif
 	dev->agp->acquired = 1;
 	return 0;
 }
@@ -189,6 +196,8 @@ EXPORT_SYMBOL(drm_agp_acquire);
 int drm_agp_acquire_ioctl(struct drm_device *dev, void *data,
 			  struct drm_file *file_priv)
 {
+	if (dev != file_priv->minor->dev)
+		DRM_ERROR("drm_agp_acquire_ioctl: dev != file_priv->minor->dev\n");
 #ifdef __linux__
 	return drm_agp_acquire((struct drm_device *) file_priv->minor->dev);
 #else
@@ -246,11 +255,16 @@ EXPORT_SYMBOL(drm_agp_enable);
 int drm_agp_enable_ioctl(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv)
 {
+	struct drm_agp_mode *mode = data;
+
+	return drm_agp_enable(dev, *mode);
+#if 0
 	struct drm_agp_mode mode;
 
 	mode = *(struct drm_agp_mode *) data;
 
 	return drm_agp_enable(dev, mode);
+#endif
 }
 
 /**
@@ -311,6 +325,10 @@ EXPORT_SYMBOL(drm_agp_alloc);
 int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
 			struct drm_file *file_priv)
 {
+	struct drm_agp_buffer *request = data;
+
+	return drm_agp_alloc(dev, request);
+#if 0
 	struct drm_agp_buffer request;
 	int retcode;
 
@@ -321,6 +339,7 @@ int drm_agp_alloc_ioctl(struct drm_device *dev, void *data,
 	*(struct drm_agp_buffer *) data = request;
 
 	return retcode;
+#endif
 }
 
 /**
@@ -418,15 +437,14 @@ int drm_agp_bind(struct drm_device *dev, struct drm_agp_binding *request)
 		return EINVAL;
 #endif
 	if (!(entry = drm_agp_lookup_entry(dev, request->handle)))
-		return -EINVAL;
+		return EINVAL;
 	if (entry->bound)
-		return -EINVAL;
+		return EINVAL;
 	page = (request->offset + PAGE_SIZE - 1) / PAGE_SIZE;
 
-#ifdef __linux__
 	if ((retcode = drm_bind_agp(entry->memory, page)))
 		return retcode;
-#else
+#if 0
 	if ((retcode = drm_agp_bind_memory(entry->memory, page)))
 		return retcode;
 #endif
@@ -440,6 +458,10 @@ EXPORT_SYMBOL(drm_agp_bind);
 int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv)
 {
+	struct drm_agp_binding *request = data;
+
+	return drm_agp_bind(dev, request);
+#if 0
 	struct drm_agp_binding request;
 	int retcode;
 
@@ -448,6 +470,7 @@ int drm_agp_bind_ioctl(struct drm_device *dev, void *data,
 	retcode = drm_agp_bind(dev, &request);
 
 	return retcode;
+#endif
 }
 
 /**
@@ -469,25 +492,43 @@ int drm_agp_free(struct drm_device *dev, struct drm_agp_buffer *request)
 	struct drm_agp_mem *entry;
 	
 	if (!dev->agp || !dev->agp->acquired)
-		return EINVAL;
-
+		return -EINVAL;
+	if (!(entry = drm_agp_lookup_entry(dev, request->handle)))
+		return -EINVAL;
+#if 0
 	entry = drm_agp_lookup_entry(dev, request->handle);
 	if (entry == NULL)
 		return EINVAL;
+#endif
+	if (entry->bound)
+		drm_unbind_agp(entry->memory);
 
 	list_del(&entry->head);
 
+#if 0
 	if (entry->bound)
 		drm_agp_unbind_memory(entry->memory);
-	drm_agp_free_memory(entry->memory);
+#endif
 
+	drm_free_agp(entry->memory, entry->pages);
+#if 0
+	drm_agp_free_memory(entry->memory);
+#endif
 	free(entry, DRM_MEM_AGPLISTS);
 	return 0;
 }
+EXPORT_SYMBOL(drm_agp_free);
+
+
 
 int drm_agp_free_ioctl(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv)
 {
+	struct drm_agp_buffer *request = data;
+
+	return drm_agp_free(dev, request);
+
+#if 0
 	struct drm_agp_buffer request;
 	int retcode;
 
@@ -496,6 +537,7 @@ int drm_agp_free_ioctl(struct drm_device *dev, void *data,
 	retcode = drm_agp_free(dev, &request);
 
 	return retcode;
+#endif
 }
 
 /**
