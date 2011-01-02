@@ -38,6 +38,7 @@ SRCS    = \
 	drm_sman.c \
 	drm_stub.c \
 	drm_sysctl.c \
+	drm_sysfs_porting.c \
 	drm_vm.c
 
 SRCS   += device_if.h bus_if.h pci_if.h iicbb_if.h iicbus_if.h opt_drm.h

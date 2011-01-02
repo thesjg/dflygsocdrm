@@ -1206,9 +1206,9 @@ struct drm_device {
 	atomic_t context_flag;
 	u_int16_t pci_vendor;		/* PCI vendor id */
 	u_int16_t pci_device;		/* PCI device id */
-#endif
 	/* Linked list of mappable regions. Protected by dev_lock */
 	drm_map_list_t_legacy maplist_legacy;
+#endif
 	DRM_PCI_DEVICE_ID *id_entry;	/* PCI ID, name, and chipset private */
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
@@ -1288,7 +1288,7 @@ static __inline__ int drm_core_check_feature(struct drm_device *dev,
 #ifdef __alpha__
 #define drm_get_pci_domain(dev) dev->hose->index
 #endif /* __alpha__ */
-#else /* drm_get_pic_domain unused previously in legacy drm */
+#else /* !__linux__ */
 #define drm_get_pci_domain(dev) 0
 #endif /* __linux__ */
 

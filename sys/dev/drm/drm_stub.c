@@ -39,16 +39,7 @@
 #include "drmP.h"
 #include "drm_core.h"
 
-unsigned int drm_debug = 0;	/* 1 to enable debug output */
-EXPORT_SYMBOL(drm_debug);
-
-MODULE_AUTHOR(CORE_AUTHOR);
-MODULE_DESCRIPTION(CORE_DESC);
-MODULE_LICENSE("GPL and additional rights");
-MODULE_PARM_DESC(debug, "Enable debug output");
-
-module_param_named(debug, drm_debug, int, 0600);
-
+#ifndef __linux__ /* legacy */
 static struct dev_ops drm_cdevsw = {
 /*	{ "drm", 145, D_TRACKCLOSE | D_KQFILTER }, */
 	{ "drm", 145, D_TRACKCLOSE },
@@ -83,6 +74,17 @@ static int drm_msi_is_blacklisted(int vendor, int device)
 
 	return 0;
 }
+#endif /* !__linux__ */
+
+unsigned int drm_debug = 0;	/* 1 to enable debug output */
+EXPORT_SYMBOL(drm_debug);
+
+MODULE_AUTHOR(CORE_AUTHOR);
+MODULE_DESCRIPTION(CORE_DESC);
+MODULE_LICENSE("GPL and additional rights");
+MODULE_PARM_DESC(debug, "Enable debug output");
+
+module_param_named(debug, drm_debug, int, 0600);
 
 struct idr drm_minors_idr;
 
@@ -274,9 +276,15 @@ int drm_dropmaster_ioctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
+#ifdef __linux__
+static int drm_fill_in_dev(struct drm_device * dev, struct pci_dev *pdev,
+			   const struct pci_device_id *ent,
+			   struct drm_driver *driver)
+#else
 static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 			   DRM_PCI_DEVICE_ID *idlist,
 			   struct drm_driver *driver)
+#endif
 {
 	int i;
 	DRM_PCI_DEVICE_ID *id_entry;
@@ -302,13 +310,24 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 	DRM_SPININIT(&dev->dev_lock, "drmdev");
 	lwkt_serialize_init(&dev->irq_lock);
 	DRM_SPININIT(&dev->static_lock, "drmsta");
-	DRM_SPININIT(&dev->file_priv_lock, "drmsta");
-#endif /* __linux__ */
+	DRM_SPININIT(&dev->file_priv_lock, "drmfpl");
+#endif /* !__linux__ */
 
+#ifdef __linux__
+	dev->pdev = pdev;
+	dev->pci_device = pdev->device;
+	dev->pci_vendor = pdev->vendor;
+
+#ifdef __alpha__
+	dev->hose = pdev->sysdata;
+#endif
+
+#else /* !__linux__ */
 	dev->device = kdev;
 	dev->unit = device_get_unit(kdev);
 	dev->pci_device = pci_get_device(dev->device);
 	dev->pci_vendor = pci_get_vendor(dev->device);
+#endif /* __linux__ */
 
 #ifndef __linux__
 	dev->pci_domain = 0;
@@ -320,7 +339,9 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 	    dev->pci_device, idlist);
 	dev->id_entry = id_entry;
 
+#if 0
 	TAILQ_INIT(&dev->maplist_legacy);
+#endif
 	TAILQ_INIT(&dev->files);
 
 /* also done in drm_fops.c */
@@ -342,7 +363,7 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 	dev->types[4] = _DRM_STAT_LOCKS;
 	dev->types[5] = _DRM_STAT_UNLOCKS;
 
-#ifdef __linux /* driver already set otherwise */
+#ifdef __linux /* legacy change, driver already set otherwise */
 	dev->driver = driver;
 #endif /* __linux__ */
 
@@ -382,6 +403,7 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 #endif /* __linux__ */
 	}
 
+
 	retcode = drm_ctxbitmap_init(dev);
 	if (retcode) {
 		DRM_ERROR("Cannot allocate memory for context bitmap.\n");
@@ -390,10 +412,6 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 
 	if (driver->driver_features & DRIVER_GEM) {
 		retcode = drm_gem_init(dev);
-#if 0
-	if (dev->driver->driver_features & DRIVER_GEM) {
-		retcode = 0;
-#endif
 		if (retcode) {
 			DRM_ERROR("Cannot initialize graphics execution "
 				  "manager (GEM)\n");
@@ -407,6 +425,7 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 	drm_lastclose(dev);
 	return retcode;
 }
+
 
 /**
  * Get a secondary minor number.
@@ -471,11 +490,7 @@ static int drm_get_minor(struct drm_device *dev, struct drm_minor **minor, int t
 	}
 #endif
 
-#ifdef __linux__
 	ret = drm_sysfs_device_add(new_minor);
-#else /* to compile */
-	ret = 0;
-#endif
 	if (ret) {
 		printk(KERN_ERR
 		       "DRM: Error sysfs_device_add.\n");
@@ -514,7 +529,12 @@ err_idr:
  * then register the character device and inter module information.
  * Try and register, if we fail to register, backout previous work.
  */
+#ifdef __linux__
+int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
+		struct drm_driver *driver)
+#else
 int drm_get_dev(DRM_GET_DEV_ARGS)
+#endif
 {
 	int unit;
 
@@ -532,6 +552,13 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 	if (!dev)
 		return -ENOMEM;
 
+#ifdef __linux__
+	ret = pci_enable_device(pdev);
+	if (ret)
+		goto err_g1;
+
+	pci_set_master(pdev);
+#else /* !__linux__ */
 	pci_enable_busmaster(dev->device);
 
 	if (drm_core_check_feature(dev, DRIVER_HAVE_IRQ)) {
@@ -560,6 +587,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 
 		dev->irq = (int) rman_get_start(dev->irqr);
 	}
+#endif /* __linux__ */
 
 	if ((ret = drm_fill_in_dev(dev, kdev, idlist, dev->driver))) {
 		printk(KERN_ERR "DRM: Fill_in_dev failed.\n");
@@ -567,6 +595,9 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 	}
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
+#ifdef __linux__
+		pci_set_drvdata(pdev, dev);
+#endif
 		ret = drm_get_minor(dev, &dev->control, DRM_MINOR_CONTROL);
 		if (ret)
 			goto err_g2;
@@ -584,7 +615,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 
         /* setup the grouping for the legacy output */
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-#ifdef __linux__ /* enable when import drm_crtc.c */
+#ifdef __linux__ /* UNIMPLEMENTED drm_mode_group_init_legacy_group, enable when import drm_crtc.c */
 		ret = drm_mode_group_init_legacy_group(dev, &dev->primary->mode_group);
 #else
 		ret = 0;
@@ -593,7 +624,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 			goto err_g4;
 	}
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED driver->device_list */
 	list_add_tail(&dev->driver_item, &driver->device_list);
 #endif /* __linux__ */
 
@@ -615,6 +646,10 @@ err_g3:
 	if (drm_core_check_feature(dev, DRIVER_MODESET))
 		drm_put_minor(&dev->control);
 err_g2:
+#ifdef __linux__
+	pci_disable_device(pdev);
+err_g1:
+#endif /* __linux__ */
 	return ret;
 }
 EXPORT_SYMBOL(drm_get_dev);
@@ -636,23 +671,21 @@ int drm_put_minor(struct drm_minor **minor_p)
 	DRM_INFO("release secondary minor %d\n", minor->index);
 
 	if (minor->type == DRM_MINOR_LEGACY)
-		drm_sysctl_cleanup(minor);
-
 #ifdef __linux__
+		drm_proc_cleanup(minor, drm_proc_root);
+#else
+		drm_sysctl_cleanup(minor);
+#endif
+
 #if defined(CONFIG_DEBUG_FS)
 	drm_debugfs_cleanup(minor);
 #endif
 
 	drm_sysfs_device_remove(minor);
-#endif /* __linux__ */
 
 	idr_remove(&drm_minors_idr, minor->index);
 
-#ifdef __linux__
-	kfree(minor);
-#else
 	free(minor, DRM_MEM_STUB);
-#endif
 	*minor_p = NULL;
 	return 0;
 }
@@ -689,7 +722,7 @@ void drm_put_dev(struct drm_device *dev)
 				  dev->agp->agp_info.aper_size * 1024 * 1024);
 		DRM_DEBUG("mtrr_del=%d\n", retval);
 	}
-#else /* __linux__ */
+#else /* !__linux__ */
 #ifdef DRM_NEWER_MTRR
 	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
 	    dev->agp && dev->agp->agp_mtrr > 0) {
@@ -734,7 +767,10 @@ void drm_put_dev(struct drm_device *dev)
 	if (driver->driver_features & DRIVER_GEM)
 		drm_gem_destroy(dev);
 
+#ifndef __linux__
 	destroy_dev(dev->devnode);
+#endif
+
 	drm_put_minor(&dev->primary);
 
 	if (dev->devname) {
