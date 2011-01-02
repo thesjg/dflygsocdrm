@@ -1757,7 +1757,7 @@ i915_add_request(struct drm_device *dev, struct drm_file *file_priv,
 	/* Associate any objects on the flushing list matching the write
 	 * domain we're flushing with our flush.
 	 */
-	if (flush_domains != 0)
+	if (flush_domains != 0) 
 		i915_gem_process_flushing_list(dev, flush_domains, seqno);
 
 	if (!dev_priv->mm.suspended) {
