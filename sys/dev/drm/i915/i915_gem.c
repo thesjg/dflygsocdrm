@@ -2373,7 +2373,7 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 	if (obj_priv->pages_refcount++ != 0)
 		return 0;
 
-/* Get the list of pages out of our struct file.  They'll be pinned
+	/* Get the list of pages out of our struct file.  They'll be pinned
 	 * at this point until we release them.
 	 */
 	page_count = obj->size / PAGE_SIZE;
