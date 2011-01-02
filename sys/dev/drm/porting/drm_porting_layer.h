@@ -420,10 +420,10 @@ free(void *addr, struct malloc_type *type)
 #define KERN_WARNING "warning::"
 
 /* file drm_crtc_helper, function drm_encoder_crtc_ok() */
-#define WARN(cond, ...)  do { if (cond) kprintf(__VA_ARGS__); } while (0)
+#define WARN(cond, ...)  do { if (cond) DRM_ERROR(__VA_ARGS__); } while (0)
 
 /* file i915_gem.c */
-#define WARN_ON(cond)  if (cond) DRM_ERROR("\n")
+#define WARN_ON(cond)  do { if (cond) DRM_ERROR("\n"); } while (0)
 
 /* file i915_gem.c */
 /* file drm_cache.c, function drm_clflush_pages() */

@@ -294,9 +294,7 @@ static void intel_dvo_destroy (struct drm_connector *connector)
 		intel_i2c_destroy(intel_encoder->i2c_bus);
 	if (intel_encoder->ddc_bus)
 		intel_i2c_destroy(intel_encoder->ddc_bus);
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif /* __linux__ */
 	drm_connector_cleanup(connector);
 	free(intel_encoder, DRM_MEM_DRIVER);
 }
@@ -492,9 +490,7 @@ void intel_dvo_init(struct drm_device *dev)
 			dvo->panel_wants_dither = true;
 		}
 
-#ifdef __linux__
 		drm_sysfs_connector_add(connector);
-#endif /* __linux__ */
 		return;
 	}
 

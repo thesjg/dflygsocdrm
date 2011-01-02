@@ -37,6 +37,8 @@
 
 #ifdef __linux__
 #include "i915_trace.h"
+#else
+#include "i915_trace_porting.h"
 #endif /* __linux__ */
 
 #include "intel_drv.h"
@@ -277,9 +279,7 @@ static void i915_hotplug_work_func(struct work_struct *work)
 		}
 	}
 	/* Just fire off a uevent and let userspace tell us what to do */
-#ifdef __linux__
 	drm_sysfs_hotplug_event(dev);
-#endif
 }
 
 static void i915_handle_rps_change(struct drm_device *dev)

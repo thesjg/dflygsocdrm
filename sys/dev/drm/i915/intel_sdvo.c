@@ -1987,9 +1987,7 @@ static void intel_sdvo_destroy(struct drm_connector *connector)
 	if (sdvo_priv->is_tv || sdvo_priv->is_lvds)
 		intel_sdvo_destroy_enhance_property(connector);
 
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif /* __linux__ */
 	drm_connector_cleanup(connector);
 	free(intel_encoder, DRM_MEM_DRIVER);
 }
@@ -2331,9 +2329,7 @@ intel_sdvo_output_setup(struct intel_encoder *intel_encoder, uint16_t flags)
 	sdvo_priv->is_lvds = false;
 
 	if (device_is_registered(&connector->kdev)) {
-#ifdef __linux__ /* UNIMPLEMENTED */
 		drm_sysfs_connector_remove(connector);
-#endif
 		registered = true;
 	}
 
@@ -2421,11 +2417,7 @@ intel_sdvo_output_setup(struct intel_encoder *intel_encoder, uint16_t flags)
 	intel_encoder->crtc_mask = (1 << 0) | (1 << 1);
 
 	if (ret && registered)
-#ifdef __linux__ /* UNIMPLEMENTED */
 		ret = drm_sysfs_connector_add(connector) == 0 ? true : false;
-#else
-		;
-#endif /* __linux__ */
 
 
 	return ret;
@@ -2879,9 +2871,7 @@ bool intel_sdvo_init(struct drm_device *dev, int sdvo_reg)
 	if (sdvo_priv->is_tv || sdvo_priv->is_lvds)
 		intel_sdvo_create_enhance_property(connector);
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	drm_sysfs_connector_add(connector);
-#endif
 
 	intel_sdvo_select_ddc_bus(sdvo_priv);
 

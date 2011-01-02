@@ -1605,9 +1605,8 @@ static void
 intel_tv_destroy (struct drm_connector *connector)
 {
 	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
-#ifdef __linux__
+
 	drm_sysfs_connector_remove(connector);
-#endif /* __linux__ */
 	drm_connector_cleanup(connector);
 	free(intel_encoder, DRM_MEM_DRIVER);
 }
@@ -1842,8 +1841,5 @@ intel_tv_init(struct drm_device *dev)
 				   dev->mode_config.tv_bottom_margin_property,
 				   tv_priv->margin[TV_MARGIN_BOTTOM]);
 out:
-	;
-#ifdef __linux__
 	drm_sysfs_connector_add(connector);
-#endif /* __linux__ */
 }

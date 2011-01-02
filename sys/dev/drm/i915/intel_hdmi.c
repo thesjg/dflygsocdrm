@@ -192,9 +192,7 @@ static void intel_hdmi_destroy(struct drm_connector *connector)
 
 	if (intel_encoder->i2c_bus)
 		intel_i2c_destroy(intel_encoder->i2c_bus);
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif /* __linux__ */
 	drm_connector_cleanup(connector);
 	free(intel_encoder, DRM_MEM_DRIVER);
 }
@@ -293,9 +291,7 @@ void intel_hdmi_init(struct drm_device *dev, int sdvox_reg)
 
 	drm_mode_connector_attach_encoder(&intel_encoder->base,
 					  &intel_encoder->enc);
-#ifdef __linux__
 	drm_sysfs_connector_add(connector);
-#endif /* __linux__ */
 
 	/* For G4X desktop chip, PEG_BAND_GAP_DATA 3:0 must first be written
 	 * 0xd.  Failure to do so will result in spurious interrupts being

@@ -427,9 +427,7 @@ static void intel_crt_destroy(struct drm_connector *connector)
 	struct intel_encoder *intel_encoder = to_intel_encoder(connector);
 
 	intel_i2c_destroy(intel_encoder->ddc_bus);
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif /* __linux__ */
 	drm_connector_cleanup(connector);
 	free(connector, DRM_MEM_DRIVER);
 }
@@ -555,9 +553,7 @@ void intel_crt_init(struct drm_device *dev)
 	drm_encoder_helper_add(&intel_encoder->enc, &intel_crt_helper_funcs);
 	drm_connector_helper_add(connector, &intel_crt_connector_helper_funcs);
 
-#ifdef __linux__
 	drm_sysfs_connector_add(connector);
-#endif /* __linux__ */
 
 	dev_priv->hotplug_supported_mask |= CRT_HOTPLUG_INT_STATUS;
 }

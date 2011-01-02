@@ -36,6 +36,11 @@
 
 #ifdef __linux__
 #include "i915_trace.h"
+#else
+#include "i915_trace_porting.h"
+#endif
+
+#ifdef __linux__
 #include <linux/vgaarb.h>
 #include <linux/acpi.h>
 #include <linux/pnp.h>
@@ -58,9 +63,7 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 	u32 last_head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
 	int i;
 
-#ifdef __linux__
 	trace_i915_ring_wait_begin (dev);
-#endif /* __linux__ */
 
 	for (i = 0; i < 100000; i++) {
 		ring->head = I915_READ(PRB0_HEAD) & HEAD_ADDR;
@@ -69,9 +72,7 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 		if (ring->space < 0)
 			ring->space += ring->Size;
 		if (ring->space >= n) {
-#ifdef __linux__
 			trace_i915_ring_wait_end (dev);
-#endif /* __linux__ */
 			return 0;
 		}
 
@@ -81,6 +82,7 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 				master_priv->sarea_priv->perf_boxes |= I915_BOX_WAIT;
 		}
 
+
 		if (ring->head != last_head)
 			i = 0;
 		if (acthd != last_acthd)
@@ -89,11 +91,10 @@ int i915_wait_ring(struct drm_device * dev, int n, const char *caller)
 		last_head = ring->head;
 		last_acthd = acthd;
 		msleep_interruptible(10);
+
 	}
 
-#ifdef __linux__
 	trace_i915_ring_wait_end (dev);
-#endif /* __linux__ */
 	return -EBUSY;
 }
 
@@ -913,11 +914,7 @@ static int i915_set_status_page(struct drm_device *dev, void *data,
 	}
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-#ifdef __linux__
 		WARN(1, "tried to set status page when mode setting active\n");
-#else
-		DRM_ERROR("tried to set status page when mode setting active\n");
-#endif
 		return 0;
 	}
 

@@ -730,9 +730,7 @@ static void intel_lvds_destroy(struct drm_connector *connector)
 		intel_i2c_destroy(intel_encoder->ddc_bus);
 	if (dev_priv->lid_notifier.notifier_call)
 		acpi_lid_notifier_unregister(&dev_priv->lid_notifier);
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif /* __linux__ */
 	drm_connector_cleanup(connector);
 	free(connector, DRM_MEM_DRIVER);
 }
@@ -1153,9 +1151,7 @@ out:
 	}
 	/* keep the LVDS connector */
 	dev_priv->int_lvds_connector = connector;
-#ifdef __linux__
 	drm_sysfs_connector_add(connector);
-#endif /* __linux__ */
 	return;
 
 failed:

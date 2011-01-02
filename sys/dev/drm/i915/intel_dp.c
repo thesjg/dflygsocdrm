@@ -1317,9 +1317,7 @@ intel_dp_destroy (struct drm_connector *connector)
 
 	if (intel_encoder->i2c_bus)
 		intel_i2c_destroy(intel_encoder->i2c_bus);
-#ifdef __linux__
 	drm_sysfs_connector_remove(connector);
-#endif /* __linux__ */
 	drm_connector_cleanup(connector);
 	free(intel_encoder, DRM_MEM_DRIVER);
 }
@@ -1417,9 +1415,7 @@ intel_dp_init(struct drm_device *dev, int output_reg)
 
 	drm_mode_connector_attach_encoder(&intel_encoder->base,
 					  &intel_encoder->enc);
-#ifdef __linux__
 	drm_sysfs_connector_add(connector);
-#endif /* __linux__ */
 
 	/* Set up the DDC bus. */
 	switch (output_reg) {

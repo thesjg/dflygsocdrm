@@ -2000,6 +2000,7 @@ dev/drm/i915/dvo_tfp410.c		optional i915drm drm
 dev/drm/i915/i915_gem.c			optional i915drm drm
 dev/drm/i915/i915_gem_tiling.c		optional i915drm drm
 dev/drm/i915/i915_opregion.c		optional i915drm drm
+dev/drm/i915/i915_trace_porting.c	optional i915drm drm
 dev/drm/i915/intel_bios.c		optional i915drm drm
 dev/drm/i915/intel_crt.c		optional i915drm drm
 dev/drm/i915/intel_display.c		optional i915drm drm
