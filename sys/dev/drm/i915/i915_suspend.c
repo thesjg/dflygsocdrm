@@ -609,19 +609,6 @@ void i915_save_display(struct drm_device *dev)
 		dev_priv->saveFBC_CONTROL2 = I915_READ(FBC_CONTROL2);
 		dev_priv->saveFBC_CONTROL = I915_READ(FBC_CONTROL);
 	}
-#if 0
-	/* Only save FBC state on the platform that supports FBC */
-	if (I915_HAS_FBC(dev)) {
-		if (IS_GM45(dev)) {
-			dev_priv->saveDPFC_CB_BASE = I915_READ(DPFC_CB_BASE);
-		} else {
-			dev_priv->saveFBC_CFB_BASE = I915_READ(FBC_CFB_BASE);
-			dev_priv->saveFBC_LL_BASE = I915_READ(FBC_LL_BASE);
-			dev_priv->saveFBC_CONTROL2 = I915_READ(FBC_CONTROL2);
-			dev_priv->saveFBC_CONTROL = I915_READ(FBC_CONTROL);
-		}
-	}
-#endif
 
 	/* VGA state */
 	dev_priv->saveVGA0 = I915_READ(VGA0);
@@ -726,21 +713,7 @@ void i915_restore_display(struct drm_device *dev)
 		I915_WRITE(FBC_CONTROL2, dev_priv->saveFBC_CONTROL2);
 		I915_WRITE(FBC_CONTROL, dev_priv->saveFBC_CONTROL);
 	}
-#if 0
-	/* only restore FBC info on the platform that supports FBC*/
-	if (I915_HAS_FBC(dev)) {
-		if (IS_GM45(dev)) {
-			g4x_disable_fbc(dev);
-			I915_WRITE(DPFC_CB_BASE, dev_priv->saveDPFC_CB_BASE);
-		} else {
-			i8xx_disable_fbc(dev);
-			I915_WRITE(FBC_CFB_BASE, dev_priv->saveFBC_CFB_BASE);
-			I915_WRITE(FBC_LL_BASE, dev_priv->saveFBC_LL_BASE);
-			I915_WRITE(FBC_CONTROL2, dev_priv->saveFBC_CONTROL2);
-			I915_WRITE(FBC_CONTROL, dev_priv->saveFBC_CONTROL);
-		}
-	}
-#endif
+
 	/* VGA state */
 	if (IS_IRONLAKE(dev))
 		I915_WRITE(CPU_VGACNTRL, dev_priv->saveVGACNTRL);

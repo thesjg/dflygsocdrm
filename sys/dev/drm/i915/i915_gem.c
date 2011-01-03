@@ -2521,14 +2521,11 @@ static void i915_write_fence_reg(struct drm_i915_fence_reg *reg)
 	pitch_val = obj_priv->stride / tile_width;
 	pitch_val = ffs(pitch_val) - 1;
 
-/* legacy change added braces, should fix WARN_ON */
 	if (obj_priv->tiling_mode == I915_TILING_Y &&
-	    HAS_128_BYTE_Y_TILING(dev)) {
+	    HAS_128_BYTE_Y_TILING(dev))
 		WARN_ON(pitch_val > I830_FENCE_MAX_PITCH_VAL);
-	}
-	else {
+	else
 		WARN_ON(pitch_val > I915_FENCE_MAX_PITCH_VAL);
-	}
 
 	val = obj_priv->gtt_offset;
 	if (obj_priv->tiling_mode == I915_TILING_Y)

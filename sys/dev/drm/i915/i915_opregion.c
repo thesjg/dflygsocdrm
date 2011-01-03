@@ -174,12 +174,12 @@ static u32 asle_set_backlight(struct drm_device *dev, u32 bclp)
 	else {
 		if (IS_PINEVIEW(dev)) {
 			blc_pwm_ctl &= ~(BACKLIGHT_DUTY_CYCLE_MASK - 1);
-			max_backlight = (blc_pwm_ctl & BACKLIGHT_MODULATION_FREQ_MASK) >>
+			max_backlight = (blc_pwm_ctl & BACKLIGHT_MODULATION_FREQ_MASK) >> 
 					BACKLIGHT_MODULATION_FREQ_SHIFT;
 			shift = BACKLIGHT_DUTY_CYCLE_SHIFT + 1;
 		} else {
 			blc_pwm_ctl &= ~BACKLIGHT_DUTY_CYCLE_MASK;
-			max_backlight = ((blc_pwm_ctl & BACKLIGHT_MODULATION_FREQ_MASK) >>
+			max_backlight = ((blc_pwm_ctl & BACKLIGHT_MODULATION_FREQ_MASK) >> 
 					BACKLIGHT_MODULATION_FREQ_SHIFT) * 2;
 			shift = BACKLIGHT_DUTY_CYCLE_SHIFT;
 		}

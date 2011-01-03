@@ -921,7 +921,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 
 		ret = IRQ_HANDLED;
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__ /* UNIMPLEMENTED i915 hotplug */
 		/* Consume port.  Then clear IIR or we'll miss events */
 		if ((I915_HAS_HOTPLUG(dev)) &&
 		    (iir & I915_DISPLAY_PORT_INTERRUPT)) {
@@ -949,7 +949,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		}
 
 		if (iir & I915_USER_INTERRUPT) {
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__ /* UNIMPLEMENTED i915_get_gem_seqno() */
 			u32 seqno = i915_get_gem_seqno(dev);
 			dev_priv->mm.irq_gem_seqno = seqno;
 			trace_i915_gem_request_complete(dev, seqno);
@@ -965,7 +965,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 
 		}
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__ /* UNIMPLEMENTED intel_finish_page_flip_plane() */
 		if (iir & I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT) {
 			intel_prepare_page_flip(dev, 0);
 			if (dev_priv->flip_pending_is_done)
@@ -982,7 +982,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		if (pipea_stats & vblank_status) {
 			vblank++;
 			drm_handle_vblank(dev, 0);
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__ /* UNIMPLEMENTED intel_finish_page_flip() */
 			if (!dev_priv->flip_pending_is_done)
 				intel_finish_page_flip(dev, 0);
 #endif
@@ -991,13 +991,13 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		if (pipeb_stats & vblank_status) {
 			vblank++;
 			drm_handle_vblank(dev, 1);
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__ /* UNIMPLEMENTED intel_finish_page_flip() */
 			if (!dev_priv->flip_pending_is_done)
 				intel_finish_page_flip(dev, 1);
 #endif
 		}
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__ /* UNIMPLEMENTED opregion_asle_intr() */
 		if ((pipeb_stats & I915_LEGACY_BLC_EVENT_STATUS) ||
 		    (iir & I915_ASLE_INTERRUPT))
 			opregion_asle_intr(dev);
@@ -1194,7 +1194,7 @@ int i915_enable_vblank(struct drm_device *dev, int pipe)
 
 	spin_lock_irqsave(&dev_priv->user_irq_lock, irqflags);
 	if (HAS_PCH_SPLIT(dev))
-		ironlake_enable_display_irq(dev_priv, (pipe == 0) ?
+		ironlake_enable_display_irq(dev_priv, (pipe == 0) ? 
 					    DE_PIPEA_VBLANK: DE_PIPEB_VBLANK);
 	else if (IS_I965G(dev))
 		i915_enable_pipestat(dev_priv, pipe,
@@ -1216,7 +1216,7 @@ void i915_disable_vblank(struct drm_device *dev, int pipe)
 
 	spin_lock_irqsave(&dev_priv->user_irq_lock, irqflags);
 	if (HAS_PCH_SPLIT(dev))
-		ironlake_disable_display_irq(dev_priv, (pipe == 0) ?
+		ironlake_disable_display_irq(dev_priv, (pipe == 0) ? 
 					     DE_PIPEA_VBLANK: DE_PIPEB_VBLANK);
 	else
 		i915_disable_pipestat(dev_priv, pipe,

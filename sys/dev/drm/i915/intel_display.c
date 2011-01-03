@@ -1868,7 +1868,6 @@ static void ironlake_crtc_dpms(struct drm_crtc *crtc, int mode)
 				}
 			}
 		}
-
 		temp = I915_READ(transconf_reg);
 		/* BPC in transcoder is consistent with that in pipeconf */
 		temp &= ~PIPE_BPC_MASK;
@@ -2339,30 +2338,6 @@ static struct intel_watermark_params i830_wm_info = {
 	1,
 	2,
 	I830_FIFO_LINE_SIZE
-};
-
-static struct intel_watermark_params ironlake_display_wm_info = {
-	ILK_DISPLAY_FIFO,
-	ILK_DISPLAY_MAXWM,
-	ILK_DISPLAY_DFTWM,
-	2,
-	ILK_FIFO_LINE_SIZE
-};
-
-static struct intel_watermark_params ironlake_display_srwm_info = {
-	ILK_DISPLAY_SR_FIFO,
-	ILK_DISPLAY_MAX_SRWM,
-	ILK_DISPLAY_DFT_SRWM,
-	2,
-	ILK_FIFO_LINE_SIZE
-};
-
-static struct intel_watermark_params ironlake_cursor_srwm_info = {
-	ILK_CURSOR_SR_FIFO,
-	ILK_CURSOR_MAX_SRWM,
-	ILK_CURSOR_DFT_SRWM,
-	2,
-	ILK_FIFO_LINE_SIZE
 };
 
 /**
@@ -3025,7 +3000,7 @@ static int intel_crtc_mode_set(struct drm_crtc *crtc,
 	} else {
 		refclk = 48000;
 	}
-
+	
 
 	/*
 	 * Returns a set of divisors for the desired target clock with the given
