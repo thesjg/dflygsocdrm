@@ -4613,6 +4613,7 @@ int intel_framebuffer_create(struct drm_device *dev,
 	return 0;
 }
 
+
 static struct drm_framebuffer *
 intel_user_framebuffer_create(struct drm_device *dev,
 			      struct drm_file *filp,
@@ -5024,6 +5025,7 @@ void intel_modeset_cleanup(struct drm_device *dev)
 
 	drm_mode_config_cleanup(dev);
 }
+
 
 /* current intel driver doesn't take advantage of encoders
    always give back the encoder for the connector

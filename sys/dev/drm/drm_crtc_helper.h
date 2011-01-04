@@ -135,10 +135,4 @@ static inline int drm_connector_helper_add(struct drm_connector *connector,
 }
 
 extern int drm_helper_resume_force_mode(struct drm_device *dev);
-extern void drm_kms_helper_poll_init(struct drm_device *dev);
-extern void drm_kms_helper_poll_fini(struct drm_device *dev);
-extern void drm_helper_hpd_irq_event(struct drm_device *dev);
-
-extern void drm_kms_helper_poll_disable(struct drm_device *dev);
-extern void drm_kms_helper_poll_enable(struct drm_device *dev);
 #endif

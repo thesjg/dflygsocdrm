@@ -32,12 +32,12 @@
 #include <linux/idr.h>
 
 #include <linux/fb.h>
-#include <linux/slow-work.h>
 #endif
 
 struct drm_device;
 struct drm_mode_set;
 struct drm_framebuffer;
+
 
 #define DRM_MODE_OBJECT_CRTC 0xcccccccc
 #define DRM_MODE_OBJECT_CONNECTOR 0xc0c0c0c0
@@ -469,15 +469,6 @@ enum drm_connector_force {
 	DRM_FORCE_ON_DIGITAL, /* for DVI-I use digital connector */
 };
 
-/* should we poll this connector for connects and disconnects */
-/* hot plug detectable */
-#define DRM_CONNECTOR_POLL_HPD (1 << 0)
-/* poll for connections */
-#define DRM_CONNECTOR_POLL_CONNECT (1 << 1)
-/* can cleanly poll for disconnections without flickering the screen */
-/* DACs should rarely do this without a lot of testing */
-#define DRM_CONNECTOR_POLL_DISCONNECT (1 << 2)
-
 /**
  * drm_connector - central DRM connector control structure
  * @crtc: CRTC this connector is currently connected to, NULL if none
@@ -521,8 +512,6 @@ struct drm_connector {
 	struct drm_property_blob *edid_blob_ptr;
 	u32 property_ids[DRM_CONNECTOR_MAX_PROPERTY];
 	uint64_t property_values[DRM_CONNECTOR_MAX_PROPERTY];
-
-	uint8_t polled; /* DRM_CONNECTOR_POLL_* */
 
 	/* requested DPMS state */
 	int dpms;
@@ -571,8 +560,6 @@ struct drm_mode_set {
 struct drm_mode_config_funcs {
 	struct drm_framebuffer *(*fb_create)(struct drm_device *dev, struct drm_file *file_priv, struct drm_mode_fb_cmd *mode_cmd);
 	int (*fb_changed)(struct drm_device *dev);
-/* removed in Linux 2.6.34.7 */
-	void (*output_poll_changed)(struct drm_device *dev);
 };
 
 struct drm_mode_group {
@@ -612,10 +599,6 @@ struct drm_mode_config {
 	int max_width, max_height;
 	struct drm_mode_config_funcs *funcs;
 	resource_size_t fb_base;
-
-	/* output poll support */
-	bool poll_enabled;
-	struct delayed_slow_work output_poll_slow_work;
 
 	/* pointers to standard properties */
 	struct list_head property_blob_list;
@@ -818,14 +801,8 @@ extern struct drm_display_mode *drm_cvt_mode(struct drm_device *dev,
 extern struct drm_display_mode *drm_gtf_mode(struct drm_device *dev,
 				int hdisplay, int vdisplay, int vrefresh,
 				bool interlaced, int margins);
-extern struct drm_display_mode *drm_gtf_mode_complex(struct drm_device *dev,
-				int hdisplay, int vdisplay, int vrefresh,
-				bool interlaced, int margins, int GTF_M,
-				int GTF_2C, int GTF_K, int GTF_2J);
 extern int drm_add_modes_noedid(struct drm_connector *connector,
 				int hdisplay, int vdisplay);
 
 extern bool drm_edid_is_valid(struct edid *edid);
-struct drm_display_mode *drm_mode_find_dmt(struct drm_device *dev,
-					   int hsize, int vsize, int fresh);
 #endif /* __DRM_CRTC_H__ */

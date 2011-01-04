@@ -59,20 +59,20 @@ struct intelfb_par {
 	struct drm_display_mode *our_mode;
 };
 
-#ifdef __linux__
 static struct fb_ops intelfb_ops = {
 	.owner = THIS_MODULE,
 	.fb_check_var = drm_fb_helper_check_var,
 	.fb_set_par = drm_fb_helper_set_par,
 	.fb_setcolreg = drm_fb_helper_setcolreg,
+#ifdef __linux__
 	.fb_fillrect = cfb_fillrect,
 	.fb_copyarea = cfb_copyarea,
 	.fb_imageblit = cfb_imageblit,
+#endif /* __linux__ */
 	.fb_pan_display = drm_fb_helper_pan_display,
 	.fb_blank = drm_fb_helper_blank,
 	.fb_setcmap = drm_fb_helper_setcmap,
 };
-#endif /* __linux__ */
 
 static struct drm_fb_helper_funcs intel_fb_helper_funcs = {
 	.gamma_set = intel_crtc_fb_gamma_set,
@@ -197,31 +197,36 @@ static int intelfb_create(struct drm_device *dev, uint32_t fb_width,
 	strcpy(info->fix.id, "inteldrmfb");
 
 	info->flags = FBINFO_DEFAULT;
-#ifdef __linux__
+
 	info->fbops = &intelfb_ops;
 
 
 	/* setup aperture base/size for vesafb takeover */
 	info->aperture_base = dev->mode_config.fb_base;
 	if (IS_I9XX(dev))
+#ifdef __linux__
 		info->aperture_size = pci_resource_len(dev->pdev, 2);
+#else
+		info->aperture_size = drm_get_resource_len(dev, 2);
+#endif
 	else
+#ifdef __linux__
 		info->aperture_size = pci_resource_len(dev->pdev, 0);
-#endif /* __linux__ */
+#else
+		info->aperture_size = drm_get_resource_len(dev, 0);
+#endif
 
 	info->fix.smem_start = dev->mode_config.fb_base + obj_priv->gtt_offset;
 	info->fix.smem_len = size;
 
 	info->flags = FBINFO_DEFAULT;
 
-#ifdef __linux__
 	info->screen_base = ioremap_wc(dev->agp->base + obj_priv->gtt_offset,
 				       size);
 	if (!info->screen_base) {
 		ret = -ENOSPC;
 		goto out_unpin;
 	}
-#endif /* __linux__ */
 	info->screen_size = size;
 
 //	memset(info->screen_base, 0, size);
@@ -229,11 +234,14 @@ static int intelfb_create(struct drm_device *dev, uint32_t fb_width,
 	drm_fb_helper_fill_fix(info, fb->pitch, fb->depth);
 	drm_fb_helper_fill_var(info, fb, fb_width, fb_height);
 
-#ifdef __linux__
 	/* FIXME: we really shouldn't expose mmio space at all */
+#ifdef __linux__
 	info->fix.mmio_start = pci_resource_start(dev->pdev, mmio_bar);
 	info->fix.mmio_len = pci_resource_len(dev->pdev, mmio_bar);
-#endif /* __linux__ */
+#else
+	info->fix.mmio_start = drm_get_resource_start(dev, mmio_bar);
+	info->fix.mmio_len = drm_get_resource_len(dev, mmio_bar);
+#endif
 
 	info->pixmap.size = 64*1024;
 	info->pixmap.buf_align = 8;
@@ -249,10 +257,6 @@ static int intelfb_create(struct drm_device *dev, uint32_t fb_width,
 	DRM_DEBUG_KMS("allocated %dx%d fb: 0x%08x, bo %p\n",
 			intel_fb->base.width, intel_fb->base.height,
 			obj_priv->gtt_offset, fbo);
-
-	DRM_DEBUG_KMS("allocated %dx%d fb: 0x%08x, bo %p\n",
-		      fb->width, fb->height,
-		      obj_priv->gtt_offset, fbo);
 
 	mutex_unlock(&dev->struct_mutex);
 	vga_switcheroo_client_fb_set(dev->pdev, info);

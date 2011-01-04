@@ -76,8 +76,7 @@ drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
 
 #define LEVEL_DMT	0
 #define LEVEL_GTF	1
-#define LEVEL_GTF2	2
-#define LEVEL_CVT	3
+#define LEVEL_CVT	2
 
 static struct edid_quirk {
 	char *vendor;
@@ -120,6 +119,7 @@ static struct edid_quirk {
 	{ "SAM", 596, EDID_QUIRK_PREFER_LARGE_60 },
 	{ "SAM", 638, EDID_QUIRK_PREFER_LARGE_60 },
 };
+
 
 /* Valid EDID header has these bytes */
 static const u8 edid_header[] = {
@@ -437,7 +437,7 @@ static struct drm_display_mode drm_dmt_modes[] = {
 		   1856, 2160, 0, 1200, 1201, 1204, 1250, 0,
 		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC) },
 	/* 1600x1200@75Hz */
-	{ DRM_MODE("1600x1200", DRM_MODE_TYPE_DRIVER, 202500, 1600, 1664,
+	{ DRM_MODE("1600x1200", DRM_MODE_TYPE_DRIVER, 2025000, 1600, 1664,
 		   1856, 2160, 0, 1200, 1201, 1204, 1250, 0,
 		   DRM_MODE_FLAG_PHSYNC | DRM_MODE_FLAG_PVSYNC) },
 	/* 1600x1200@85Hz */
@@ -507,27 +507,6 @@ static struct drm_display_mode drm_dmt_modes[] = {
 };
 static const int drm_num_dmt_modes =
 	sizeof(drm_dmt_modes) / sizeof(struct drm_display_mode);
-
-struct drm_display_mode *drm_mode_find_dmt(struct drm_device *dev,
-					   int hsize, int vsize, int fresh)
-{
-	int i;
-	struct drm_display_mode *ptr, *mode;
-
-	mode = NULL;
-	for (i = 0; i < drm_num_dmt_modes; i++) {
-		ptr = &drm_dmt_modes[i];
-		if (hsize == ptr->hdisplay &&
-			vsize == ptr->vdisplay &&
-			fresh == drm_mode_vrefresh(ptr)) {
-			/* get the expected default mode */
-			mode = drm_mode_duplicate(dev, ptr);
-			break;
-		}
-	}
-	return mode;
-}
-EXPORT_SYMBOL(drm_mode_find_dmt);
 
 static struct drm_display_mode *drm_find_dmt(struct drm_device *dev,
 			int hsize, int vsize, int fresh)
@@ -748,9 +727,9 @@ static struct drm_display_mode *drm_mode_detailed(struct drm_device *dev,
 	if (mode->vsync_end > mode->vtotal)
 		mode->vtotal = mode->vsync_end + 1;
 
-	drm_mode_do_interlace_quirk(mode, pt);
-
 	drm_mode_set_name(mode);
+
+	drm_mode_do_interlace_quirk(mode, pt);
 
 	if (quirks & EDID_QUIRK_DETAILED_SYNC_PP) {
 		pt->misc |= DRM_EDID_PT_HSYNC_POSITIVE | DRM_EDID_PT_VSYNC_POSITIVE;
@@ -865,7 +844,6 @@ static int add_established_modes(struct drm_connector *connector, struct edid *e
 
 	return modes;
 }
-
 /**
  * stanard_timing_level - get std. timing level(CVT/GTF/DMT)
  * @edid: EDID block to scan

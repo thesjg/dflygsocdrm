@@ -853,6 +853,7 @@ int drm_fb_helper_single_fb_probe(struct drm_device *dev,
 	} else {
 		fb = list_first_entry(&dev->mode_config.fb_kernel_list,
 				      struct drm_framebuffer, filp_head);
+
 		/* if someone hotplugs something bigger than we have already allocated, we are pwned.
 		   As really we can't resize an fbdev that is in the wild currently due to fbdev
 		   not really being designed for the lower layers moving stuff around under it.

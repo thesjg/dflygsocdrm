@@ -3235,6 +3235,8 @@ struct fb_cmap {
 	int len;
 };
 
+struct fb_ops;
+
 /*file drm_fb_helper.h, function drm_fb_helper_blank() */
 struct fb_info {
 	struct fb_var_screeninfo var;
@@ -3250,6 +3252,10 @@ struct fb_info {
 	struct DRM_FB_PIXMAP pixmap;
 /* file drm_fb_helper.h and drm_fb_helper.c */
 	struct fb_cmap cmap;
+	struct fb_ops *fbops;
+/* file intel_fb.c, function intelfb_create() */
+	resource_size_t aperture_base;
+	resource_size_t aperture_size;
 };
 
 /* file drm_fb_helper.c, function drm_fb_helper_parse_command_line() */
@@ -3297,6 +3303,23 @@ fb_alloc_cmap(
 static __inline__ void
 fb_dealloc_cmap(struct fb_cmap *cmap) {
 }
+
+/* file intel_fb.c, struct intelfb_ops */
+struct fb_ops {
+	struct module *owner;
+	int (*fb_check_var)(struct fb_var_screeninfo *var, struct fb_info *info);
+	int (*fb_set_par)(struct fb_info *info);
+	int (*fb_setcolreg)(unsigned regno, unsigned red, unsigned green,
+		unsigned blue, unsigned transp, struct fb_info *info);
+#ifdef __linux__
+	.fb_fillrect = cfb_fillrect,
+	.fb_copyarea = cfb_copyarea,
+	.fb_imageblit = cfb_imageblit,
+#endif
+	int (*fb_pan_display)(struct fb_var_screeninfo *var, struct fb_info *info);
+	int (*fb_blank)(int blank, struct fb_info *info);
+	int (*fb_setcmap)(struct fb_cmap *cmap, struct fb_info *info);
+};
 
 /*
  * Framebuffer global variables

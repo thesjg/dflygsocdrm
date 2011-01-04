@@ -254,10 +254,10 @@ intel_dp_aux_ch(struct intel_encoder *intel_encoder,
 		/* Load the send data into the aux channel data registers */
 		for (i = 0; i < send_bytes; i += 4) {
 			uint32_t    d = pack_aux(send + i, send_bytes - i);
-
+	
 			I915_WRITE(ch_data + i, d);
 		}
-
+	
 		ctl = (DP_AUX_CH_CTL_SEND_BUSY |
 		       DP_AUX_CH_CTL_TIME_OUT_400us |
 		       (send_bytes << DP_AUX_CH_CTL_MESSAGE_SIZE_SHIFT) |
@@ -266,7 +266,7 @@ intel_dp_aux_ch(struct intel_encoder *intel_encoder,
 		       DP_AUX_CH_CTL_DONE |
 		       DP_AUX_CH_CTL_TIME_OUT_ERROR |
 		       DP_AUX_CH_CTL_RECEIVE_ERROR);
-
+	
 		/* Send the command and wait for it to complete */
 		I915_WRITE(ch_ctl, ctl);
 		(void) I915_READ(ch_ctl);
@@ -276,7 +276,7 @@ intel_dp_aux_ch(struct intel_encoder *intel_encoder,
 			if ((status & DP_AUX_CH_CTL_SEND_BUSY) == 0)
 				break;
 		}
-
+	
 		/* Clear done status and any errors */
 		I915_WRITE(ch_ctl, (status |
 				DP_AUX_CH_CTL_DONE |
@@ -313,7 +313,7 @@ intel_dp_aux_ch(struct intel_encoder *intel_encoder,
 
 	if (recv_bytes > recv_size)
 		recv_bytes = recv_size;
-
+	
 	for (i = 0; i < recv_bytes; i += 4) {
 		uint32_t    d = I915_READ(ch_data + i);
 
@@ -475,6 +475,7 @@ intel_dp_i2c_aux_ch(struct i2c_adapter *adapter, int mode,
 		}
 	}
 }
+
 static int
 intel_dp_i2c_init(struct intel_encoder *intel_encoder, const char *name)
 {
@@ -493,8 +494,8 @@ intel_dp_i2c_init(struct intel_encoder *intel_encoder, const char *name)
 	dp_priv->adapter.algo_data = &dp_priv->algo;
 #ifdef __linux__ /* UNIMPLEMENTED */
 	dp_priv->adapter.dev.parent = &intel_encoder->base.kdev;
+	
 #endif
-
 	return i2c_dp_aux_add_bus(&dp_priv->adapter);
 }
 
