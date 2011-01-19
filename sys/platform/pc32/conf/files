@@ -34,8 +34,13 @@ ukbdmap.h			optional	ukbd_dflt_keymap	\
 	no-obj no-implicit-rule before-depend				\
 	clean		"ukbdmap.h"
 #
-emulation/dragonfly12/dfbsd12_getdirentries.c	nonoptional compat_df12
-emulation/dragonfly12/dfbsd12_stat.c	nonoptional compat_df12
+hptmvraid.o			optional	hptmv			\
+	dependency	"$S/dev/raid/hptmv/i386-elf.raid.o.uu"		\
+	compile-with	"uudecode < $S/dev/raid/hptmv/i386-elf.raid.o.uu" \
+	no-implicit-rule
+#
+emulation/dragonfly12/dfbsd12_getdirentries.c	optional compat_df12
+emulation/dragonfly12/dfbsd12_stat.c	optional compat_df12
 #
 emulation/linux/linux_emuldata.c	optional	compat_linux
 emulation/linux/linux_epoll.c	optional	compat_linux
@@ -101,7 +106,6 @@ acpi_wakecode.h				optional        acpi		\
 dev/crypto/glxsb/glxsb.c		optional	glxsb
 dev/crypto/glxsb/glxsb_hash.c		optional	glxsb
 dev/netif/ed/if_ed_isa.c		optional	ed isa
-bus/eisa/eisaconf.c			optional	eisa
 dev/video/fb/fb.c			optional	fb
 dev/video/fb/fb.c			optional	vga
 dev/video/fb/splash.c			optional	splash
@@ -154,6 +158,7 @@ cpu/i386/misc/ktr.c			optional	ktr
 cpu/i386/misc/db_disasm.c		optional	ddb
 cpu/i386/misc/i386-gdbstub.c		optional	ddb
 cpu/i386/misc/bzeront.s			standard
+cpu/i386/misc/monitor.s			standard
 platform/pc32/i386/autoconf.c		standard
 platform/pc32/i386/bios.c		standard
 platform/pc32/i386/bioscall.s		standard

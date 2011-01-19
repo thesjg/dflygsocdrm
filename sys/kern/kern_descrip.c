@@ -816,7 +816,7 @@ sys_close(struct close_args *uap)
 }
 
 /*
- * MPALMOSTSAFE - acquires mplock around knote_fdclose() calls
+ * MPSAFE
  */
 int
 kern_close(int fd)
@@ -2782,7 +2782,6 @@ struct fileops badfileops = {
 	.fo_read = badfo_readwrite,
 	.fo_write = badfo_readwrite,
 	.fo_ioctl = badfo_ioctl,
-	.fo_poll = badfo_poll,
 	.fo_kqfilter = badfo_kqfilter,
 	.fo_stat = badfo_stat,
 	.fo_close = badfo_close,
@@ -2804,12 +2803,6 @@ badfo_ioctl(struct file *fp, u_long com, caddr_t data,
 	    struct ucred *cred, struct sysmsg *msgv)
 {
 	return (EBADF);
-}
-
-int
-badfo_poll(struct file *fp, int events, struct ucred *cred)
-{
-	return (0);
 }
 
 /*

@@ -458,8 +458,8 @@ trap(struct trapframe *frame)
 		case T_ASTFLT:		/* Allow process switch */
 			mycpu->gd_cnt.v_soft++;
 			if (mycpu->gd_reqflags & RQF_AST_OWEUPC) {
-				atomic_clear_int_nonlocked(&mycpu->gd_reqflags,
-					    RQF_AST_OWEUPC);
+				atomic_clear_int(&mycpu->gd_reqflags,
+						 RQF_AST_OWEUPC);
 				addupc_task(p, p->p_prof.pr_addr,
 					    p->p_prof.pr_ticks);
 			}
@@ -486,7 +486,6 @@ trap(struct trapframe *frame)
 			break;
 
 		case T_PAGEFLT:		/* page fault */
-			MAKEMPSAFE(have_mplock);
 			i = trap_pfault(frame, TRUE);
 			if (frame->tf_rip == 0)
 				kprintf("T_PAGEFLT: Warning %%rip == 0!\n");
@@ -584,7 +583,6 @@ trap(struct trapframe *frame)
 
 		switch (type) {
 		case T_PAGEFLT:			/* page fault */
-			MAKEMPSAFE(have_mplock);
 			trap_pfault(frame, FALSE);
 			goto out2;
 
@@ -756,12 +754,6 @@ trap(struct trapframe *frame)
 #endif
 
 out:
-#ifdef SMP
-        if (ISPL(frame->tf_cs) == SEL_UPL) {
-		KASSERT(td->td_mpcount == have_mplock,
-			("badmpcount trap/end from %p", (void *)frame->tf_rip));
-	}
-#endif
 	userret(lp, frame, sticks);
 	userexit(lp);
 out2:	;
@@ -886,12 +878,13 @@ nogo:
 	 */
 	p = td->td_proc;
 	if (td->td_lwp->lwp_vkernel == NULL) {
-		kprintf("seg-fault ft=%04x ff=%04x addr=%p rip=%p "
-			"pid=%d p_comm=%s\n",
-			ftype, fault_flags,
-			(void *)frame->tf_addr,
-			(void *)frame->tf_rip,
-			p->p_pid, p->p_comm);
+		if (bootverbose)
+			kprintf("seg-fault ft=%04x ff=%04x addr=%p rip=%p "
+			    "pid=%d p_comm=%s\n",
+			    ftype, fault_flags,
+			    (void *)frame->tf_addr,
+			    (void *)frame->tf_rip,
+			    p->p_pid, p->p_comm);
 		if (ddb_on_seg_fault)
 			Debugger("ddb_on_seg_fault");
 	}
@@ -921,7 +914,6 @@ trap_fatal(struct trapframe *frame, vm_offset_t eva)
 	    ISPL(frame->tf_cs) == SEL_UPL ? "user" : "kernel");
 #ifdef SMP
 	/* three separate prints in case of a trap on an unmapped page */
-	kprintf("mp_lock = %08x; ", mp_lock);
 	kprintf("cpuid = %d; ", mycpu->gd_cpuid);
 	kprintf("lapic->id = %08x\n", lapic->id);
 #endif
@@ -1021,7 +1013,6 @@ dblfault_handler(struct trapframe *frame)
 	kprintf("rbp = 0x%lx\n", frame->tf_rbp);
 #ifdef SMP
 	/* three separate prints in case of a trap on an unmapped page */
-	kprintf("mp_lock = %08x; ", mp_lock);
 	kprintf("cpuid = %d; ", mycpu->gd_cpuid);
 	kprintf("lapic->id = %08x\n", lapic->id);
 #endif
@@ -1075,10 +1066,6 @@ syscall2(struct trapframe *frame)
 	KTR_LOG(kernentry_syscall, p->p_pid, lp->lwp_tid,
 		frame->tf_rax);
 
-#ifdef SMP
-	KASSERT(td->td_mpcount == 0,
-		("badmpcount syscall2 from %p", (void *)frame->tf_rip));
-#endif
 	userenter(td, p);	/* lazy raise our priority */
 
 	reg = 0;
@@ -1271,8 +1258,6 @@ bad:
 	/*
 	 * Release the MP lock if we had to get it
 	 */
-	KASSERT(td->td_mpcount == have_mplock, 
-		("badmpcount syscall2/end from %p", (void *)frame->tf_rip));
 	if (have_mplock)
 		rel_mplock();
 #endif

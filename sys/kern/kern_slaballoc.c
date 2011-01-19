@@ -117,8 +117,6 @@
 
 #include <sys/thread2.h>
 
-#define arysize(ary)	(sizeof(ary)/sizeof((ary)[0]))
-
 #define btokup(z)	(&pmap_kvtom((vm_offset_t)(z))->ku_pagecnt)
 
 #define MEMORY_STRING	"ptr=%p type=%p size=%d flags=%04x"
@@ -249,7 +247,7 @@ kmeminit(void *dummy)
     ZoneMask = ~(uintptr_t)(ZoneSize - 1);
     ZonePageCount = ZoneSize / PAGE_SIZE;
 
-    for (i = 0; i < arysize(weirdary); ++i)
+    for (i = 0; i < NELEM(weirdary); ++i)
 	weirdary[i] = WEIRD_ADDR;
 
     ZeroPage = kmem_slab_alloc(PAGE_SIZE, PAGE_SIZE, M_WAITOK|M_ZERO);
@@ -1389,7 +1387,7 @@ kmem_slab_alloc(vm_size_t size, vm_offset_t align, int flags)
 	}
 
 	m = vm_page_alloc(&kernel_object, OFF_TO_IDX(addr + i), vmflags);
-	if ((i / PAGE_SIZE) < (sizeof(mp) / sizeof(mp[0])))
+	if (i / PAGE_SIZE < NELEM(mp))
 		mp[i / PAGE_SIZE] = m;
 
 	/*
@@ -1453,20 +1451,20 @@ kmem_slab_alloc(vm_size_t size, vm_offset_t align, int flags)
     for (i = 0; i < size; i += PAGE_SIZE) {
 	vm_page_t m;
 
-	if ((i / PAGE_SIZE) < (sizeof(mp) / sizeof(mp[0])))
+	if (i / PAGE_SIZE < NELEM(mp))
 	   m = mp[i / PAGE_SIZE];
 	else 
 	   m = vm_page_lookup(&kernel_object, OFF_TO_IDX(addr + i));
 	m->valid = VM_PAGE_BITS_ALL;
 	/* page should already be busy */
 	vm_page_wire(m);
-	vm_page_wakeup(m);
 	pmap_enter(&kernel_pmap, addr + i, m, VM_PROT_ALL, 1);
 	if ((m->flags & PG_ZERO) == 0 && (flags & M_ZERO))
 	    bzero((char *)addr + i, PAGE_SIZE);
 	vm_page_flag_clear(m, PG_ZERO);
 	KKASSERT(m->flags & (PG_WRITEABLE | PG_MAPPED));
 	vm_page_flag_set(m, PG_REFERENCED);
+	vm_page_wakeup(m);
     }
     vm_map_unlock(&kernel_map);
     vm_map_entry_release(count);

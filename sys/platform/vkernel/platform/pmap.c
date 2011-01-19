@@ -494,14 +494,16 @@ get_ptbase(struct pmap *pmap, vm_offset_t va)
 		if ((pmap->pm_cpucachemask & gd->mi.gd_cpumask) == 0) {
 			*gd->gd_PT1pde = pmap->pm_pdirpte;
 			madvise(gd->gd_PT1map, SEG_SIZE, MADV_INVAL);
-			atomic_set_int(&pmap->pm_cpucachemask, gd->mi.gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_cpucachemask,
+					   gd->mi.gd_cpumask);
 		}
 		return(gd->gd_PT1map + (va >> PAGE_SHIFT));
 	} else if (pmap->pm_pdir == gd->gd_PT2pdir) {
 		if ((pmap->pm_cpucachemask & gd->mi.gd_cpumask) == 0) {
 			*gd->gd_PT2pde = pmap->pm_pdirpte;
 			madvise(gd->gd_PT2map, SEG_SIZE, MADV_INVAL);
-			atomic_set_int(&pmap->pm_cpucachemask, gd->mi.gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_cpucachemask,
+					   gd->mi.gd_cpumask);
 		}
 		return(gd->gd_PT2map + (va >> PAGE_SHIFT));
 	}
@@ -520,15 +522,15 @@ get_ptbase(struct pmap *pmap, vm_offset_t va)
 			gd->gd_PT1pdir = pmap->pm_pdir;
 			*gd->gd_PT1pde = pmap->pm_pdirpte;
 			madvise(gd->gd_PT1map, SEG_SIZE, MADV_INVAL);
-			atomic_set_int(&pmap->pm_cpucachemask,
-					gd->mi.gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_cpucachemask,
+					   gd->mi.gd_cpumask);
 			return(gd->gd_PT1map + (va >> PAGE_SHIFT));
 		} else {
 			gd->gd_PT2pdir = pmap->pm_pdir;
 			*gd->gd_PT2pde = pmap->pm_pdirpte;
 			madvise(gd->gd_PT2map, SEG_SIZE, MADV_INVAL);
-			atomic_set_int(&pmap->pm_cpucachemask,
-					gd->mi.gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_cpucachemask,
+					   gd->mi.gd_cpumask);
 			return(gd->gd_PT2map + (va >> PAGE_SHIFT));
 		}
 	}
@@ -542,15 +544,15 @@ get_ptbase(struct pmap *pmap, vm_offset_t va)
 		if ((pmap->pm_cpucachemask & gd->mi.gd_cpumask) == 0) {
 			*gd->gd_PT3pde = pmap->pm_pdirpte;
 			madvise(gd->gd_PT3map, SEG_SIZE, MADV_INVAL);
-			atomic_set_int(&pmap->pm_cpucachemask,
-					gd->mi.gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_cpucachemask,
+					   gd->mi.gd_cpumask);
 		}
 	} else {
 		gd->gd_PT3pdir = pmap->pm_pdir;
 		*gd->gd_PT3pde = pmap->pm_pdirpte;
 		madvise(gd->gd_PT3map, SEG_SIZE, MADV_INVAL);
-		atomic_set_int(&pmap->pm_cpucachemask,
-				gd->mi.gd_cpumask);
+		atomic_set_cpumask(&pmap->pm_cpucachemask,
+				   gd->mi.gd_cpumask);
 	}
 	return(gd->gd_PT3map + (va >> PAGE_SHIFT));
 }
@@ -567,7 +569,8 @@ get_ptbase1(struct pmap *pmap, vm_offset_t va)
 		if ((pmap->pm_cpucachemask & gd->mi.gd_cpumask) == 0) {
 			*gd->gd_PT1pde = pmap->pm_pdirpte;
 			madvise(gd->gd_PT1map, SEG_SIZE, MADV_INVAL);
-			atomic_set_int(&pmap->pm_cpucachemask, gd->mi.gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_cpucachemask,
+					   gd->mi.gd_cpumask);
 		}
 		return(gd->gd_PT1map + (va >> PAGE_SHIFT));
 	}
@@ -591,7 +594,8 @@ get_ptbase2(struct pmap *pmap, vm_offset_t va)
 		if ((pmap->pm_cpucachemask & gd->mi.gd_cpumask) == 0) {
 			*gd->gd_PT2pde = pmap->pm_pdirpte;
 			madvise(gd->gd_PT2map, SEG_SIZE, MADV_INVAL);
-			atomic_set_int(&pmap->pm_cpucachemask, gd->mi.gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_cpucachemask,
+					   gd->mi.gd_cpumask);
 		}
 		return(gd->gd_PT2map + (va >> PAGE_SHIFT));
 	}
@@ -748,7 +752,7 @@ pmap_kenter_quick(vm_offset_t va, vm_paddr_t pa)
  * to be used for panic dumps.
  */
 void *
-pmap_kenter_temporary(vm_paddr_t pa, int i)
+pmap_kenter_temporary(vm_paddr_t pa, long i)
 {
 	pmap_kenter(crashdumpmap + (i * PAGE_SIZE), pa);
 	return ((void *)crashdumpmap);
@@ -2119,9 +2123,9 @@ pmap_object_init_pt_callback(vm_page_t p, void *data)
 	}
 	if (((p->valid & VM_PAGE_BITS_ALL) == VM_PAGE_BITS_ALL) &&
 	    (p->busy == 0) && (p->flags & (PG_BUSY | PG_FICTITIOUS)) == 0) {
+		vm_page_busy(p);
 		if ((p->queue - p->pc) == PQ_CACHE)
 			vm_page_deactivate(p);
-		vm_page_busy(p);
 		rel_index = p->pindex - info->start_pindex;
 		pmap_enter_quick(info->pmap,
 				 info->addr + i386_ptob(rel_index), p);
@@ -3026,7 +3030,7 @@ pmap_setlwpvm(struct lwp *lp, struct vmspace *newvm)
 		if (curthread->td_lwp == lp) {
 			pmap = vmspace_pmap(newvm);
 #if defined(SMP)
-			atomic_set_int(&pmap->pm_active, mycpu->gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_active, mycpu->gd_cpumask);
 #else
 			pmap->pm_active |= 1;
 #endif
@@ -3035,9 +3039,9 @@ pmap_setlwpvm(struct lwp *lp, struct vmspace *newvm)
 #endif
 			pmap = vmspace_pmap(oldvm);
 #if defined(SMP)
-			atomic_clear_int(&pmap->pm_active, mycpu->gd_cpumask);
+			atomic_clear_cpumask(&pmap->pm_active, mycpu->gd_cpumask);
 #else
-			pmap->pm_active &= ~1;
+			pmap->pm_active &= ~(cpumask_t)1;
 #endif
 		}
 	}

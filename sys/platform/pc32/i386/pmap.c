@@ -639,7 +639,7 @@ ptbase_assert(struct pmap *pmap)
 	/* are we current address space or kernel? */
 	if (pmap == &kernel_pmap || frame == (((unsigned)PTDpde) & PG_FRAME))
 		return;
-	KKASSERT(frame == (*mycpu->gd_GDMAP1 & PG_FRAME));
+	KKASSERT(frame == (*mdcpu->gd_GDMAP1 & PG_FRAME));
 }
 
 #else
@@ -1042,7 +1042,6 @@ _pmap_unwire_pte_hold(pmap_t pmap, vm_page_t m, pmap_inval_info_t info)
 	 * any active flushes if we block.
 	 */
 	if (m->flags & PG_BUSY) {
-		pmap_inval_flush(info);
 		while (vm_page_sleep_busy(m, FALSE, "pmuwpt"))
 			;
 	}
@@ -1130,7 +1129,6 @@ pmap_unuse_pt(pmap_t pmap, vm_offset_t va, vm_page_t mpte,
 			(pmap->pm_ptphint->pindex == ptepindex)) {
 			mpte = pmap->pm_ptphint;
 		} else {
-			pmap_inval_flush(info);
 			mpte = pmap_page_lookup( pmap->pm_pteobj, ptepindex);
 			pmap->pm_ptphint = mpte;
 		}
@@ -2129,10 +2127,7 @@ pmap_protect(pmap_t pmap, vm_offset_t sva, vm_offset_t eva, vm_prot_t prot)
 			vm_page_t m;
 
 			/*
-			 * XXX non-optimal.  Note also that there can be
-			 * no pmap_inval_flush() calls until after we modify
-			 * ptbase[sindex] (or otherwise we have to do another
-			 * pmap_inval_interlock() call).
+			 * XXX non-optimal.
 			 */
 			pmap_inval_interlock(&info, pmap, i386_ptob(sindex));
 again:
@@ -2493,7 +2488,7 @@ pmap_enter_quick(pmap_t pmap, vm_offset_t va, vm_page_t m)
  * No requirements.
  */
 void *
-pmap_kenter_temporary(vm_paddr_t pa, int i)
+pmap_kenter_temporary(vm_paddr_t pa, long i)
 {
 	pmap_kenter((vm_offset_t)crashdumpmap + (i * PAGE_SIZE), pa);
 	return ((void *)crashdumpmap);
@@ -2591,9 +2586,9 @@ pmap_object_init_pt_callback(vm_page_t p, void *data)
 	}
 	if (((p->valid & VM_PAGE_BITS_ALL) == VM_PAGE_BITS_ALL) &&
 	    (p->busy == 0) && (p->flags & (PG_BUSY | PG_FICTITIOUS)) == 0) {
+		vm_page_busy(p);
 		if ((p->queue - p->pc) == PQ_CACHE)
 			vm_page_deactivate(p);
-		vm_page_busy(p);
 		rel_index = p->pindex - info->start_pindex;
 		pmap_enter_quick(info->pmap,
 				 info->addr + i386_ptob(rel_index), p);
@@ -3447,7 +3442,7 @@ pmap_setlwpvm(struct lwp *lp, struct vmspace *newvm)
 		if (curthread->td_lwp == lp) {
 			pmap = vmspace_pmap(newvm);
 #if defined(SMP)
-			atomic_set_int(&pmap->pm_active, mycpu->gd_cpumask);
+			atomic_set_cpumask(&pmap->pm_active, mycpu->gd_cpumask);
 			if (pmap->pm_active & CPUMASK_LOCK)
 				pmap_interlock_wait(newvm);
 #else
@@ -3460,9 +3455,10 @@ pmap_setlwpvm(struct lwp *lp, struct vmspace *newvm)
 			load_cr3(curthread->td_pcb->pcb_cr3);
 			pmap = vmspace_pmap(oldvm);
 #if defined(SMP)
-			atomic_clear_int(&pmap->pm_active, mycpu->gd_cpumask);
+			atomic_clear_cpumask(&pmap->pm_active,
+					     mycpu->gd_cpumask);
 #else
-			pmap->pm_active &= ~1;
+			pmap->pm_active &= ~(cpumask_t)1;
 #endif
 		}
 	}
@@ -3485,11 +3481,13 @@ pmap_interlock_wait(struct vmspace *vm)
 	struct pmap *pmap = &vm->vm_pmap;
 
 	if (pmap->pm_active & CPUMASK_LOCK) {
+		DEBUG_PUSH_INFO("pmap_interlock_wait");
 		while (pmap->pm_active & CPUMASK_LOCK) {
 			cpu_pause();
 			cpu_ccfence();
 			lwkt_process_ipiq();
 		}
+		DEBUG_POP_INFO();
 	}
 }
 

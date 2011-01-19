@@ -2043,7 +2043,8 @@ restart:
 		/*
 		 * Sanity Checks
 		 */
-		KASSERT(bp->b_qindex == qindex, ("getnewbuf: inconsistent queue %d bp %p", qindex, bp));
+		KASSERT(bp->b_qindex == qindex,
+			("getnewbuf: inconsistent queue %d bp %p", qindex, bp));
 
 		/*
 		 * Note: we no longer distinguish between VMIO and non-VMIO
@@ -2081,7 +2082,7 @@ restart:
 
 		if (BUF_LOCK(bp, LK_EXCLUSIVE | LK_NOWAIT) != 0) {
 			spin_unlock(&bufqspin);
-			tsleep(&bd_request, 0, "gnbxxx", hz / 100);
+			tsleep(&bd_request, 0, "gnbxxx", (hz + 99) / 100);
 			goto restart;
 		}
 		if (bp->b_qindex != qindex) {
@@ -2806,20 +2807,41 @@ unrefblk(struct buf *bp)
  *	If B_RAM is set the buffer might be just fine, but we return
  *	NULL anyway because we want the code to fall through to the
  *	cluster read.  Otherwise read-ahead breaks.
+ *
+ *	If blksize is 0 the buffer cache buffer must already be fully
+ *	cached.
+ *
+ *	If blksize is non-zero getblk() will be used, allowing a buffer
+ *	to be reinstantiated from its VM backing store.  The buffer must
+ *	still be fully cached after reinstantiation to be returned.
  */
 struct buf *
-getcacheblk(struct vnode *vp, off_t loffset)
+getcacheblk(struct vnode *vp, off_t loffset, int blksize)
 {
 	struct buf *bp;
 
-	bp = findblk(vp, loffset, 0);
-	if (bp) {
-		if ((bp->b_flags & (B_INVAL | B_CACHE | B_RAM)) == B_CACHE) {
-			bp->b_flags &= ~B_AGE;
-			bremfree(bp);
-		} else {
-			BUF_UNLOCK(bp);
-			bp = NULL;
+	if (blksize) {
+		bp = getblk(vp, loffset, blksize, 0, 0);
+		if (bp) {
+			if ((bp->b_flags & (B_INVAL | B_CACHE | B_RAM)) ==
+			    B_CACHE) {
+				bp->b_flags &= ~B_AGE;
+			} else {
+				brelse(bp);
+				bp = NULL;
+			}
+		}
+	} else {
+		bp = findblk(vp, loffset, 0);
+		if (bp) {
+			if ((bp->b_flags & (B_INVAL | B_CACHE | B_RAM)) ==
+			    B_CACHE) {
+				bp->b_flags &= ~B_AGE;
+				bremfree(bp);
+			} else {
+				BUF_UNLOCK(bp);
+				bp = NULL;
+			}
 		}
 	}
 	return (bp);
@@ -3363,8 +3385,8 @@ allocbuf(struct buf *bp, int size)
 					m = bio_page_alloc(obj, pi, desiredpages - bp->b_xio.xio_npages);
 					if (m) {
 						vm_page_wire(m);
-						vm_page_wakeup(m);
 						vm_page_flag_clear(m, PG_ZERO);
+						vm_page_wakeup(m);
 						bp->b_flags &= ~B_CACHE;
 						bp->b_xio.xio_pages[bp->b_xio.xio_npages] = m;
 						++bp->b_xio.xio_npages;

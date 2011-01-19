@@ -224,6 +224,13 @@ extern void drm_ut_debug_printk(unsigned int request_level,
 
 /*@}*/
 
+#if 0
+				/* Internal types and structures */
+#define DRM_ARRAY_SIZE(x) NELEM(x)
+#define DRM_MIN(a,b) ((a)<(b)?(a):(b))
+#define DRM_MAX(a,b) ((a)>(b)?(a):(b))
+#endif
+
 /***********************************************************************/
 /** \name Macros to make printk easier */
 /*@{*/

@@ -76,9 +76,10 @@
  * 200800 - 2.8 release			October 2010
  * 200900 - 2.9 master
  * 200901 - prototype changes for alphasort(3) and scandir(3)
+ * 200902 - Xerox NS protocol removal
  */
 #undef __DragonFly_version
-#define __DragonFly_version 200901	/* propagated to newvers */
+#define __DragonFly_version 200902	/* propagated to newvers */
 
 #include <sys/_null.h>
 
@@ -153,6 +154,12 @@
 #endif
 
 /*
+ * cpu_mi_feature bits
+ */
+#define CPU_MI_BZERONT	0x00000001
+#define CPU_MI_MONITOR	0x00000010
+
+/*
  * File system parameters and macros.
  *
  * MAXBSIZE -	Filesystems are made out of blocks of at most MAXBSIZE bytes
@@ -218,6 +225,9 @@
 /* Macros for min/max. */
 #define MIN(a,b) (((a)<(b))?(a):(b))
 #define MAX(a,b) (((a)>(b))?(a):(b))
+
+/* Macro for array size */
+#define NELEM(ary) 	(sizeof(ary) / sizeof((ary))[0])
 
 /*
  * Constants for setting the parameters of the kernel memory allocator.

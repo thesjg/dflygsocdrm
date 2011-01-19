@@ -127,7 +127,7 @@ static	char spacer;
 
 static void LINE_INIT(char c);
 static void LINE_BREAK(void);
-static void LINE_CHECK(const char *fmt, ...);
+static void LINE_CHECK(const char *fmt, ...) __printflike(1, 2);
 
 static const char *modename[IEEE80211_MODE_MAX] = {
 	[IEEE80211_MODE_AUTO]	  = "auto",
@@ -5257,7 +5257,7 @@ static struct afswtch af_ieee80211 = {
 	.af_other_status = ieee80211_status,
 };
 
-static __constructor void
+static __constructor(100) void
 ieee80211_ctor(void)
 {
 #define	N(a)	(sizeof(a) / sizeof(a[0]))

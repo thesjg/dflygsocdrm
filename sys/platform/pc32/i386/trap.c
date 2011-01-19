@@ -476,11 +476,11 @@ restart:
 		if (frame->tf_eflags & PSL_VM &&
 		    (type == T_PROTFLT || type == T_STKFLT)) {
 #ifdef SMP
-			KKASSERT(td->td_mpcount > 0);
+			KKASSERT(get_mplock_count(curthread) > 0);
 #endif
 			i = vm86_emulate((struct vm86frame *)frame);
 #ifdef SMP
-			KKASSERT(td->td_mpcount > 0);
+			KKASSERT(get_mplock_count(curthread) > 0);
 #endif
 			if (i != 0) {
 				/*
@@ -544,8 +544,8 @@ restart:
 		case T_ASTFLT:		/* Allow process switch */
 			mycpu->gd_cnt.v_soft++;
 			if (mycpu->gd_reqflags & RQF_AST_OWEUPC) {
-				atomic_clear_int_nonlocked(&mycpu->gd_reqflags,
-					    RQF_AST_OWEUPC);
+				atomic_clear_int(&mycpu->gd_reqflags,
+						 RQF_AST_OWEUPC);
 				addupc_task(p, p->p_prof.pr_addr,
 					    p->p_prof.pr_ticks);
 			}
@@ -584,7 +584,6 @@ restart:
 			break;
 
 		case T_PAGEFLT:		/* page fault */
-			MAKEMPSAFE(have_mplock);
 			i = trap_pfault(frame, TRUE, eva);
 			if (i == -1)
 				goto out;
@@ -703,7 +702,6 @@ kernel_trap:
 
 		switch (type) {
 		case T_PAGEFLT:			/* page fault */
-			MAKEMPSAFE(have_mplock);
 			trap_pfault(frame, FALSE, eva);
 			goto out2;
 
@@ -909,12 +907,6 @@ kernel_trap:
 #endif
 
 out:
-#ifdef SMP
-        if (ISPL(frame->tf_cs) == SEL_UPL) {
-		KASSERT(td->td_mpcount == have_mplock,
-			("badmpcount trap/end from %p", (void *)frame->tf_eip));
-	}
-#endif
 	userret(lp, frame, sticks);
 	userexit(lp);
 out2:	;
@@ -1051,7 +1043,6 @@ trap_fatal(struct trapframe *frame, vm_offset_t eva)
 			ISPL(frame->tf_cs) == SEL_UPL ? "user" : "kernel");
 #ifdef SMP
 	/* three separate prints in case of a trap on an unmapped page */
-	kprintf("mp_lock = %08x; ", mp_lock);
 	kprintf("cpuid = %d; ", mycpu->gd_cpuid);
 	kprintf("lapic.id = %08x\n", lapic.id);
 #endif
@@ -1168,7 +1159,6 @@ dblfault_handler(void)
 	kprintf("ebp = 0x%x\n", gd->gd_common_tss.tss_ebp);
 #ifdef SMP
 	/* three separate prints in case of a trap on an unmapped page */
-	kprintf("mp_lock = %08x; ", mp_lock);
 	kprintf("cpuid = %d; ", gd->mi.gd_cpuid);
 	kprintf("lapic.id = %08x\n", lapic.id);
 #endif
@@ -1216,10 +1206,6 @@ syscall2(struct trapframe *frame)
 	KTR_LOG(kernentry_syscall, p->p_pid, lp->lwp_tid,
 		frame->tf_eax);
 
-#ifdef SMP
-	KASSERT(td->td_mpcount == 0,
-		("badmpcount syscall2 from %p", (void *)frame->tf_eip));
-#endif
 	userenter(td, p);	/* lazy raise our priority */
 
 	/*
@@ -1408,9 +1394,6 @@ bad:
 	/*
 	 * Release the MP lock if we had to get it
 	 */
-	KASSERT(td->td_mpcount == have_mplock, 
-		("badmpcount syscall2/end from %p callp %p",
-		(void *)frame->tf_eip, callp));
 	if (have_mplock)
 		rel_mplock();
 #endif

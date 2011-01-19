@@ -54,8 +54,8 @@ extern u_int32_t		mptramp_pagetables;
 void	bootMP			(void);
 
 /* global data in apic_vector.s */
-extern volatile u_int		stopped_cpus;
-extern volatile u_int		started_cpus;
+extern volatile cpumask_t	stopped_cpus;
+extern volatile cpumask_t	started_cpus;
 
 extern volatile u_int		checkstate_probed_cpus;
 extern void (*cpustop_restartfunc) (void);
@@ -75,16 +75,23 @@ extern int			cpu_num_to_apic_id[];
 extern int			io_num_to_apic_id[];
 extern int			apic_id_to_logical[];
 #define APIC_INTMAPSIZE 24
+/*
+ * NOTE:
+ * - Keep size of apic_intmapinfo power of 2
+ * - Update IOAPIC_IM_SZSHIFT after changing apic_intmapinfo size
+ */
 struct apic_intmapinfo {
   	int ioapic;
 	int int_pin;
 	volatile void *apic_address;
-	int32_t redirindex;
-	u_int32_t flags;	/* AIMI_FLAG */
+	int redirindex;
+	uint32_t flags;		/* IOAPIC_IM_FLAG_ */
+	uint32_t pad[2];
 };
+#define IOAPIC_IM_SZSHIFT	5
 
-#define AIMI_FLAG_LEVEL		0x1	/* default to edge trigger */
-#define AIMI_FLAG_MASKED	0x2
+#define IOAPIC_IM_FLAG_LEVEL	0x1	/* default to edge trigger */
+#define IOAPIC_IM_FLAG_MASKED	0x2
 
 extern struct apic_intmapinfo	int_to_apicintpin[];
 extern struct pcb		stoppcbs[];
@@ -111,9 +118,9 @@ int	apic_polarity		(int, int);
 void	assign_apic_irq		(int apic, int intpin, int irq);
 void	revoke_apic_irq		(int irq);
 void	init_secondary		(void);
-int	stop_cpus		(u_int);
+int	stop_cpus		(cpumask_t);
 void	ap_init			(void);
-int	restart_cpus		(u_int);
+int	restart_cpus		(cpumask_t);
 void	forward_signal		(struct proc *);
 
 #ifndef _SYS_QUEUE_H_
@@ -139,7 +146,7 @@ void	apic_dump		(char*);
 void	apic_initialize		(boolean_t);
 void	imen_dump		(void);
 int	apic_ipi		(int, int, int);
-void	selected_apic_ipi	(u_int, int, int);
+void	selected_apic_ipi	(cpumask_t, int, int);
 void	single_apic_ipi(int cpu, int vector, int delivery_mode);
 int	single_apic_ipi_passive(int cpu, int vector, int delivery_mode);
 int	io_apic_setup		(int);

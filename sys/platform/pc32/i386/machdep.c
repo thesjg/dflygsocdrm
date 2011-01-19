@@ -876,7 +876,8 @@ cpu_halt(void)
  * NOTE: On an SMP system we rely on a scheduler IPI to wake a HLTed cpu up.
  *	 However, there are cases where the idlethread will be entered with
  *	 the possibility that no IPI will occur and in such cases
- *	 lwkt_switch() sets TDF_IDLE_NOHLT.
+ *	 lwkt_switch() sets RQF_WAKEUP. We usually check
+ *	 RQF_IDLECHECK_WK_MASK.
  *
  * NOTE: cpu_idle_hlt again defaults to 2 (use ACPI sleep states).  Set to
  *	 1 to just use hlt and for debugging purposes.
@@ -884,12 +885,15 @@ cpu_halt(void)
 static int	cpu_idle_hlt = 2;
 static int	cpu_idle_hltcnt;
 static int	cpu_idle_spincnt;
+static u_int	cpu_idle_repeat = 4;
 SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_hlt, CTLFLAG_RW,
     &cpu_idle_hlt, 0, "Idle loop HLT enable");
 SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_hltcnt, CTLFLAG_RW,
     &cpu_idle_hltcnt, 0, "Idle loop entry halts");
 SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_spincnt, CTLFLAG_RW,
     &cpu_idle_spincnt, 0, "Idle loop entry spins");
+SYSCTL_INT(_machdep, OID_AUTO, cpu_idle_repeat, CTLFLAG_RW,
+    &cpu_idle_repeat, 0, "Idle entries before acpi hlt");
 
 static void
 cpu_idle_default_hook(void)
@@ -907,7 +911,10 @@ void (*cpu_idle_hook)(void) = cpu_idle_default_hook;
 void
 cpu_idle(void)
 {
-	struct thread *td = curthread;
+	globaldata_t gd = mycpu;
+	struct thread *td = gd->gd_curthread;
+	int reqflags;
+	int quick;
 
 	crit_exit();
 	KKASSERT(td->td_critcount == 0);
@@ -918,57 +925,64 @@ cpu_idle(void)
 		lwkt_switch();
 
 		/*
-		 * If we are going to halt call splz unconditionally after
-		 * CLIing to catch any interrupt races.  Note that we are
-		 * at SPL0 and interrupts are enabled.
+		 * When halting inside a cli we must check for reqflags
+		 * races, particularly [re]schedule requests.  Running
+		 * splz() does the job.
+		 *
+		 * cpu_idle_hlt:
+		 *      0       Never halt, just spin
+		 *
+		 *      1       Always use HLT (or MONITOR/MWAIT if avail).
+		 *              This typically eats more power than the
+		 *              ACPI halt.
+		 *
+		 *      2       Use HLT/MONITOR/MWAIT up to a point and then
+		 *              use the ACPI halt (default).  This is a hybrid
+		 *              approach.  See machdep.cpu_idle_repeat.
+		 *
+		 *      3       Always use the ACPI halt.  This typically
+		 *              eats the least amount of power but the cpu
+		 *              will be slow waking up.  Slows down e.g.
+		 *              compiles and other pipe/event oriented stuff.
+		 *
+		 *
+		 * NOTE: Interrupts are enabled and we are not in a critical
+		 *       section.
+		 *
+		 * NOTE: Preemptions do not reset gd_idle_repeat.  Also we
+		 *	 don't bother capping gd_idle_repeat, it is ok if
+		 *	 it overflows.
 		 */
-		if (cpu_idle_hlt && !lwkt_runnable() &&
-		    (td->td_flags & TDF_IDLE_NOHLT) == 0) {
+		++gd->gd_idle_repeat;
+		reqflags = gd->gd_reqflags;
+		quick = (cpu_idle_hlt == 1) ||
+			(cpu_idle_hlt < 3 &&
+			 gd->gd_idle_repeat < cpu_idle_repeat);
+
+		if (quick && (cpu_mi_feature & CPU_MI_MONITOR) &&
+		    (reqflags & RQF_IDLECHECK_WK_MASK) == 0) {
+			cpu_mmw_pause_int(&gd->gd_reqflags, reqflags);
+			++cpu_idle_hltcnt;
+		} else if (cpu_idle_hlt) {
 			__asm __volatile("cli");
 			splz();
-			if (!lwkt_runnable()) {
-				if (cpu_idle_hlt == 1)
+			if ((gd->gd_reqflags & RQF_IDLECHECK_WK_MASK) == 0) {
+				if (quick)
 					cpu_idle_default_hook();
 				else
 					cpu_idle_hook();
 			}
-#ifdef SMP
-			else
-				handle_cpu_contention_mask();
-#endif
 			__asm __volatile("sti");
 			++cpu_idle_hltcnt;
 		} else {
-			td->td_flags &= ~TDF_IDLE_NOHLT;
 			splz();
-#ifdef SMP
 			__asm __volatile("sti");
-			handle_cpu_contention_mask();
-#else
-			__asm __volatile("sti");
-#endif
 			++cpu_idle_spincnt;
 		}
 	}
 }
 
 #ifdef SMP
-
-/*
- * This routine is called when the only runnable threads require
- * the MP lock, and the scheduler couldn't get it.  On a real cpu
- * we let the scheduler spin.
- */
-void
-handle_cpu_contention_mask(void)
-{
-	cpumask_t mask;
-
-	mask = cpu_contention_mask;
-	cpu_ccfence();
-	if (mask && bsfl(mask) != mycpu->gd_cpuid)
-		DELAY(2);
-}
 
 /*
  * This routine is called if a spinlock has been held through the
@@ -2621,14 +2635,11 @@ struct spinlock_deprecated smp_rv_spinlock;
 static void
 init_locks(void)
 {
+#ifdef SMP
 	/*
-	 * mp_lock = 0;	BSP already owns the MP lock 
-	 */
-	/*
-	 * Get the initial mp_lock with a count of 1 for the BSP.
+	 * Get the initial mplock with a count of 1 for the BSP.
 	 * This uses a LOGICAL cpu ID, ie BSP == 0.
 	 */
-#ifdef SMP
 	cpu_get_initial_mplock();
 #endif
 	/* DEPRECATED */

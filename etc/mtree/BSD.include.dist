@@ -103,6 +103,8 @@
     ..
     libprop
     ..
+    lzma
+    ..
     machine
         pc
         ..
@@ -228,8 +230,6 @@
         ..
         ncp
         ..
-        ns
-        ..
         smb
         ..
     ..
@@ -269,6 +269,10 @@
         mfs
         ..
         smbfs
+        ..
+        gnu
+            ext2fs
+            ..
         ..
         isofs
             cd9660

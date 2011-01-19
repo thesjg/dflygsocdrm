@@ -437,8 +437,12 @@ check_subpartition_selections(struct dfui_response *r, struct i_fn_args *a)
 			valid = 0;
 		}
 
-		if ((strcasecmp(mountpoint, "swap") == 0) && (capacity > 8192)) {
-			inform(a->c, _("Swap capacity is limited to 8G."));
+		/*
+		 * Maybe remove this limit entirely?
+		 */
+		if ((strcasecmp(mountpoint, "swap") == 0) &&
+		    (capacity > 512*1024)) {
+			inform(a->c, _("Swap capacity is limited to 512G."));
 			valid = 0;
 		}
 
@@ -575,6 +579,7 @@ warn_encrypted_boot(struct i_fn_args *a)
 		    _("You have selected encryption for the /boot partition which "
 		    "is not supported."))) {
 		case 1:
+			subpartition_clr_encrypted(sp);
 			valid = 1;
 			break;
 		case 2:

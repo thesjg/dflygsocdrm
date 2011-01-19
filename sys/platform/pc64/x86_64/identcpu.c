@@ -481,6 +481,12 @@ identify_cpu(void)
 
 	/* XXX */
 	cpu = CPU_CLAWHAMMER;
+
+	if (cpu_feature & CPUID_SSE2)
+		cpu_mi_feature |= CPU_MI_BZERONT;
+
+	if (cpu_feature2 & CPUID2_MON)
+		cpu_mi_feature |= CPU_MI_MONITOR;
 }
 
 static u_int
@@ -488,7 +494,7 @@ find_cpu_vendor_id(void)
 {
 	int	i;
 
-	for (i = 0; i < sizeof(cpu_vendors) / sizeof(cpu_vendors[0]); i++)
+	for (i = 0; i < NELEM(cpu_vendors); i++)
 		if (strcmp(cpu_vendor, cpu_vendors[i].vendor) == 0)
 			return (cpu_vendors[i].vendor_id);
 	return (0);

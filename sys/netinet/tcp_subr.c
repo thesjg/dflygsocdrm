@@ -331,7 +331,7 @@ tcp_init(void)
 	 * allocation to fail so do not specify MPF_INT.
 	 */
 	mpipe_init(&tcptemp_mpipe, M_TCPTEMP, sizeof(struct tcptemp),
-		    25, -1, 0, NULL);
+		    25, -1, 0, NULL, NULL, NULL);
 
 	tcp_delacktime = TCPTV_DELACK;
 	tcp_keepinit = TCPTV_KEEP_INIT;
@@ -1174,7 +1174,7 @@ tcp_pcblist(SYSCTL_HANDLER_ARGS)
 		int cpu_id;
 
 		cpu_id = (origcpu + ccpu) % ncpus;
-		if ((smp_active_mask & (1 << cpu_id)) == 0)
+		if ((smp_active_mask & CPUMASK(cpu_id)) == 0)
 			continue;
 		rgd = globaldata_find(cpu_id);
 		lwkt_setcpu_self(rgd);

@@ -23,11 +23,15 @@
 #include <machine/smp.h>
 #include <machine_base/isa/intr_machdep.h>
 
-/* convert an absolute IRQ# into a bitmask */
-#define IRQ_LBIT(irq_num)	(1 << (irq_num))
+#ifdef foo
+/* convert an absolute IRQ# into bitmask */
+#define IRQ_LBIT(irq_num)	(1UL << (irq_num & 0x3f))
+#endif
 
-/* make an index into the IO APIC from the IRQ# */
-#define REDTBL_IDX(irq_num)	(0x10 + ((irq_num) * 2))
+#define IRQ_SBITS(irq_num)	((irq_num) & 0x3f)
+
+/* convert an absolute IRQ# into gd_ipending index */
+#define IRQ_LIDX(irq_num)	((irq_num) >> 6)
 
 #ifdef SMP
 #define MPLOCKED     lock ;
@@ -52,17 +56,17 @@
 #define APIC_POP_FRAME POP_FRAME
 
 #define IOAPICADDR(irq_num) \
-	CNAME(int_to_apicintpin) + AIMI_SIZE * (irq_num) + AIMI_APIC_ADDRESS
+	CNAME(int_to_apicintpin) + IOAPIC_IM_SIZE * (irq_num) + IOAPIC_IM_ADDR
 #define REDIRIDX(irq_num) \
-	CNAME(int_to_apicintpin) + AIMI_SIZE * (irq_num) + AIMI_REDIRINDEX
+	CNAME(int_to_apicintpin) + IOAPIC_IM_SIZE * (irq_num) + IOAPIC_IM_ENTIDX
 #define IOAPICFLAGS(irq_num) \
-	CNAME(int_to_apicintpin) + AIMI_SIZE * (irq_num) + AIMI_FLAGS
+	CNAME(int_to_apicintpin) + IOAPIC_IM_SIZE * (irq_num) + IOAPIC_IM_FLAGS
  
 #define MASK_IRQ(irq_num)						\
 	APIC_IMASK_LOCK ;			/* into critical reg */	\
-	testl	$AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
+	testl	$IOAPIC_IM_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
 	jne	7f ;			/* masked, don't mask */	\
-	orl	$AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
+	orl	$IOAPIC_IM_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
 						/* set the mask bit */	\
 	movq	IOAPICADDR(irq_num), %rcx ;	/* ioapic addr */	\
 	movl	REDIRIDX(irq_num), %eax ;	/* get the index */	\
@@ -77,7 +81,7 @@
  *  and the EOI cycle would cause redundant INTs to occur.
  */
 #define MASK_LEVEL_IRQ(irq_num)						\
-	testl	$AIMI_FLAG_LEVEL, IOAPICFLAGS(irq_num) ;		\
+	testl	$IOAPIC_IM_FLAG_LEVEL, IOAPICFLAGS(irq_num) ;		\
 	jz	9f ;				/* edge, don't mask */	\
 	MASK_IRQ(irq_num) ;						\
 9: ;									\
@@ -89,9 +93,9 @@
 	cmpl	$0,%eax ;						\
 	jnz	8f ;							\
 	APIC_IMASK_LOCK ;			/* into critical reg */	\
-	testl	$AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
+	testl	$IOAPIC_IM_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
 	je	7f ;			/* bit clear, not masked */	\
-	andl	$~AIMI_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
+	andl	$~IOAPIC_IM_FLAG_MASKED, IOAPICFLAGS(irq_num) ;		\
 						/* clear mask bit */	\
 	movq	IOAPICADDR(irq_num),%rcx ;	/* ioapic addr */	\
 	movl	REDIRIDX(irq_num), %eax ;	/* get the index */	\
@@ -104,23 +108,22 @@
 #ifdef SMP /* APIC-IO */
 
 /*
- * Fast interrupt call handlers run in the following sequence:
+ * Interrupt call handlers run in the following sequence:
  *
  *	- Push the trap frame required by doreti
  *	- Mask the interrupt and reenable its source
- *	- If we cannot take the interrupt set its fpending bit and
- *	  doreti.  Note that we cannot mess with mp_lock at all
- *	  if we entered from a critical section!
- *	- If we can take the interrupt clear its fpending bit,
+ *	- If we cannot take the interrupt set its ipending bit and
+ *	  doreti.
+ *	- If we can take the interrupt clear its ipending bit,
  *	  call the handler, then unmask and doreti.
  *
  * YYY can cache gd base opitner instead of using hidden %fs prefixes.
  */
 
-#define	FAST_INTR(irq_num, vec_name)					\
+#define	INTR_HANDLER(irq_num)						\
 	.text ;								\
 	SUPERALIGN_TEXT ;						\
-IDTVEC(vec_name) ;							\
+IDTVEC(apic_intr##irq_num) ;						\
 	APIC_PUSH_FRAME ;						\
 	FAKE_MCOUNT(TF_RIP(%rsp)) ;					\
 	MASK_LEVEL_IRQ(irq_num) ;					\
@@ -134,12 +137,19 @@ IDTVEC(vec_name) ;							\
 1: ;									\
 	/* in critical section, make interrupt pending */		\
 	/* set the pending bit and return, leave interrupt masked */	\
-	orl	$IRQ_LBIT(irq_num),PCPU(fpending) ;			\
+	movq	$1,%rcx ;						\
+	shlq	$IRQ_SBITS(irq_num),%rcx ;				\
+	movl	$IRQ_LIDX(irq_num),%edx ;				\
+	orq	%rcx,PCPU_E8(ipending,%edx) ;				\
 	orl	$RQF_INTPEND,PCPU(reqflags) ;				\
 	jmp	5f ;							\
 2: ;									\
 	/* clear pending bit, run handler */				\
-	andl	$~IRQ_LBIT(irq_num),PCPU(fpending) ;			\
+	movq	$1,%rcx ;						\
+	shlq	$IRQ_SBITS(irq_num),%rcx ;				\
+	notq	%rcx ;							\
+	movl	$IRQ_LIDX(irq_num),%edx ;				\
+	andq	%rcx,PCPU_E8(ipending,%edx) ;				\
 	pushq	$irq_num ;		/* trapframe -> intrframe */	\
 	movq	%rsp, %rdi ;		/* pass frame by reference */	\
 	incl	TD_CRITCOUNT(%rbx) ;					\
@@ -216,7 +226,7 @@ Xcpustop:
 	addq	%rax, %rdi
 	call	CNAME(savectx)		/* Save process context */
 
-	movl	PCPU(cpuid), %eax
+	movslq	PCPU(cpuid), %rax
 
 	/*
 	 * Indicate that we have stopped and loop waiting for permission
@@ -227,7 +237,7 @@ Xcpustop:
 	 * (e.g. Xtimer, Xinvltlb).
 	 */
 	MPLOCKED
-	btsl	%eax, stopped_cpus	/* stopped_cpus |= (1<<id) */
+	btsq	%rax, stopped_cpus	/* stopped_cpus |= (1<<id) */
 	sti
 1:
 	andl	$~RQF_IPIQ,PCPU(reqflags)
@@ -235,13 +245,13 @@ Xcpustop:
 	call	lwkt_smp_stopped
 	popq	%rax
 	pause
-	btl	%eax, started_cpus	/* while (!(started_cpus & (1<<id))) */
+	btq	%rax, started_cpus	/* while (!(started_cpus & (1<<id))) */
 	jnc	1b
 
 	MPLOCKED
-	btrl	%eax, started_cpus	/* started_cpus &= ~(1<<id) */
+	btrq	%rax, started_cpus	/* started_cpus &= ~(1<<id) */
 	MPLOCKED
-	btrl	%eax, stopped_cpus	/* stopped_cpus &= ~(1<<id) */
+	btrq	%rax, stopped_cpus	/* stopped_cpus &= ~(1<<id) */
 
 	test	%eax, %eax
 	jnz	2f
@@ -301,6 +311,11 @@ Xtimer:
 	movl	$0, LA_EOI(%rax)	/* End Of Interrupt to APIC */
 	FAKE_MCOUNT(TF_RIP(%rsp))
 
+	subq	$8,%rsp			/* make same as interrupt frame */
+	movq	%rsp,%rdi		/* pass frame by reference */
+	call	lapic_timer_always
+	addq	$8,%rsp			/* turn into trapframe */
+
 	incl    PCPU(cnt) + V_TIMER
 	movq	PCPU(curthread),%rbx
 	testl	$-1,TD_CRITCOUNT(%rbx)
@@ -327,30 +342,30 @@ Xtimer:
 #ifdef SMP /* APIC-IO */
 
 MCOUNT_LABEL(bintr)
-	FAST_INTR(0,apic_fastintr0)
-	FAST_INTR(1,apic_fastintr1)
-	FAST_INTR(2,apic_fastintr2)
-	FAST_INTR(3,apic_fastintr3)
-	FAST_INTR(4,apic_fastintr4)
-	FAST_INTR(5,apic_fastintr5)
-	FAST_INTR(6,apic_fastintr6)
-	FAST_INTR(7,apic_fastintr7)
-	FAST_INTR(8,apic_fastintr8)
-	FAST_INTR(9,apic_fastintr9)
-	FAST_INTR(10,apic_fastintr10)
-	FAST_INTR(11,apic_fastintr11)
-	FAST_INTR(12,apic_fastintr12)
-	FAST_INTR(13,apic_fastintr13)
-	FAST_INTR(14,apic_fastintr14)
-	FAST_INTR(15,apic_fastintr15)
-	FAST_INTR(16,apic_fastintr16)
-	FAST_INTR(17,apic_fastintr17)
-	FAST_INTR(18,apic_fastintr18)
-	FAST_INTR(19,apic_fastintr19)
-	FAST_INTR(20,apic_fastintr20)
-	FAST_INTR(21,apic_fastintr21)
-	FAST_INTR(22,apic_fastintr22)
-	FAST_INTR(23,apic_fastintr23)
+	INTR_HANDLER(0)
+	INTR_HANDLER(1)
+	INTR_HANDLER(2)
+	INTR_HANDLER(3)
+	INTR_HANDLER(4)
+	INTR_HANDLER(5)
+	INTR_HANDLER(6)
+	INTR_HANDLER(7)
+	INTR_HANDLER(8)
+	INTR_HANDLER(9)
+	INTR_HANDLER(10)
+	INTR_HANDLER(11)
+	INTR_HANDLER(12)
+	INTR_HANDLER(13)
+	INTR_HANDLER(14)
+	INTR_HANDLER(15)
+	INTR_HANDLER(16)
+	INTR_HANDLER(17)
+	INTR_HANDLER(18)
+	INTR_HANDLER(19)
+	INTR_HANDLER(20)
+	INTR_HANDLER(21)
+	INTR_HANDLER(22)
+	INTR_HANDLER(23)
 MCOUNT_LABEL(eintr)
 
 #endif
@@ -360,9 +375,9 @@ MCOUNT_LABEL(eintr)
 /* variables used by stop_cpus()/restart_cpus()/Xcpustop */
 	.globl stopped_cpus, started_cpus
 stopped_cpus:
-	.long	0
+	.quad	0
 started_cpus:
-	.long	0
+	.quad	0
 
 	.globl CNAME(cpustop_restartfunc)
 CNAME(cpustop_restartfunc):

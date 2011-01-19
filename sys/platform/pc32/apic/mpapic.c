@@ -23,7 +23,6 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/i386/mpapic.c,v 1.37.2.7 2003/01/25 02:31:47 peter Exp $
- * $DragonFly: src/sys/platform/pc32/apic/mpapic.c,v 1.22 2008/04/20 13:44:26 swildner Exp $
  */
 
 #include <sys/param.h>
@@ -89,8 +88,7 @@ static const uint32_t	lapic_timer_divisors[] = {
 	APIC_TDCR_2,	APIC_TDCR_4,	APIC_TDCR_8,	APIC_TDCR_16,
 	APIC_TDCR_32,	APIC_TDCR_64,	APIC_TDCR_128,	APIC_TDCR_1
 };
-#define APIC_TIMER_NDIVISORS \
-	(int)(sizeof(lapic_timer_divisors) / sizeof(lapic_timer_divisors[0]))
+#define APIC_TIMER_NDIVISORS (int)(NELEM(lapic_timer_divisors))
 
 
 /*
@@ -149,7 +147,7 @@ apic_initialize(boolean_t bsp)
 	 * Set the Task Priority Register as needed.   At the moment allow
 	 * interrupts on all cpus (the APs will remain CLId until they are
 	 * ready to deal).  We could disable all but IPIs by setting
-	 * temp |= TPR_IPI_ONLY for cpu != 0.
+	 * temp |= TPR_IPI for cpu != 0.
 	 */
 	temp = lapic.tpr;
 	temp &= ~APIC_TPR_PRIO;		/* clear priority field */
@@ -160,7 +158,7 @@ if (!apic_io_enable) {
 	 * If we are NOT running the IO APICs, the LAPIC will only be used
 	 * for IPIs.  Set the TPR to prevent any unintentional interrupts.
 	 */
-	temp |= TPR_IPI_ONLY;
+	temp |= TPR_IPI;
 #ifdef SMP /* APIC-IO */
 }
 #endif
@@ -842,9 +840,11 @@ apic_ipi(int dest_type, int vector, int delivery_mode)
 	if ((lapic.icr_lo & APIC_DELSTAT_MASK) != 0) {
 	    unsigned int eflags = read_eflags();
 	    cpu_enable_intr();
+	    DEBUG_PUSH_INFO("apic_ipi");
 	    while ((lapic.icr_lo & APIC_DELSTAT_MASK) != 0) {
 		lwkt_process_ipiq();
 	    }
+	    DEBUG_POP_INFO();
 	    write_eflags(eflags);
 	}
 
@@ -865,9 +865,11 @@ single_apic_ipi(int cpu, int vector, int delivery_mode)
 	if ((lapic.icr_lo & APIC_DELSTAT_MASK) != 0) {
 	    unsigned int eflags = read_eflags();
 	    cpu_enable_intr();
+	    DEBUG_PUSH_INFO("single_apic_ipi");
 	    while ((lapic.icr_lo & APIC_DELSTAT_MASK) != 0) {
 		lwkt_process_ipiq();
 	    }
+	    DEBUG_POP_INFO();
 	    write_eflags(eflags);
 	}
 	icr_hi = lapic.icr_hi & ~APIC_ID_MASK;
@@ -926,12 +928,12 @@ single_apic_ipi_passive(int cpu, int vector, int delivery_mode)
  * APIC_DELMODE_FIXED or APIC_DELMODE_LOWPRIO.
  */
 void
-selected_apic_ipi(u_int target, int vector, int delivery_mode)
+selected_apic_ipi(cpumask_t target, int vector, int delivery_mode)
 {
 	crit_enter();
 	while (target) {
-		int n = bsfl(target);
-		target &= ~(1 << n);
+		int n = BSFCPUMASK(target);
+		target &= ~CPUMASK(n);
 		single_apic_ipi(n, vector, delivery_mode);
 	}
 	crit_exit();

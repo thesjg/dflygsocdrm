@@ -46,7 +46,7 @@ struct drm_sysctl_list {
 	{"bufs",    drm_bufs_info_legacy},
 	{"vblank",    drm_vblank_info_legacy},
 };
-#define DRM_SYSCTL_ENTRIES (sizeof(drm_sysctl_list)/sizeof(drm_sysctl_list[0]))
+#define DRM_SYSCTL_ENTRIES NELEM(drm_sysctl_list)
 
 DRM_PROC_DIR_ENTRY drm_sysctl_root;
 

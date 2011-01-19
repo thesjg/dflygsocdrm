@@ -1545,6 +1545,17 @@ TO_REMOVE+=/boot/kernel/hotplug.ko
 TO_REMOVE+=/usr/include/sys/hotplug.h
 TO_REMOVE+=/usr/share/man/cat4/hotplug.4.gz
 TO_REMOVE+=/usr/share/man/man4/hotplug.4.gz
+TO_REMOVE+=/usr/include/sys/dm.h
+TO_REMOVE+=/usr/share/man/cat4/ahb.4.gz
+TO_REMOVE+=/usr/share/man/man4/ahb.4.gz
+TO_REMOVE+=/boot/kernel/ahc_eisa.ko
+TO_REMOVE+=/boot/kernel/ahc_isa.ko
+TO_REMOVE+=/usr/include/netproto/ns
+TO_REMOVE+=/usr/include/netns
+
+# XXX Remove when pfsync(4) has been fixed
+TO_REMOVE+=/usr/share/man/cat4/pfsync.4.gz
+TO_REMOVE+=/usr/share/man/man4/pfsync.4.gz
 
 # XXX Remove when adjusted to the new 802.11 framework
 TO_REMOVE+=/boot/modules/if_acx.ko

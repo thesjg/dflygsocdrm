@@ -96,6 +96,7 @@ struct lwp lwp0;
 struct thread thread0;
 
 int cmask = CMASK;
+u_int cpu_mi_feature;
 extern	struct user *proc0paddr;
 extern int fallback_elf_brand;
 
@@ -164,9 +165,6 @@ mi_proc0init(struct globaldata *gd, struct user *proc0paddr)
 {
 	lwkt_init_thread(&thread0, proc0paddr, LWKT_THREAD_STACK, 0, gd);
 	lwkt_set_comm(&thread0, "thread0");
-#ifdef SMP
-	thread0.td_mpcount = 1;	/* will hold mplock initially */
-#endif
 	RB_INIT(&proc0.p_lwp_tree);
 	spin_init(&proc0.p_spin);
 	proc0.p_lasttid = 0;	/* +1 = next TID */
@@ -174,7 +172,7 @@ mi_proc0init(struct globaldata *gd, struct user *proc0paddr)
 	lwp0.lwp_thread = &thread0;
 	lwp0.lwp_proc = &proc0;
 	proc0.p_usched = usched_init();
-	lwp0.lwp_cpumask = 0xFFFFFFFF;
+	lwp0.lwp_cpumask = (cpumask_t)-1;
 	varsymset_init(&proc0.p_varsymset, NULL);
 	thread0.td_flags |= TDF_RUNNING;
 	thread0.td_proc = &proc0;
@@ -704,7 +702,7 @@ mi_gdinit(struct globaldata *gd, int cpuid)
 	TAILQ_INIT(&gd->gd_systimerq);
 	gd->gd_sysid_alloc = cpuid;	/* prime low bits for cpu lookup */
 	gd->gd_cpuid = cpuid;
-	gd->gd_cpumask = (cpumask_t)1 << cpuid;
+	gd->gd_cpumask = CPUMASK(cpuid);
 	lwkt_gdinit(gd);
 	vm_map_entry_reserve_cpu_init(gd);
 	sleep_gdinit(gd);
