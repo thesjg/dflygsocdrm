@@ -1638,7 +1638,7 @@ typedef struct lwbuf *	DRM_LWBUF_T;
 /* file i915_gem_tiling.c, function i915_gem_swizzle_page() */
 static __inline__ char *
 drm_kmap(DRM_PAGE_T page, DRM_LWBUF_T *plwb) {
-	*plwb = lwbuf_alloc(page);
+	*plwb = lwbuf_alloc(page, *plwb);
 	return (char *)lwbuf_kva(*plwb);
 }
 
@@ -1649,7 +1649,7 @@ drm_kunmap(void *vaddr, DRM_LWBUF_T lwb) {
 
 static __inline__ char *
 drm_kmap_atomic(DRM_PAGE_T page, DRM_LWBUF_T *plwb) {
-	*plwb = lwbuf_alloc(page);
+	*plwb = lwbuf_alloc(page, *plwb);
 	return (char *)lwbuf_kva(*plwb);
 }
 
