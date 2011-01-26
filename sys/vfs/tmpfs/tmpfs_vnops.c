@@ -303,6 +303,7 @@ tmpfs_getattr(struct vop_getattr_args *v)
 
 	node = VP_TO_TMPFS_NODE(vp);
 
+	lwkt_gettoken(&vp->v_mount->mnt_token);
 	tmpfs_update(vp);
 
 	vap->va_type = vp->v_type;
@@ -329,6 +330,8 @@ tmpfs_getattr(struct vop_getattr_args *v)
 	}
 	vap->va_bytes = round_page(node->tn_size);
 	vap->va_filerev = 0;
+
+	lwkt_reltoken(&vp->v_mount->mnt_token);
 
 	return 0;
 }
@@ -513,6 +516,8 @@ tmpfs_write (struct vop_write_args *ap)
 	if (vp->v_type != VREG)
 		return (EINVAL);
 
+	lwkt_gettoken(&vp->v_mount->mnt_token);
+
 	oldsize = node->tn_size;
 	if (ap->a_ioflag & IO_APPEND)
 		uio->uio_offset = node->tn_size;
@@ -521,15 +526,20 @@ tmpfs_write (struct vop_write_args *ap)
 	 * Check for illegal write offsets.
 	 */
 	if (uio->uio_offset + uio->uio_resid >
-	  VFS_TO_TMPFS(vp->v_mount)->tm_maxfilesize)
+	  VFS_TO_TMPFS(vp->v_mount)->tm_maxfilesize) {
+		lwkt_reltoken(&vp->v_mount->mnt_token);
 		return (EFBIG);
+	}
 
 	if (vp->v_type == VREG && td != NULL) {
 		error = kern_getrlimit(RLIMIT_FSIZE, &limit);
-		if (error != 0)
+		if (error != 0) {
+			lwkt_reltoken(&vp->v_mount->mnt_token);
 			return error;
+		}
 		if (uio->uio_offset + uio->uio_resid > limit.rlim_cur) {
 			ksignal(td->td_proc, SIGXFSZ);
+			lwkt_reltoken(&vp->v_mount->mnt_token);
 			return (EFBIG);
 		}
 	}
@@ -644,6 +654,9 @@ tmpfs_write (struct vop_write_args *ap)
 done:
 
 	tmpfs_knote(vp, kflags);
+
+
+	lwkt_reltoken(&vp->v_mount->mnt_token);
 	return(error);
 }
 
