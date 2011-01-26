@@ -280,7 +280,11 @@ typedef unsigned long resource_size_t;
 
 /* file i915_gem.c, function i915_gem_object_save_bit_17_swizzle() */
 
-#define BITS_PER_LONG	(sizeof(long) * 8)
+#ifdef __x86_64__
+#define BITS_PER_LONG  64
+#else
+#define BITS_PER_LONG  32
+#endif
 
 #define BITS_TO_LONGS(b) (((b) + BITS_PER_LONG - 1) / BITS_PER_LONG)
 
@@ -314,6 +318,30 @@ hweight16(uint16_t mask) {
 		}
 	}
 	return num_bits;
+}
+
+/**********************************************************
+ * HASH                                                   *
+ **********************************************************/
+
+/* file drm_hashtab.c */
+/* return value unsigned long from drm_ht_just_insert_please */
+static __inline__ unsigned int
+hash_long(unsigned long key, int bits) {
+	unsigned long val;
+#ifdef __x86_64__
+/* Prime close to golden ratio obtained from
+ * Bob Jenkins, Public Domain code
+ * http://burtleburtle.net/bob/c/lookup8.c */
+	val = key * 0x9e3779b97f4a7c13L;
+#else
+/* Prime close to golden ratio obtained from
+ * Bob Jenkins, Public Domain code
+ * http://burtleburtle.net/bob/c/lookup2.c */
+	val = key * 0x9e3779b9;
+#endif
+	return (unsigned int)((val >> (BITS_PER_LONG - bits))
+		& (~((~0L) << bits))); 
 }
 
 /**********************************************************
