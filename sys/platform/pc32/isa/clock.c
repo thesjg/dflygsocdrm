@@ -67,6 +67,7 @@
 #include <sys/thread2.h>
 #include <sys/systimer.h>
 #include <sys/machintr.h>
+#include <sys/interrupt.h>
 
 #include <machine/clock.h>
 #ifdef CLK_CALIBRATION_LOOP
@@ -86,7 +87,7 @@
 #include <bus/isa/rtc.h>
 #include <machine_base/isa/timerreg.h>
 
-#include <machine_base/isa/intr_machdep.h>
+#include <machine/intr_machdep.h>
 
 #ifdef SMP /* APIC-IO */
 /* The interrupt triggered by the 8254 (timer) chip */
