@@ -63,7 +63,10 @@ void drm_ht_verbose_list(struct drm_open_hash *ht, unsigned long key)
 	unsigned int hashed_key;
 	int count = 0;
 
+	hashed_key = hash_long(key, ht->order);
+#if 0
 	hashed_key = hash32_buf(&key, sizeof(key), ht->order);
+#endif
 	DRM_DEBUG("Key is 0x%08lx, Hashed key is 0x%08x\n", key, hashed_key);
 	h_list = &ht->table[hashed_key & ht->mask];
 	LIST_FOREACH(entry, h_list, head)
@@ -77,7 +80,10 @@ drm_ht_find_key(struct drm_open_hash *ht, unsigned long key)
 	struct drm_hash_item_list *h_list;
 	unsigned int hashed_key;
 
+	hashed_key = hash_long(key, ht->order);
+#if 0
 	hashed_key = hash32_buf(&key, sizeof(key), ht->order);
+#endif
 	h_list = &ht->table[hashed_key & ht->mask];
 	LIST_FOREACH(entry, h_list, head) {
 		if (entry->key == key)
@@ -96,7 +102,10 @@ int drm_ht_insert_item(struct drm_open_hash *ht, struct drm_hash_item *item)
 	unsigned int hashed_key;
 	unsigned long key = item->key;
 
+	hashed_key = hash_long(key, ht->order);
+#if 0
 	hashed_key = hash32_buf(&key, sizeof(key), ht->order);
+#endif
 	h_list = &ht->table[hashed_key & ht->mask];
 	parent = NULL;
 	LIST_FOREACH(entry, h_list, head) {
@@ -126,7 +135,10 @@ int drm_ht_just_insert_please(struct drm_open_hash *ht, struct drm_hash_item *it
 	unsigned long mask = (1 << bits) - 1;
 	unsigned long first, unshifted_key = 0;
 
+	unshifted_key = hash_long(seed, bits);
+#if 0
 	unshifted_key = hash32_buf(&seed, sizeof(seed), unshifted_key);
+#endif
 	first = unshifted_key;
 	do {
 		item->key = (unshifted_key << shift) + add;

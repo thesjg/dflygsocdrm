@@ -341,7 +341,7 @@ hash_long(unsigned long key, int bits) {
 	val = key * 0x9e3779b9;
 #endif
 	return (unsigned int)((val >> (BITS_PER_LONG - bits))
-		& (~((~0L) << bits))); 
+		& ((1 << bits) - 1)); 
 }
 
 /**********************************************************
