@@ -1,6 +1,5 @@
 /*-
  * Copyright (c) 1997, by Steve Passe
- * Copyright (c) 2008 The DragonFly Project.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -24,15 +23,15 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/isa/apic_ipl.h,v 1.3 1999/08/28 00:44:36 peter Exp $
- * $DragonFly: src/sys/platform/pc64/apic/apic_ipl.h,v 1.1 2008/08/29 17:07:12 dillon Exp $
+ * $DragonFly: src/sys/platform/pc32/apic/apic_ipl.h,v 1.8 2006/10/23 21:50:29 dillon Exp $
  */
 
-#ifndef _ARCH_APIC_IPL_H_
-#define	_ARCH_APIC_IPL_H_
+#ifndef _ARCH_APIC_IOAPIC_IPL_H_
+#define	_ARCH_APIC_IOAPIC_IPL_H_
 
 #ifdef SMP /* APIC-IO */
 
-#define APIC_HWI_VECTORS 192
+#define IOAPIC_HWI_VECTORS 192
 
 #endif
 
@@ -41,12 +40,12 @@
 /*
  * Interrupts may or may not be disabled when using these functions.
  */
-#define APIC_IMASK_LOCK							\
+#define IOAPIC_IMASK_LOCK						\
         SPIN_LOCK(imen_spinlock) ;					\
 
-#define APIC_IMASK_UNLOCK						\
+#define IOAPIC_IMASK_UNLOCK						\
         SPIN_UNLOCK(imen_spinlock) ;					\
 
 #endif
 
-#endif /* !_ARCH_APIC_IPL_H_ */
+#endif /* !_ARCH_APIC_IOAPIC_IPL_H_ */
