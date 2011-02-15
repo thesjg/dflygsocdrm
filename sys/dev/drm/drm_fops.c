@@ -673,7 +673,7 @@ int drm_close_legacy(struct dev_close_args *ap)
 #endif /* !__linux__ */
 
 #ifndef __linux__
-	funsetown(dev->buf_sigio);
+	funsetown(&dev->buf_sigio);
 #endif /* !__linux__ */
 
 	drm_events_release(file_priv);
