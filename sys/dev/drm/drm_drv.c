@@ -615,7 +615,7 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		return fsetown(*(int *)data, &dev->buf_sigio);
 
 	case FIOGETOWN:
-		*(int *) data = fgetown(dev->buf_sigio);
+		*(int *) data = fgetown(&dev->buf_sigio);
 		return 0;
 	}
 

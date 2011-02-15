@@ -500,15 +500,15 @@ io_apic_set_id(int apic, int id)
 {
 	u_int32_t ux;
 	
-	ux = ioapic_read(apic, IOAPIC_ID);	/* get current contents */
+	ux = ioapic_read(ioapic[apic], IOAPIC_ID);	/* get current contents */
 	if (((ux & APIC_ID_MASK) >> 24) != id) {
 		kprintf("Changing APIC ID for IO APIC #%d"
 		       " from %d to %d on chip\n",
 		       apic, ((ux & APIC_ID_MASK) >> 24), id);
 		ux &= ~APIC_ID_MASK;	/* clear the ID field */
 		ux |= (id << 24);
-		ioapic_write(apic, IOAPIC_ID, ux);	/* write new value */
-		ux = ioapic_read(apic, IOAPIC_ID);	/* re-read && test */
+		ioapic_write(ioapic[apic], IOAPIC_ID, ux);	/* write new value */
+		ux = ioapic_read(ioapic[apic], IOAPIC_ID);	/* re-read && test */
 		if (((ux & APIC_ID_MASK) >> 24) != id)
 			panic("can't control IO APIC #%d ID, reg: 0x%08x",
 			      apic, ux);
@@ -519,7 +519,7 @@ io_apic_set_id(int apic, int id)
 int
 io_apic_get_id(int apic)
 {
-  return (ioapic_read(apic, IOAPIC_ID) & APIC_ID_MASK) >> 24;
+  return (ioapic_read(ioapic[apic], IOAPIC_ID) & APIC_ID_MASK) >> 24;
 }
   
 
@@ -555,17 +555,17 @@ io_apic_setup_intpin(int apic, int pin)
 	 */
 	imen_lock();
 
-	flags = ioapic_read(apic, select) & IOART_RESV;
+	flags = ioapic_read(ioapic[apic], select) & IOART_RESV;
 	flags |= IOART_INTMSET | IOART_TRGREDG | IOART_INTAHI;
 	flags |= IOART_DESTPHY | IOART_DELFIXED;
 
-	target = ioapic_read(apic, select + 1) & IOART_HI_DEST_RESV;
+	target = ioapic_read(ioapic[apic], select + 1) & IOART_HI_DEST_RESV;
 	target |= 0;	/* fixed mode cpu mask of 0 - don't deliver anywhere */
 
 	vector = 0;
 
-	ioapic_write(apic, select, flags | vector);
-	ioapic_write(apic, select + 1, target);
+	ioapic_write(ioapic[apic], select, flags | vector);
+	ioapic_write(ioapic[apic], select + 1, target);
 
 	imen_unlock();
 
@@ -641,13 +641,13 @@ io_apic_setup_intpin(int apic, int pin)
 	imen_lock();
 
 	vector = IDT_OFFSET + irq;			/* IDT vec */
-	target = ioapic_read(apic, select + 1) & IOART_HI_DEST_RESV;
+	target = ioapic_read(ioapic[apic], select + 1) & IOART_HI_DEST_RESV;
 	/* Deliver all interrupts to CPU0 (BSP) */
 	target |= (CPU_TO_ID(cpuid) << IOART_HI_DEST_SHIFT) &
 		  IOART_HI_DEST_MASK;
-	flags |= ioapic_read(apic, select) & IOART_RESV;
-	ioapic_write(apic, select, flags | vector);
-	ioapic_write(apic, select + 1, target);
+	flags |= ioapic_read(ioapic[apic], select) & IOART_RESV;
+	ioapic_write(ioapic[apic], select, flags | vector);
+	ioapic_write(ioapic[apic], select + 1, target);
 
 	imen_unlock();
 }
@@ -719,8 +719,8 @@ ext_int_setup(int apic, int intr)
 	vector = IDT_OFFSET + intr;
 	flags = DEFAULT_EXTINT_FLAGS;
 
-	ioapic_write(apic, select, flags | vector);
-	ioapic_write(apic, select + 1, target);
+	ioapic_write(ioapic[apic], select, flags | vector);
+	ioapic_write(ioapic[apic], select + 1, target);
 
 	return 0;
 }
@@ -1065,20 +1065,10 @@ u_sleep(int count)
 		 /* spin */ ;
 }
 
-/*
- * XXX: Hack: Used by pmap_init
- */
-vm_offset_t cpu_apic_addr;
-
 void
-lapic_init(vm_offset_t lapic_addr)
+lapic_map(vm_offset_t lapic_addr)
 {
-	/*
-	 * lapic not mapped yet (pmap_init is called too late)
-	 */
 	lapic = pmap_mapdev_uncacheable(lapic_addr, sizeof(struct LAPIC));
-
-	cpu_apic_addr = lapic_addr;
 
 	kprintf("lapic: at 0x%08lx\n", lapic_addr);
 }
@@ -1115,4 +1105,44 @@ lapic_enumerator_register(struct lapic_enumerator *ne)
 		}
 	}
 	TAILQ_INSERT_TAIL(&lapic_enumerators, ne, lapic_link);
+}
+
+static TAILQ_HEAD(, ioapic_enumerator) ioapic_enumerators =
+	TAILQ_HEAD_INITIALIZER(ioapic_enumerators);
+
+void
+ioapic_config(void)
+{
+	struct ioapic_enumerator *e;
+	int error;
+
+	TAILQ_FOREACH(e, &ioapic_enumerators, ioapic_link) {
+		error = e->ioapic_probe(e);
+		if (!error)
+			break;
+	}
+	if (e == NULL) {
+#ifdef notyet
+		panic("can't config I/O APIC\n");
+#else
+		kprintf("no I/O APIC\n");
+		return;
+#endif
+	}
+
+	e->ioapic_enumerate(e);
+}
+
+void
+ioapic_enumerator_register(struct ioapic_enumerator *ne)
+{
+	struct ioapic_enumerator *e;
+
+	TAILQ_FOREACH(e, &ioapic_enumerators, ioapic_link) {
+		if (e->ioapic_prio < ne->ioapic_prio) {
+			TAILQ_INSERT_BEFORE(e, ne, ioapic_link);
+			return;
+		}
+	}
+	TAILQ_INSERT_TAIL(&ioapic_enumerators, ne, ioapic_link);
 }

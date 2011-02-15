@@ -679,6 +679,9 @@ mp_enable(u_int boot_addr)
 
 	lapic_config();
 
+	if (apic_io_enable)
+		ioapic_config();
+
 	mpfps_paddr = mptable_probe();
 	if (mpfps_paddr) {
 		mptable_map(&mpt, mpfps_paddr);
@@ -707,7 +710,7 @@ if (apic_io_enable) {
 
 	/* fill the LOGICAL io_apic_versions table */
 	for (apic = 0; apic < mp_napics; ++apic) {
-		ux = ioapic_read(apic, IOAPIC_VER);
+		ux = ioapic_read(ioapic[apic], IOAPIC_VER);
 		io_apic_versions[apic] = ux;
 		io_apic_set_id(apic, IO_TO_ID(apic));
 	}
@@ -1662,7 +1665,7 @@ int_entry(const struct INTENTRY *entry, int intr)
 		/* This signal goes to all IO APICS.  Select an IO APIC
 		   with sufficient number of interrupt pins */
 		for (apic = 0; apic < mp_napics; apic++)
-			if (((ioapic_read(apic, IOAPIC_VER) & 
+			if (((ioapic_read(ioapic[apic], IOAPIC_VER) & 
 			      IOART_VER_MAXREDIR) >> MAXREDIRSHIFT) >= 
 			    entry->dst_apic_int)
 				break;
@@ -2064,7 +2067,7 @@ mptable_default(int type)
 #endif	/* 0 */
 
 	/* one and only IO APIC */
-	io_apic_id = (ioapic_read(0, IOAPIC_ID) & APIC_ID_MASK) >> 24;
+	io_apic_id = (ioapic_read(ioapic[0], IOAPIC_ID) & APIC_ID_MASK) >> 24;
 
 	/*
 	 * sanity check, refer to MP spec section 3.6.6, last paragraph
@@ -2994,7 +2997,7 @@ mptable_lapic_default(void)
 	mp_naps = 1; /* exclude BSP */
 
 	/* Map local apic before the id field is accessed */
-	lapic_init(DEFAULT_APIC_BASE);
+	lapic_map(DEFAULT_APIC_BASE);
 
 	bsp_apicid = APIC_ID(lapic->id);
 	ap_apicid = (bsp_apicid == 0) ? 1 : 0;
@@ -3092,7 +3095,7 @@ mptable_lapic_enumerate(struct lapic_enumerator *e)
 	KKASSERT(arg2.found_bsp);
 
 	/* Map local apic */
-	lapic_init(lapic_addr);
+	lapic_map(lapic_addr);
 
 	mptable_unmap(&mpt);
 }

@@ -424,12 +424,12 @@ tapclose(struct dev_close_args *ap)
 		rt_ifannouncemsg(ifp, IFAN_DEPARTURE);
 	}
 
-	funsetown(tp->tap_sigio);
+	funsetown(&tp->tap_sigio);
 	tp->tap_sigio = NULL;
 	KNOTE(&tp->tap_rkq.ki_note, 0);
 
 	tp->tap_flags &= ~TAP_OPEN;
-	funsetown(tp->tap_sigtd);
+	funsetown(&tp->tap_sigtd);
 	tp->tap_sigtd = NULL;
 
 	taprefcnt --;
@@ -730,7 +730,7 @@ tapioctl(struct dev_ioctl_args *ap)
 		break;
 
 	case FIOGETOWN:
-		*(int *)data = fgetown(tp->tap_sigio);
+		*(int *)data = fgetown(&tp->tap_sigio);
 		break;
 
 	/* this is deprecated, FIOSETOWN should be used instead */
@@ -740,7 +740,7 @@ tapioctl(struct dev_ioctl_args *ap)
 
 	/* this is deprecated, FIOGETOWN should be used instead */
 	case TIOCGPGRP:
-		*(int *)data = -fgetown(tp->tap_sigio);
+		*(int *)data = -fgetown(&tp->tap_sigio);
 		break;
 
 	/* VMware/VMnet port ioctl's */
