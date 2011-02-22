@@ -65,6 +65,7 @@
 #include <vm/vm_extern.h>
 
 #include <sys/vmmeter.h>
+#include <sys/refcount.h>
 #include <sys/thread2.h>
 #include <sys/signal2.h>
 #include <sys/spinlock2.h>
@@ -402,7 +403,7 @@ fork1(struct lwp *lp1, int flags, struct proc **procp)
 		p2->p_flag |= P_JAILED;
 
 	if (p2->p_args)
-		p2->p_args->ar_ref++;
+		refcount_acquire(&p2->p_args->ar_ref);
 
 	p2->p_usched = p1->p_usched;
 	/* XXX: verify copy of the secondary iosched stuff */
@@ -410,12 +411,12 @@ fork1(struct lwp *lp1, int flags, struct proc **procp)
 
 	if (flags & RFSIGSHARE) {
 		p2->p_sigacts = p1->p_sigacts;
-		p2->p_sigacts->ps_refcnt++;
+		refcount_acquire(&p2->p_sigacts->ps_refcnt);
 	} else {
-		p2->p_sigacts = (struct sigacts *)kmalloc(sizeof(*p2->p_sigacts),
-		    M_SUBPROC, M_WAITOK);
+		p2->p_sigacts = kmalloc(sizeof(*p2->p_sigacts),
+					M_SUBPROC, M_WAITOK);
 		bcopy(p1->p_sigacts, p2->p_sigacts, sizeof(*p2->p_sigacts));
-		p2->p_sigacts->ps_refcnt = 1;
+		refcount_init(&p2->p_sigacts->ps_refcnt, 1);
 	}
 	if (flags & RFLINUXTHPN) 
 	        p2->p_sigparent = SIGUSR1;

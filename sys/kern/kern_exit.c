@@ -62,7 +62,6 @@
 #include <sys/filedesc.h>
 #include <sys/shm.h>
 #include <sys/sem.h>
-#include <sys/aio.h>
 #include <sys/jail.h>
 #include <sys/kern_syscall.h>
 #include <sys/upcall.h>
@@ -79,6 +78,7 @@
 #include <vm/vm_extern.h>
 #include <sys/user.h>
 
+#include <sys/refcount.h>
 #include <sys/thread2.h>
 #include <sys/sysref2.h>
 #include <sys/mplock2.h>
@@ -299,7 +299,6 @@ exit1(int rv)
 	}
 
 	caps_exit(lp->lwp_thread);
-	aio_proc_rundown(p);
 
 	/* are we a task leader? */
 	if (p == p->p_leader) {
@@ -777,6 +776,8 @@ kern_wait(pid_t pid, int *status, int options, struct rusage *rusage, int *res)
 	struct lwp *lp;
 	struct proc *q = td->td_proc;
 	struct proc *p, *t;
+	struct pargs *pa;
+	struct sigacts *ps;
 	int nfound, error;
 
 	if (pid == 0)
@@ -871,6 +872,8 @@ loop:
 
 			/* Take care of our return values. */
 			*res = p->p_pid;
+			p->p_usched->heuristic_exiting(td->td_lwp, p);
+
 			if (status)
 				*status = p->p_xstat;
 			if (rusage)
@@ -916,12 +919,18 @@ loop:
 			/*
 			 * Remove unused arguments
 			 */
-			if (p->p_args && --p->p_args->ar_ref == 0)
-				FREE(p->p_args, M_PARGS);
+			pa = p->p_args;
+			p->p_args = NULL;
+			if (pa && refcount_release(&pa->ar_ref)) {
+				kfree(pa, M_PARGS);
+				pa = NULL;
+			}
 
-			if (--p->p_sigacts->ps_refcnt == 0) {
-				kfree(p->p_sigacts, M_SUBPROC);
-				p->p_sigacts = NULL;
+			ps = p->p_sigacts;
+			p->p_sigacts = NULL;
+			if (ps && refcount_release(&ps->ps_refcnt)) {
+				kfree(ps, M_SUBPROC);
+				ps = NULL;
 			}
 
 			vm_waitproc(p);
@@ -935,6 +944,7 @@ loop:
 			p->p_flag |= P_WAITED;
 
 			*res = p->p_pid;
+			p->p_usched->heuristic_exiting(td->td_lwp, p);
 			if (status)
 				*status = W_STOPCODE(p->p_xstat);
 			/* Zero rusage so we get something consistent. */
@@ -945,6 +955,7 @@ loop:
 		}
 		if (options & WCONTINUED && (p->p_flag & P_CONTINUED)) {
 			*res = p->p_pid;
+			p->p_usched->heuristic_exiting(td->td_lwp, p);
 			p->p_flag &= ~P_CONTINUED;
 
 			if (status)
