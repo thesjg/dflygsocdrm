@@ -249,6 +249,16 @@ int drm_setsareactx(struct drm_device *dev, void *data,
 
 	mutex_lock(&dev->struct_mutex);
 	list_for_each_entry(r_list, &dev->maplist, head) {
+#ifdef DRM_NEWER_USER_TOKEN
+		if (r_list->map
+		    && r_list->user_token == (unsigned long) request->handle) {
+			if (dev->max_context < 0)
+				goto bad;
+			if (request->ctx_id >= (unsigned) dev->max_context)
+				goto bad;
+			goto found;
+		}
+#else
 		if (r_list->map
 		    && (r_list->map->handle == request->handle)) {
 			if (dev->max_context < 0)
@@ -257,12 +267,13 @@ int drm_setsareactx(struct drm_device *dev, void *data,
 				goto bad;
 			goto found;
 		}
+#endif /* DRM_NEWER_USER_TOKEN */
 	}
-bad:
+      bad:
 	mutex_unlock(&dev->struct_mutex);
 	return -EINVAL;
 
-found:
+      found:
 	map = r_list->map;
 	if (!map)
 		goto bad;

@@ -220,8 +220,8 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	}
 	mutex_unlock(&dev->struct_mutex);
 
-	DRM_SYSCTL_PRINT("\nslot offset	          size "
-	    "type flags address            user_token        mtrr\n");
+	DRM_SYSCTL_PRINT("\nslot             offset       size type flags"
+	    "            address         user_token mtrr\n");
 
 	for (i = 0; i < mapcount; i++) {
 		map = &tempmaps[i];

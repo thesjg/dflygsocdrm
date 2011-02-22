@@ -84,6 +84,7 @@
 static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
+	unsigned long foff = (unsigned long)ap->a_foff;
 	vm_offset_t offset = ap->a_offset;
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv = NULL;
@@ -92,6 +93,8 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	struct drm_map_list *r_list_found = NULL;
 	enum drm_map_type type;
 	vm_paddr_t phys;
+	struct drm_local_map *map_foff = NULL;
+	struct drm_hash_item *hash;
 
         file_priv = drm_find_file_by_proc(dev, DRM_CURPROC);
 
@@ -142,6 +145,17 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 		return -1;
 	}
+
+	if (drm_ht_find_item(&dev->map_hash, foff, &hash)) {
+		DRM_ERROR("Could not find map for foff = 0x%lx\n", foff);
+	}
+	else {
+		map_foff = drm_hash_entry(hash, struct drm_map_list, hash)->map;
+		if (map != map_foff) {
+			DRM_ERROR("map != map_foff for foff = 0x%lx", foff);
+		}
+	}
+
 	if (((map->flags&_DRM_RESTRICTED) && !DRM_SUSER(DRM_CURPROC))) {
 		DRM_DEBUG("restricted map\n");
 		return -1;

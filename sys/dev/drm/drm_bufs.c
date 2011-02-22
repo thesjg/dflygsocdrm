@@ -132,14 +132,15 @@ static int drm_map_handle(struct drm_device *dev, struct drm_hash_item *hash,
 	unsigned long add;
 
 #ifdef DRM_NEWER_USER_TOKEN
-	if (sizeof(long) == 8)
-		use_hashed_handle = ((user_token & 0xFFFFFFFF00000000UL) || hashed_handle);
-	else
-		use_hashed_handle = hashed_handle;
+#if (BITS_PER_LONG == 64)
+	use_hashed_handle = ((user_token & 0xFFFFFFFF00000000UL) || hashed_handle);
+#else /* BITS_PER_LONG == 32 */
+	use_hashed_handle = hashed_handle;
+#endif
 #else
 /* sizeof(int) == 4 all supported platforms for DragonFly BSD */
 	use_hashed_handle = hashed_handle;
-#endif
+#endif /* DRM_NEWER_USER_TOKEN */
 
 	if (!use_hashed_handle) {
 		int ret;
@@ -504,6 +505,8 @@ done:
 	return 0;
 }
 
+EXPORT_SYMBOL(drm_addmap);
+
 int drm_addmap(struct drm_device * dev, resource_size_t offset,
 /* QUESTION: does userland know size to be unsigned int or unsigned long? */
 #ifdef DRM_NEWER_USER_TOKEN
@@ -550,7 +553,8 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	int err;
 
 #ifdef __linux__
-	if (!(DRM_SUSER(DRM_CURPROC) || map->type == _DRM_AGP || map->type == _DRM_SHM))
+	if (!(capable(CAP_SYS_ADMIN) || map->type == _DRM_AGP || map->type == _DRM_SHM))
+		return -EPERM;
 #else
 	if (!(dev->flags & (FREAD|FWRITE)))
 		return EACCES; /* Require read/write */
@@ -568,7 +572,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	/* avoid a warning on 64-bit, this casting isn't very nice, but the API is set so too late */
 	map->handle = (void *)(unsigned long)maplist->user_token;
 
-#else /* DRM_NEWER_USER_TOKEN */
+#else /* !DRM_NEWER_USER_TOKEN */
 
 	struct drm_map *request = data;
 	drm_local_map_t *map;
@@ -744,6 +748,14 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 
 	mutex_lock(&dev->struct_mutex);
 	list_for_each_entry(r_list, &dev->maplist, head) {
+#ifdef DRM_NEWER_USER_TOKEN
+		if (r_list->map &&
+		    r_list->user_token == (unsigned long)request->handle &&
+		    r_list->map->flags & _DRM_REMOVABLE) {
+			map = r_list->map;
+			break;
+		}
+#else
 		if (r_list->map &&
 			((r_list->map->handle == request->handle) ||
 			(r_list->user_token == (unsigned long)request->handle)) &&
@@ -751,6 +763,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 			map = r_list->map;
 			break;
 		}
+#endif /* DRM_NEWER_USER_TOKEN */
 	}
 
 	/* List has wrapped around to the head pointer, or its empty we didn't
