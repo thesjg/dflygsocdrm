@@ -152,7 +152,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	else if (foff) {
 		map_foff = drm_hash_entry(hash, struct drm_map_list, hash)->map;
 		if (map != map_foff) {
-/*			DRM_ERROR("map != map_foff for foff = 0x%lx", foff); */
+			DRM_ERROR("map != map_foff for foff = 0x%lx, user_token = %lx", foff, map->offset);
 		}
 	}
 
