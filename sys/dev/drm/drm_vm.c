@@ -143,7 +143,12 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 		DRM_ERROR("Can't find map, requested offset = %016lx\n",
 			(unsigned long)offset);
 
-		return -1;
+/*		return -1; */
+		if (drm_ht_find_item(&dev->map_hash, foff, &hash)) {
+			DRM_ERROR("Could not find map for foff = 0x%lx\n", foff);
+			return -1;
+		}
+		map = drm_hash_entry(hash, struct drm_map_list, hash)->map;
 	}
 
 	if (foff && drm_ht_find_item(&dev->map_hash, foff, &hash)) {
