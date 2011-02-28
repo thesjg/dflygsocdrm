@@ -841,6 +841,7 @@ static void drm_cleanup_buf_error(struct drm_device * dev,
 	}
 }
 
+#if __OS_HAS_AGP
 /**
  * Add AGP buffers for DMA transfers.
  *
@@ -901,10 +902,6 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 #endif
 
 	/* Make sure buffers are located in AGP memory that we own */
-	/* Breaks MGA due to drm_alloc_agp not setting up entries for the
-	 * memory.  Safe to ignore for now because these ioctls are still
-	 * root-only.
-	 */
 	valid = 0;
 	list_for_each_entry(agp_entry, &dev->agp->memory, head) {
 		if ((agp_offset >= agp_entry->bound) &&
@@ -1001,7 +998,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 		drm_cleanup_buf_error(dev, entry);
 		mutex_unlock(&dev->struct_mutex);
 		atomic_dec(&dev->buf_alloc);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 	dma->buflist = temp_buflist;
 
@@ -1029,8 +1026,10 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 	atomic_dec(&dev->buf_alloc);
 	return 0;
 }
+EXPORT_SYMBOL(drm_addbufs_agp);
+#endif				/* __OS_HAS_AGP */
 
-int drm_addbufs_pci(struct drm_device *dev, struct drm_buf_desc *request)
+int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 {
 	struct drm_device_dma *dma = dev->dma;
 	int count;
@@ -1286,21 +1285,21 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 	order = drm_order(request->size);
 	size = 1 << order;
 
-	alignment  = (request->flags & _DRM_PAGE_ALIGN)
-	    ? round_page(size) : size;
+	alignment = (request->flags & _DRM_PAGE_ALIGN)
+	    ? PAGE_ALIGN(size) : size;
 	page_order = order - PAGE_SHIFT > 0 ? order - PAGE_SHIFT : 0;
 	total = PAGE_SIZE << page_order;
 
 	byte_count = 0;
 	agp_offset = request->agp_start;
 
-	DRM_DEBUG("count:      %d\n",  count);
-	DRM_DEBUG("order:      %d\n",  order);
-	DRM_DEBUG("size:       %d\n",  size);
-	DRM_DEBUG("agp_offset: %ld\n", agp_offset);
-	DRM_DEBUG("alignment:  %d\n",  alignment);
-	DRM_DEBUG("page_order: %d\n",  page_order);
-	DRM_DEBUG("total:      %d\n",  total);
+	DRM_DEBUG("count:      %d\n", count);
+	DRM_DEBUG("order:      %d\n", order);
+	DRM_DEBUG("size:       %d\n", size);
+	DRM_DEBUG("agp_offset: %lu\n", agp_offset);
+	DRM_DEBUG("alignment:  %d\n", alignment);
+	DRM_DEBUG("page_order: %d\n", page_order);
+	DRM_DEBUG("total:      %d\n", total);
 
 	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER)
 		return -EINVAL;
@@ -1875,6 +1874,11 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 			retcode = EINVAL;
 			goto done;
 		}
+#ifndef __linux__
+		if (map->size != dev->agp_buffer_token) {
+			DRM_ERROR("map->size 0x%016lx != agp_buffer_token 0x%016lx\n", map->size, dev->agp_buffer_token);
+		}
+#endif
 		size = round_page(map->size);
 		foff = map->offset;
 	} else {
