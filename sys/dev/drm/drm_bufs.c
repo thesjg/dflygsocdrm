@@ -6,7 +6,9 @@
  * \author Gareth Hughes <gareth@valinux.com>
  */
 
-/*-
+/*
+ * Created: Thu Nov 23 03:10:50 2000 by gareth@valinux.com
+ *
  * Copyright 1999, 2000 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
@@ -29,11 +31,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- *
- * Authors:
- *    Rickard E. (Rik) Faith <faith@valinux.com>
- *    Gareth Hughes <gareth@valinux.com>
- *
  */
 
 #ifdef __linux__
@@ -83,6 +80,7 @@ resource_size_t drm_get_resource_start(struct drm_device *dev, unsigned int reso
 
 	return rman_get_start(dev->pcir[resource]);
 }
+EXPORT_SYMBOL(drm_get_resource_start);
 
 resource_size_t drm_get_resource_len(struct drm_device *dev, unsigned int resource)
 {
@@ -91,6 +89,8 @@ resource_size_t drm_get_resource_len(struct drm_device *dev, unsigned int resour
 
 	return rman_get_size(dev->pcir[resource]);
 }
+
+EXPORT_SYMBOL(drm_get_resource_len);
 
 static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 						  struct drm_local_map *map)
@@ -261,6 +261,18 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	switch (map->type) {
 	case _DRM_REGISTERS:
 	case _DRM_FRAME_BUFFER:
+#ifdef __linux__
+#if !defined(__sparc__) && !defined(__alpha__) && !defined(__ia64__) && !defined(__powerpc64__) && !defined(__x86_64__)
+		if (map->offset + (map->size-1) < map->offset ||
+		    map->offset < virt_to_phys(high_memory)) {
+			kfree(map);
+			return -EINVAL;
+		}
+#endif
+#ifdef __alpha__
+		map->offset += dev->hose->mem_space->start;
+#endif
+#endif /* __linux__ */
 		/* Some drivers preinitialize some maps, without the X Server
 		 * needing to be aware of it.  Therefore, we just return success
 		 * when the server tries to create a duplicate map.
@@ -307,7 +319,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 #endif
 
 		break;
-
 	case _DRM_SHM:
 		list = drm_find_matching_map(dev, map);
 		if (list != NULL) {
@@ -354,7 +365,9 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			free(map, DRM_MEM_MAPS);
 			return -EINVAL;
 		}
-
+#ifdef __alpha__
+		map->offset += dev->hose->mem_space->start;
+#endif
 		/* In some cases (i810 driver), user space may have already
 		 * added the AGP base itself, because dev->agp->base previously
 		 * only got set during AGP enable.  So, only add the base
@@ -388,6 +401,8 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			return -EPERM;
 #endif /* __linux__ */
 		}
+		DRM_DEBUG("AGP offset = 0x%08llx, size = 0x%08lx\n",
+			  (unsigned long long)map->offset, map->size);
 
 		break;
 	}
@@ -557,11 +572,11 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 		return -EPERM;
 #else
 	if (!(dev->flags & (FREAD|FWRITE)))
-		return EACCES; /* Require read/write */
+		return -EACCES; /* Require read/write */
 
 	if (!(DRM_SUSER(DRM_CURPROC) || map->type == _DRM_AGP))
 #endif /* __linux__ */
-		return EACCES;
+		return -EACCES;
 
 	err = drm_addmap_core(dev, map->offset, map->size, map->type,
 			      map->flags, &maplist);
@@ -645,8 +660,11 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 
 	if (!found)
 		return -EINVAL;
+
 	switch (map->type) {
 	case _DRM_REGISTERS:
+		if (map->bsr != NULL)
+			DRM_ERROR("map->bsr != 0!");
 		if (map->bsr == NULL)
 			drm_ioremapfree(map);
 		/* FALLTHROUGH */
@@ -774,7 +792,7 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 		return -EINVAL;
 	}
 
-#ifdef __linux__
+#if 1 /* __linux__ */
 	/* Register and framebuffer maps are permanent */
 	if ((map->type == _DRM_REGISTERS) || (map->type == _DRM_FRAME_BUFFER)) {
 		mutex_unlock(&dev->struct_mutex);
@@ -797,8 +815,8 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
  *
  * Frees any pages and buffers associated with the given entry.
  */
-static void drm_cleanup_buf_error(struct drm_device *dev,
-				  struct drm_buf_entry *entry)
+static void drm_cleanup_buf_error(struct drm_device * dev,
+				  struct drm_buf_entry * entry)
 {
 	int i;
 
@@ -859,7 +877,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 	order = drm_order(request->size);
 	size = 1 << order;
 
-	alignment  = (request->flags & _DRM_PAGE_ALIGN)
+	alignment = (request->flags & _DRM_PAGE_ALIGN)
 	    ? PAGE_ALIGN(size) : size;
 	page_order = order - PAGE_SHIFT > 0 ? order - PAGE_SHIFT : 0;
 	total = PAGE_SIZE << page_order;
@@ -867,13 +885,13 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 	byte_count = 0;
 	agp_offset = dev->agp->base + request->agp_start;
 
-	DRM_DEBUG("count:      %d\n",  count);
-	DRM_DEBUG("order:      %d\n",  order);
-	DRM_DEBUG("size:       %d\n",  size);
-	DRM_DEBUG("agp_offset: 0x%lx\n", agp_offset);
-	DRM_DEBUG("alignment:  %d\n",  alignment);
-	DRM_DEBUG("page_order: %d\n",  page_order);
-	DRM_DEBUG("total:      %d\n",  total);
+	DRM_DEBUG("count:      %d\n", count);
+	DRM_DEBUG("order:      %d\n", order);
+	DRM_DEBUG("size:       %d\n", size);
+	DRM_DEBUG("agp_offset: %lx\n", agp_offset);
+	DRM_DEBUG("alignment:  %d\n", alignment);
+	DRM_DEBUG("page_order: %d\n", page_order);
+	DRM_DEBUG("total:      %d\n", total);
 
 	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER)
 		return -EINVAL;
