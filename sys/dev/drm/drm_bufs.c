@@ -520,8 +520,6 @@ done:
 	return 0;
 }
 
-EXPORT_SYMBOL(drm_addmap);
-
 int drm_addmap(struct drm_device * dev, resource_size_t offset,
 /* QUESTION: does userland know size to be unsigned int or unsigned long? */
 #ifdef DRM_NEWER_USER_TOKEN
@@ -535,8 +533,8 @@ int drm_addmap(struct drm_device * dev, resource_size_t offset,
 	int rc;
 
 #ifndef __linux__
-	if (size > 0x100000000UL) {
-		DRM_ERROR("drm_addmap() size (%16lx) > max_int\n", size);
+	if (size > 0x7FFFFFFFUL) {
+		DRM_ERROR("drm_addmap() size (%16lx) > max_uint\n", size);
 	}
 #endif /* __linux__ */
 
@@ -545,6 +543,8 @@ int drm_addmap(struct drm_device * dev, resource_size_t offset,
 		*map_ptr = list->map;
 	return rc;
 }
+
+EXPORT_SYMBOL(drm_addmap);
 
 /**
  * Ioctl to specify a range of memory that is available for mapping by a
@@ -575,8 +575,8 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 		return -EACCES; /* Require read/write */
 
 	if (!(DRM_SUSER(DRM_CURPROC) || map->type == _DRM_AGP))
-#endif /* __linux__ */
 		return -EACCES;
+#endif /* __linux__ */
 
 	err = drm_addmap_core(dev, map->offset, map->size, map->type,
 			      map->flags, &maplist);
