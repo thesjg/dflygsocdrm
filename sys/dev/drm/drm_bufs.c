@@ -104,10 +104,19 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 		 * It is assumed that each driver will have only one resource of
 		 * each type.
 		 */
+#ifdef __linux__
 		if (!entry->map ||
 		    map->type != entry->map->type ||
 		    entry->master != dev->primary->master)
 			continue;
+#else
+		if (!entry->map ||
+		    map->type != entry->map->type)
+			continue;
+		if (((map->type != _DRM_REGISTERS) || (map->type != _DRM_FRAME_BUFFER)) &&
+			(entry->master != dev->primary->master))
+			continue;
+#endif /* __linux__ */
 		switch (map->type) {
 		case _DRM_SHM:
 			if (map->flags != _DRM_CONTAINS_LOCK)
