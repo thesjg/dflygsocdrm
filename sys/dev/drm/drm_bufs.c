@@ -122,6 +122,9 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 			return entry;
 	}
 
+	DRM_ERROR("map not found, map->type(%d), offset (%016lx), handle (%016lx)\n",
+		map->type, map->offset, (unsigned long)map->handle);
+
 	return NULL;
 }
 
