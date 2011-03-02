@@ -658,15 +658,15 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		}
 	}
 
-	if (!found)
+	if (!found) {
+		DRM_ERROR("not removed map->type (%d), offset (%016lx), handle (%016lx)\n",
+			map->type, map->offset, (unsigned long)map->handle);
 		return -EINVAL;
+	}
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
-		if (map->bsr != NULL)
-			DRM_ERROR("map->bsr != 0!");
-		if (map->bsr == NULL)
-			drm_ioremapfree(map);
+		drm_ioremapfree(map);
 		/* FALLTHROUGH */
 	case _DRM_FRAME_BUFFER:
 #ifdef __linux__
