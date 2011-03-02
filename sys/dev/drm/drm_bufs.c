@@ -113,7 +113,7 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 		if (!entry->map ||
 		    map->type != entry->map->type)
 			continue;
-		if (((map->type != _DRM_REGISTERS) || (map->type != _DRM_FRAME_BUFFER)) &&
+		if ((map->type != _DRM_REGISTERS) && (map->type != _DRM_FRAME_BUFFER) &&
 			(entry->master != dev->primary->master))
 			continue;
 #endif /* __linux__ */
