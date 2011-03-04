@@ -365,8 +365,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 				free(map, DRM_MEM_MAPS);
 				return -EBUSY;
 			}
-			dev->primary->master->lock.hw_lock = map->handle;	/* Pointer to lock */
-			dev->sigdata.lock = dev->primary->master->lock.hw_lock;	/* Pointer to lock */
+			dev->sigdata.lock = dev->primary->master->lock.hw_lock = map->handle;	/* Pointer to lock */
 		}
 		break;
 	case _DRM_AGP: {
@@ -843,8 +842,8 @@ static void drm_cleanup_buf_error(struct drm_device * dev,
 		entry->seg_count = 0;
 	}
 
-   	if (entry->buf_count) {
-	   	for (i = 0; i < entry->buf_count; i++) {
+	if (entry->buf_count) {
+		for (i = 0; i < entry->buf_count; i++) {
 			free(entry->buflist[i].dev_private, DRM_MEM_BUFS);
 		}
 		free(entry->buflist, DRM_MEM_BUFS);
@@ -1150,11 +1149,11 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 		return -ENOMEM;
 	}
 	memcpy(temp_pagelist,
-		dma->pagelist, dma->page_count * sizeof(*dma->pagelist));
+	       dma->pagelist, dma->page_count * sizeof(*dma->pagelist));
 	DRM_DEBUG("pagelist: %d entries\n",
-		dma->page_count + (count << page_order));
+		  dma->page_count + (count << page_order));
 
-	entry->buf_size	= size;
+	entry->buf_size = size;
 	entry->page_order = page_order;
 	byte_count = 0;
 	page_count = 0;
@@ -1185,8 +1184,8 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 				= (unsigned long)dmah->vaddr + PAGE_SIZE * i;
 		}
 		for (offset = 0;
-		    offset + size <= total && entry->buf_count < count;
-		    offset += alignment, ++entry->buf_count) {
+		     offset + size <= total && entry->buf_count < count;
+		     offset += alignment, ++entry->buf_count) {
 			buf = &entry->buflist[entry->buf_count];
 			buf->idx = dma->buf_count + entry->buf_count;
 			buf->total = alignment;
@@ -1594,6 +1593,7 @@ static int drm_addbufs_fb(struct drm_device * dev, struct drm_buf_desc * request
 	return 0;
 }
 
+
 /**
  * Add buffers for DMA transfers (ioctl).
  *
@@ -1717,11 +1717,11 @@ int drm_infobufs(struct drm_device *dev, void *data,
 #endif /* __linux__ */
 
 				DRM_DEBUG("%d %d %d %d %d\n",
-					i,
-					dma->bufs[i].buf_count,
-					dma->bufs[i].buf_size,
-					dma->bufs[i].freelist.low_mark,
-					dma->bufs[i].freelist.high_mark);
+					  i,
+					  dma->bufs[i].buf_count,
+					  dma->bufs[i].buf_size,
+					  dma->bufs[i].freelist.low_mark,
+					  dma->bufs[i].freelist.high_mark);
 				++count;
 			}
 		}

@@ -212,14 +212,15 @@ int drm_ati_pcigart_init(struct drm_device *dev, struct drm_ati_pcigart_info *ga
 			entry_addr += ATI_PCIGART_PAGE_SIZE;
 		}
 	}
-
 	ret = 1;
 
 #if defined(__i386__) || defined(__x86_64__)
 	wbinvd();
+#else
+	mb();
 #endif
 
-    done:
+      done:
 	gart_info->addr = address;
 	gart_info->bus_addr = bus_address;
 	return ret;

@@ -56,9 +56,8 @@
  * in drm_device::ctx_idr, while holding the drm_device::struct_mutex
  * lock.
  */
-void drm_ctxbitmap_free(struct drm_device *dev, int ctx_handle)
+void drm_ctxbitmap_free(struct drm_device * dev, int ctx_handle)
 {
-
 	mutex_lock(&dev->struct_mutex);
 
 	if (ctx_handle < 0 || ctx_handle >= DRM_MAX_CTXBITMAP || 
@@ -73,7 +72,6 @@ void drm_ctxbitmap_free(struct drm_device *dev, int ctx_handle)
 	dev->context_sareas[ctx_handle] = NULL;
 
 	mutex_unlock(&dev->struct_mutex);
-	return;
 }
 
 /**
@@ -134,7 +132,7 @@ static int drm_ctxbitmap_next(struct drm_device * dev)
  *
  * Initialise the drm_device::ctx_idr
  */
-int drm_ctxbitmap_init(struct drm_device *dev)
+int drm_ctxbitmap_init(struct drm_device * dev)
 {
 	int i;
    	int temp;
@@ -166,7 +164,7 @@ int drm_ctxbitmap_init(struct drm_device *dev)
  * Free all idr members using drm_ctx_sarea_free helper function
  * while holding the drm_device::struct_mutex lock.
  */
-void drm_ctxbitmap_cleanup(struct drm_device *dev)
+void drm_ctxbitmap_cleanup(struct drm_device * dev)
 {
 	mutex_lock(&dev->struct_mutex);
 	if (dev->context_sareas != NULL)
@@ -174,6 +172,8 @@ void drm_ctxbitmap_cleanup(struct drm_device *dev)
 	free(dev->ctx_bitmap, DRM_MEM_CTXBITMAP);
 	mutex_unlock(&dev->struct_mutex);
 }
+
+/*@}*/
 
 /******************************************************************/
 /** \name Per Context SAREA Support */
@@ -301,7 +301,7 @@ int drm_setsareactx(struct drm_device *dev, void *data,
  *
  * Attempt to set drm_device::context_flag.
  */
-static int drm_context_switch(struct drm_device *dev, int old, int new)
+static int drm_context_switch(struct drm_device * dev, int old, int new)
 {
 	if (test_and_set_bit(0, &dev->context_flag)) {
 		DRM_ERROR("Reentering -- FIXME\n");
@@ -332,7 +332,7 @@ static int drm_context_switch(struct drm_device *dev, int old, int new)
 static int drm_context_switch_complete(struct drm_device *dev,
 				       struct drm_file *file_priv, int new)
 {
-	dev->last_context = new;  /* PRE/POST: This is the _only_ writer. */
+	dev->last_context = new;	/* PRE/POST: This is the _only_ writer. */
 	dev->last_switch = jiffies;
 
 	if (!_DRM_LOCK_IS_HELD(file_priv->master->lock.hw_lock->lock)) {
@@ -358,7 +358,7 @@ static int drm_context_switch_complete(struct drm_device *dev,
  * \return zero on success or a negative number on failure.
  */
 int drm_resctx(struct drm_device *dev, void *data,
-	struct drm_file *file_priv)
+	       struct drm_file *file_priv)
 {
 	struct drm_ctx_res *res = data;
 	struct drm_ctx ctx;
@@ -389,7 +389,7 @@ int drm_resctx(struct drm_device *dev, void *data,
  * Get a new handle for the context and copy to userspace.
  */
 int drm_addctx(struct drm_device *dev, void *data,
-		struct drm_file *file_priv)
+	       struct drm_file *file_priv)
 {
 	struct drm_ctx_list *ctx_entry;
 	struct drm_ctx *ctx = data;
@@ -407,13 +407,12 @@ int drm_addctx(struct drm_device *dev, void *data,
 	}
 
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {
-		if (dev->driver->context_ctor) {
+		if (dev->driver->context_ctor)
 /* used in legacy sis driver but not the linux sis driver */
 			if (!dev->driver->context_ctor(dev, ctx->handle)) {
 				DRM_DEBUG("Running out of ctxs or memory.\n");
 				return -ENOMEM;
 			}
-		}
 	}
 
 	ctx_entry = malloc(sizeof(*ctx_entry), DRM_MEM_CTXBITMAP, M_WAITOK);
@@ -491,7 +490,7 @@ int drm_switchctx(struct drm_device *dev, void *data,
  * Calls context_switch_complete().
  */
 int drm_newctx(struct drm_device *dev, void *data,
-		struct drm_file *file_priv)
+	       struct drm_file *file_priv)
 {
 	struct drm_ctx *ctx = data;
 
@@ -519,9 +518,8 @@ int drm_rmctx(struct drm_device *dev, void *data,
 
 	DRM_DEBUG("%d\n", ctx->handle);
 	if (ctx->handle != DRM_KERNEL_CONTEXT) {
-		if (dev->driver->context_dtor) {
+		if (dev->driver->context_dtor)
 			dev->driver->context_dtor(dev, ctx->handle);
-		}
 		drm_ctxbitmap_free(dev, ctx->handle);
 	}
 

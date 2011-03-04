@@ -31,11 +31,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- *
- * Authors:
- *    Rickard E. (Rik) Faith <faith@valinux.com>
- *    Gareth Hughes <gareth@valinux.com>
- *
  */
 
 #include "drmP.h"
@@ -145,7 +140,7 @@ static int drm_remove_magic(struct drm_master *master, drm_magic_t magic)
 int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	static drm_magic_t sequence = 0;
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	static DEFINE_SPINLOCK(lock);
 #endif /* __linux__ */
 	struct drm_auth *auth = data;
