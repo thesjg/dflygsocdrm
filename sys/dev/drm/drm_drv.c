@@ -610,14 +610,14 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		goto err_i1;
 #ifdef __linux__
 	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
+	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
+		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
+#else
+	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
 	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls)) {
 		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
 		is_driver_ioctl = 1;
 	}
-#else
-	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
-	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
-		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
 #endif
 	else if ((nr >= DRM_COMMAND_END) || (nr < DRM_COMMAND_BASE)) {
 		ioctl = &drm_ioctls[nr];
