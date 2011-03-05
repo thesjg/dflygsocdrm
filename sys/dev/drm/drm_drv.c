@@ -59,7 +59,7 @@
 #include "drm_sarea.h"
 #include "drm_core.h"
 
-/* #define DRM_NEWER_IOCTL 1 */
+#define DRM_NEWER_IOCTL 1
 
 uint32_t cpu_clflush_line_size;
 
@@ -97,7 +97,11 @@ static int drm_version(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv);
 
 /** Ioctl table */
+#ifdef DRM_NEWER_IOCTL
+static struct drm_ioctl_desc drm_ioctls[] = {
+#else
 static struct drm_ioctl_desc drm_ioctls[256] = {
+#endif
 	DRM_IOCTL_DEF(DRM_IOCTL_VERSION, drm_version, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_UNIQUE, drm_getunique, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_MAGIC, drm_getmagic, 0),
@@ -260,7 +264,7 @@ int drm_lastclose(struct drm_device * dev)
 			drm_agp_release(dev);
 
 		dev->agp->acquired = 0;
-		dev->agp->enabled  = 0;
+		dev->agp->enabled = 0;
 	}
 	if (drm_core_check_feature(dev, DRIVER_SG) && dev->sg &&
 	    !drm_core_check_feature(dev, DRIVER_MODESET)) {
@@ -377,6 +381,352 @@ void drm_exit(struct drm_driver *driver)
 
 EXPORT_SYMBOL(drm_exit);
 
+#ifdef __linux__
+/** File operations structure */
+static const struct file_operations drm_stub_fops = {
+	.owner = THIS_MODULE,
+	.open = drm_stub_open
+};
+#endif
+
+
+static int __init drm_core_init(void)
+{
+
+/* From FreeBSD file machine initcpu.c, function initializecpucache() */
+	cpu_clflush_line_size = ((cpu_procinfo >> 8) & 0xff) * 8;
+
+	int ret = -ENOMEM;
+
+	idr_init(&drm_minors_idr);
+
+	drm_sysctl_root = drm_sysctl_mkroot("dri");
+	if (!drm_sysctl_root) {
+		DRM_ERROR("Cannot create sysctl hw.dri\n");
+		ret = -1;
+		goto err_p2;
+	}
+
+#ifdef __linux__
+	if (register_chrdev(DRM_MAJOR, "drm", &drm_stub_fops))
+		goto err_p1;
+
+	drm_class = drm_sysfs_create(THIS_MODULE, "drm");
+	if (IS_ERR(drm_class)) {
+		printk(KERN_ERR "DRM: Error creating drm class.\n");
+		ret = PTR_ERR(drm_class);
+		goto err_p2;
+	}
+
+	drm_debugfs_root = debugfs_create_dir("dri", NULL);
+	if (!drm_debugfs_root) {
+		DRM_ERROR("Cannot create /sys/kernel/debug/dri\n");
+		ret = -1;
+		goto err_p3;
+	}
+#endif /* __linux__ */
+
+	DRM_INFO("Initialized %s %d.%d.%d %s\n",
+		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
+	return 0;
+#ifdef __linux__
+err_p3:
+	drm_sysfs_destroy();
+	unregister_chrdev(DRM_MAJOR, "drm");
+
+#endif /* __linux */
+err_p2:
+	idr_destroy(&drm_minors_idr);
+
+	return ret;
+}
+
+static void __exit drm_core_exit(void)
+{
+#ifdef __linux__
+	remove_proc_entry("dri", NULL);
+	debugfs_remove(drm_debugfs_root);
+	drm_sysfs_destroy();
+
+	unregister_chrdev(DRM_MAJOR, "drm");
+#endif /* __linux__ */
+	DRM_INFO("Exiting drm module %s %d.%d.%d %s\n",
+		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
+	drm_sysctl_rmroot(drm_sysctl_root);
+	drm_sysctl_root = NULL;
+	idr_destroy(&drm_minors_idr);
+}
+
+
+/**
+ * Copy and IOCTL return string to user space
+ */
+static int drm_copy_field(char *buf, size_t *buf_len, const char *value)
+{
+	int len;
+
+	/* don't overflow userbuf */
+	len = strlen(value);
+	if (len > *buf_len)
+		len = *buf_len;
+
+	/* let userspace know exact length of driver value (which could be
+	 * larger than the userspace-supplied buffer) */
+	*buf_len = strlen(value);
+
+	/* finally, try filling in the userbuf */
+	if (len && buf)
+		if (copy_to_user(buf, value, len))
+			return -EFAULT;
+	return 0;
+}
+
+/**
+ * Get version information
+ *
+ * \param inode device inode.
+ * \param filp file pointer.
+ * \param cmd command.
+ * \param arg user argument, pointing to a drm_version structure.
+ * \return zero on success or negative number on failure.
+ *
+ * Fills in the version information in \p arg.
+ */
+static int drm_version(struct drm_device *dev, void *data,
+		       struct drm_file *file_priv)
+{
+	struct drm_version *version = data;
+	int len;
+
+#define DRM_COPY( name, value )						\
+	len = strlen( value );						\
+	if ( len > name##_len ) len = name##_len;			\
+	name##_len = strlen( value );					\
+	if ( len && name ) {						\
+		if ( DRM_COPY_TO_USER( name, value, len ) )		\
+			return EFAULT;				\
+	}
+
+	version->version_major		= dev->driver->major;
+	version->version_minor		= dev->driver->minor;
+	version->version_patchlevel	= dev->driver->patchlevel;
+
+	DRM_COPY(version->name, dev->driver->name);
+	DRM_COPY(version->date, dev->driver->date);
+	DRM_COPY(version->desc, dev->driver->desc);
+
+	return 0;
+}
+
+/**
+ * Called whenever a process performs an ioctl on /dev/drm.
+ *
+ * \param inode device inode.
+ * \param file_priv DRM file private.
+ * \param cmd command.
+ * \param arg user argument.
+ * \return zero on success or negative number on failure.
+ *
+ * Looks up the ioctl function in the ::ioctls table, checking for root
+ * previleges if so required, and dispatches to the respective function.
+ */
+#ifdef __linux__
+long drm_ioctl(struct file *filp,
+	      unsigned int cmd, unsigned long arg)
+#else
+int drm_ioctl_legacy(struct dev_ioctl_args *ap)
+#endif
+{
+	struct cdev *kdev = ap->a_head.a_dev;
+	u_long cmd = ap->a_cmd;
+	caddr_t data = ap->a_data;
+	struct thread *p = curthread;
+
+	struct drm_device *dev = drm_get_device_from_kdev(kdev);
+	struct drm_file *file_priv;
+
+	spin_lock(&dev->file_priv_lock);
+	file_priv = drm_find_file_by_proc(dev, p);
+	spin_unlock(&dev->file_priv_lock);
+
+	if (!file_priv) {
+		DRM_ERROR("file_priv null\n");
+		return EINVAL;
+	}
+	if (!file_priv->minor) {
+		DRM_ERROR("file_priv has no minor\n");
+	}
+	if (file_priv->minor && (dev != file_priv->minor->dev)) {
+		DRM_ERROR("drm_get_device_from_kdev dev != file_priv->minor->dev\n");
+	}
+
+	struct drm_ioctl_desc *ioctl;
+	drm_ioctl_t *func;
+	unsigned int nr = DRM_IOCTL_NR(cmd);
+	int retcode = EINVAL;
+
+#ifdef __linux__
+	char stack_kdata[128];
+	char *kdata = NULL;
+#else /* !__linux__ */
+	int is_driver_ioctl = 0;
+#endif /* __linux__ */
+
+	dev = file_priv->minor->dev;
+#ifdef __linux__
+	atomic_inc(&dev->ioctl_count);
+#endif
+	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
+	++file_priv->ioctl_count;
+
+	DRM_DEBUG("pid=%d, cmd=0x%02lx, nr=0x%02x, dev 0x%lx, auth=%d\n",
+		  DRM_CURRENTPID, cmd, nr,
+		  (long)dev->device,
+		  file_priv->authenticated);
+
+	switch (cmd) {
+	case FIONBIO:
+	case FIOASYNC:
+		return 0;
+
+	case FIOSETOWN:
+		return fsetown(*(int *)data, &dev->buf_sigio);
+
+	case FIOGETOWN:
+		*(int *) data = fgetown(&dev->buf_sigio);
+		return 0;
+	}
+
+	if (IOCGROUP(cmd) != DRM_IOCTL_BASE) {
+		DRM_DEBUG("Bad ioctl group 0x%x\n", (int)IOCGROUP(cmd));
+		return EINVAL;
+	}
+
+	atomic_inc(&dev->ioctl_count);
+
+#ifdef DRM_NEWER_IOCTL
+	if ((nr >= DRM_CORE_IOCTL_COUNT) &&
+	    ((nr < DRM_COMMAND_BASE) || (nr >= DRM_COMMAND_END)))
+		goto err_i1;
+#ifdef __linux__
+	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
+	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls)) {
+		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
+		is_driver_ioctl = 1;
+	}
+#else
+	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
+	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
+		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
+#endif
+	else if ((nr >= DRM_COMMAND_END) || (nr < DRM_COMMAND_BASE)) {
+		ioctl = &drm_ioctls[nr];
+#ifdef __linux__ 
+		cmd = ioctl->cmd;
+#endif /* __linux__ */
+	} else
+		goto err_i1;
+#else /* DRM_NEWER_IOCTL */
+	ioctl = &drm_ioctls[nr];
+	/* It's not a core DRM ioctl, try driver-specific. */
+	if (ioctl->func == NULL && nr >= DRM_COMMAND_BASE) {
+		/* The array entries begin at DRM_COMMAND_BASE ioctl nr */
+		nr -= DRM_COMMAND_BASE;
+		if (nr > dev->driver->num_ioctls) {
+			DRM_DEBUG("Bad driver ioctl number, 0x%x (of 0x%x)\n",
+			    nr, dev->driver->num_ioctls);
+			goto err_i1;
+		}
+		ioctl = &dev->driver->ioctls[nr];
+		is_driver_ioctl = 1;
+	}
+#endif /* DRM_NEWER_IOCTL */
+
+	/* Do not trust userspace, use our own definition */
+	func = ioctl->func;
+
+#ifdef __linux__
+	/* is there a local override? */
+	if ((nr == DRM_IOCTL_NR(DRM_IOCTL_DMA)) && dev->driver->dma_ioctl)
+		func = dev->driver->dma_ioctl;
+#endif /* __linux__ */
+
+	if (!func) {
+		DRM_DEBUG("no function\n");
+		retcode = EINVAL;
+		goto err_i1;
+	}
+
+	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
+	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
+	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
+		retcode = EACCES;
+		goto err_i1;
+	}
+
+	if (is_driver_ioctl) {
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			lock_kernel();
+/* this lock seems essential for stability */
+#ifndef __linux__
+		DRM_LOCK();
+#endif /* __linux__ */
+		retcode = -func(dev, data, file_priv);
+#ifndef __linux__
+		DRM_UNLOCK();
+#endif /* __linux__ */
+
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			unlock_kernel();
+	} else {
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			lock_kernel();
+
+		retcode = func(dev, data, file_priv);
+
+		if (!(ioctl->flags & DRM_UNLOCKED))
+			unlock_kernel();
+	}
+
+      err_i1:
+	atomic_dec(&dev->ioctl_count);
+	if (retcode)
+		DRM_DEBUG("ret = %x\n", retcode);
+	return retcode;
+}
+
+EXPORT_SYMBOL(drm_ioctl);
+
+struct drm_local_map *drm_getsarea(struct drm_device *dev)
+{
+	struct drm_map_list *entry;
+
+	list_for_each_entry(entry, &dev->maplist, head) {
+		if (entry->map && entry->map->type == _DRM_SHM &&
+		    (entry->map->flags & _DRM_CONTAINS_LOCK)) {
+			return entry->map;
+		}
+	}
+	return NULL;
+}
+EXPORT_SYMBOL(drm_getsarea);
+
+static int drm_handler(module_t mod, int what, void *arg) {
+	int err = 0;
+	switch(what) {
+	case MOD_LOAD:
+		drm_core_init();
+		break;
+	case MOD_UNLOAD:
+		drm_core_exit();
+		break;
+	default:
+		err = EINVAL;
+		break;
+	}
+	return (err);
+}
+
 int drm_probe(device_t kdev, DRM_PCI_DEVICE_ID *idlist)
 {
 	DRM_PCI_DEVICE_ID *id_entry;
@@ -454,89 +804,6 @@ int drm_detach(device_t kdev)
 	return 0;
 }
 
-static int __init drm_core_init(void)
-{
-
-/* From FreeBSD file machine initcpu.c, function initializecpucache() */
-	cpu_clflush_line_size = ((cpu_procinfo >> 8) & 0xff) * 8;
-
-	int ret = -ENOMEM;
-
-	idr_init(&drm_minors_idr);
-
-	drm_sysctl_root = drm_sysctl_mkroot("dri");
-	if (!drm_sysctl_root) {
-		DRM_ERROR("Cannot create sysctl hw.dri\n");
-		ret = -1;
-		goto err_p2;
-	}
-
-#ifdef __linux__
-	if (register_chrdev(DRM_MAJOR, "drm", &drm_stub_fops))
-		goto err_p1;
-
-	drm_class = drm_sysfs_create(THIS_MODULE, "drm");
-	if (IS_ERR(drm_class)) {
-		printk(KERN_ERR "DRM: Error creating drm class.\n");
-		ret = PTR_ERR(drm_class);
-		goto err_p2;
-	}
-
-	drm_debugfs_root = debugfs_create_dir("dri", NULL);
-	if (!drm_debugfs_root) {
-		DRM_ERROR("Cannot create /sys/kernel/debug/dri\n");
-		ret = -1;
-		goto err_p3;
-	}
-#endif /* __linux__ */
-
-	DRM_INFO("Initialized %s %d.%d.%d %s\n",
-		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
-	return 0;
-#ifdef __linux__
-err_p3:
-	drm_sysfs_destroy();
-	unregister_chrdev(DRM_MAJOR, "drm");
-
-#endif /* __linux */
-err_p2:
-	idr_destroy(&drm_minors_idr);
-
-	return ret;
-}
-
-static void __exit drm_core_exit(void)
-{
-#ifdef __linux__
-	remove_proc_entry("dri", NULL);
-	debugfs_remove(drm_debugfs_root);
-	drm_sysfs_destroy();
-
-	unregister_chrdev(DRM_MAJOR, "drm");
-#endif /* __linux__ */
-	DRM_INFO("Exiting drm module %s %d.%d.%d %s\n",
-		 CORE_NAME, CORE_MAJOR, CORE_MINOR, CORE_PATCHLEVEL, CORE_DATE);
-	drm_sysctl_rmroot(drm_sysctl_root);
-	drm_sysctl_root = NULL;
-	idr_destroy(&drm_minors_idr);
-}
-
-static int drm_handler(module_t mod, int what, void *arg) {
-	int err = 0;
-	switch(what) {
-	case MOD_LOAD:
-		drm_core_init();
-		break;
-	case MOD_UNLOAD:
-		drm_core_exit();
-		break;
-	default:
-		err = EINVAL;
-		break;
-	}
-	return (err);
-}
-
 static moduledata_t drm_data= {
 	"drm",
 	drm_handler,
@@ -547,214 +814,3 @@ MODULE_VERSION(drm, 1);
 DECLARE_MODULE(drm, drm_data, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
 MODULE_DEPEND(drm, agp, 1, 1, 1);
 MODULE_DEPEND(drm, pci, 1, 1, 1);
-
-/**
- * Called whenever a process performs an ioctl on /dev/drm.
- *
- * \param inode device inode.
- * \param file_priv DRM file private.
- * \param cmd command.
- * \param arg user argument.
- * \return zero on success or negative number on failure.
- *
- * Looks up the ioctl function in the ::ioctls table, checking for root
- * previleges if so required, and dispatches to the respective function.
- */
-int drm_ioctl_legacy(struct dev_ioctl_args *ap)
-{
-	struct cdev *kdev = ap->a_head.a_dev;
-	u_long cmd = ap->a_cmd;
-	caddr_t data = ap->a_data;
-	struct thread *p = curthread;
-
-	struct drm_device *dev = drm_get_device_from_kdev(kdev);
-	struct drm_file *file_priv;
-
-	spin_lock(&dev->file_priv_lock);
-	file_priv = drm_find_file_by_proc(dev, p);
-	spin_unlock(&dev->file_priv_lock);
-
-	if (!file_priv) {
-		DRM_ERROR("file_priv null\n");
-		return EINVAL;
-	}
-	if (!file_priv->minor) {
-		DRM_ERROR("file_priv has no minor\n");
-	}
-	if (file_priv->minor && (dev != file_priv->minor->dev)) {
-		DRM_ERROR("drm_get_device_from_kdev dev != file_priv->minor->dev\n");
-	}
-
-	struct drm_ioctl_desc *ioctl;
-	drm_ioctl_t *func;
-	unsigned int nr = DRM_IOCTL_NR(cmd);
-	int retcode = EINVAL;
-
-#ifdef __linux__
-	char stack_kdata[128];
-	char *kdata = NULL;
-#else /* __linux__ */
-	int is_driver_ioctl = 0;
-#endif /* __linux__ */
-
-	dev = file_priv->minor->dev;
-	atomic_inc(&dev->counts[_DRM_STAT_IOCTLS]);
-	++file_priv->ioctl_count;
-
-	DRM_DEBUG("pid=%d, cmd=0x%02lx, nr=0x%02x, dev 0x%lx, auth=%d\n",
-		  DRM_CURRENTPID, cmd, nr,
-		  (long)dev->device,
-		  file_priv->authenticated);
-
-	switch (cmd) {
-	case FIONBIO:
-	case FIOASYNC:
-		return 0;
-
-	case FIOSETOWN:
-		return fsetown(*(int *)data, &dev->buf_sigio);
-
-	case FIOGETOWN:
-		*(int *) data = fgetown(&dev->buf_sigio);
-		return 0;
-	}
-
-	if (IOCGROUP(cmd) != DRM_IOCTL_BASE) {
-		DRM_DEBUG("Bad ioctl group 0x%x\n", (int)IOCGROUP(cmd));
-		return EINVAL;
-	}
-
-	atomic_inc(&dev->ioctl_count);
-
-#ifdef DRM_NEWER_IOCTL
-	if ((nr >= DRM_CORE_IOCTL_COUNT) &&
-	    ((nr < DRM_COMMAND_BASE) || (nr >= DRM_COMMAND_END)))
-		goto err_i1;
-	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
-	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
-		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
-	else if ((nr >= DRM_COMMAND_END) || (nr < DRM_COMMAND_BASE)) {
-		ioctl = &drm_ioctls[nr];
-#ifdef __linux__
-		cmd = ioctl->cmd;
-#endif /* __linux__ */
-	} else
-		goto err_i1;
-#else
-	ioctl = &drm_ioctls[nr];
-	/* It's not a core DRM ioctl, try driver-specific. */
-	if (ioctl->func == NULL && nr >= DRM_COMMAND_BASE) {
-		/* The array entries begin at DRM_COMMAND_BASE ioctl nr */
-		nr -= DRM_COMMAND_BASE;
-		if (nr > dev->driver->num_ioctls) {
-			DRM_DEBUG("Bad driver ioctl number, 0x%x (of 0x%x)\n",
-			    nr, dev->driver->num_ioctls);
-			goto err_i1;
-		}
-		ioctl = &dev->driver->ioctls[nr];
-		is_driver_ioctl = 1;
-	}
-#endif
-
-	/* Do not trust userspace, use our own definition */
-	func = ioctl->func;
-
-#ifdef __linux__
-	/* is there a local override? */
-	if ((nr == DRM_IOCTL_NR(DRM_IOCTL_DMA)) && dev->driver->dma_ioctl)
-		func = dev->driver->dma_ioctl;
-#endif /* __linux__ */
-
-	if (!func) {
-		DRM_DEBUG("no function\n");
-		retcode = EINVAL;
-		goto err_i1;
-	}
-
-	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
-	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
-	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
-		retcode = EACCES;
-		goto err_i1;
-	}
-
-	if (is_driver_ioctl) {
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			lock_kernel();
-/* this lock seems essential for stability */
-#ifndef __linux__
-		DRM_LOCK();
-#endif /* __linux__ */
-		retcode = -func(dev, data, file_priv);
-#ifndef __linux__
-		DRM_UNLOCK();
-#endif /* __linux__ */
-
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			unlock_kernel();
-	} else {
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			lock_kernel();
-
-		retcode = func(dev, data, file_priv);
-
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			unlock_kernel();
-	}
-
-      err_i1:
-	atomic_dec(&dev->ioctl_count);
-	if (retcode)
-		DRM_DEBUG("ret = %x\n", retcode);
-	return retcode;
-}
-
-drm_local_map_t *drm_getsarea(struct drm_device *dev)
-{
-	struct drm_map_list *entry;
-
-	list_for_each_entry(entry, &dev->maplist, head) {
-		if (entry->map && entry->map->type == _DRM_SHM &&
-		    (entry->map->flags & _DRM_CONTAINS_LOCK)) {
-			return entry->map;
-		}
-	}
-	return NULL;
-}
-
-/**
- * Get version information
- *
- * \param inode device inode.
- * \param filp file pointer.
- * \param cmd command.
- * \param arg user argument, pointing to a drm_version structure.
- * \return zero on success or negative number on failure.
- *
- * Fills in the version information in \p arg.
- */
-static int drm_version(struct drm_device *dev, void *data,
-		       struct drm_file *file_priv)
-{
-	struct drm_version *version = data;
-	int len;
-
-#define DRM_COPY( name, value )						\
-	len = strlen( value );						\
-	if ( len > name##_len ) len = name##_len;			\
-	name##_len = strlen( value );					\
-	if ( len && name ) {						\
-		if ( DRM_COPY_TO_USER( name, value, len ) )		\
-			return EFAULT;				\
-	}
-
-	version->version_major		= dev->driver->major;
-	version->version_minor		= dev->driver->minor;
-	version->version_patchlevel	= dev->driver->patchlevel;
-
-	DRM_COPY(version->name, dev->driver->name);
-	DRM_COPY(version->date, dev->driver->date);
-	DRM_COPY(version->desc, dev->driver->desc);
-
-	return 0;
-}
