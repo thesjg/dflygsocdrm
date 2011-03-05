@@ -236,9 +236,8 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	}
 
 	map = malloc(sizeof(*map), DRM_MEM_MAPS, M_WAITOK | M_ZERO);
-	if (!map) {
+	if (!map)
 		return -ENOMEM;
-	}
 
 	map->offset = offset;
 	map->size = size;
@@ -1200,7 +1199,11 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 			init_waitqueue_head(&buf->dma_wait);
 			buf->file_priv = NULL;
 
+#ifdef DRM_NEWER_BUFSYNC
+			buf->dev_priv_size = dev->driver->dev_priv_size;
+#else
 			buf->dev_priv_size = dev->driver->buf_priv_size;
+#endif
 			buf->dev_private = malloc(buf->dev_priv_size,
 				DRM_MEM_BUFS, M_WAITOK | M_ZERO);
 			if (!buf->dev_private) {
@@ -1413,10 +1416,10 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 	}
 
 	dma->buf_count += entry->buf_count;
-#ifdef __linux__
+#ifdef DRM_NEWER_BUFSYNC
 	dma->seg_count += entry->seg_count;
 	dma->page_count += byte_count >> PAGE_SHIFT;
-#endif /* __linux__ */
+#endif
 	dma->byte_count += byte_count;
 
 	DRM_DEBUG("dma->buf_count : %d\n", dma->buf_count);
@@ -1573,10 +1576,10 @@ static int drm_addbufs_fb(struct drm_device * dev, struct drm_buf_desc * request
 	}
 
 	dma->buf_count += entry->buf_count;
-#ifdef __linux__
+#ifdef DRM_NEWER_BUFSYNC
 	dma->seg_count += entry->seg_count;
 	dma->page_count += byte_count >> PAGE_SHIFT;
-#endif /* __linux__ */
+#endif
 	dma->byte_count += byte_count;
 
 	DRM_DEBUG("dma->buf_count : %d\n", dma->buf_count);
@@ -1621,10 +1624,10 @@ int drm_addbufs(struct drm_device *dev, void *data,
 		ret = drm_addbufs_agp(dev, request);
 	else if (request->flags & _DRM_SG_BUFFER)
 		ret = drm_addbufs_sg(dev, request);
-#ifdef __linux__
+#ifdef DRM_NEWER_BUFSYNC
 	else if (request->flags & _DRM_FB_BUFFER)
 		ret = drm_addbufs_fb(dev, request);
-#endif /* __linux__ */
+#endif
 	else
 		ret = drm_addbufs_pci(dev, request);
 
