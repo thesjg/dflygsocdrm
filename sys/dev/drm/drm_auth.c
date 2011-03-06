@@ -81,7 +81,7 @@ static int drm_add_magic(struct drm_master *master, struct drm_file *priv,
 
 	entry = malloc(sizeof(*entry), DRM_MEM_MAGIC, M_ZERO | M_WAITOK);
 	if (!entry)
-		return ENOMEM;
+		return -ENOMEM;
 	entry->priv = priv;
 	entry->hash_item.key = (unsigned long)magic;
 	mutex_lock(&dev->struct_mutex);
@@ -112,7 +112,7 @@ static int drm_remove_magic(struct drm_master *master, drm_magic_t magic)
 	mutex_lock(&dev->struct_mutex);
 	if (drm_ht_find_item(&master->magiclist, (unsigned long)magic, &hash)) {
 		mutex_unlock(&dev->struct_mutex);
-		return EINVAL;
+		return -EINVAL;
 	}
 	pt = drm_hash_entry(hash, struct drm_magic_entry, hash_item);
 	drm_ht_remove_item(&master->magiclist, hash);
@@ -140,7 +140,7 @@ static int drm_remove_magic(struct drm_master *master, drm_magic_t magic)
 int drm_getmagic(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
 	static drm_magic_t sequence = 0;
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__ /* UNIMPLEMENTED, using alternate lock */
 	static DEFINE_SPINLOCK(lock);
 #endif /* __linux__ */
 	struct drm_auth *auth = data;
