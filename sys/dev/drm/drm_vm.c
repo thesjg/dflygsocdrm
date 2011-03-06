@@ -88,7 +88,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	vm_offset_t offset = ap->a_offset;
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv = NULL;
-	drm_local_map_t *map;
+	struct drm_local_map *map = NULL;
 	struct drm_map_list *r_list;
 	struct drm_map_list *r_list_found = NULL;
 	enum drm_map_type type;
@@ -102,10 +102,26 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
                 DRM_ERROR("can't find authenticator\n");
                 return EINVAL;
         }
+	if (dev != file_priv->minor->dev) {
+                DRM_ERROR("dev != priv->minor->dev!\n");
+	}
 
         if (!file_priv->authenticated)
                 return EACCES;
 
+#ifdef DRM_NEWER_USER_TOKEN
+	/* We check for "dma". On Apple's UniNorth, it's valid to have
+	 * the AGP mapped at physical address 0
+	 * --BenH.
+	 */
+	if (!foff
+#if __OS_HAS_AGP
+	    && (!dev->agp
+#ifdef __linux__
+		|| dev->agp->agp_info.device->vendor != PCI_VENDOR_ID_APPLE)
+#endif
+#endif
+	    ) {
 	if (dev->dma && offset < ptoa(dev->dma->page_count)) {
 		struct drm_device_dma *dma = dev->dma;
 
@@ -118,6 +134,24 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 			return -1;
 		}
 	}
+	}
+
+#endif /* DRM_NEWER_USER_TOKEN */
+
+#ifndef DRM_NEWER_USER_TOKEN
+	if (dev->dma && offset < ptoa(dev->dma->page_count)) {
+		struct drm_device_dma *dma = dev->dma;
+
+		if (dma->pagelist != NULL) {
+			unsigned long page = offset >> PAGE_SHIFT;
+			unsigned long phys = dma->pagelist[page];
+			ap->a_result = atop(phys);
+			return 0;
+		} else {
+			return -1;
+		}
+	}
+#endif /* !DRM_NEWER_USER_TOKEN */
 
 				/* A sequential search of a linked list is
 				   fine here because: 1) there will only be
