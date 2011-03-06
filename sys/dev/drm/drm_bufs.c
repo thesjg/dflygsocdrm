@@ -45,6 +45,7 @@
 #include "drmP.h"
 
 #define DRM_NEWER_BUFS 1
+#define DRM_NEWER_37 1
 
 /* Allocation of PCI memory resources (framebuffer, registers, etc.) for
  * drm_get_resource_*.  Note that they are not RF_ACTIVE, so there's no virtual
@@ -979,7 +980,11 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 		init_waitqueue_head(&buf->dma_wait);
 		buf->file_priv = NULL;
 
+#ifdef DRM_NEWER_37
+		buf->dev_priv_size = dev->driver->dev_priv_size;
+#else
 		buf->dev_priv_size = dev->driver->buf_priv_size;
+#endif
 		buf->dev_private = malloc(buf->dev_priv_size,
 			DRM_MEM_BUFS, M_WAITOK | M_ZERO);
 		if (!buf->dev_private) {
@@ -1017,10 +1022,10 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 	}
 
 	dma->buf_count += entry->buf_count;
-#ifdef __linux__
+#ifdef DRM_NEWER_37
 	dma->seg_count += entry->seg_count;
 	dma->page_count += byte_count >> PAGE_SHIFT;
-#endif /* __linux__ */
+#endif
 	dma->byte_count += byte_count;
 
 	DRM_DEBUG("dma->buf_count : %d\n", dma->buf_count);
@@ -1241,7 +1246,7 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 		dma->buflist[i + dma->buf_count] = &entry->buflist[i];
 	}
 
-	/* No allocations failed, so now we can replace the orginal pagelist
+	/* No allocations failed, so now we can replace the original pagelist
 	 * with the new one.
 	 */
 	if (dma->page_count) {
@@ -1259,10 +1264,10 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 	request->count = entry->buf_count;
 	request->size = size;
 
-#ifdef __linux__
+#ifdef DRM_NEWER_37
 	if (request->flags & _DRM_PCI_BUFFER_RO)
 		dma->flags = _DRM_DMA_USE_PCI_RO;
-#endif /* __linux__ */
+#endif
 
 	atomic_dec(&dev->buf_alloc);
 	return 0;
@@ -1370,7 +1375,12 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 		buf->address = (void *)(agp_offset + offset
 					+ (unsigned long)dev->sg->virtual);
 #else
+#ifdef DRM_NEWER_37
+		buf->address = (void *)(agp_offset + offset
+					+ (unsigned long)dev->sg->handle);
+#else
 		buf->address = (void *)(agp_offset + offset + dev->sg->handle);
+#endif
 #endif /* __linux__ */
 		buf->next = NULL;
 		buf->waiting = 0;
@@ -1378,7 +1388,11 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 		init_waitqueue_head(&buf->dma_wait);
 		buf->file_priv = NULL;
 
+#ifdef DRM_NEWER_37
+		buf->dev_priv_size = dev->driver->dev_priv_size;
+#else
 		buf->dev_priv_size = dev->driver->buf_priv_size;
+#endif
 		buf->dev_private = malloc(buf->dev_priv_size,
 			DRM_MEM_BUFS, M_WAITOK | M_ZERO);
 		if (!buf->dev_private) {
@@ -1620,9 +1634,12 @@ int drm_addbufs(struct drm_device *dev, void *data,
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
 		return -EINVAL;
 
+#if __OS_HAS_AGP
 	if (request->flags & _DRM_AGP_BUFFER)
 		ret = drm_addbufs_agp(dev, request);
-	else if (request->flags & _DRM_SG_BUFFER)
+	else
+#endif
+	if (request->flags & _DRM_SG_BUFFER)
 		ret = drm_addbufs_sg(dev, request);
 #ifdef DRM_NEWER_BUFSYNC
 	else if (request->flags & _DRM_FB_BUFFER)
