@@ -119,6 +119,8 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	    && (!dev->agp
 #ifdef __linux__
 		|| dev->agp->agp_info.device->vendor != PCI_VENDOR_ID_APPLE)
+#else
+		)
 #endif
 #endif
 	    ) {
