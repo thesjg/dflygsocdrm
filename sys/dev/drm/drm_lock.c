@@ -31,30 +31,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- *
- * Authors:
- *    Rickard E. (Rik) Faith <faith@valinux.com>
- *    Gareth Hughes <gareth@valinux.com>
- *
- */
-
-/** @file drm_lock.c
- * Implementation of the ioctls and other support code for dealing with the
- * hardware lock.
- *
- * The DRM hardware lock is a shared structure between the kernel and userland.
- *
- * On uncontended access where the new context was the last context, the
- * client may take the lock without dropping down into the kernel, using atomic
- * compare-and-set.
- *
- * If the client finds during compare-and-set that it was not the last owner
- * of the lock, it calls the DRM lock ioctl, which may sleep waiting for the
- * lock, and may have side-effects of kernel-managed context switching.
- *
- * When the client releases the lock, if the lock is marked as being contended
- * by another client, then the DRM unlock ioctl is called so that the
- * contending client may be woken up.
  */
 
 #include "drmP.h"
@@ -88,29 +64,39 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",
-		    DRM_CURRENTPID, lock->context);
+			  DRM_CURRENTPID, lock->context);
 		return -EINVAL;
 	}
 
 	DRM_DEBUG("%d (pid %d) requests lock (0x%08x), flags = 0x%08x\n",
-		lock->context, DRM_CURRENTPID,
-		master->lock.hw_lock->lock, lock->flags);
+		  lock->context, DRM_CURRENTPID,
+		  master->lock.hw_lock->lock, lock->flags);
 
 	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE))
 		if (lock->context < 0)
 			return -EINVAL;
 
+#ifdef __linux__ /* UNIMPLEMENTED */
+	add_wait_queue(&master->lock.lock_queue, &entry);
+#endif
 	spin_lock_bh(&master->lock.spinlock);
 	master->lock.user_waiters++;
 	spin_unlock_bh(&master->lock.spinlock);
 
 //	DRM_LOCK();
 	for (;;) {
+#ifdef __linux__
+		__set_current_state(TASK_INTERRUPTIBLE);
+#endif
 		if (!master->lock.hw_lock) {
-			/* Device has been unregistered */
 			DRM_INFO("drm_lock pid (%d) hw_lock == 0 device unregistered\n",
 				DRM_CURRENTPID);
+			/* Device has been unregistered */
+#ifdef __linux__
+			send_sig(SIGTERM, current, 0);
+#else
 			kern_kill(SIGTERM, DRM_CURRENTPID, -1);
+#endif
 			ret = -EINTR;
 			break;
 		}
@@ -122,6 +108,13 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 		}
 
 		/* Contention */
+#ifdef __linux__
+		schedule();
+		if (signal_pending(current)) {
+			ret = -EINTR;
+			break;
+		}
+#else
 		tsleep_interlock((void *)&master->lock.lock_queue, PCATCH);
 //		DRM_UNLOCK();
 		ret = tsleep((void *)&master->lock.lock_queue,
@@ -129,12 +122,17 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 //		DRM_LOCK();
 		if (ret != 0)
 			break;
+#endif
 	}
 //	DRM_UNLOCK();
 
 	spin_lock_bh(&master->lock.spinlock);
 	master->lock.user_waiters--;
 	spin_unlock_bh(&master->lock.spinlock);
+#ifdef __linux__ /* UNIMPLEMENTED */
+	__set_current_state(TASK_RUNNING);
+	remove_wait_queue(&master->lock.lock_queue, &entry);
+#endif
 
 	if (ret == ERESTART)
 		DRM_DEBUG("restarting syscall\n");
@@ -145,12 +143,11 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	if (ret) return ret;
 
 	/* XXX: Add signal blocking here */
-	/* don't set the block all signals on the master process for now
+	/* don't set the block all signals on the master process for now 
 	 * really probably not the correct answer but lets us debug xkb
-	 * xserver for now */
-
+ 	 * xserver for now */
 	if (!file_priv->is_master) {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 		sigemptyset(&dev->sigmask);
 		sigaddset(&dev->sigmask, SIGSTOP);
 		sigaddset(&dev->sigmask, SIGTSTP);
@@ -159,7 +156,7 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #endif /* __linux__ */
 		dev->sigdata.context = lock->context;
 		dev->sigdata.lock = master->lock.hw_lock;
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 		block_all_signals(drm_notifier, &dev->sigdata, &dev->sigmask);
 #endif /* __linux__ */
 	}
@@ -167,18 +164,26 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	if (dev->driver->dma_ready && (lock->flags & _DRM_LOCK_READY))
 		dev->driver->dma_ready(dev);
 
+	if (dev->driver->dma_quiescent && (lock->flags & _DRM_LOCK_QUIESCENT))
+	{
+#ifdef __linux__
+		if (dev->driver->dma_quiescent(dev)) {
+			DRM_DEBUG("%d waiting for DMA quiescent\n",
+				  lock->context);
+			return -EBUSY;
+		}
+#else
 /* BSD legacy note: apparently drm_quiescent may return non-zero */
-	if (dev->driver->dma_quiescent != NULL &&
-	    (lock->flags & _DRM_LOCK_QUIESCENT))
 		dev->driver->dma_quiescent(dev);
+#endif
+	}
 
-#ifdef __linux__ /* used only for sparc? */
+/* BSD legacy: used only for sparc on Linux? */
 	if (dev->driver->kernel_context_switch &&
 	    dev->last_context != lock->context) {
 		dev->driver->kernel_context_switch(dev, dev->last_context,
 						   lock->context);
 	}
-#endif /* __linux__ */
 
 	return 0;
 }
@@ -201,21 +206,27 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",
-			DRM_CURRENTPID, lock->context);
+			  DRM_CURRENTPID, lock->context);
 		return -EINVAL;
 	}
 
 	atomic_inc(&dev->counts[_DRM_STAT_UNLOCKS]);
 
-	if (drm_lock_free(&master->lock, lock->context)) {
-		/* FIXME: Should really bail out here. */
-		DRM_ERROR("drm_unlock(), drm_lock_free nonzero return\n");
+	/* kernel_context_switch isn't used by any of the x86 drm
+	 * modules but is required by the Sparc driver.
+	 */
+	if (dev->driver->kernel_context_switch_unlock)
+		dev->driver->kernel_context_switch_unlock(dev);
+	else {
+		if (drm_lock_free(&master->lock, lock->context)) {
+			/* FIXME: Should really bail out here. */
+			DRM_ERROR("drm_unlock(), drm_lock_free nonzero return\n");
+		}
 	}
 
 #ifdef __linux__
 	unblock_all_signals();
 #endif /* __linux__ */
-
 	return 0;
 }
 
@@ -229,7 +240,7 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
  * Attempt to mark the lock as held by the given context, via the \p cmpxchg instruction.
  */
 int drm_lock_take(struct drm_lock_data *lock_data,
-		unsigned int context)
+		  unsigned int context)
 {
 	unsigned int old, new;
 	volatile unsigned int *lock = &lock_data->hw_lock->lock;
@@ -251,7 +262,7 @@ int drm_lock_take(struct drm_lock_data *lock_data,
 		if (old & _DRM_LOCK_HELD) {
 			if (context != DRM_KERNEL_CONTEXT) {
 				DRM_ERROR("%d holds heavyweight lock\n",
-				    context);
+					  context);
 			}
 			return 0;
 		}
@@ -263,9 +274,8 @@ int drm_lock_take(struct drm_lock_data *lock_data,
 	}
 	return 0;
 }
+EXPORT_SYMBOL(drm_lock_take);
 
-/* This takes a lock forcibly and hands it to context.	Should ONLY be used
-   inside *_unlock to give lock to kernel before calling *_dma_schedule. */
 /**
  * This takes a lock forcibly and hands it to context.	Should ONLY be used
  * inside *_unlock to give lock to kernel before calling *_dma_schedule.
@@ -278,8 +288,8 @@ int drm_lock_take(struct drm_lock_data *lock_data,
  * Resets the lock file pointer.
  * Marks the lock as held by the given context, via the \p cmpxchg instruction.
  */
-int drm_lock_transfer(struct drm_lock_data *lock_data,
-		unsigned int context)
+static int drm_lock_transfer(struct drm_lock_data *lock_data,
+			     unsigned int context)
 {
 	unsigned int old, new;
 	volatile unsigned int *lock = &lock_data->hw_lock->lock;
@@ -325,12 +335,13 @@ int drm_lock_free(struct drm_lock_data *lock_data, unsigned int context)
 
 	if (_DRM_LOCK_IS_HELD(old) && _DRM_LOCKING_CONTEXT(old) != context) {
 		DRM_ERROR("%d freed heavyweight lock held by %d\n",
-		    context, _DRM_LOCKING_CONTEXT(old));
+			  context, _DRM_LOCKING_CONTEXT(old));
 		return 1;
 	}
 	DRM_WAKEUP_INT((void *)&lock_data->lock_queue);
 	return 0;
 }
+EXPORT_SYMBOL(drm_lock_free);
 
 /* newer UNIMPLEMENTED */
 
