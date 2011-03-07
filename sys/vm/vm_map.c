@@ -490,7 +490,6 @@ vm_map_init(struct vm_map *map, vm_offset_t min, vm_offset_t max, pmap_t pmap)
 	map->nentries = 0;
 	map->size = 0;
 	map->system_map = 0;
-	map->infork = 0;
 	map->min_offset = min;
 	map->max_offset = max;
 	map->pmap = pmap;
@@ -933,11 +932,9 @@ vm_map_insert(vm_map_t map, int *countp,
 		 * appropriately.
 		 */
 
-		vm_object_lock(object);
 		if ((object->ref_count > 1) || (object->shadow_count != 0)) {
 			vm_object_clear_flag(object, OBJ_ONEMAPPING);
 		}
-		vm_object_unlock(object);
 	}
 	else if ((prev_entry != &map->header) &&
 		 (prev_entry->eflags == protoeflags) &&
@@ -2841,6 +2838,7 @@ vm_map_check_protection(vm_map_t map, vm_offset_t start, vm_offset_t end,
  * being a negative impact on memory usage.
  *
  * The vm_map must be exclusively locked.
+ * The orig_object should be held.
  */
 static void
 vm_map_split(vm_map_entry_t entry)
@@ -2889,8 +2887,11 @@ vm_map_split(vm_map_entry_t entry)
 	lwkt_gettoken(&vm_token);
 	lwkt_gettoken(&vmobj_token);
 
+	vm_object_hold(new_object);
+
 	source = orig_object->backing_object;
 	if (source != NULL) {
+		vm_object_hold(source);
 		/* Referenced by new_object */
 		vm_object_reference_locked(source);
 		LIST_INSERT_HEAD(&source->shadow_head,
@@ -2902,6 +2903,7 @@ vm_map_split(vm_map_entry_t entry)
 		new_object->backing_object = source;
 		source->shadow_count++;
 		source->generation++;
+		vm_object_drop(source);
 	}
 
 	for (idx = 0; idx < size; idx++) {
@@ -2951,6 +2953,7 @@ vm_map_split(vm_map_entry_t entry)
 	entry->object.vm_object = new_object;
 	entry->offset = 0LL;
 	vm_object_deallocate_locked(orig_object);
+	vm_object_drop(new_object);
 	lwkt_reltoken(&vmobj_token);
 	lwkt_reltoken(&vm_token);
 }
@@ -3051,7 +3054,6 @@ vmspace_fork(struct vmspace *vm1)
 	lwkt_gettoken(&vmspace_token);
 	lwkt_gettoken(&vmobj_token);
 	vm_map_lock(old_map);
-	old_map->infork = 1;
 
 	/*
 	 * XXX Note: upcalls are not copied.
@@ -3150,7 +3152,6 @@ vmspace_fork(struct vmspace *vm1)
 	}
 
 	new_map->size = old_map->size;
-	old_map->infork = 0;
 	vm_map_unlock(old_map);
 	vm_map_unlock(new_map);
 	vm_map_entry_release(count);

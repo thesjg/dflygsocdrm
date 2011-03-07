@@ -28,7 +28,6 @@
  *
  *	from: @(#)float.h	7.1 (Berkeley) 5/8/90
  * $FreeBSD: src/sys/i386/include/float.h,v 1.17 2008/03/05 11:17:20 bde Exp $
- * $DragonFly: src/sys/cpu/i386/include/float.h,v 1.6 2008/04/09 06:44:37 hasso Exp $
  */
 
 #ifndef _CPU_FLOAT_H_
