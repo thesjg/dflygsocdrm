@@ -28,6 +28,50 @@
  * \author Eric Anholt <anholt@FreeBSD.org>
  */
 
+/* drm_pci.h -- PCI DMA memory management wrappers for DRM -*- linux-c -*- */
+/**
+ * \file drm_pci.c
+ * \brief Functions and ioctls to manage PCI memory
+ *
+ * \warning These interfaces aren't stable yet.
+ *
+ * \todo Implement the remaining ioctl's for the PCI pools.
+ * \todo The wrappers here are so thin that they would be better off inlined..
+ *
+ * \author José Fonseca <jrfonseca@tungstengraphics.com>
+ * \author Leif Delgass <ldelgass@retinalburn.net>
+ */
+
+/*
+ * Copyright 2003 José Fonseca.
+ * Copyright 2003 Leif Delgass.
+ * All Rights Reserved.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice (including the next
+ * paragraph) shall be included in all copies or substantial portions of the
+ * Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL THE
+ * AUTHORS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN
+ * ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
+ * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ */
+
+#ifdef __linux__
+#include <linux/pci.h>
+#include <linux/slab.h>
+#include <linux/dma-mapping.h>
+#endif
+
 #include "drmP.h"
 
 /**********************************************************************/
@@ -47,11 +91,9 @@ drm_pci_busdma_callback(void *arg, bus_dma_segment_t *segs, int nsegs, int error
 }
 
 /**
- * \brief Allocate a physically contiguous DMA-accessible consistent 
- * memory block.
+ * \brief Allocate a PCI consistent memory block, for DMA.
  */
-drm_dma_handle_t *
-drm_pci_alloc(struct drm_device *dev, size_t size, size_t align)
+drm_dma_handle_t *drm_pci_alloc(struct drm_device * dev, size_t size, size_t align)
 {
 
 /* All calls to drm_pci_alloc in legacy drm set maxaddr to this value */
@@ -67,8 +109,8 @@ drm_pci_alloc(struct drm_device *dev, size_t size, size_t align)
 		return NULL;
 	}
 
-	dmah = malloc(sizeof(drm_dma_handle_t), DRM_MEM_DMA, M_ZERO | M_NOWAIT);
-	if (dmah == NULL)
+	dmah = malloc(sizeof(drm_dma_handle_t), DRM_MEM_DMA, M_ZERO | M_WAITOK);
+	if (!dmah)
 		return NULL;
 
 #if 0 /* HT XXX XXX XXX */
@@ -81,7 +123,25 @@ drm_pci_alloc(struct drm_device *dev, size_t size, size_t align)
 	    DRM_ERROR("called while holding dma_lock\n");
 #endif
 
-	ret = bus_dma_tag_create(NULL, align, 0, /* tag, align, boundary */
+	dmah->size = size;
+#ifdef __linux__
+	dmah->vaddr = dma_alloc_coherent(&dev->pdev->dev, size, &dmah->busaddr, GFP_KERNEL | __GFP_COMP);
+
+	if (dmah->vaddr == NULL) {
+		kfree(dmah);
+		return NULL;
+	}
+
+	memset(dmah->vaddr, 0, size);
+
+	/* XXX - Is virt_to_page() legal for consistent mem? */
+	/* Reserve */
+	for (addr = (unsigned long)dmah->vaddr, sz = size;
+	     sz > 0; addr += PAGE_SIZE, sz -= PAGE_SIZE) {
+		SetPageReserved(virt_to_page(addr));
+	}
+#else /* !__linux__ */
+	ret = bus_dma_tag_create(NULL, align, 0, /* parent, align, boundary */
 	    maxaddr, BUS_SPACE_MAXADDR, /* lowaddr, highaddr */
 	    NULL, NULL, /* filtfunc, filtfuncargs */
 	    size, 1, size, /* maxsize, nsegs, maxsegsize */
@@ -93,8 +153,9 @@ drm_pci_alloc(struct drm_device *dev, size_t size, size_t align)
 	}
 
 	/* XXX BUS_DMA_NOCACHE */
+/* legacy BSD: added BUS_DMA_COHERENT flag */
 	ret = bus_dmamem_alloc(dmah->tag, &dmah->vaddr,
-	    BUS_DMA_WAITOK | BUS_DMA_ZERO, &dmah->map);
+	    BUS_DMA_WAITOK | BUS_DMA_ZERO | BUS_DMA_COHERENT, &dmah->map);
 	if (ret != 0) {
 		bus_dma_tag_destroy(dmah->tag);
 		free(dmah, DRM_MEM_DMA);
@@ -109,26 +170,12 @@ drm_pci_alloc(struct drm_device *dev, size_t size, size_t align)
 		free(dmah, DRM_MEM_DMA);
 		return NULL;
 	}
+#endif /* __linux__ */
 
 	return dmah;
 }
 
-/**
- * \brief Free a DMA-accessible consistent memory block.
- */
-void
-drm_pci_free(struct drm_device *dev, drm_dma_handle_t *dmah)
-{
-	if (dmah == NULL)
-		return;
-
-	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
-	bus_dma_tag_destroy(dmah->tag);
-
-	free(dmah, DRM_MEM_DMA);
-}
-
-/* newer UNIMPLEMENTED */
+EXPORT_SYMBOL(drm_pci_alloc);
 
 /**
  * \brief Free a PCI consistent memory block without freeing its descriptor.
@@ -137,6 +184,7 @@ drm_pci_free(struct drm_device *dev, drm_dma_handle_t *dmah)
  */
 void __drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
 {
+#ifdef __linux__
 #if 1
 	unsigned long addr;
 	size_t sz;
@@ -152,6 +200,28 @@ void __drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
 		dma_free_coherent(&dev->pdev->dev, dmah->size, dmah->vaddr,
 				  dmah->busaddr);
 	}
+#else /* !__linux__ */
+	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
+	bus_dma_tag_destroy(dmah->tag);
+#endif
 }
+
+/**
+ * \brief Free a PCI consistent memory block
+ */
+void drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
+{
+	if (dmah == NULL)
+		return;
+
+#if 0
+	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
+	bus_dma_tag_destroy(dmah->tag);
+#endif
+	__drm_pci_free(dev, dmah);
+	free(dmah, DRM_MEM_DMA);
+}
+
+EXPORT_SYMBOL(drm_pci_free);
 
 /*@}*/
