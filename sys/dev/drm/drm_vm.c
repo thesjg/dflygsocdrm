@@ -118,10 +118,9 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 #if __OS_HAS_AGP
 	    && (!dev->agp
 #ifdef __linux__
-		|| dev->agp->agp_info.device->vendor != PCI_VENDOR_ID_APPLE)
-#else
-		)
+		|| dev->agp->agp_info.device->vendor != PCI_VENDOR_ID_APPLE
 #endif
+		)
 #endif
 	    ) {
 	if (dev->dma && offset < ptoa(dev->dma->page_count)) {

@@ -103,7 +103,7 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 		DRM_MEM_PAGES, M_WAITOK | M_ZERO);
 	if (!entry->busaddr) {
 		free(entry, DRM_MEM_SGLISTS);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	dmah = malloc(sizeof(struct drm_dma_handle),
@@ -111,7 +111,7 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	if (dmah == NULL) {
 		free(entry->busaddr, DRM_MEM_PAGES);
 		free(entry, DRM_MEM_SGLISTS);
-		return ENOMEM;
+		return -ENOMEM;
 	}
 
 	ret = bus_dma_tag_create(NULL, PAGE_SIZE, 0, /* tag, align, boundary */
