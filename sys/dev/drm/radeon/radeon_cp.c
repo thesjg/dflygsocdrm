@@ -606,6 +606,18 @@ static void radeon_do_cp_start(drm_radeon_private_t * dev_priv)
 
 	dev_priv->cp_running = 1;
 
+	/* on r420, any DMA from CP to system memory while 2D is active
+	 * can cause a hang.  workaround is to queue a CP RESYNC token
+	 */
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_R420) {
+		BEGIN_RING(3);
+		OUT_RING(CP_PACKET0(R300_CP_RESYNC_ADDR, 1));
+		OUT_RING(5); /* scratch reg 5 */
+		OUT_RING(0xdeadbeef);
+		ADVANCE_RING();
+		COMMIT_RING();
+	}
+
 	BEGIN_RING(8);
 	/* isync can only be written through cp on r5xx write it here */
 	OUT_RING(CP_PACKET0(RADEON_ISYNC_CNTL, 0));
