@@ -32,6 +32,13 @@
 #ifndef __RADEON_DRV_H__
 #define __RADEON_DRV_H__
 
+#if 0
+#include <linux/firmware.h>
+#include <linux/platform_device.h>
+#endif
+
+#include "radeon_family.h"
+
 /* General customization:
  */
 
@@ -39,7 +46,10 @@
 
 #define DRIVER_NAME		"radeon"
 #define DRIVER_DESC		"ATI Radeon"
+#define DRIVER_DATE		"20080528"
+#if 0
 #define DRIVER_DATE		"20080613"
+#endif
 
 /* Interface history:
  *
@@ -105,16 +115,16 @@
  * 1.32- fixes for rv740 setup
  * 1.33- Add r6xx/r7xx const buffer support
  */
-#ifdef __linux__
 #define DRIVER_MAJOR		1
 #define DRIVER_MINOR		33
 #define DRIVER_PATCHLEVEL	0
-#else /* __linux__ */
+#if 0
 #define DRIVER_MAJOR		1
 #define DRIVER_MINOR		31
 #define DRIVER_PATCHLEVEL	0
 #endif /* __linux__ */
 
+#if 0
 /*
  * Radeon chip families
  */
@@ -166,6 +176,7 @@ enum radeon_family {
 	CHIP_HEMLOCK,
 	CHIP_LAST,
 };
+#endif
 
 enum radeon_cp_microcode_version {
 	UCODE_R100,
@@ -173,6 +184,7 @@ enum radeon_cp_microcode_version {
 	UCODE_R300,
 };
 
+#if 0
 /*
  * Chip flags
  */
@@ -189,6 +201,7 @@ enum radeon_chip_flags {
 	RADEON_IS_PCI = 0x00800000UL,
 	RADEON_IS_IGPGART = 0x01000000UL,
 };
+#endif
 
 typedef struct drm_radeon_freelist {
 	unsigned int age;
