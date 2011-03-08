@@ -489,10 +489,17 @@ extern void radeon_set_ring_head(drm_radeon_private_t *dev_priv, u32 val);
 static __inline__ int radeon_check_offset(drm_radeon_private_t *dev_priv,
 					  u64 off)
 {
+#ifdef DRM_NEWER_RADEON_H
+	u32 fb_start = dev_priv->fb_location;
+	u32 fb_end = fb_start + dev_priv->fb_size - 1;
+	u32 gart_start = dev_priv->gart_vm_start;
+	u32 gart_end = gart_start + dev_priv->gart_size - 1;
+#else
 	u64 fb_start = dev_priv->fb_location;
 	u64 fb_end = fb_start + dev_priv->fb_size - 1;
 	u64 gart_start = dev_priv->gart_vm_start;
 	u64 gart_end = gart_start + dev_priv->gart_size - 1;
+#endif
 
 	return ((off >= fb_start && off <= fb_end) ||
 		(off >= gart_start && off <= gart_end));
@@ -596,17 +603,16 @@ extern int r600_page_table_init(struct drm_device *dev);
 extern void r600_page_table_cleanup(struct drm_device *dev, struct drm_ati_pcigart_info *gart_info);
 extern int r600_cs_legacy_ioctl(struct drm_device *dev, void *data, struct drm_file *fpriv);
 extern void r600_cp_dispatch_swap(struct drm_device *dev, struct drm_file *file_priv);
-extern int r600_cp_dispatch_texture(struct drm_device * dev,
+extern int r600_cp_dispatch_texture(struct drm_device *dev,
 				    struct drm_file *file_priv,
-				    drm_radeon_texture_t * tex,
-				    drm_radeon_tex_image_t * image);
-
+				    drm_radeon_texture_t *tex,
+				    drm_radeon_tex_image_t *image);
 /* r600_blit.c */
 extern int r600_prepare_blit_copy(struct drm_device *dev, struct drm_file *file_priv);
 extern void r600_done_blit_copy(struct drm_device *dev);
 extern void r600_blit_copy(struct drm_device *dev,
-		           uint64_t src_gpu_addr, uint64_t dst_gpu_addr,
-		           int size_bytes);
+			   uint64_t src_gpu_addr, uint64_t dst_gpu_addr,
+			   int size_bytes);
 extern void r600_blit_swap(struct drm_device *dev,
 		           uint64_t src_gpu_addr, uint64_t dst_gpu_addr,
 		           int sx, int sy, int dx, int dy,
@@ -1274,7 +1280,7 @@ extern u32 radeon_get_scratch(drm_radeon_private_t *dev_priv, int index);
 #       define R600_IT_MPEG_INDEX               0x00003A00
 #       define R600_IT_WAIT_REG_MEM             0x00003C00
 #       define R600_IT_MEM_WRITE                0x00003D00
-#	define R600_IT_INDIRECT_BUFFER		0x00003200
+#       define R600_IT_INDIRECT_BUFFER          0x00003200
 #       define R600_IT_SURFACE_SYNC             0x00004300
 #              define R600_CB0_DEST_BASE_ENA    (1 << 6)
 #              define R600_TC_ACTION_ENA        (1 << 23)
@@ -1283,15 +1289,15 @@ extern u32 radeon_get_scratch(drm_radeon_private_t *dev_priv, int index);
 #              define R600_DB_ACTION_ENA        (1 << 26)
 #              define R600_SH_ACTION_ENA        (1 << 27)
 #              define R600_SMX_ACTION_ENA       (1 << 28)
-#	define R600_IT_ME_INITIALIZE		0x00004400
+#       define R600_IT_ME_INITIALIZE            0x00004400
 #	       define R600_ME_INITIALIZE_DEVICE_ID(x) ((x) << 16)
 #       define R600_IT_COND_WRITE               0x00004500
-#	define R600_IT_EVENT_WRITE		0x00004600
+#       define R600_IT_EVENT_WRITE              0x00004600
 #       define R600_IT_EVENT_WRITE_EOP          0x00004700
 #       define R600_IT_ONE_REG_WRITE            0x00005700
-#	define R600_IT_SET_CONFIG_REG		0x00006800
-#	define R600_SET_CONFIG_REG_OFFSET       0x00008000
-#	define R600_SET_CONFIG_REG_END          0x0000ac00
+#       define R600_IT_SET_CONFIG_REG           0x00006800
+#              define R600_SET_CONFIG_REG_OFFSET 0x00008000
+#              define R600_SET_CONFIG_REG_END   0x0000ac00
 #       define R600_IT_SET_CONTEXT_REG          0x00006900
 #              define R600_SET_CONTEXT_REG_OFFSET 0x00028000
 #              define R600_SET_CONTEXT_REG_END  0x00029000
@@ -2081,7 +2087,7 @@ do {									\
  * Engine control helper macros
  */
 
-#ifdef __linux__
+#ifdef DRM_NEWER_RADEON_H
 
 #define RADEON_WAIT_UNTIL_2D_IDLE() do {				\
 	OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );			\
@@ -2107,7 +2113,7 @@ do {									\
 	OUT_RING( RADEON_WAIT_CRTC_PFLIP );				\
 } while (0)
 
-#else /* __linux__ */
+#else /* !DRM_NEWER_RADEON_H */
 
 #define RADEON_WAIT_UNTIL_2D_IDLE() do {				\
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)        \
@@ -2145,7 +2151,7 @@ do {									\
 	OUT_RING( RADEON_WAIT_CRTC_PFLIP );				\
 } while (0)
 
-#endif /* __linux__ */
+#endif /* !DRM_NEWER_RADEON_H */
 
 #define RADEON_FLUSH_CACHE() do {					\
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) <= CHIP_RV280) {	\
