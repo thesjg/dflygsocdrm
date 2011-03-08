@@ -728,8 +728,10 @@ struct drm_ati_pcigart_info {
 	int table_size;
 
 /* legacy drm */
+#if 0
 	dma_addr_t member_mask;
 	struct drm_dma_handle *dmah; /* handle for ATI PCIGART table */
+#endif
 };
 
 /**

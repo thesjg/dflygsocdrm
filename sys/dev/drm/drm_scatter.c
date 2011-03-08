@@ -44,6 +44,20 @@
 #endif /* __linux__ */
 #include "drmP.h"
 
+static void
+drm_sg_alloc_cb(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
+{
+	struct drm_sg_mem *entry = arg;
+	int i;
+
+	if (error != 0)
+	    return;
+
+	for(i = 0 ; i < nsegs ; i++) {
+		entry->busaddr[i] = segs[i].ds_addr;
+	}
+}
+
 #define DEBUG_SCATTER 0
 
 static inline void *drm_vmalloc_dma(unsigned long size)
@@ -57,6 +71,22 @@ static inline void *drm_vmalloc_dma(unsigned long size)
 
 void drm_sg_cleanup(struct drm_sg_mem * entry)
 {
+#ifdef __linux__
+	struct page *page;
+	int i;
+
+	for (i = 0; i < entry->pages; i++) {
+		page = entry->pagelist[i];
+		if (page)
+			ClearPageReserved(page);
+	}
+
+	vfree(entry->virtual);
+
+	kfree(entry->busaddr);
+	kfree(entry->pagelist);
+	kfree(entry);
+#else /* !__linux__ */
 	struct drm_dma_handle *dmah = entry->dmah;
 
 	bus_dmamap_unload(dmah->tag, dmah->map);
@@ -65,6 +95,7 @@ void drm_sg_cleanup(struct drm_sg_mem * entry)
 	free(dmah, DRM_MEM_DMA);
 	free(entry->busaddr, DRM_MEM_PAGES);
 	free(entry, DRM_MEM_SGLISTS);
+#endif /* !__linux__ */
 }
 
 #ifdef _LP64
@@ -73,15 +104,16 @@ void drm_sg_cleanup(struct drm_sg_mem * entry)
 # define ScatterHandle(x) (unsigned int)(x)
 #endif
 
-static void drm_sg_alloc_cb(void *arg, bus_dma_segment_t *segs,
-			    int nsegs, int error);
-
 int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 {
 	struct drm_sg_mem *entry;
+#ifdef __linux__
+	unsigned long pages, i, j;
+#else
 	struct drm_dma_handle *dmah;
 	unsigned long pages;
 	int ret;
+#endif
 
 	DRM_DEBUG("\n");
 
@@ -99,13 +131,42 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	DRM_DEBUG("size=%ld pages=%ld\n", request->size, pages);
 
 	entry->pages = pages;
+#ifdef __linux__
+	entry->pagelist = kmalloc(pages * sizeof(*entry->pagelist), GFP_KERNEL);
+	if (!entry->pagelist) {
+		kfree(entry);
+		return -ENOMEM;
+	}
+
+	memset(entry->pagelist, 0, pages * sizeof(*entry->pagelist));
+#endif
+
 	entry->busaddr = malloc(pages * sizeof(*entry->busaddr),
 		DRM_MEM_PAGES, M_WAITOK | M_ZERO);
 	if (!entry->busaddr) {
+#ifdef __linux__
+		kfree(entry->pagelist);
+#endif
 		free(entry, DRM_MEM_SGLISTS);
 		return -ENOMEM;
 	}
 
+#ifdef __linux__
+	entry->virtual = drm_vmalloc_dma(pages << PAGE_SHIFT);
+	if (!entry->virtual) {
+		kfree(entry->busaddr);
+		kfree(entry->pagelist);
+		kfree(entry);
+		return -ENOMEM;
+	}
+
+	/* This also forces the mapping of COW pages, so our page list
+	 * will be valid.  Please don't remove it...
+	 */
+	memset(entry->virtual, 0, pages << PAGE_SHIFT);
+
+	entry->handle = ScatterHandle((unsigned long)entry->virtual);
+#else /* !__linux__ */
 	dmah = malloc(sizeof(struct drm_dma_handle),
 		DRM_MEM_DMA, M_WAITOK | M_ZERO);
 	if (dmah == NULL) {
@@ -129,7 +190,7 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 
 	/* XXX BUS_DMA_NOCACHE */
 	ret = bus_dmamem_alloc(dmah->tag, &dmah->vaddr,
-	    BUS_DMA_WAITOK | BUS_DMA_ZERO , &dmah->map);
+	    BUS_DMA_WAITOK | BUS_DMA_ZERO | BUS_DMA_COHERENT , &dmah->map);
 	if (ret != 0) {
 		bus_dma_tag_destroy(dmah->tag);
 		free(dmah, DRM_MEM_DMA);
@@ -152,30 +213,77 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	entry->dmah = dmah;
 	entry->handle = (unsigned long)dmah->vaddr;
 	entry->virtual = (void *)entry->handle;
+#endif /* !__linux__ */
 
 	DRM_DEBUG("handle  = %08lx\n", entry->handle);
 	DRM_DEBUG("virtual = %p\n", entry->virtual);
+
+#ifdef __linux__
+	for (i = (unsigned long)entry->virtual, j = 0; j < pages;
+	     i += PAGE_SIZE, j++) {
+		entry->pagelist[j] = vmalloc_to_page((void *)i);
+		if (!entry->pagelist[j])
+			goto failed;
+		SetPageReserved(entry->pagelist[j]);
+	}
+#endif
 
 	request->handle = entry->handle;
 
 	dev->sg = entry;
 
-	return 0;
-}
+#ifdef __linux__
+#if DEBUG_SCATTER
+	/* Verify that each page points to its virtual address, and vice
+	 * versa.
+	 */
+	{
+		int error = 0;
 
-static void
-drm_sg_alloc_cb(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
-{
-	struct drm_sg_mem *entry = arg;
-	int i;
+		for (i = 0; i < pages; i++) {
+			unsigned long *tmp;
 
-	if (error != 0)
-	    return;
-
-	for(i = 0 ; i < nsegs ; i++) {
-		entry->busaddr[i] = segs[i].ds_addr;
+			tmp = page_address(entry->pagelist[i]);
+			for (j = 0;
+			     j < PAGE_SIZE / sizeof(unsigned long);
+			     j++, tmp++) {
+				*tmp = 0xcafebabe;
+			}
+			tmp = (unsigned long *)((u8 *) entry->virtual +
+						(PAGE_SIZE * i));
+			for (j = 0;
+			     j < PAGE_SIZE / sizeof(unsigned long);
+			     j++, tmp++) {
+				if (*tmp != 0xcafebabe && error == 0) {
+					error = 1;
+					DRM_ERROR("Scatter allocation error, "
+						  "pagelist does not match "
+						  "virtual mapping\n");
+				}
+			}
+			tmp = page_address(entry->pagelist[i]);
+			for (j = 0;
+			     j < PAGE_SIZE / sizeof(unsigned long);
+			     j++, tmp++) {
+				*tmp = 0;
+			}
+		}
+		if (error == 0)
+			DRM_ERROR("Scatter allocation matches pagelist\n");
 	}
+#endif
+#endif /* __linux__ */
+
+	return 0;
+
+#ifdef __linux__
+      failed:
+	drm_sg_cleanup(entry);
+	return -ENOMEM;
+#endif
 }
+EXPORT_SYMBOL(drm_sg_alloc);
+
 
 int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
 		       struct drm_file *file_priv)
@@ -183,6 +291,7 @@ int drm_sg_alloc_ioctl(struct drm_device *dev, void *data,
 	struct drm_scatter_gather *request = data;
 
 	return drm_sg_alloc(dev, request);
+
 }
 
 int drm_sg_free(struct drm_device *dev, void *data,
