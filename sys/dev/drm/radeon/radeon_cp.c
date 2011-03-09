@@ -1330,18 +1330,17 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
-#ifndef __linux__
+#ifndef DRM_NEWER_PRESAREA 
 #if 0
 	unsigned long old_sarea_priv = (unsigned long)master_priv->sarea_priv;
 #endif
 	master_priv->sarea_priv =
 	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
 				    init->sarea_priv_offset);
-#if 0
-	DRM_INFO("radeon_master_create sarea_priv = 0x%016lx, radeon_do_init_cp sarea_priv = 0x%016lx\n",
-		old_sarea_priv, (unsigned long)master_priv->sarea_priv);
-#endif
-#endif
+	DRM_INFO("sarea_priv = 0x%016lx, from sarea_priv_offset = 0x%016lx\n",
+		(unsigned long)master_priv->sarea_priv,
+		init->sarea_priv_offset);
+#endif /* DRM_NEWER_PRESAREA */
 
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
@@ -1494,9 +1493,15 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 			dev_priv->gart_info.gart_table_location =
 			    DRM_ATI_GART_FB;
 
+#ifdef __linux__
 			DRM_DEBUG("Setting phys_pci_gart to %p %08lX\n",
 				  dev_priv->gart_info.addr,
 				  dev_priv->pcigart_offset);
+#else
+			DRM_INFO("DRM_ATI_GART_FB Setting phys_pci_gart to %p %016lX\n",
+				  dev_priv->gart_info.addr,
+				  dev_priv->pcigart_offset);
+#endif
 		} else {
 			if (dev_priv->flags & RADEON_IS_IGPGART)
 				dev_priv->gart_info.gart_reg_if = DRM_ATI_GART_IGP;
@@ -1512,6 +1517,9 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 				radeon_do_cleanup_cp(dev);
 				return -EINVAL;
 			}
+#ifndef __linux__
+			DRM_INFO("gart_table_location DRM_ATI_GART_MAIN\n");
+#endif
 		}
 
 		sctrl = RADEON_READ(RADEON_SURFACE_CNTL);
@@ -1608,7 +1616,7 @@ static int radeon_do_cleanup_cp(struct drm_device * dev)
 		if (dev_priv->gart_info.gart_table_location == DRM_ATI_GART_FB)
 		{
 			drm_core_ioremapfree(&dev_priv->gart_info.mapping, dev);
-			dev_priv->gart_info.addr = 0;
+			dev_priv->gart_info.addr = NULL;
 		}
 	}
 	/* only clear to the start of flags */
@@ -2132,9 +2140,10 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	if (ret != 0) {
 #ifdef __linux__
 		return ret;
-#else
+#else /* !__linux__ */
+		DRM_ERROR("failed (%d) to drm_addmap for _DRM_REGISTERS\n", ret);
 		goto error;
-#endif /* __linux__ */
+#endif /* !__linux__ */
 	}
 
 	ret = drm_vblank_init(dev, 2);
@@ -2147,9 +2156,13 @@ int radeon_driver_load(struct drm_device *dev, unsigned long flags)
 	dev->max_vblank_count = 0x001fffff;
 #endif /* __linux__ */
 
+#ifdef __linux__
 	DRM_DEBUG("%s card detected\n",
-		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" :
-		    (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
+		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" : (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
+#else
+	DRM_INFO("%s card detected in radeon_driver_load()\n",
+		  ((dev_priv->flags & RADEON_IS_AGP) ? "AGP" : (((dev_priv->flags & RADEON_IS_PCIE) ? "PCIE" : "PCI"))));
+#endif
 
 	return ret;
 
@@ -2170,7 +2183,7 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return -ENOMEM;
 
-#ifdef __linux__
+#ifdef DRM_NEWER_PRESAREA
 	/* prebuild the SAREA */
 	sareapage = max_t(unsigned long, SAREA_MAX, PAGE_SIZE);
 	ret = drm_addmap(dev, 0, sareapage, _DRM_SHM, _DRM_CONTAINS_LOCK,
@@ -2182,7 +2195,7 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	}
 	master_priv->sarea_priv = master_priv->sarea->handle + sizeof(struct drm_sarea);
 	master_priv->sarea_priv->pfCurrentPage = 0;
-#endif /* __linux__ */
+#endif /* DRM_NEWER_PRESAREA */
 
 	master->driver_priv = master_priv;
 	return 0;
@@ -2257,7 +2270,7 @@ void radeon_commit_ring(drm_radeon_private_t *dev_priv)
 
 	/* check if the ring is padded out to 16-dword alignment */
 
-	tail_aligned = dev_priv->ring.tail & (RADEON_RING_ALIGN - 1);
+	tail_aligned = dev_priv->ring.tail & (RADEON_RING_ALIGN-1);
 	if (tail_aligned) {
 		int num_p2 = RADEON_RING_ALIGN - tail_aligned;
 
