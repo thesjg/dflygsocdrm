@@ -32,19 +32,18 @@
 
 #ifndef __linux__
 #include "porting/drm_porting_layer.h"
-#endif /* __linux__ */
+#endif /* !__linux__ */
 #include <drm_crtc.h>
 #include <drm_mode.h>
 #include <drm_edid.h>
 #include <drm_dp_helper.h>
-#include <drm_fixed.h>
 #ifdef __linux__
 #include <linux/i2c.h>
 #include <linux/i2c-id.h>
 #include <linux/i2c-algo-bit.h>
 #endif /* __linux__ */
+#include "radeon_fixed.h"
 
-struct radeon_bo;
 struct radeon_device;
 
 #define to_radeon_crtc(x) container_of(x, struct radeon_crtc, base)
@@ -71,16 +70,6 @@ enum radeon_tv_std {
 	TV_STD_PAL_N,
 };
 
-enum radeon_hpd_id {
-	RADEON_HPD_1 = 0,
-	RADEON_HPD_2,
-	RADEON_HPD_3,
-	RADEON_HPD_4,
-	RADEON_HPD_5,
-	RADEON_HPD_6,
-	RADEON_HPD_NONE = 0xff,
-};
-
 /* radeon gpio-based i2c
  * 1. "mask" reg and bits
  *    grabs the gpio pins for software use
@@ -100,7 +89,7 @@ struct radeon_i2c_bus_rec {
 	/* id used by atom */
 	uint8_t i2c_id;
 	/* id used by atom */
-	enum radeon_hpd_id hpd;
+	uint8_t hpd_id;
 	/* can be used with hw i2c engine */
 	bool hw_capable;
 	/* uses multi-media i2c engine */
@@ -218,8 +207,6 @@ enum radeon_dvo_chip {
 	DVO_SIL1178,
 };
 
-struct radeon_fbdev;
-
 struct radeon_mode_info {
 	struct atom_context *atom_context;
 	struct card_info *atom_card_info;
@@ -236,9 +223,6 @@ struct radeon_mode_info {
 	struct drm_property *tmds_pll_property;
 	/* hardcoded DFP edid from BIOS */
 	struct edid *bios_hardcoded_edid;
-
-	/* pointer to fbdev info structure */
-	struct radeon_fbdev *rfbdev;
 };
 
 #define MAX_H_CODE_TIMING_LEN 32
@@ -360,7 +344,6 @@ struct radeon_encoder {
 	enum radeon_rmx_type rmx_type;
 	struct drm_display_mode native_mode;
 	void *enc_priv;
-	int audio_polling_active;
 	int hdmi_offset;
 	int hdmi_config_offset;
 	int hdmi_audio_workaround;
@@ -383,6 +366,16 @@ struct radeon_gpio_rec {
 	u8 id;
 	u32 reg;
 	u32 mask;
+};
+
+enum radeon_hpd_id {
+	RADEON_HPD_NONE = 0,
+	RADEON_HPD_1,
+	RADEON_HPD_2,
+	RADEON_HPD_3,
+	RADEON_HPD_4,
+	RADEON_HPD_5,
+	RADEON_HPD_6,
 };
 
 struct radeon_hpd {
@@ -544,10 +537,11 @@ extern void radeon_crtc_fb_gamma_set(struct drm_crtc *crtc, u16 red, u16 green,
 				     u16 blue, int regno);
 extern void radeon_crtc_fb_gamma_get(struct drm_crtc *crtc, u16 *red, u16 *green,
 				     u16 *blue, int regno);
-void radeon_framebuffer_init(struct drm_device *dev,
-			     struct radeon_framebuffer *rfb,
-			     struct drm_mode_fb_cmd *mode_cmd,
-			     struct drm_gem_object *obj);
+struct drm_framebuffer *radeon_framebuffer_create(struct drm_device *dev,
+						  struct drm_mode_fb_cmd *mode_cmd,
+						  struct drm_gem_object *obj);
+
+int radeonfb_probe(struct drm_device *dev);
 
 int radeonfb_remove(struct drm_device *dev, struct drm_framebuffer *fb);
 bool radeon_get_legacy_connector_info_from_bios(struct drm_device *dev);
@@ -586,13 +580,4 @@ void radeon_legacy_tv_adjust_pll2(struct drm_encoder *encoder,
 void radeon_legacy_tv_mode_set(struct drm_encoder *encoder,
 			       struct drm_display_mode *mode,
 			       struct drm_display_mode *adjusted_mode);
-
-/* fbdev layer */
-int radeon_fbdev_init(struct radeon_device *rdev);
-void radeon_fbdev_fini(struct radeon_device *rdev);
-void radeon_fbdev_set_suspend(struct radeon_device *rdev, int state);
-int radeon_fbdev_total_size(struct radeon_device *rdev);
-bool radeon_fbdev_robj_is_fb(struct radeon_device *rdev, struct radeon_bo *robj);
-
-void radeon_fb_output_poll_changed(struct radeon_device *rdev);
 #endif

@@ -273,6 +273,7 @@ struct drm_radeon_master_private {
 	drm_radeon_sarea_t *sarea_priv;
 };
 
+#ifndef __linux__ /* legacy BSD */
 struct drm_radeon_kernel_chunk {
 	uint32_t chunk_id;
 	uint32_t length_dw;
@@ -312,10 +313,11 @@ struct drm_radeon_cs_priv {
 	int (*relocate)(struct drm_radeon_cs_parser *parser,
 			uint32_t *reloc, uint64_t *offset);
 };
+#endif /* !__linux__ */
 
 typedef struct drm_radeon_private {
 	drm_radeon_ring_buffer_t ring;
-#ifndef __linux__
+#if 0
 	drm_radeon_sarea_t *sarea_priv;
 #endif /* __linux__ */
 
@@ -401,17 +403,11 @@ typedef struct drm_radeon_private {
 
 	u32 scratch_ages[5];
 
-/* #ifdef __linux__ */
 	int have_z_offset;
-/* #endif */
 
 	/* starting from here on, data is preserved accross an open */
 	uint32_t flags;		/* see radeon_chip_flags */
-/* #ifdef __linux__ */
 	resource_size_t fb_aper_offset;
-#if 0
-	unsigned long fb_aper_offset;
-#endif
 
 	int num_gb_pipes;
 	int num_z_pipes;
@@ -436,7 +432,6 @@ typedef struct drm_radeon_private {
 	int r700_sc_prim_fifo_size;
 	int r700_sc_hiz_tile_fifo_size;
 	int r700_sc_earlyz_tile_fifo_fize;
-/* #ifdef __linux__ */
 	int r600_group_size;
 	int r600_npipes;
 	int r600_nbanks;
@@ -444,7 +439,6 @@ typedef struct drm_radeon_private {
 	struct mutex cs_mutex;
 	u32 cs_id_scnt;
 	u32 cs_id_wcnt;
-/* #endif */
 	/* r6xx/r7xx drm blit vertex buffer */
 	struct drm_buf *blit_vb;
 
@@ -2273,11 +2267,11 @@ do {								\
 	if ( RADEON_VERBOSE ) {						\
 		DRM_INFO( "BEGIN_RING( %d )\n", (n));			\
 	}								\
-	_align_nr = RADEON_RING_ALIGN - ((dev_priv->ring.tail + n) & (RADEON_RING_ALIGN - 1)); \
+	_align_nr = RADEON_RING_ALIGN - ((dev_priv->ring.tail + n) & (RADEON_RING_ALIGN-1));	\
 	_align_nr += n;							\
-	if ( dev_priv->ring.space <= (_align_nr) * sizeof(u32) ) {	\
-		COMMIT_RING();						\
-		radeon_wait_ring( dev_priv, (_align_nr) * sizeof(u32) ); \
+	if (dev_priv->ring.space <= (_align_nr * sizeof(u32))) {	\
+                COMMIT_RING();						\
+		radeon_wait_ring( dev_priv, _align_nr * sizeof(u32));	\
 	}								\
 	_nr = n; dev_priv->ring.space -= (n) * sizeof(u32);		\
 	ring = dev_priv->ring.start;					\
@@ -2368,5 +2362,6 @@ extern void radeon_commit_ring(drm_radeon_private_t *dev_priv);
 		drm_buffer_advance(_buf, _part_size);			\
 	}								\
 } while (0)
+
 
 #endif				/* __RADEON_DRV_H__ */
