@@ -37,6 +37,8 @@
 #include <linux/platform_device.h>
 #endif
 
+#define DRM_NEWER_RADEON_H 1
+
 #include "radeon_family.h"
 
 /* General customization:
