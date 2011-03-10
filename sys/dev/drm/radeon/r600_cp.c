@@ -2233,17 +2233,15 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
-#ifndef __linux__
+#ifndef DRM_NEWER_PRESAREA
 	master_priv->sarea_priv =
 	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
 				    init->sarea_priv_offset);
-#endif /* !__linux__ */
-
-#if 0
-	dev_priv->sarea_priv =
-	    (drm_radeon_sarea_t *) ((u8 *) dev_priv->sarea->handle +
-				    init->sarea_priv_offset);
-#endif
+	DRM_INFO("r600_do_init_cp(): sarea_priv = 0x%016lx, handle (%016lx) + sarea_priv_offset (0x%016lx)\n",
+		(unsigned long)master_priv->sarea_priv,
+		(unsigned long)master_priv->sarea->handle,
+		init->sarea_priv_offset);
+#endif /* !DRM_NEWER_PRESAREA */
 
 #if __OS_HAS_AGP
 	/* XXX */
@@ -2378,6 +2376,9 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
+#ifndef __linux__
+		DRM_INFO("r600_do_init_cp(): turn off pcie gart since RADEON_IS_AGP flag\n");
+#endif
 		/* XXX turn off pcie gart */
 	} else
 #endif
@@ -2409,9 +2410,15 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		dev_priv->gart_info.addr =
 			dev_priv->gart_info.mapping.handle;
 
+#ifdef __linux__
 		DRM_DEBUG("Setting phys_pci_gart to %p %08lX\n",
 			  dev_priv->gart_info.addr,
 			  dev_priv->pcigart_offset);
+#else
+		DRM_INFO("r600_do_init_cp(): Setting phys_pci_gart to addr (%p) pcigart_offset (%016lX)\n",
+			  dev_priv->gart_info.addr,
+			  dev_priv->pcigart_offset);
+#endif
 
 		if (!r600_page_table_init(dev)) {
 			DRM_ERROR("Failed to init GART table\n");

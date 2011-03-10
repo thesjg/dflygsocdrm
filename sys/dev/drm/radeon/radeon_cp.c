@@ -1337,10 +1337,11 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	master_priv->sarea_priv =
 	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
 				    init->sarea_priv_offset);
-	DRM_INFO("sarea_priv = 0x%016lx, from sarea_priv_offset = 0x%016lx\n",
+	DRM_INFO("radeon_do_init_cp(): sarea_priv = 0x%016lx, handle (%016lx) + sarea_priv_offset (0x%016lx)\n",
 		(unsigned long)master_priv->sarea_priv,
+		(unsigned long)master_priv->sarea->handle,
 		init->sarea_priv_offset);
-#endif /* DRM_NEWER_PRESAREA */
+#endif /* !DRM_NEWER_PRESAREA */
 
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
@@ -1464,6 +1465,7 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
+		DRM_INFO("radeon_do_cp_init(): Turn off PCI_GART\n");
 		/* Turn off PCI GART */
 		radeon_set_pcigart(dev_priv, 0);
 	} else
