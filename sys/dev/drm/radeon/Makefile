@@ -6,6 +6,7 @@ NO_MAN	= YES
 SRCS    = \
 	r300_cmdbuf.c \
 	r600_blit.c \
+	r600_blit_shaders.c \
 	r600_cp.c \
 	radeon_cp.c \
 	radeon_cs_legacy.c \

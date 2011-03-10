@@ -33,9 +33,16 @@
 
 #include "drmP.h"
 #include "drm.h"
+#ifdef DRM_NEWER_RCMD
+#include "drm_buffer.h"
+#endif
 #include "radeon_drm.h"
 #include "radeon_drv.h"
 #include "r300_reg.h"
+
+#ifdef __linux__
+#include <asm/unaligned.h>
+#endif
 
 #define R300_SIMULTANEOUS_CLIPRECTS		4
 
@@ -233,11 +240,16 @@ void r300_init_reg_flags(struct drm_device *dev)
 	ADD_RANGE_MARK(R300_ZB_DEPTHOFFSET, 1, MARK_CHECK_OFFSET);	/* check offset */
 	ADD_RANGE(R300_ZB_DEPTHPITCH, 1);
 	ADD_RANGE(R300_ZB_DEPTHCLEARVALUE, 1);
+#ifdef DRM_NEWER_SCREEN
+	ADD_RANGE(R300_ZB_ZMASK_OFFSET, 13);
+	ADD_RANGE(R300_ZB_ZPASS_DATA, 2); /* ZB_ZPASS_DATA, ZB_ZPASS_ADDR */
+#else
 	ADD_RANGE(R300_ZB_ZMASK_OFFSET, 5);
 	ADD_RANGE(R300_ZB_HIZ_OFFSET, 5);
 	ADD_RANGE(R300_ZB_ZPASS_DATA, 1);
 	ADD_RANGE_MARK(R300_ZB_ZPASS_ADDR, 1, MARK_CHECK_OFFSET);       /* check offset */
 	ADD_RANGE(R300_ZB_DEPTHXY_OFFSET, 1)
+#endif
 
 	ADD_RANGE(R300_TX_FILTER_0, 16);
 	ADD_RANGE(R300_TX_FILTER1_0, 16);
@@ -307,9 +319,8 @@ static __inline__ int r300_emit_carefully_checked_packet0(drm_radeon_private_t *
 	reg = (header.packet0.reghi << 8) | header.packet0.reglo;
 
 	if ((sz > 64) || (sz < 0)) {
-		DRM_ERROR
-		    ("Cannot emit more than 64 values at a time (reg=%04x sz=%d)\n",
-		     reg, sz);
+		DRM_ERROR("Cannot emit more than 64 values at a time (reg=%04x sz=%d)\n",
+			 reg, sz);
 		return -EINVAL;
 	}
 	for (i = 0; i < sz; i++) {
@@ -319,15 +330,14 @@ static __inline__ int r300_emit_carefully_checked_packet0(drm_radeon_private_t *
 			break;
 		case MARK_CHECK_OFFSET:
 			if (!radeon_check_offset(dev_priv, (u32) values[i])) {
-				DRM_ERROR
-				    ("Offset failed range check (reg=%04x sz=%d)\n",
-				     reg, sz);
+				DRM_ERROR("Offset failed range check (reg=%04x sz=%d)\n",
+					 reg, sz);
 				return -EINVAL;
 			}
 			break;
 		default:
 			DRM_ERROR("Register %04x failed check as flag=%02x\n",
-				  reg + i * 4, r300_reg_flags[(reg >> 2) + i]);
+				reg + i * 4, r300_reg_flags[(reg >> 2) + i]);
 			return -EINVAL;
 		}
 	}
@@ -942,7 +952,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 		return -EINVAL;
 	}
 
-	dev_priv->scratch_ages[header.scratch.reg] ++;
+	dev_priv->scratch_ages[header.scratch.reg]++;
 
 	ref_age_base = (u32 *)(unsigned long)*((uint64_t *)cmdbuf->buf);
 
@@ -961,9 +971,8 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 			return -EINVAL;
 		}
 
-		if (h_pending == 0) {
+		if (h_pending == 0)
 			return -EINVAL;
-		}
 
 		h_pending--;
 
@@ -988,14 +997,14 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
  * the graphics card.
  * Called by r300_do_cp_cmdbuf.
  */
-static __inline__ int r300_emit_r500fp(drm_radeon_private_t *dev_priv,
+static inline int r300_emit_r500fp(drm_radeon_private_t *dev_priv,
 				       drm_radeon_kcmd_buffer_t *cmdbuf,
 				       drm_r300_cmd_header_t header)
 {
 	int sz;
 	int addr;
 	int type;
-	int clamp;
+	int isclamp;
 	int stride;
 	RING_LOCALS;
 
@@ -1004,10 +1013,10 @@ static __inline__ int r300_emit_r500fp(drm_radeon_private_t *dev_priv,
 	addr = ((header.r500fp.adrhi_flags & 1) << 8) | header.r500fp.adrlo;
 
 	type = !!(header.r500fp.adrhi_flags & R500FP_CONSTANT_TYPE);
-	clamp = !!(header.r500fp.adrhi_flags & R500FP_CONSTANT_CLAMP);
+	isclamp = !!(header.r500fp.adrhi_flags & R500FP_CONSTANT_CLAMP);
 
 	addr |= (type << 16);
-	addr |= (clamp << 17);
+	addr |= (isclamp << 17);
 
 	stride = type ? 4 : 6;
 

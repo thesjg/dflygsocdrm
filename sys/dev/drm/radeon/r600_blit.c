@@ -30,6 +30,9 @@
 #include "radeon_drm.h"
 #include "radeon_drv.h"
 
+#include "r600_blit_shaders.h"
+
+#if 0
 static u32 r6xx_default_state[] =
 {
 	0xc0002400,
@@ -1093,25 +1096,36 @@ static u32 r6xx_ps[] =
 	0xb0800000,
 	0x00000000,
 };
+#endif /* 0 */
 
-#ifndef __linux__ /* from r600_blit_shaders.c */
+#if 0 /* from r600_blit_shaders.c */
 const u32 r6xx_ps_size = ARRAY_SIZE(r6xx_ps);
 const u32 r6xx_vs_size = ARRAY_SIZE(r6xx_vs);
 const u32 r6xx_default_size = ARRAY_SIZE(r6xx_default_state);
 const u32 r7xx_default_size = ARRAY_SIZE(r7xx_default_state);
 #endif
 
-#define DI_PT_RECTLIST 0x11
-#define DI_INDEX_SIZE_16_BIT 0x0
+#define DI_PT_RECTLIST        0x11
+#define DI_INDEX_SIZE_16_BIT  0x0
 #define DI_SRC_SEL_AUTO_INDEX 0x2
 
+#define FMT_8                 0x1
+#define FMT_5_6_5             0x8
+#define FMT_8_8_8_8           0x1a
+#define COLOR_8               0x1
+#define COLOR_5_6_5           0x8
+#define COLOR_8_8_8_8         0x1a
+
+#if 0
 #define FMT_8 1
 #define FMT_5_6_5 8
 #define FMT_8_8_8_8 0x1a
 #define COLOR_8 1
 #define COLOR_5_6_5 8
 #define COLOR_8_8_8_8 0x1a
+#endif
 
+#if 0
 #define R600_CB0_DEST_BASE_ENA (1 << 6)
 #define R600_TC_ACTION_ENA (1 << 23)
 #define R600_VC_ACTION_ENA (1 << 24)
@@ -1202,6 +1216,7 @@ const u32 r7xx_default_size = ARRAY_SIZE(r7xx_default_state);
 #define R600_IT_SET_SAMPLER                       0x00006E00
 #define R600_IT_SET_CTL_CONST                     0x00006F00
 #define R600_IT_SURFACE_BASE_UPDATE               0x00007300
+#endif
 
 static inline void
 set_render_target(drm_radeon_private_t *dev_priv, int format, int w, int h, u64 gpu_addr)
@@ -1235,27 +1250,27 @@ set_render_target(drm_radeon_private_t *dev_priv, int format, int w, int h, u64 
 	}
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_CB_COLOR0_SIZE - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_CB_COLOR0_SIZE - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING((pitch << 0) | (slice << 10));
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_CB_COLOR0_VIEW - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_CB_COLOR0_VIEW - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(0);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_CB_COLOR0_INFO - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_CB_COLOR0_INFO - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(cb_color_info);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_CB_COLOR0_TILE - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_CB_COLOR0_TILE - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(0);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_CB_COLOR0_FRAG - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_CB_COLOR0_FRAG - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(0);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_CB_COLOR0_MASK - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_CB_COLOR0_MASK - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(0);
 
 	ADVANCE_RING();
@@ -1288,7 +1303,7 @@ set_shaders(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	u64 gpu_addr;
-	int shader_size, i;
+	int i;
 	u32 *vs, *ps;
 	uint32_t sq_pgm_resources;
 	RING_LOCALS;
@@ -1298,14 +1313,6 @@ set_shaders(struct drm_device *dev)
 	vs = (u32 *) ((char *)dev->agp_buffer_map->handle + dev_priv->blit_vb->offset);
 	ps = (u32 *) ((char *)dev->agp_buffer_map->handle + dev_priv->blit_vb->offset + 256);
 
-#if 0
-	shader_size = sizeof(r6xx_vs) / 4;
-	for (i= 0; i < shader_size; i++)
-		vs[i] = r6xx_vs[i];
-	shader_size = sizeof(r6xx_ps) / 4;
-	for (i= 0; i < shader_size; i++)
-		ps[i] = r6xx_ps[i];
-#endif
 	for (i = 0; i < r6xx_vs_size; i++)
 		vs[i] = r6xx_vs[i];
 	for (i = 0; i < r6xx_ps_size; i++)
@@ -1321,32 +1328,32 @@ set_shaders(struct drm_device *dev)
 	BEGIN_RING(9 + 12);
 	/* VS */
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_SQ_PGM_START_VS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_PGM_START_VS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(gpu_addr >> 8);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_SQ_PGM_RESOURCES_VS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_PGM_RESOURCES_VS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(sq_pgm_resources);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_SQ_PGM_CF_OFFSET_VS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_PGM_CF_OFFSET_VS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(0);
 
 	/* PS */
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_SQ_PGM_START_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_PGM_START_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING((gpu_addr + 256) >> 8);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_SQ_PGM_RESOURCES_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_PGM_RESOURCES_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(sq_pgm_resources | (1 << 28));
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_SQ_PGM_EXPORTS_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_PGM_EXPORTS_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(2);
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 1));
-        OUT_RING((R600_SQ_PGM_CF_OFFSET_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_PGM_CF_OFFSET_PS - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING(0);
 	ADVANCE_RING();
 
@@ -1433,17 +1440,17 @@ set_scissors(drm_radeon_private_t *dev_priv, int x1, int y1, int x2, int y2)
 
 	BEGIN_RING(12);
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 2));
-        OUT_RING((R600_PA_SC_SCREEN_SCISSOR_TL - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_PA_SC_SCREEN_SCISSOR_TL - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING((x1 << 0) | (y1 << 16));
 	OUT_RING((x2 << 0) | (y2 << 16));
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 2));
-        OUT_RING((R600_PA_SC_GENERIC_SCISSOR_TL - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_PA_SC_GENERIC_SCISSOR_TL - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING((x1 << 0) | (y1 << 16) | (1 << 31));
 	OUT_RING((x2 << 0) | (y2 << 16));
 
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONTEXT_REG, 2));
-        OUT_RING((R600_PA_SC_WINDOW_SCISSOR_TL - R600_SET_CONTEXT_REG_OFFSET) >> 2);
+	OUT_RING((R600_PA_SC_WINDOW_SCISSOR_TL - R600_SET_CONTEXT_REG_OFFSET) >> 2);
 	OUT_RING((x1 << 0) | (y1 << 16) | (1 << 31));
 	OUT_RING((x2 << 0) | (y2 << 16));
 	ADVANCE_RING();
@@ -1457,7 +1464,7 @@ draw_auto(drm_radeon_private_t *dev_priv)
 
 	BEGIN_RING(10);
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONFIG_REG, 1));
-        OUT_RING((R600_VGT_PRIMITIVE_TYPE - R600_SET_CONFIG_REG_OFFSET) >> 2);
+	OUT_RING((R600_VGT_PRIMITIVE_TYPE - R600_SET_CONFIG_REG_OFFSET) >> 2);
 	OUT_RING(DI_PT_RECTLIST);
 
 	OUT_RING(CP_PACKET3(R600_IT_INDEX_TYPE, 0));
@@ -1477,7 +1484,7 @@ draw_auto(drm_radeon_private_t *dev_priv)
 static inline void
 set_default_state(drm_radeon_private_t *dev_priv)
 {
-	int default_state_dw, i;
+	int i;
 	u32 sq_config, sq_gpr_resource_mgmt_1, sq_gpr_resource_mgmt_2;
 	u32 sq_thread_resource_mgmt, sq_stack_resource_mgmt_1, sq_stack_resource_mgmt_2;
 	int num_ps_gprs, num_vs_gprs, num_temp_gprs, num_gs_gprs, num_es_gprs;
@@ -1630,26 +1637,19 @@ set_default_state(drm_radeon_private_t *dev_priv)
 				    R600_NUM_ES_STACK_ENTRIES(num_es_stack_entries));
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RV770) {
-		default_state_dw = sizeof(r7xx_default_state) / 4;
-		BEGIN_RING(default_state_dw + 10);
-		for (i = 0; i < default_state_dw; i++)
+		BEGIN_RING(r7xx_default_size + 10);
+		for (i = 0; i < r7xx_default_size; i++)
 			OUT_RING(r7xx_default_state[i]);
 	} else {
 		BEGIN_RING(r6xx_default_size + 10);
 		for (i = 0; i < r6xx_default_size; i++)
 			OUT_RING(r6xx_default_state[i]);
-#if 0
-		default_state_dw = sizeof(r6xx_default_state) / 4;
-		BEGIN_RING(default_state_dw + 10);
-		for (i = 0; i < default_state_dw; i++)
-			OUT_RING(r6xx_default_state[i]);
-#endif
 	}
 	OUT_RING(CP_PACKET3(R600_IT_EVENT_WRITE, 0));
 	OUT_RING(R600_CACHE_FLUSH_AND_INV_EVENT);
 	/* SQ config */
 	OUT_RING(CP_PACKET3(R600_IT_SET_CONFIG_REG, 6));
-        OUT_RING((R600_SQ_CONFIG - R600_SET_CONFIG_REG_OFFSET) >> 2);
+	OUT_RING((R600_SQ_CONFIG - R600_SET_CONFIG_REG_OFFSET) >> 2);
 	OUT_RING(sq_config);
 	OUT_RING(sq_gpr_resource_mgmt_1);
 	OUT_RING(sq_gpr_resource_mgmt_2);
@@ -1675,7 +1675,7 @@ static inline uint32_t i2f(uint32_t input)
 			else {
 				fraction = fraction << 1; /* keep
 							     shifting left until top bit = 1 */
-				exponent = exponent -1;
+				exponent = exponent - 1;
 			}
 		}
 		result = exponent << 23 | (fraction & 0x7fffff); /* mask
@@ -1683,6 +1683,7 @@ static inline uint32_t i2f(uint32_t input)
 	}
 	return result;
 }
+
 
 static inline int r600_nomm_get_vb(struct drm_device *dev)
 {
@@ -1719,19 +1720,13 @@ r600_prepare_blit_copy(struct drm_device *dev, struct drm_file *file_priv)
 	r600_nomm_get_vb(dev);
 
 	dev_priv->blit_vb->file_priv = file_priv;
-#if 0
-	dev_priv->blit_vb = radeon_freelist_get(dev);
-	if (!dev_priv->blit_vb) {
-		DRM_ERROR("Unable to allocate vertex buffer for blit\n");
-		return -EAGAIN;
-	}
-#endif
 
 	set_default_state(dev_priv);
 	set_shaders(dev);
 
 	return 0;
 }
+
 
 void
 r600_done_blit_copy(struct drm_device *dev)
@@ -1752,10 +1747,6 @@ r600_done_blit_copy(struct drm_device *dev)
 	COMMIT_RING();
 
 	r600_nomm_put_vb(dev);
-#if 0
-	dev_priv->blit_vb->used = 0;
-	radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
-#endif
 }
 
 void
@@ -1769,15 +1760,7 @@ r600_blit_copy(struct drm_device *dev,
 	u32 *vb;
 
 	vb = r600_nomm_get_vb_ptr(dev);
-#if 0
-	vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
-	    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
-#endif
-#if 0
-	DRM_DEBUG("src=0x%016llx, dst=0x%016llx, size=%d\n",
-	    (unsigned long long)src_gpu_addr,
-	    (unsigned long long)dst_gpu_addr, size_bytes);
-#endif
+
 	if ((size_bytes & 3) || (src_gpu_addr & 3) || (dst_gpu_addr & 3)) {
 		max_bytes = 8192;
 
@@ -1810,19 +1793,10 @@ r600_blit_copy(struct drm_device *dev,
 
 				r600_nomm_put_vb(dev);
 				r600_nomm_get_vb(dev);
-#if 0
-				dev_priv->blit_vb->used = 0;
-				radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
-				dev_priv->blit_vb = radeon_freelist_get(dev);
-#endif
 				if (!dev_priv->blit_vb)
 					return;
 				set_shaders(dev);
 				vb = r600_nomm_get_vb_ptr(dev);
-#if 0
-				vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
-				    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
-#endif
 			}
 
 			vb[0] = i2f(dst_x);
@@ -1858,7 +1832,7 @@ r600_blit_copy(struct drm_device *dev,
 
 			/* Vertex buffer setup */
 			vb_addr = dev_priv->gart_buffers_offset +
-                                dev_priv->blit_vb->offset +
+				dev_priv->blit_vb->offset +
 				dev_priv->blit_vb->used;
 			set_vtx_resource(dev_priv, vb_addr);
 
@@ -1897,7 +1871,7 @@ r600_blit_copy(struct drm_device *dev,
 					cur_size = max_bytes;
 			} else {
 				if (cur_size > max_bytes)
-				    cur_size = max_bytes;
+					cur_size = max_bytes;
 				if (cur_size > (max_bytes - dst_x))
 					cur_size = (max_bytes - dst_x);
 				if (cur_size > (max_bytes - src_x))
@@ -1907,19 +1881,11 @@ r600_blit_copy(struct drm_device *dev,
 			if ((dev_priv->blit_vb->used + 48) > dev_priv->blit_vb->total) {
 				r600_nomm_put_vb(dev);
 				r600_nomm_get_vb(dev);
-#if 0
-				dev_priv->blit_vb->used = 0;
-				radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
-				dev_priv->blit_vb = radeon_freelist_get(dev);
-#endif
 				if (!dev_priv->blit_vb)
 					return;
+
 				set_shaders(dev);
 				vb = r600_nomm_get_vb_ptr(dev);
-#if 0
-				vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
-				    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
-#endif
 			}
 
 			vb[0] = i2f(dst_x / 4);
@@ -1956,7 +1922,7 @@ r600_blit_copy(struct drm_device *dev,
 
 			/* Vertex buffer setup */
 			vb_addr = dev_priv->gart_buffers_offset +
-                                dev_priv->blit_vb->offset +
+				dev_priv->blit_vb->offset +
 				dev_priv->blit_vb->used;
 			set_vtx_resource(dev_priv, vb_addr);
 
@@ -1993,20 +1959,12 @@ r600_blit_swap(struct drm_device *dev,
 
 		r600_nomm_put_vb(dev);
 		r600_nomm_get_vb(dev);
-#if 0
-		dev_priv->blit_vb->used = 0;
-		radeon_cp_discard_buffer(dev, dev_priv->blit_vb);
-		dev_priv->blit_vb = radeon_freelist_get(dev);
-#endif
 		if (!dev_priv->blit_vb)
 			return;
+
 		set_shaders(dev);
 	}
 	vb = r600_nomm_get_vb_ptr(dev);
-#if 0
-	vb = (u32 *) ((char *)dev->agp_buffer_map->handle +
-	    dev_priv->blit_vb->offset + dev_priv->blit_vb->used);
-#endif
 
 	sx2 = sx + w;
 	sy2 = sy + h;
