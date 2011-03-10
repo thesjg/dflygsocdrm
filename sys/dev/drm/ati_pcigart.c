@@ -191,19 +191,22 @@ EXPORT_SYMBOL(drm_ati_pcigart_cleanup);
 
 int drm_ati_pcigart_init(struct drm_device *dev, struct drm_ati_pcigart_info *gart_info)
 {
+#ifdef DRM_NEWER_PCIGART
 	struct drm_local_map *map = &gart_info->mapping;
+#endif
 	struct drm_sg_mem *entry = dev->sg;
 	void *address = NULL;
 	unsigned long pages;
 	u32 *pci_gart = NULL, page_base, gart_idx;
 	dma_addr_t bus_address = 0;
 	int i, j, ret = 0;
+#ifdef DRM_NEWER_PCIGART
 	int max_ati_pages, max_real_pages;
-
+#else
 	dma_addr_t entry_addr;
 	int max_pages;
+#endif
 
-	/* we need to support large memory configurations */
 	if (!entry) {
 		DRM_ERROR("no scatter/gather memory!\n");
 		goto done;
@@ -231,7 +234,7 @@ int drm_ati_pcigart_init(struct drm_device *dev, struct drm_ati_pcigart_info *ga
 		bus_address = gart_info->dmah->busaddr;
 #endif
 
-#if __linux__
+#if DRM_NEWER_PCIGART
 		pci_gart = gart_info->table_handle->vaddr;
 #endif
 		address = gart_info->table_handle->vaddr;
@@ -239,19 +242,25 @@ int drm_ati_pcigart_init(struct drm_device *dev, struct drm_ati_pcigart_info *ga
 	} else {
 		address = gart_info->addr;
 		bus_address = gart_info->bus_addr;
-#if 0
-		DRM_DEBUG("PCI: Gart Table: VRAM %08X mapped at %08lX\n",
-			  (unsigned int)bus_address, (unsigned long)address);
-#endif
 		DRM_DEBUG("PCI: Gart Table: VRAM %08LX mapped at %08lX\n",
 			  (unsigned long long)bus_address,
 			  (unsigned long)address);
 	}
 
-	pci_gart = (u32 *) address;
-
+#ifdef DRM_NEWER_PCIGART
 	max_ati_pages = (gart_info->table_size / sizeof(u32));
 	max_real_pages = max_ati_pages / (PAGE_SIZE / ATI_PCIGART_PAGE_SIZE);
+	pages = (entry->pages <= max_real_pages)
+	    ? entry->pages : max_real_pages;
+
+	if (gart_info->gart_table_location == DRM_ATI_GART_MAIN) {
+		memset(pci_gart, 0, max_ati_pages * sizeof(u32));
+	} else {
+		memset_io((void __iomem *)map->handle, 0, max_ati_pages * sizeof(u32));
+	}
+#else /* !DRM_NEWER_PCIGART */
+	pci_gart = (u32 *) address;
+
 	max_pages = (gart_info->table_size / sizeof(u32));
 	pages = (dev->sg->pages <= max_pages)
 	    ? dev->sg->pages : max_pages;
@@ -259,11 +268,57 @@ int drm_ati_pcigart_init(struct drm_device *dev, struct drm_ati_pcigart_info *ga
 	memset(pci_gart, 0, max_pages * sizeof(u32));
 
 	KASSERT(PAGE_SIZE >= ATI_PCIGART_PAGE_SIZE, ("page size too small"));
+#endif /* !DRM_NEWER_PCIGART */
 
 	gart_idx = 0;
 	for (i = 0; i < pages; i++) {
+		/* we need to support large memory configurations */
+#ifdef __linux__
+		entry->busaddr[i] = pci_map_page(dev->pdev, entry->pagelist[i],
+						 0, PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
+		if (entry->busaddr[i] == 0) {
+			DRM_ERROR("unable to map PCIGART pages!\n");
+			drm_ati_pcigart_cleanup(dev, gart_info);
+			address = NULL;
+			bus_address = 0;
+			goto done;
+		}
+#endif /* __linux__ */
+
+#ifdef DRM_NEWER_PCIGART
+		if ((unsigned long)entry->busaddr[i] > 0xFFFFFFFFUL) {
+			DRM_ERROR("Over 32-bit ptr busaddr[%d] (%016lx)\n",
+				i, (unsigned long)entry->busaddr[i]);
+		}
+		page_base = (u32) entry->busaddr[i];
+#else
 		entry_addr = dev->sg->busaddr[i];
+#endif
+
 		for (j = 0; j < (PAGE_SIZE / ATI_PCIGART_PAGE_SIZE); j++) {
+#ifdef DRM_NEWER_PCIGART
+			u32 val;
+
+			switch(gart_info->gart_reg_if) {
+			case DRM_ATI_GART_IGP:
+				val = page_base | 0xc;
+				break;
+			case DRM_ATI_GART_PCIE:
+				val = (page_base >> 8) | 0xc;
+				break;
+			default:
+			case DRM_ATI_GART_PCI:
+				val = page_base;
+				break;
+			}
+			if (gart_info->gart_table_location ==
+			    DRM_ATI_GART_MAIN)
+				pci_gart[gart_idx] = cpu_to_le32(val);
+			else
+				DRM_WRITE32(map, gart_idx * sizeof(u32), val);
+			gart_idx++;
+			page_base += ATI_PCIGART_PAGE_SIZE;
+#else /* !DRM_NEWER_PCIGART */
 			page_base = (u32) entry_addr & ATI_PCIGART_PAGE_MASK;
 			switch(gart_info->gart_reg_if) {
 			case DRM_ATI_GART_IGP:
@@ -284,6 +339,7 @@ int drm_ati_pcigart_init(struct drm_device *dev, struct drm_ati_pcigart_info *ga
 			*pci_gart = cpu_to_le32(page_base);
 			pci_gart++;
 			entry_addr += ATI_PCIGART_PAGE_SIZE;
+#endif /* !DRM_NEWER_PCIGART */
 		}
 	}
 	ret = 1;

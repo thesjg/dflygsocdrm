@@ -2130,8 +2130,8 @@ memcpy(void *src, void *dst, size_t size) {
 /* file ati_pcigart.c, function drm_ati_pcigart_init() */
 /* directive __iomem */
 static __inline__ void
-memset_io(void * handle, uint32_t zero, int size) {
-	;
+memset_io(void * handle, uint32_t value, int size) {
+	memset(handle, value, size);
 }
 
 static __inline__ void

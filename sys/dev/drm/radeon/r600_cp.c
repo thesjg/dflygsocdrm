@@ -190,15 +190,34 @@ int r600_page_table_init(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_ati_pcigart_info *gart_info = &dev_priv->gart_info;
+#ifdef DRM_NEWER_PCIGART
+	struct drm_local_map *map = &gart_info->mapping;
+#endif
 	struct drm_sg_mem *entry = dev->sg;
 	int ret = 0;
 	int i, j;
+#ifdef DRM_NEWER_PCIGART
+	int pages;
+	u64 page_base;
+#else
 	int max_pages, pages;
 	u64 *pci_gart, page_base;
+#endif
 	dma_addr_t entry_addr;
+#ifdef DRM_NEWER_PCIGART
+	int max_ati_pages, max_real_pages, gart_idx;
+#endif
 
 	/* okay page table is available - lets rock */
+#ifdef DRM_NEWER_PCIGART
+	max_ati_pages = (gart_info->table_size / sizeof(u64));
+	max_real_pages = max_ati_pages / (PAGE_SIZE / ATI_PCIGART_PAGE_SIZE);
 
+	pages = (entry->pages <= max_real_pages) ?
+		entry->pages : max_real_pages;
+
+	memset_io((void __iomem *)map->handle, 0, max_ati_pages * sizeof(u64));
+#else
 	/* PTEs are 64-bits */
 	pci_gart = (u64 *)gart_info->addr;
 
@@ -206,7 +225,11 @@ int r600_page_table_init(struct drm_device *dev)
 	pages = (entry->pages <= max_pages) ? entry->pages : max_pages;
 
 	memset(pci_gart, 0, max_pages * sizeof(u64));
+#endif /* !DRM_NEWER_PCIGART */
 
+#ifdef DRM_NEWER_PCIGART
+	gart_idx = 0;
+#endif
 	for (i = 0; i < pages; i++) {
 #ifdef __linux__
 		entry->busaddr[i] = pci_map_page(dev->pdev,
@@ -225,12 +248,22 @@ int r600_page_table_init(struct drm_device *dev)
 			page_base |= R600_PTE_VALID | R600_PTE_SYSTEM | R600_PTE_SNOOPED;
 			page_base |= R600_PTE_READABLE | R600_PTE_WRITEABLE;
 
+#ifdef DRM_NEWER_PCIGART
+			DRM_WRITE64(map, gart_idx * sizeof(u64), page_base);
+
+			gart_idx++;
+
+			if ((i % 128) == 0)
+				DRM_DEBUG("page entry %d: 0x%016llx\n",
+				    i, (unsigned long long)page_base);
+#else /* !DRM_NEWER_PCIGART */
 			*pci_gart = page_base;
 
 			if ((i % 128) == 0)
 				DRM_DEBUG("page entry %d: 0x%016llx\n",
 				    i, (unsigned long long)page_base);
 			pci_gart++;
+#endif /* !DRM_NEWER_PCIGART */
 			entry_addr += ATI_PCIGART_PAGE_SIZE;
 		}
 	}
