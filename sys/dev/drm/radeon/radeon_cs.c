@@ -221,6 +221,10 @@ int radeon_cs_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 	int r;
 
 	mutex_lock(&rdev->cs_mutex);
+	if (rdev->gpu_lockup) {
+		mutex_unlock(&rdev->cs_mutex);
+		return -EINVAL;
+	}
 	/* initialize parser */
 	memset(&parser, 0, sizeof(struct radeon_cs_parser));
 	parser.filp = filp;
@@ -289,7 +293,7 @@ int radeon_cs_finish_pages(struct radeon_cs_parser *p)
 			if (size == 0)
 				size = PAGE_SIZE;
 		}
-
+		
 		if (DRM_COPY_FROM_USER(p->ib->ptr + (i * (PAGE_SIZE/4)),
 				       ibc->user_ptr + (i * PAGE_SIZE),
 				       size))

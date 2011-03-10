@@ -31,6 +31,9 @@
 
 #include "drmP.h"
 #include "drm.h"
+#ifdef DRM_NEWER_RCMD
+#include "drm_buffer.h"
+#endif
 #include "drm_sarea.h"
 #include "radeon_drm.h"
 #include "radeon_drv.h"
@@ -41,7 +44,7 @@
 
 static __inline__ int radeon_check_and_fixup_offset(drm_radeon_private_t *
 						    dev_priv,
-						    struct drm_file *file_priv,
+						    struct drm_file * file_priv,
 						    u32 *offset)
 {
 	u64 off = *offset;
@@ -103,6 +106,9 @@ static __inline__ int radeon_check_and_fixup_packets(drm_radeon_private_t *
 			DRM_ERROR("Invalid depth buffer offset\n");
 			return -EINVAL;
 		}
+#ifdef DRM_NEWER_SCREEN
+		dev_priv->have_z_offset = 1;
+#endif
 		break;
 
 	case RADEON_EMIT_PP_CNTL:
@@ -171,7 +177,7 @@ static __inline__ int radeon_check_and_fixup_packets(drm_radeon_private_t *
 		}
 		break;
 
-	case R200_EMIT_VAP_CTL: {
+	case R200_EMIT_VAP_CTL:{
 			RING_LOCALS;
 			BEGIN_RING(2);
 			OUT_RING_REG(RADEON_SE_TCL_STATE_FLUSH, 0);
@@ -879,13 +885,19 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 			flags |= RADEON_FRONT;
 	}
 
-#ifdef __linux__
+#ifdef DRM_NEWER_SCREEN
 	if (flags & (RADEON_DEPTH|RADEON_STENCIL)) {
-		if (!dev_priv->have_z_offset)
+		if (!dev_priv->have_z_offset) {
+#ifdef __linux__
 			printk_once(KERN_ERR "radeon: illegal depth clear request. Buggy mesa detected - please update.\n");
-		flags &= ~(RADEON_DEPTH | RADEON_STENCIL);
+#else
+			DRM_ERROR("radeon: illegal depth clear request. Buggy mesa detected - please update.\n");
+
+#endif
+			flags &= ~(RADEON_DEPTH | RADEON_STENCIL);
+		}
 	}
-#endif /* __linux__ */
+#endif
 
 	if (flags & (RADEON_FRONT | RADEON_BACK)) {
 
@@ -1075,7 +1087,7 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 					/* judging by the first tile offset needed, could possibly
 					   directly address/clear 4x4 tiles instead of 8x2 * 4x4
 					   macro tiles, though would still need clear mask for
-					   right/bottom if truely 4x4 granularity is desired ? */
+					   right/bottom if truly 4x4 granularity is desired ? */
 					OUT_RING(tileoffset * 16);
 					/* the number of tiles to clear */
 					OUT_RING(nrtilesx + 1);
@@ -1960,7 +1972,7 @@ static void radeon_apply_surface_regs(int surf_index,
  * Note that refcount can be at most 2, since during a free refcount=3
  * might mean we have to allocate a new surface which might not always
  * be available.
- * For example : we allocate three contigous surfaces ABC. If B is
+ * For example : we allocate three contiguous surfaces ABC. If B is
  * freed, we suddenly need two surfaces to store A and C, which might
  * not always be available.
  */
@@ -1996,7 +2008,7 @@ static int alloc_surface(drm_radeon_surface_alloc_t *new,
 
 	/* find a virtual surface */
 	for (i = 0; i < 2 * RADEON_MAX_SURFACES; i++)
-		if (dev_priv->virt_surfaces[i].file_priv == 0)
+		if (dev_priv->virt_surfaces[i].file_priv == NULL)
 			break;
 	if (i == 2 * RADEON_MAX_SURFACES) {
 		return -1;
@@ -2462,10 +2474,12 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+#ifndef __linux__ /* probably UNNECESSARY */
 	if (!dev_priv) {
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
 	}
+#endif
 
 	DRM_DEBUG("idx=%d s=%d e=%d d=%d\n",
 		  indirect->idx, indirect->start, indirect->end,
@@ -2516,8 +2530,9 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 		radeon_cp_dispatch_indirect(dev, buf, indirect->start, indirect->end);
 	}
 
-	if (indirect->discard)
+	if (indirect->discard) {
 		radeon_cp_discard_buffer(dev, file_priv->master, buf);
+	}
 
 	COMMIT_RING();
 	return 0;
@@ -2861,7 +2876,8 @@ static int radeon_emit_wait(struct drm_device * dev, int flags)
 	return 0;
 }
 
-static int radeon_cp_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_priv)
+static int radeon_cp_cmdbuf(struct drm_device *dev, void *data,
+		struct drm_file *file_priv)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_device_dma *dma = dev->dma;
@@ -3251,7 +3267,11 @@ struct drm_ioctl_desc radeon_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_RADEON_INDICES, radeon_cp_indices, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_TEXTURE, radeon_cp_texture, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_STIPPLE, radeon_cp_stipple, DRM_AUTH),
+#ifdef __linux__
+	DRM_IOCTL_DEF(DRM_RADEON_INDIRECT, radeon_cp_indirect, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
+#else
 	DRM_IOCTL_DEF(DRM_RADEON_INDIRECT, radeon_cp_indirect, DRM_AUTH|DRM_ROOT_ONLY),
+#endif
 	DRM_IOCTL_DEF(DRM_RADEON_VERTEX2, radeon_cp_vertex2, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_CMDBUF, radeon_cp_cmdbuf, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_GETPARAM, radeon_cp_getparam, DRM_AUTH),
@@ -3264,7 +3284,11 @@ struct drm_ioctl_desc radeon_ioctls[] = {
 	DRM_IOCTL_DEF(DRM_RADEON_SETPARAM, radeon_cp_setparam, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SURF_ALLOC, radeon_surface_alloc, DRM_AUTH),
 	DRM_IOCTL_DEF(DRM_RADEON_SURF_FREE, radeon_surface_free, DRM_AUTH),
+#ifdef __linux__
+	DRM_IOCTL_DEF(DRM_RADEON_CS, r600_cs_legacy_ioctl, DRM_AUTH)
+#else
 	DRM_IOCTL_DEF(DRM_RADEON_CS, radeon_cs_ioctl, DRM_AUTH)
+#endif
 };
 
 int radeon_max_ioctl = DRM_ARRAY_SIZE(radeon_ioctls);

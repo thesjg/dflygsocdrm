@@ -33,7 +33,7 @@
 #ifdef __linux__
 #include <linux/vga_switcheroo.h>
 #include <linux/slab.h>
-#endif /* __linux__ */
+#endif
 
 int radeon_driver_unload_kms(struct drm_device *dev)
 {
@@ -43,11 +43,7 @@ int radeon_driver_unload_kms(struct drm_device *dev)
 		return 0;
 	radeon_modeset_fini(rdev);
 	radeon_device_fini(rdev);
-#ifdef __linux__
-	kfree(rdev);
-#else
 	free(rdev, DRM_MEM_DRIVER);
-#endif /* __linux__ */
 	dev->dev_private = NULL;
 	return 0;
 }
@@ -57,11 +53,7 @@ int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags)
 	struct radeon_device *rdev;
 	int r;
 
-#ifdef __linux__
-	rdev = kzalloc(sizeof(struct radeon_device), GFP_KERNEL);
-#else
 	rdev = malloc(sizeof(struct radeon_device), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-#endif /* __linux__ */
 	if (rdev == NULL) {
 		return -ENOMEM;
 	}
@@ -108,15 +100,11 @@ int radeon_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 {
 	struct radeon_device *rdev = dev->dev_private;
 	struct drm_radeon_info *info;
-	struct radeon_mode_info *minfo = &rdev->mode_info;
 	uint32_t *value_ptr;
 	uint32_t value;
-	struct drm_crtc *crtc;
-	int i, found;
 
 	info = data;
 	value_ptr = (uint32_t *)((unsigned long)info->value);
-	value = *value_ptr;
 	switch (info->request) {
 	case RADEON_INFO_DEVICE_ID:
 		value = dev->pci_device;
@@ -129,20 +117,6 @@ int radeon_info_ioctl(struct drm_device *dev, void *data, struct drm_file *filp)
 		break;
 	case RADEON_INFO_ACCEL_WORKING:
 		value = rdev->accel_working;
-		break;
-	case RADEON_INFO_CRTC_FROM_ID:
-		for (i = 0, found = 0; i < rdev->num_crtc; i++) {
-			crtc = (struct drm_crtc *)minfo->crtcs[i];
-			if (crtc && crtc->base.id == value) {
-				value = i;
-				found = 1;
-				break;
-			}
-		}
-		if (!found) {
-			DRM_DEBUG("unknown crtc id %d\n", value);
-			return -EINVAL;
-		}
 		break;
 	default:
 		DRM_DEBUG("Invalid request %d\n", info->request);

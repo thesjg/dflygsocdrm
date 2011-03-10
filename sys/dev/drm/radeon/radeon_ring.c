@@ -28,7 +28,7 @@
 #ifdef __linux__
 #include <linux/seq_file.h>
 #include <linux/slab.h>
-#endif /* __linux__ */
+#endif
 #include "drmP.h"
 #include "radeon_drm.h"
 #include "radeon_reg.h"
@@ -43,13 +43,8 @@ void radeon_ib_bogus_cleanup(struct radeon_device *rdev)
 
 	list_for_each_entry_safe(ib, n, &rdev->ib_pool.bogus_ib, list) {
 		list_del(&ib->list);
-#ifdef __linux__
-		vfree(ib->ptr);
-		kfree(ib);
-#else
 		free(ib->ptr, DRM_MEM_DRIVER);
 		free(ib, DRM_MEM_DRIVER);
-#endif /* __linux__ */
 	}
 }
 
@@ -57,25 +52,14 @@ void radeon_ib_bogus_add(struct radeon_device *rdev, struct radeon_ib *ib)
 {
 	struct radeon_ib *bib;
 
-#ifdef __linux__
-	bib = kmalloc(sizeof(*bib), GFP_KERNEL);
+	bib = malloc(sizeof(*bib), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (bib == NULL)
 		return;
-	bib->ptr = vmalloc(ib->length_dw * 4);
-	if (bib->ptr == NULL) {
-		kfree(bib);
-		return;
-	}
-#else
-	bib = malloc(sizeof(*bib), DRM_MEM_DRIVER, M_WAITOK);
-	if (bib == NULL)
-		return;
-	bib->ptr = malloc(ib->length_dw * 4, DRM_MEM_DRIVER, M_WAITOK);
+	bib->ptr = malloc(ib->length_dw * 4, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (bib->ptr == NULL) {
 		free(bib, DRM_MEM_DRIVER);
 		return;
 	}
-#endif /* __linux__ */
 	memcpy(bib->ptr, ib->ptr, ib->length_dw * 4);
 	bib->length_dw = ib->length_dw;
 	mutex_lock(&rdev->ib_pool.mutex);
@@ -237,26 +221,24 @@ int radeon_ib_pool_init(struct radeon_device *rdev)
 void radeon_ib_pool_fini(struct radeon_device *rdev)
 {
 	int r;
-	struct radeon_bo *robj;
 
 	if (!rdev->ib_pool.ready) {
 		return;
 	}
 	mutex_lock(&rdev->ib_pool.mutex);
 	radeon_ib_bogus_cleanup(rdev);
-	robj = rdev->ib_pool.robj;
-	rdev->ib_pool.robj = NULL;
-	mutex_unlock(&rdev->ib_pool.mutex);
 
-	if (robj) {
-		r = radeon_bo_reserve(robj, false);
+	if (rdev->ib_pool.robj) {
+		r = radeon_bo_reserve(rdev->ib_pool.robj, false);
 		if (likely(r == 0)) {
-			radeon_bo_kunmap(robj);
-			radeon_bo_unpin(robj);
-			radeon_bo_unreserve(robj);
+			radeon_bo_kunmap(rdev->ib_pool.robj);
+			radeon_bo_unpin(rdev->ib_pool.robj);
+			radeon_bo_unreserve(rdev->ib_pool.robj);
 		}
-		radeon_bo_unref(&robj);
+		radeon_bo_unref(&rdev->ib_pool.robj);
+		rdev->ib_pool.robj = NULL;
 	}
+	mutex_unlock(&rdev->ib_pool.mutex);
 }
 
 
@@ -278,41 +260,31 @@ void radeon_ring_free_size(struct radeon_device *rdev)
 	}
 }
 
-int radeon_ring_alloc(struct radeon_device *rdev, unsigned ndw)
+int radeon_ring_lock(struct radeon_device *rdev, unsigned ndw)
 {
 	int r;
 
 	/* Align requested size with padding so unlock_commit can
 	 * pad safely */
 	ndw = (ndw + rdev->cp.align_mask) & ~rdev->cp.align_mask;
+	mutex_lock(&rdev->cp.mutex);
 	while (ndw > (rdev->cp.ring_free_dw - 1)) {
 		radeon_ring_free_size(rdev);
 		if (ndw < rdev->cp.ring_free_dw) {
 			break;
 		}
 		r = radeon_fence_wait_next(rdev);
-		if (r)
+		if (r) {
+			mutex_unlock(&rdev->cp.mutex);
 			return r;
+		}
 	}
 	rdev->cp.count_dw = ndw;
 	rdev->cp.wptr_old = rdev->cp.wptr;
 	return 0;
 }
 
-int radeon_ring_lock(struct radeon_device *rdev, unsigned ndw)
-{
-	int r;
-
-	mutex_lock(&rdev->cp.mutex);
-	r = radeon_ring_alloc(rdev, ndw);
-	if (r) {
-		mutex_unlock(&rdev->cp.mutex);
-		return r;
-	}
-	return 0;
-}
-
-void radeon_ring_commit(struct radeon_device *rdev)
+void radeon_ring_unlock_commit(struct radeon_device *rdev)
 {
 	unsigned count_dw_pad;
 	unsigned i;
@@ -325,11 +297,6 @@ void radeon_ring_commit(struct radeon_device *rdev)
 	}
 	DRM_MEMORYBARRIER();
 	radeon_cp_commit(rdev);
-}
-
-void radeon_ring_unlock_commit(struct radeon_device *rdev)
-{
-	radeon_ring_commit(rdev);
 	mutex_unlock(&rdev->cp.mutex);
 }
 
@@ -379,23 +346,20 @@ int radeon_ring_init(struct radeon_device *rdev, unsigned ring_size)
 void radeon_ring_fini(struct radeon_device *rdev)
 {
 	int r;
-	struct radeon_bo *ring_obj;
 
 	mutex_lock(&rdev->cp.mutex);
-	ring_obj = rdev->cp.ring_obj;
-	rdev->cp.ring = NULL;
-	rdev->cp.ring_obj = NULL;
-	mutex_unlock(&rdev->cp.mutex);
-
-	if (ring_obj) {
-		r = radeon_bo_reserve(ring_obj, false);
+	if (rdev->cp.ring_obj) {
+		r = radeon_bo_reserve(rdev->cp.ring_obj, false);
 		if (likely(r == 0)) {
-			radeon_bo_kunmap(ring_obj);
-			radeon_bo_unpin(ring_obj);
-			radeon_bo_unreserve(ring_obj);
+			radeon_bo_kunmap(rdev->cp.ring_obj);
+			radeon_bo_unpin(rdev->cp.ring_obj);
+			radeon_bo_unreserve(rdev->cp.ring_obj);
 		}
-		radeon_bo_unref(&ring_obj);
+		radeon_bo_unref(&rdev->cp.ring_obj);
+		rdev->cp.ring = NULL;
+		rdev->cp.ring_obj = NULL;
 	}
+	mutex_unlock(&rdev->cp.mutex);
 }
 
 

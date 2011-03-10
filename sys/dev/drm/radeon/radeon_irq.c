@@ -66,7 +66,7 @@ int radeon_enable_vblank(struct drm_device *dev, int crtc)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS600) {	
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS600) {
 		switch (crtc) {
 		case 0:
 			r500_vbl_irq_set_state(dev, R500_D1MODE_INT_MASK, 1);
@@ -101,7 +101,7 @@ void radeon_disable_vblank(struct drm_device *dev, int crtc)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS600) {	
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RS600) {
 		switch (crtc) {
 		case 0:
 			r500_vbl_irq_set_state(dev, R500_D1MODE_INT_MASK, 0);
@@ -130,7 +130,7 @@ void radeon_disable_vblank(struct drm_device *dev, int crtc)
 	}
 }
 
-static __inline__ u32 radeon_acknowledge_irqs(drm_radeon_private_t * dev_priv, u32 *r500_disp_int)
+static inline u32 radeon_acknowledge_irqs(drm_radeon_private_t *dev_priv, u32 *r500_disp_int)
 {
 	u32 irqs = RADEON_READ(RADEON_GEN_INT_STATUS);
 	u32 irq_mask = RADEON_SW_INT_TEST;
@@ -146,12 +146,10 @@ static __inline__ u32 radeon_acknowledge_irqs(drm_radeon_private_t * dev_priv, u
 			disp_irq = RADEON_READ(R500_DISP_INTERRUPT_STATUS);
 
 			*r500_disp_int = disp_irq;
-			if (disp_irq & R500_D1_VBLANK_INTERRUPT) {
+			if (disp_irq & R500_D1_VBLANK_INTERRUPT)
 				RADEON_WRITE(R500_D1MODE_VBLANK_STATUS, R500_VBLANK_ACK);
-			}
-			if (disp_irq & R500_D2_VBLANK_INTERRUPT) {
+			if (disp_irq & R500_D2_VBLANK_INTERRUPT)
 				RADEON_WRITE(R500_D2MODE_VBLANK_STATUS, R500_VBLANK_ACK);
-			}
 		}
 		irq_mask |= R500_DISPLAY_INT_STATUS;
 	} else
@@ -161,7 +159,7 @@ static __inline__ u32 radeon_acknowledge_irqs(drm_radeon_private_t * dev_priv, u
 
 	if (irqs)
 		RADEON_WRITE(RADEON_GEN_INT_STATUS, irqs);
-	
+
 	return irqs;
 }
 
@@ -384,7 +382,7 @@ void radeon_driver_irq_preinstall(struct drm_device * dev)
 	radeon_acknowledge_irqs(dev_priv, &dummy);
 }
 
-int radeon_driver_irq_postinstall(struct drm_device * dev)
+int radeon_driver_irq_postinstall(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv =
 	    (drm_radeon_private_t *) dev->dev_private;

@@ -1,5 +1,5 @@
 /* radeon_mem.c -- Simple GART/fb memory manager for radeon -*- linux-c -*- */
-/*-
+/*
  * Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
  *
  * The Weather Channel (TM) funded Tungsten Graphics to develop the
@@ -100,8 +100,8 @@ static struct mem_block *find_block(struct mem_block *heap, int start)
 	struct mem_block *p;
 
 	list_for_each(p, heap)
-		if (p->start == start)
-			return p;
+	    if (p->start == start)
+		return p;
 
 	return NULL;
 }
