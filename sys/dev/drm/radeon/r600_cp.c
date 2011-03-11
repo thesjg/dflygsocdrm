@@ -2142,7 +2142,7 @@ int r600_do_cleanup_cp(struct drm_device *dev)
 
 		if (dev_priv->gart_info.gart_table_location == DRM_ATI_GART_FB) {
 			drm_core_ioremapfree(&dev_priv->gart_info.mapping, dev);
-			dev_priv->gart_info.addr = 0;
+			dev_priv->gart_info.addr = NULL;
 		}
 	}
 	/* only clear to the start of flags */
@@ -2195,7 +2195,6 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	/* Enable vblank on CRTC1 for older X servers
 	 */
 	dev_priv->vblank_crtc = DRM_RADEON_VBLANK_CRTC1;
-
 	dev_priv->do_boxes = 0;
 	dev_priv->cp_mode = init->cp_mode;
 
@@ -2719,9 +2718,6 @@ int r600_cp_dispatch_texture(struct drm_device *dev,
 		DRM_ERROR("unable to allocate vertex buffer for swap buffer\n");
 		return -EAGAIN;
 	}
-#if 0
-	r600_prepare_blit_copy(dev, file_priv);
-#endif
 	do {
 		data = (const u8 __user *)image->data;
 		pass_size = size;

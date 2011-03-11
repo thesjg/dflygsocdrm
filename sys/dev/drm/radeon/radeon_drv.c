@@ -1,7 +1,11 @@
-/* radeon_drv.c -- ATI Radeon driver -*- linux-c -*-
- * Created: Wed Feb 14 17:10:04 2001 by gareth@valinux.com
+/**
+ * \file radeon_drv.c
+ * ATI Radeon driver
+ *
+ * \author Gareth Hughes <gareth@valinux.com>
  */
-/*-
+
+/*
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All Rights Reserved.
  *
@@ -23,10 +27,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- *
- * Authors:
- *    Gareth Hughes <gareth@valinux.com>
- *
  */
 
 #include "drmP.h"
@@ -39,16 +39,16 @@
 #include <linux/console.h>
 #endif /* __linux__ */
 
+
 /*
  * KMS wrapper.
  * - 2.0.0 - initial interface
  * - 2.1.0 - add square tiling interface
  * - 2.2.0 - add r6xx/r7xx const buffer support
  * - 2.3.0 - add MSPOS + 3D texture + r500 VAP regs
- * - 2.4.0 - add crtc id query
  */
 #define KMS_DRIVER_MAJOR	2
-#define KMS_DRIVER_MINOR	4
+#define KMS_DRIVER_MINOR	3
 #define KMS_DRIVER_PATCHLEVEL	0
 int radeon_driver_load_kms(struct drm_device *dev, unsigned long flags);
 int radeon_driver_unload_kms(struct drm_device *dev);
@@ -80,6 +80,7 @@ int radeon_debugfs_init(struct drm_minor *minor);
 void radeon_debugfs_cleanup(struct drm_minor *minor);
 #endif
 
+
 int radeon_no_wb;
 int radeon_modeset = -1;
 #ifdef __linux__
@@ -93,6 +94,7 @@ int radeon_testing = 0;
 int radeon_connector_table = 0;
 int radeon_tv = 1;
 int radeon_new_pll = -1;
+int radeon_dynpm = -1;
 int radeon_audio = 1;
 int radeon_disp_priority = 0;
 int radeon_hw_i2c = 0;
@@ -132,6 +134,9 @@ module_param_named(tv, radeon_tv, int, 0444);
 
 MODULE_PARM_DESC(new_pll, "Select new PLL code");
 module_param_named(new_pll, radeon_new_pll, int, 0444);
+
+MODULE_PARM_DESC(dynpm, "Disable/Enable dynamic power management (1 = enable)");
+module_param_named(dynpm, radeon_dynpm, int, 0444);
 
 MODULE_PARM_DESC(audio, "Audio enable (0 = disable)");
 module_param_named(audio, radeon_audio, int, 0444);
