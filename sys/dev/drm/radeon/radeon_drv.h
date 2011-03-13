@@ -43,7 +43,9 @@
 
 #define DRM_NEWER_PRESAREA 1
 
-#define DRM_NEWER_RCMD 1
+/* #define DRM_NEWER_RCMD 1 */
+
+#define DRM_NEWER_SCREEN 1
 
 #include "radeon_family.h"
 
