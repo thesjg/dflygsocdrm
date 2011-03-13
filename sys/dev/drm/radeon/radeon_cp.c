@@ -2176,7 +2176,7 @@ error:
 int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 {
 	struct drm_radeon_master_private *master_priv;
-#ifdef __linux__
+#ifdef DRM_NEWER_PRESAREA
 	unsigned long sareapage;
 	int ret;
 #endif
