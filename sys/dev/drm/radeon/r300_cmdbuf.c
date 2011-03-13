@@ -1298,25 +1298,41 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 		if (DRM_COPY_TO_USER(ref_age_base + *buf_idx,
 				&dev_priv->scratch_ages[header.scratch.reg],
 				sizeof(u32)))
+#ifdef __linux__
 			return -EINVAL;
+#else
+			goto einval;
+#endif
 
 		if (DRM_COPY_FROM_USER(&h_pending,
 				ref_age_base + *buf_idx + 1,
 				sizeof(u32)))
+#ifdef __linux__
 			return -EINVAL;
+#else
+			goto einval;
+#endif
 
 		if (h_pending == 0)
+#ifdef __linux__
 			return -EINVAL;
+#else
+			goto einval;
+#endif
 
 		h_pending--;
 
 		if (DRM_COPY_TO_USER(ref_age_base + *buf_idx + 1,
 					&h_pending,
 					sizeof(u32)))
+#ifdef __linux__
 			return -EINVAL;
+#else
+			goto einval;
+#endif
 
 		drm_buffer_advance(cmdbuf->buffer, sizeof(*buf_idx));
-#else
+#else /* !DRM_NEWER_RCMD */
 		buf_idx = *(u32 *)cmdbuf->buf;
 		buf_idx *= 2; /* 8 bytes per buf */
 
@@ -1345,7 +1361,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 
 		cmdbuf->buf += sizeof(buf_idx);
 		cmdbuf->bufsz -= sizeof(buf_idx);
-#endif
+#endif /* !DRM_NEWER_RCMD */
 	}
 
 	BEGIN_RING(2);
@@ -1354,6 +1370,16 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 	ADVANCE_RING();
 
 	return 0;
+
+#ifndef __linux__
+#ifdef DRM_NEWER_RCMD
+einval:
+	DRM_ERROR("ref_age_base (%016lx), buf_idx (%016lx)\n",
+		(unsigned long)ref_age_base,
+		(unsigned long)buf_idx);
+	return -EINVAL;
+#endif
+#endif
 }
 
 /**
