@@ -33,11 +33,11 @@
 
 #include "drmP.h"
 #include "drm.h"
+#include "radeon_drm.h"
+#include "radeon_drv.h"
 #ifdef DRM_NEWER_RCMD
 #include "drm_buffer.h"
 #endif
-#include "radeon_drm.h"
-#include "radeon_drv.h"
 #include "r300_reg.h"
 
 #ifdef __linux__
@@ -1275,7 +1275,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 #ifdef __linux__ /* get_unaligned() UNIMPLEMENTED */
 	ref_age_base = (u32 *)(unsigned long)get_unaligned(ptr_addr);
 #else /* !__linux__ */
-	memcpy(&temp_u64, pdr_addr, sizeof(temp_u64));
+	memcpy(&temp_u64, ptr_addr, sizeof(temp_u64));
 	ref_age_base = (u32 *)(unsigned long)temp_u64;
 #endif /* !__linux__ */
 #else /* !DRM_NEWER_RCMD */

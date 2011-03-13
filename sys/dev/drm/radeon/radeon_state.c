@@ -31,12 +31,12 @@
 
 #include "drmP.h"
 #include "drm.h"
-#ifdef DRM_NEWER_RCMD
-#include "drm_buffer.h"
-#endif
 #include "drm_sarea.h"
 #include "radeon_drm.h"
 #include "radeon_drv.h"
+#ifdef DRM_NEWER_RCMD
+#include "drm_buffer.h"
+#endif
 
 /* ================================================================
  * Helper functions for client state checking and fixup
