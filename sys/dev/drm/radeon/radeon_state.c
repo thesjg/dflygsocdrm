@@ -3078,9 +3078,7 @@ static int radeon_emit_packet3_cliprect(struct drm_device *dev,
 		cmdbuf->nbox = 0;
 
 #ifdef DRM_NEWER_RCMD /* INVESTIGATE */
-#if 0 /* TRY IT */
 	return 0;
-#endif
 #endif
       out:
 #ifdef DRM_NEWER_RCMD
