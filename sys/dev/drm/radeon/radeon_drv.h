@@ -41,6 +41,8 @@
 
 #define DRM_NEWER_RADSYNC 1
 
+#define DRM_NEWER_PRESAREA 1
+
 #include "radeon_family.h"
 
 /* General customization:
