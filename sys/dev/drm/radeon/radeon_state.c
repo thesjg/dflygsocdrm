@@ -2652,7 +2652,7 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
-#ifndef __linux__ /* probably UNNECESSARY */
+#ifndef DRM_NEWER_RADSYNC /* probably UNNECESSARY */
 	if (!dev_priv) {
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
@@ -3307,7 +3307,11 @@ static int radeon_cp_cmdbuf(struct drm_device *dev, void *data,
 #else /* !DRM_NEWER_RCMD */
 	while (cmdbuf->bufsz >= sizeof(header)) {
 
+#ifdef DRM_NEWER_RADSYNC
+		memcpy(&header, cmdbuf->buf, sizeof(header));
+#else
 		header.i = *(int *)cmdbuf->buf;
+#endif
 		cmdbuf->buf += sizeof(header);
 		cmdbuf->bufsz -= sizeof(header);
 
@@ -3453,7 +3457,11 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 			value = 0;
 		else
+#ifdef DRM_NEWER_RADSYNC
+			value = drm_dev_to_irq(dev);
+#else
 			value = dev->irq;
+#endif
 		break;
 	case RADEON_PARAM_GART_BASE:
 		value = dev_priv->gart_vm_start;
@@ -3464,7 +3472,7 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 	case RADEON_PARAM_STATUS_HANDLE:
 		value = dev_priv->ring_rptr_offset;
 		break;
-#ifndef __LP64__
+#ifndef __LP64__ /* INVESTIGATE __linux__ BITS_PER_LONG == 32 */
 		/*
 		 * This ioctl() doesn't work on 64-bit platforms because hw_lock is a
 		 * pointer which can't fit into an int-sized variable.  According to

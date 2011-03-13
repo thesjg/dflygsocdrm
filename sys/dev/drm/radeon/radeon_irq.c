@@ -188,7 +188,9 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 	    (drm_radeon_private_t *) dev->dev_private;
 	u32 stat;
 	u32 r500_disp_int;
+#ifndef DRM_NEWER_RADSYNC
 	u32 tmp;
+#endif
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 		return IRQ_NONE;
@@ -218,7 +220,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 		if (stat & RADEON_CRTC2_VBLANK_STAT)
 			drm_handle_vblank(dev, 1);
 	}
-#ifndef __linux__
+#ifndef DRM_NEWER_RADSYNC
 	if (dev->msi_enabled) {
 		switch(dev_priv->flags & RADEON_FAMILY_MASK) {
 			case CHIP_RS400:
@@ -247,7 +249,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 				break;
 		}
 	}
-#endif /* __linux__ */
+#endif /* !DRM_NEWER_RADSYNC */
 	return IRQ_HANDLED;
 }
 
@@ -283,8 +285,10 @@ static int radeon_wait_irq(struct drm_device * dev, int swi_nr)
 	DRM_WAIT_ON(ret, dev_priv->swi_queue, 3 * DRM_HZ,
 		    RADEON_READ(RADEON_LAST_SWI_REG) >= swi_nr);
 
-	if (ret == -ERESTART)
-		DRM_DEBUG("restarting syscall");
+#ifndef __linux__
+	if ((ret == -ERESTART) || (ret == ERESTART))
+		DRM_INFO("radeon_wait_irq(): restarting syscall ret (%d)\n", ret);
+#endif
 
 	return ret;
 }

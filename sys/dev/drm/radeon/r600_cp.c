@@ -354,9 +354,96 @@ static void r600_vm_init(struct drm_device *dev)
 	r600_vm_flush_gart_range(dev);
 }
 
-/* load r600 microcode */
+#ifdef __linux__
+static int r600_cp_init_microcode(drm_radeon_private_t *dev_priv)
+{
+	struct platform_device *pdev;
+	const char *chip_name;
+	size_t pfp_req_size, me_req_size;
+	char fw_name[30];
+	int err;
+
+	pdev = platform_device_register_simple("r600_cp", 0, NULL, 0);
+	err = IS_ERR(pdev);
+	if (err) {
+		printk(KERN_ERR "r600_cp: Failed to register firmware\n");
+		return -EINVAL;
+	}
+
+	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
+	case CHIP_R600:  chip_name = "R600";  break;
+	case CHIP_RV610: chip_name = "RV610"; break;
+	case CHIP_RV630: chip_name = "RV630"; break;
+	case CHIP_RV620: chip_name = "RV620"; break;
+	case CHIP_RV635: chip_name = "RV635"; break;
+	case CHIP_RV670: chip_name = "RV670"; break;
+	case CHIP_RS780:
+	case CHIP_RS880: chip_name = "RS780"; break;
+	case CHIP_RV770: chip_name = "RV770"; break;
+	case CHIP_RV730:
+	case CHIP_RV740: chip_name = "RV730"; break;
+	case CHIP_RV710: chip_name = "RV710"; break;
+	default:         BUG();
+	}
+
+	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_RV770) {
+		pfp_req_size = R700_PFP_UCODE_SIZE * 4;
+		me_req_size = R700_PM4_UCODE_SIZE * 4;
+	} else {
+		pfp_req_size = PFP_UCODE_SIZE * 4;
+		me_req_size = PM4_UCODE_SIZE * 12;
+	}
+
+	DRM_INFO("Loading %s CP Microcode\n", chip_name);
+
+	snprintf(fw_name, sizeof(fw_name), "radeon/%s_pfp.bin", chip_name);
+	err = request_firmware(&dev_priv->pfp_fw, fw_name, &pdev->dev);
+	if (err)
+		goto out;
+	if (dev_priv->pfp_fw->size != pfp_req_size) {
+		printk(KERN_ERR
+		       "r600_cp: Bogus length %zu in firmware \"%s\"\n",
+		       dev_priv->pfp_fw->size, fw_name);
+		err = -EINVAL;
+		goto out;
+	}
+
+	snprintf(fw_name, sizeof(fw_name), "radeon/%s_me.bin", chip_name);
+	err = request_firmware(&dev_priv->me_fw, fw_name, &pdev->dev);
+	if (err)
+		goto out;
+	if (dev_priv->me_fw->size != me_req_size) {
+		printk(KERN_ERR
+		       "r600_cp: Bogus length %zu in firmware \"%s\"\n",
+		       dev_priv->me_fw->size, fw_name);
+		err = -EINVAL;
+	}
+out:
+	platform_device_unregister(pdev);
+
+	if (err) {
+		if (err != -EINVAL)
+			printk(KERN_ERR
+			       "r600_cp: Failed to load firmware \"%s\"\n",
+			       fw_name);
+		release_firmware(dev_priv->pfp_fw);
+		dev_priv->pfp_fw = NULL;
+		release_firmware(dev_priv->me_fw);
+		dev_priv->me_fw = NULL;
+	}
+	return err;
+}
+#endif /* __linux__ */
+
 static void r600_cp_load_microcode(drm_radeon_private_t *dev_priv)
 {
+#ifdef __linux__
+	const __be32 *fw_data;
+	int i;
+
+	if (!dev_priv->me_fw || !dev_priv->pfp_fw)
+		return;
+#else
 	const u32 (*cp)[3];
 	const u32 *pfp;
 	int i;
@@ -401,6 +488,7 @@ static void r600_cp_load_microcode(drm_radeon_private_t *dev_priv)
 	default:
 		return;
 	}
+#endif
 
 	r600_do_cp_stop(dev_priv);
 
@@ -414,21 +502,38 @@ static void r600_cp_load_microcode(drm_radeon_private_t *dev_priv)
 	DRM_UDELAY(15000);
 	RADEON_WRITE(R600_GRBM_SOFT_RESET, 0);
 
+#ifdef __linux__
+	fw_data = (const __be32 *)dev_priv->me_fw->data;
+#endif
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
-
+#ifdef __linux__
+	for (i = 0; i < PM4_UCODE_SIZE * 3; i++)
+		RADEON_WRITE(R600_CP_ME_RAM_DATA,
+			     be32_to_cpup(fw_data++));
+#else
 	for (i = 0; i < PM4_UCODE_SIZE; i++) {
 		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i][0]);
 		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i][1]);
 		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i][2]);
 	}
+#endif
 
+#ifdef __linux__
+	fw_data = (const __be32 *)dev_priv->pfp_fw->data;
+#endif
 	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 	for (i = 0; i < PFP_UCODE_SIZE; i++)
+#ifdef __linux__
+		RADEON_WRITE(R600_CP_PFP_UCODE_DATA,
+			     be32_to_cpup(fw_data++));
+#else
 		RADEON_WRITE(R600_CP_PFP_UCODE_DATA, pfp[i]);
+#endif
 
 	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_RADDR, 0);
+
 }
 
 static void r700_vm_init(struct drm_device *dev)
@@ -483,9 +588,15 @@ static void r700_vm_init(struct drm_device *dev)
 	r600_vm_flush_gart_range(dev);
 }
 
-/* load r600 microcode */
 static void r700_cp_load_microcode(drm_radeon_private_t *dev_priv)
 {
+#ifdef __linux__
+	const __be32 *fw_data;
+	int i;
+
+	if (!dev_priv->me_fw || !dev_priv->pfp_fw)
+		return;
+#else /* !__linux__ */
 	const u32 *pfp;
 	const u32 *cp;
 	int i;
@@ -510,6 +621,7 @@ static void r700_cp_load_microcode(drm_radeon_private_t *dev_priv)
 	default:
 		return;
 	}
+#endif /* !__linux__ */
 
 	r600_do_cp_stop(dev_priv);
 
@@ -523,19 +635,34 @@ static void r700_cp_load_microcode(drm_radeon_private_t *dev_priv)
 	DRM_UDELAY(15000);
 	RADEON_WRITE(R600_GRBM_SOFT_RESET, 0);
 
+#ifdef __linux__
+	fw_data = (const __be32 *)dev_priv->pfp_fw->data;
+#endif
 	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 	for (i = 0; i < R700_PFP_UCODE_SIZE; i++)
+#ifdef __linux__
+		RADEON_WRITE(R600_CP_PFP_UCODE_DATA, be32_to_cpup(fw_data++));
+#else
 		RADEON_WRITE(R600_CP_PFP_UCODE_DATA, pfp[i]);
+#endif
 	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 
+#ifdef __linux__
+	fw_data = (const __be32 *)dev_priv->me_fw->data;
+#endif
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 	for (i = 0; i < R700_PM4_UCODE_SIZE; i++)
+#ifdef __linux__
+		RADEON_WRITE(R600_CP_ME_RAM_DATA, be32_to_cpup(fw_data++));
+#else
 		RADEON_WRITE(R600_CP_ME_RAM_DATA, cp[i]);
+#endif
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 
 	RADEON_WRITE(R600_CP_PFP_UCODE_ADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_WADDR, 0);
 	RADEON_WRITE(R600_CP_ME_RAM_RADDR, 0);
+
 }
 
 static void r600_test_writeback(drm_radeon_private_t *dev_priv)
@@ -759,8 +886,8 @@ static void r600_gfx_init(struct drm_device *dev,
 	u32 hdp_host_path_cntl;
 	u32 backend_map;
 	u32 gb_tiling_config = 0;
-	u32 cc_rb_backend_disable = 0;
-	u32 cc_gc_shader_pipe_config = 0;
+	u32 cc_rb_backend_disable;
+	u32 cc_gc_shader_pipe_config;
 	u32 ramcfg;
 
 	/* setup chip specs */
@@ -1476,8 +1603,8 @@ static void r700_gfx_init(struct drm_device *dev,
 	u32 sq_dyn_gpr_size_simd_ab_0;
 	u32 backend_map;
 	u32 gb_tiling_config = 0;
-	u32 cc_rb_backend_disable = 0;
-	u32 cc_gc_shader_pipe_config = 0;
+	u32 cc_rb_backend_disable;
+	u32 cc_gc_shader_pipe_config;
 	u32 mc_arb_ramcfg;
 	u32 db_debug4;
 
@@ -2760,3 +2887,113 @@ int r600_cp_dispatch_texture(struct drm_device *dev,
 
 	return 0;
 }
+
+#ifdef __linux__
+/*
+ * Legacy cs ioctl
+ */
+static u32 radeon_cs_id_get(struct drm_radeon_private *radeon)
+{
+	/* FIXME: check if wrap affect last reported wrap & sequence */
+	radeon->cs_id_scnt = (radeon->cs_id_scnt + 1) & 0x00FFFFFF;
+	if (!radeon->cs_id_scnt) {
+		/* increment wrap counter */
+		radeon->cs_id_wcnt += 0x01000000;
+		/* valid sequence counter start at 1 */
+		radeon->cs_id_scnt = 1;
+	}
+	return (radeon->cs_id_scnt | radeon->cs_id_wcnt);
+}
+
+static void r600_cs_id_emit(drm_radeon_private_t *dev_priv, u32 *id)
+{
+	RING_LOCALS;
+
+	*id = radeon_cs_id_get(dev_priv);
+
+	/* SCRATCH 2 */
+	BEGIN_RING(3);
+	R600_CLEAR_AGE(*id);
+	ADVANCE_RING();
+	COMMIT_RING();
+}
+
+static int r600_ib_get(struct drm_device *dev,
+			struct drm_file *fpriv,
+			struct drm_buf **buffer)
+{
+	struct drm_buf *buf;
+
+	*buffer = NULL;
+	buf = radeon_freelist_get(dev);
+	if (!buf) {
+		return -EBUSY;
+	}
+	buf->file_priv = fpriv;
+	*buffer = buf;
+	return 0;
+}
+
+static void r600_ib_free(struct drm_device *dev, struct drm_buf *buf,
+			struct drm_file *fpriv, int l, int r)
+{
+	drm_radeon_private_t *dev_priv = dev->dev_private;
+
+	if (buf) {
+		if (!r)
+			r600_cp_dispatch_indirect(dev, buf, 0, l * 4);
+		radeon_cp_discard_buffer(dev, fpriv->master, buf);
+		COMMIT_RING();
+	}
+}
+
+int r600_cs_legacy_ioctl(struct drm_device *dev, void *data, struct drm_file *fpriv)
+{
+	struct drm_radeon_private *dev_priv = dev->dev_private;
+	struct drm_radeon_cs *cs = data;
+	struct drm_buf *buf;
+	unsigned family;
+	int l, r = 0;
+	u32 *ib, cs_id = 0;
+
+	if (dev_priv == NULL) {
+		DRM_ERROR("called with no initialization\n");
+		return -EINVAL;
+	}
+	family = dev_priv->flags & RADEON_FAMILY_MASK;
+	if (family < CHIP_R600) {
+		DRM_ERROR("cs ioctl valid only for R6XX & R7XX in legacy mode\n");
+		return -EINVAL;
+	}
+	mutex_lock(&dev_priv->cs_mutex);
+	/* get ib */
+	r = r600_ib_get(dev, fpriv, &buf);
+	if (r) {
+		DRM_ERROR("ib_get failed\n");
+		goto out;
+	}
+	ib = dev->agp_buffer_map->handle + buf->offset;
+	/* now parse command stream */
+	r = r600_cs_legacy(dev, data,  fpriv, family, ib, &l);
+	if (r) {
+		goto out;
+	}
+
+out:
+	r600_ib_free(dev, buf, fpriv, l, r);
+	/* emit cs id sequence */
+	r600_cs_id_emit(dev_priv, &cs_id);
+	cs->cs_id = cs_id;
+	mutex_unlock(&dev_priv->cs_mutex);
+	return r;
+}
+
+void r600_cs_legacy_get_tiling_conf(struct drm_device *dev, u32 *npipes, u32 *nbanks, u32 *group_size)
+{
+	struct drm_radeon_private *dev_priv = dev->dev_private;
+
+	*npipes = dev_priv->r600_npipes;
+	*nbanks = dev_priv->r600_nbanks;
+	*group_size = dev_priv->r600_group_size;
+}
+#endif /* __linux__ */

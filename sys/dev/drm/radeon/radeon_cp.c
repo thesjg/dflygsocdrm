@@ -1659,7 +1659,7 @@ static int radeon_do_resume_cp(struct drm_device *dev, struct drm_file *file_pri
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
-#ifdef DRM_NEWER_RCMD
+#ifdef DRM_NEWER_SCREEN
 	dev_priv->have_z_offset = 0;
 #endif
 	radeon_do_engine_reset(dev);
