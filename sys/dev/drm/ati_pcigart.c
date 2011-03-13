@@ -33,6 +33,10 @@
 
 #include "drmP.h"
 
+#ifndef __linux__
+#define DRM_NEWER_PCIGART 1
+#endif
+
 # define ATI_PCIGART_PAGE_SIZE		4096	/**< PCI GART page size */
 
 #define ATI_PCIGART_PAGE_MASK		(~(ATI_PCIGART_PAGE_SIZE-1))

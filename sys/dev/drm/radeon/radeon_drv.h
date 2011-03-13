@@ -47,6 +47,8 @@
 
 #define DRM_NEWER_SCREEN 1
 
+#define DRM_NEWER_PCIGART 1
+
 #include "radeon_family.h"
 
 /* General customization:
