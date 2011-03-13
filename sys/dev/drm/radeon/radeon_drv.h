@@ -32,12 +32,14 @@
 #ifndef __RADEON_DRV_H__
 #define __RADEON_DRV_H__
 
-#if 0
+#ifdef __linux__
 #include <linux/firmware.h>
 #include <linux/platform_device.h>
 #endif
 
 #define DRM_NEWER_RADEON_H 1
+
+#define DRM_NEWER_RADSYNC 1
 
 #include "radeon_family.h"
 
