@@ -199,7 +199,7 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 
 	tempmaps = malloc(sizeof(drm_local_map_t) * mapcount,
 		DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
-	if (tempmaps == NULL) {
+	if (!tempmaps) {
 		mutex_unlock(&dev->struct_mutex);
 		return ENOMEM;
 	}
@@ -278,6 +278,10 @@ static int drm_bufs_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	tempdma = *dma;
 	templists = malloc(sizeof(int) * dma->buf_count,
 		DRM_MEM_DRIVER, M_WAITOK);
+	if (!templists) {
+		mutex_unlock(&dev->struct_mutex);
+		return ENOMEM;
+	}
 	for (i = 0; i < dma->buf_count; i++)
 		templists[i] = dma->buflist[i]->list;
 	dma = &tempdma;
@@ -356,18 +360,28 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	mutex_lock(&dev->struct_mutex);
 
 	privcount = 0;
+	list_for_each_entry(priv, &dev->filelist, lhead) {
+		privcount++;
+	}
+#if 0
 	TAILQ_FOREACH(priv, &dev->files, link)
 		privcount++;
+#endif
 
 	tempprivs = malloc(sizeof(struct drm_file) * privcount,
 		DRM_MEM_DRIVER, M_WAITOK);
-	if (tempprivs == NULL) {
+	if (!tempprivs) {
 		mutex_unlock(&dev->struct_mutex);
 		return ENOMEM;
 	}
 	i = 0;
+	list_for_each_entry(priv, &dev->filelist, lhead) {
+		tempprivs[i++] = *priv;
+	}
+#if 0
 	TAILQ_FOREACH(priv, &dev->files, link)
 		tempprivs[i++] = *priv;
+#endif
 	mutex_unlock(&dev->struct_mutex);
 
 	DRM_SYSCTL_PRINT("\na dev	pid    uid	magic	  ioctls\n");
@@ -375,7 +389,7 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 		priv = &tempprivs[i];
 		DRM_SYSCTL_PRINT("%c %3d %5d %5d %10u %10lu\n",
 			       priv->authenticated ? 'y' : 'n',
-			       priv->minor_legacy,
+			       priv->minor->index,
 			       priv->pid,
 			       priv->uid, priv->magic, priv->ioctl_count);
 	}

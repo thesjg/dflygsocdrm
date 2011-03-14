@@ -448,7 +448,9 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	}
 
 	mutex_lock(&dev->struct_mutex);
+#ifndef __linux__ /* legacy BSD */
 	TAILQ_INSERT_TAIL(&dev->files, priv, link);
+#endif
 	list_add(&priv->lhead, &dev->filelist);
 	mutex_unlock(&dev->struct_mutex);
 

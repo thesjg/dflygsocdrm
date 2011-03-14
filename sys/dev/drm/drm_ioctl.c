@@ -31,16 +31,6 @@
  * OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE,
  * ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
  * OTHER DEALINGS IN THE SOFTWARE.
- *
- * Authors:
- *    Rickard E. (Rik) Faith <faith@valinux.com>
- *    Gareth Hughes <gareth@valinux.com>
- *
- */
-
-/** @file drm_ioctl.c
- * Varios minor DRM ioctls not applicable to other files, such as versioning
- * information and reporting DRM information to userland.
  */
 
 #include "drmP.h"
@@ -97,26 +87,21 @@ int drm_setunique(struct drm_device *dev, void *data,
 	struct drm_master *master = file_priv->master;
 	int domain, bus, slot, func, ret;
 
-	if (master->unique_len || master->unique) {
+	if (master->unique_len || master->unique)
 		return -EBUSY;
-	}
 
-	if (!u->unique_len || u->unique_len > 1024) {
+	if (!u->unique_len || u->unique_len > 1024)
 		return -EINVAL;
-	}
 
 	master->unique_len = u->unique_len;
 	master->unique_size = u->unique_len + 1;
 	master->unique = malloc(master->unique_size, DRM_MEM_DRIVER, M_WAITOK);
-	if (!master->unique) {
-		master->unique_len = 0;
+	if (!master->unique)
 		return -ENOMEM;
-	}
-	if (DRM_COPY_FROM_USER(master->unique, u->unique, master->unique_len)) {
+	if (DRM_COPY_FROM_USER(master->unique, u->unique, master->unique_len))
 		return -EFAULT;
-	}
 
-	master->unique[u->unique_len] = '\0';
+	master->unique[master->unique_len] = '\0';
 
 #ifdef __linux__
 	dev->devname = kmalloc(strlen(dev->driver->pci_driver.name) +
@@ -132,18 +117,23 @@ int drm_setunique(struct drm_device *dev, void *data,
 	 * busid.
 	 */
 	ret = sscanf(master->unique, "PCI:%d:%d:%d", &bus, &slot, &func);
-	if (ret != 3) {
+	if (ret != 3)
 		return -EINVAL;
-	}
 	domain = bus >> 8;
 	bus &= 0xff;
-	
+
+#ifdef __linux__
+	if ((domain != drm_get_pci_domain(dev)) ||
+	    (bus != dev->pdev->bus->number) ||
+	    (slot != PCI_SLOT(dev->pdev->devfn)) ||
+	    (func != PCI_FUNC(dev->pdev->devfn)))
+#else
 	if ((domain != dev->pci_domain) ||
 	    (bus != dev->pci_bus) ||
 	    (slot != dev->pci_slot) ||
-	    (func != dev->pci_func)) {
+	    (func != dev->pci_func))
+#endif
 		return -EINVAL;
-	}
 
 	return 0;
 }
@@ -153,17 +143,14 @@ static int drm_set_busid(struct drm_device *dev, struct drm_file *file_priv)
 	struct drm_master *master = file_priv->master;
 	int len;
 
-	if (master->unique != NULL) {
+	if (master->unique != NULL)
 		return -EBUSY;
-	}
 
 	master->unique_len = 40;
 	master->unique_size = master->unique_len;
 	master->unique = malloc(master->unique_size, DRM_MEM_DRIVER, M_WAITOK);
-	if (master->unique == NULL) {
-		master->unique_len = 0;
+	if (master->unique == NULL)
 		return -ENOMEM;
-	}
 
 	len = snprintf(master->unique, master->unique_len, "pci:%04x:%02x:%02x.%d",
 		dev->pci_domain,
@@ -176,7 +163,7 @@ static int drm_set_busid(struct drm_device *dev, struct drm_file *file_priv)
 	else
 		master->unique_len = len;
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	dev->devname = kmalloc(strlen(dev->driver->pci_driver.name) +
 			       master->unique_len + 2, GFP_KERNEL);
 	if (dev->devname == NULL)
@@ -231,6 +218,7 @@ int drm_getmap(struct drm_device *dev, void *data,
 		mutex_unlock(&dev->struct_mutex);
 		return -EINVAL;
 	}
+
 	map->offset = r_list->map->offset;
 	map->size = r_list->map->size;
 	map->type = r_list->map->type;
@@ -265,11 +253,29 @@ int drm_getclient(struct drm_device *dev, void *data,
 	struct drm_client *client = data;
 	struct drm_file *pt;
 	int idx;
+	int i;
+
+#if 0
 	int i = 0;
+#endif
 
 	idx = client->idx;
 	mutex_lock(&dev->struct_mutex);
 
+	i = 0;
+	list_for_each_entry(pt, &dev->filelist, lhead) {
+		if (i++ >= idx) {
+			client->auth = pt->authenticated;
+			client->pid = pt->pid;
+			client->uid = pt->uid;
+			client->magic = pt->magic;
+			client->iocs = pt->ioctl_count;
+			mutex_unlock(&dev->struct_mutex);
+
+			return 0;
+		}
+	}
+#if 0
 	TAILQ_FOREACH(pt, &dev->files, link) {
 		if (i == idx) {
 			client->auth  = pt->authenticated;
@@ -282,6 +288,7 @@ int drm_getclient(struct drm_device *dev, void *data,
 		}
 		i++;
 	}
+#endif
 	mutex_unlock(&dev->struct_mutex);
 
 	return -EINVAL;
@@ -311,11 +318,11 @@ int drm_getstats(struct drm_device *dev, void *data,
 		if (dev->types[i] == _DRM_STAT_LOCK)
 			stats->data[i].value =
 			    (file_priv->master->lock.hw_lock ? file_priv->master->lock.hw_lock->lock : 0);
-		else 
+		else
 			stats->data[i].value = atomic_read(&dev->counts[i]);
 		stats->data[i].type = dev->types[i];
 	}
-	
+
 	stats->count = dev->counters;
 
 	mutex_unlock(&dev->struct_mutex);
@@ -336,6 +343,47 @@ int drm_getstats(struct drm_device *dev, void *data,
  */
 int drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
+	struct drm_set_version *sv = data;
+	int if_version, retcode = 0;
+
+	if (sv->drm_di_major != -1) {
+		if (sv->drm_di_major != DRM_IF_MAJOR ||
+		    sv->drm_di_minor < 0 || sv->drm_di_minor > DRM_IF_MINOR) {
+			retcode = -EINVAL;
+			goto done;
+		}
+		if_version = DRM_IF_VERSION(sv->drm_di_major,
+					    sv->drm_di_minor);
+		dev->if_version = max(if_version, dev->if_version);
+		if (sv->drm_di_minor >= 1) {
+			/*
+			 * Version 1.1 includes tying of DRM to specific device
+			 */
+			drm_set_busid(dev, file_priv);
+		}
+	}
+
+	if (sv->drm_dd_major != -1) {
+		if (sv->drm_dd_major != dev->driver->major ||
+		    sv->drm_dd_minor < 0 || sv->drm_dd_minor >
+		    dev->driver->minor) {
+			retcode = -EINVAL;
+			goto done;
+		}
+
+		if (dev->driver->set_version)
+			dev->driver->set_version(dev, sv);
+	}
+
+done:
+	sv->drm_di_major = DRM_IF_MAJOR;
+	sv->drm_di_minor = DRM_IF_MINOR;
+	sv->drm_dd_major = dev->driver->major;
+	sv->drm_dd_minor = dev->driver->minor;
+
+	return retcode;
+
+#if 0
 	struct drm_set_version *sv = data;
 	struct drm_set_version ver;
 	int if_version;
@@ -377,6 +425,7 @@ int drm_setversion(struct drm_device *dev, void *data, struct drm_file *file_pri
 	}
 
 	return 0;
+#endif
 }
 
 /** No-op ioctl. */
