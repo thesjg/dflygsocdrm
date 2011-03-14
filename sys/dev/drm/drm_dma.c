@@ -69,7 +69,7 @@ int drm_dma_setup(struct drm_device *dev)
  */
 void drm_dma_takedown(struct drm_device *dev)
 {
-	struct drm_device_dma  *dma = dev->dma;
+	struct drm_device_dma *dma = dev->dma;
 	int i, j;
 
 	if (!dma)
@@ -102,7 +102,10 @@ void drm_dma_takedown(struct drm_device *dev)
 	free(dma->pagelist, DRM_MEM_PAGES);
 	free(dev->dma, DRM_MEM_DRIVER);
 	dev->dma = NULL;
+
+#ifndef __linux__
 	DRM_SPINUNINIT(&dev->dma_lock);
+#endif
 }
 
 /**
@@ -113,20 +116,26 @@ void drm_dma_takedown(struct drm_device *dev)
  *
  * Resets the fields of \p buf.
  */
-void drm_free_buffer(struct drm_device *dev, struct drm_buf *buf)
+void drm_free_buffer(struct drm_device *dev, struct drm_buf * buf)
 {
 	if (!buf)
 		return;
 
 	buf->waiting = 0;
-	buf->pending  = 0;
-	buf->file_priv= NULL;
-	buf->used     = 0;
+	buf->pending = 0;
+	buf->file_priv = NULL;
+	buf->used = 0;
 
-/* No driver seems to actually have anything waiting on dra_wait */
+#ifdef __linux__ /* waitqueue_active() UNIMPLEMENTED */
+	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE)
+	    && waitqueue_active(&buf->dma_wait)) {
+		wake_up_interruptible(&buf->dma_wait);
+	}
+#else
 	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE)) {
 		DRM_WAKEUP_INT(&buf->dma_wait);
 	}
+#endif
 }
 
 /**
@@ -161,15 +170,18 @@ void drm_core_reclaim_buffers(struct drm_device *dev,
 	}
 }
 
+EXPORT_SYMBOL(drm_core_reclaim_buffers);
+
+#ifndef __linux__ /* legacy BSD */
 /* Call into the driver-specific DMA handler */
 int drm_dma(struct drm_device *dev, void *data, struct drm_file *file_priv)
 {
-
 	if (dev->driver->dma_ioctl) {
 		/* shared code returns -errno */
-		return -dev->driver->dma_ioctl(dev, data, file_priv);
+		return dev->driver->dma_ioctl(dev, data, file_priv);
 	} else {
-		DRM_DEBUG("DMA ioctl on driver with no dma handler\n");
-		return EINVAL;
+		DRM_ERROR("DMA ioctl on driver with no dma handler\n");
+		return -EINVAL;
 	}
 }
+#endif
