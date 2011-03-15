@@ -1959,7 +1959,7 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 #endif
 		size = round_page(map->size);
 #ifdef DRM_NEWER_USER_TOKEN
-		foff = token
+		foff = token;
 #else
 		foff = map->offset;
 #endif
