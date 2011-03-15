@@ -568,6 +568,7 @@ static int mga_do_agp_dma_bootstrap(struct drm_device *dev,
 			return -EFAULT;
 
 		dev->agp_buffer_token = agp_token;
+		dev->agp_buffer_token_long = agp_token;
 	}
 #endif
 
@@ -870,6 +871,7 @@ static int mga_do_init_dma(struct drm_device * dev, drm_mga_init_t * init)
 			return -EINVAL;
 		}
 		dev->agp_buffer_token = init->buffers_offset;
+		dev->agp_buffer_token_long = init->buffers_offset;
 		dev->agp_buffer_map =
 			drm_core_findmap(dev, init->buffers_offset);
 		if (!dev->agp_buffer_map) {

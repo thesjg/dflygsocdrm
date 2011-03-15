@@ -1313,6 +1313,7 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		return -EINVAL;
 	}
 	dev->agp_buffer_token = init->buffers_offset;
+	dev->agp_buffer_token_long = init->buffers_offset;
 	dev->agp_buffer_map = drm_core_findmap(dev, init->buffers_offset);
 	if (!dev->agp_buffer_map) {
 		DRM_ERROR("could not find dma buffer region!\n");

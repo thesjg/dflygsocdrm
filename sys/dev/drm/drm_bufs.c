@@ -1944,17 +1944,17 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 	    || (drm_core_check_feature(dev, DRIVER_FB_DMA)
 		&& (dma->flags & _DRM_DMA_USE_FB))) {
 		drm_local_map_t *map = dev->agp_buffer_map;
-		unsigned long token = dev->agp_buffer_token;
+		unsigned long token = dev->agp_buffer_token_long;
 
 		if (!map) {
 			retcode = -EINVAL;
 			goto done;
 		}
 #ifndef __linux__
-		if ((unsigned long)map->offset != (unsigned long)dev->agp_buffer_token) {
-			DRM_ERROR("map->offset (0x%016lx) != agp_buffer_token (0x%016lx)\n",
+		if ((unsigned long)map->offset != dev->agp_buffer_token_long) {
+			DRM_ERROR("map->offset (0x%016lx) != agp_buffer_token_long (0x%016lx)\n",
 				(unsigned long)map->offset,
-				(unsigned long)dev->agp_buffer_token);
+				dev->agp_buffer_token_long);
 		}
 #endif
 		size = round_page(map->size);

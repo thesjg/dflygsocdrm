@@ -1210,7 +1210,7 @@ struct drm_device {
 	uint32_t flush_domains;         /* domains pending flush */
 	/*@} */
 
-/* legacy drm */
+/* legacy BSD drm */
 #if 0
 	atomic_t context_flag;
 	u_int16_t pci_vendor;		/* PCI vendor id */
@@ -1276,6 +1276,7 @@ struct drm_device {
 	device_t iicbus; /* iicbus device */
 	device_t iicbb;  /* iicbb device */
 	device_t iic;    /* _iic device */
+	unsigned long agp_buffer_token_long; /* preserves 64-bits */
 };
 
 static inline int drm_dev_to_irq(struct drm_device *dev)
