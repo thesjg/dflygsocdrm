@@ -98,11 +98,19 @@ void drm_sg_cleanup(struct drm_sg_mem * entry)
 #endif /* !__linux__ */
 }
 
+#ifdef __linux__
 #ifdef _LP64
 # define ScatterHandle(x) (unsigned int)((x >> 32) + (x & ((1L << 32) - 1)))
 #else
 # define ScatterHandle(x) (unsigned int)(x)
 #endif
+#else /* !__linux__ */
+#if (BITS_PER_LONG == 64)
+# define ScatterHandle(x) (unsigned int)((x >> 32) + (x & ((1L << 32) - 1)))
+#else
+# define ScatterHandle(x) (unsigned int)(x)
+#endif
+#endif /* !__linux__ */
 
 int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 {
@@ -127,7 +135,10 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	if (!entry)
 		return -ENOMEM;
 
+	pages = (request->size + PAGE_SIZE - 1) / PAGE_SIZE;
+#if 0 
 	pages = round_page(request->size) / PAGE_SIZE;
+#endif
 	DRM_DEBUG("size=%ld pages=%ld\n", request->size, pages);
 
 	entry->pages = pages;
@@ -182,6 +193,8 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	    PAGE_SIZE, 0, /* maxsegsize, flags */
 	    &dmah->tag);
 	if (ret != 0) {
+		DRM_ERROR("bus_dma_tag_create() failed! request->size (%016lx)\n",
+			(unsigned long)request->size);
 		free(dmah, DRM_MEM_DMA);
 		free(entry->busaddr, DRM_MEM_PAGES);
 		free(entry, DRM_MEM_SGLISTS);
@@ -192,6 +205,8 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	ret = bus_dmamem_alloc(dmah->tag, &dmah->vaddr,
 	    BUS_DMA_WAITOK | BUS_DMA_ZERO | BUS_DMA_COHERENT , &dmah->map);
 	if (ret != 0) {
+		DRM_ERROR("bus_dmamem_alloc() failed! dmah->tag (%016lx)\n",
+			(unsigned long)dmah->tag);
 		bus_dma_tag_destroy(dmah->tag);
 		free(dmah, DRM_MEM_DMA);
 		free(entry->busaddr, DRM_MEM_PAGES);
@@ -202,6 +217,8 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	ret = bus_dmamap_load(dmah->tag, dmah->map, dmah->vaddr,
 	    request->size, drm_sg_alloc_cb, entry, BUS_DMA_NOWAIT);
 	if (ret != 0) {
+		DRM_ERROR("bus_dmamap_load() failed! dmah->vaddr (%016lx)\n",
+			(unsigned long)dmah->vaddr);
 		bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
 		bus_dma_tag_destroy(dmah->tag);
 		free(dmah, DRM_MEM_DMA);
@@ -211,12 +228,23 @@ int drm_sg_alloc(struct drm_device *dev, struct drm_scatter_gather * request)
 	}
 
 	entry->dmah = dmah;
+	entry->virtual = dmah->vaddr;
+
+#ifdef DRM_NEWER_USER_TOKEN
+	entry->handle = ScatterHandle((unsigned long)entry->virtual);
+#else
 	entry->handle = (unsigned long)dmah->vaddr;
-	entry->virtual = (void *)entry->handle;
+#endif
+
 #endif /* !__linux__ */
 
+#ifdef __linux__
 	DRM_DEBUG("handle  = %08lx\n", entry->handle);
 	DRM_DEBUG("virtual = %p\n", entry->virtual);
+#else
+	DRM_INFO("drm_sg_alloc(): request->handle  = %016lx\n", (unsigned long)entry->handle);
+	DRM_INFO("drm_sg_alloc(): virtual = %p\n", entry->virtual);
+#endif
 
 #ifdef __linux__
 	for (i = (unsigned long)entry->virtual, j = 0; j < pages;
