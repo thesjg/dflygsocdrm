@@ -1508,11 +1508,10 @@ extern int drm_update_drawable_info(struct drm_device *dev, void *data,
 int	drm_update_draw(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
 #endif /* !__linux__ */
-#ifdef __linux__
 /* drm_drawable_t is defined in drm.h to be unsigned int */
 extern struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev,
 						  drm_drawable_t id);
-#else
+#if 0
 struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev,
 						int handle);
 #endif

@@ -2029,6 +2029,7 @@ access_ok(int flags, void *ptr, int size) {
 	return useracc(__DECONST(caddr_t, ptr), size, flags);
 }
 
+#if 0
 /* file drm_ioc32.c, function compat_drm_version() */
 static __inline__ int
 __put_user(void * src, void *dest) {
@@ -2046,12 +2047,19 @@ static __inline__ int
 __get_user(void *dest, void *src) {
 	return 0;
 }
+#endif
 
 /* file drm_crtc.c, function drm_mode_setcrtc() */
-static __inline__ int
-get_user(long dest, void *src) {
-	return 0;
-}
+#define get_user(dest, src)  copyin(&dest, src, sizeof(dest))
+
+/* file drm_crtc.c, function drm_mode_setcrtc() */
+#define __get_user(dest, src)  copyin(&dest, src, sizeof(dest))
+
+/* file drm_crtc.c, function drm_mode_getresources() */
+#define put_user(src, dest)  copyout(&src, dest, sizeof(src))
+
+/* file drm_ioc32.c, function compat_drm_version() */
+#define __put_user(src, dest)  copyout(&src, dest, sizeof(src))
 
 /* file ttm/ttm_bo_vm.c, function ttm_bo_io() */
 /* file drm_bufs.c, function drm_freebufs() */

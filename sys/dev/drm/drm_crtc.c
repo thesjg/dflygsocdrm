@@ -36,7 +36,6 @@
 #endif /* drm.h already included in drmP.h after porting layer */
 #include "drmP.h"
 #include "drm_crtc.h"
-#include "drm_edid.h"
 
 struct drm_prop_enum_list {
 	int type;
@@ -1587,9 +1586,6 @@ int drm_mode_setcrtc(struct drm_device *dev, void *data,
 
 		for (i = 0; i < crtc_req->count_connectors; i++) {
 			set_connectors_ptr = (uint32_t *)(unsigned long)crtc_req->set_connectors_ptr;
-#ifndef __linux__ /* UNIMPLEMENTED */
-			out_id = 0;
-#endif
 			if (get_user(out_id, &set_connectors_ptr[i])) {
 				ret = -EFAULT;
 				goto out;

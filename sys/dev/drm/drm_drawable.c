@@ -95,7 +95,10 @@ int drm_rmdraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 	return 0;
 }
 
+int drm_update_drawable_info(struct drm_device *dev, void *data, struct drm_file *file_priv)
+#if 0
 int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_priv)
+#endif
 {
 	struct drm_update_draw *update = data;
 	unsigned long irqflags;
@@ -105,8 +108,12 @@ int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_pr
 
 	info = idr_find(&dev->drw_idr, update->handle);
 	if (!info) {
+#ifdef __linux__
+		info = kzalloc(sizeof(*info), GFP_KERNEL);
+#else
 		info = malloc(sizeof(*info),
 			DRM_MEM_DRAWABLE, M_WAITOK | M_ZERO);
+#endif
 		if (!info)
 			return -ENOMEM;
 		if (IS_ERR(idr_replace(&dev->drw_idr, info, update->handle))) {
@@ -121,9 +128,15 @@ int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_pr
 		if (update->num == 0)
 			rects = NULL;
 		else if (update->num != info->num_rects) {
+#ifdef __linux__
+			rects = kmalloc(update->num *
+					sizeof(struct drm_clip_rect),
+					GFP_KERNEL);
+#else
 			rects = malloc(update->num *
 					sizeof(struct drm_clip_rect),
-					DRM_MEM_DRAWABLE, M_WAITOK | M_ZERO);
+					DRM_MEM_DRAWABLE, M_WAITOK);
+#endif
 		} else
 			rects = info->rects;
 
@@ -174,7 +187,10 @@ error:
 /**
  * Caller must hold the drawable spinlock!
  */
+struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev, drm_drawable_t id)
+#if 0
 struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev, int id)
+#endif
 {
 	return idr_find(&dev->drw_idr, id);
 }
