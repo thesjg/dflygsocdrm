@@ -611,7 +611,8 @@ agp_i810_attach(device_t dev)
 			    sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 48 * 1024;
 			} else {
 				stolen = 0;
@@ -622,7 +623,8 @@ agp_i810_attach(device_t dev)
 			    sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 64 * 1024;
 			} else {
 				stolen = 0;
@@ -632,7 +634,8 @@ agp_i810_attach(device_t dev)
 			if (sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 128 * 1024;
 			} else {
 				stolen = 0;
@@ -642,7 +645,8 @@ agp_i810_attach(device_t dev)
 			if (sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 256 * 1024;
 			} else {
 				stolen = 0;
@@ -650,7 +654,8 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_96M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 96 * 1024;
 			} else {
 				stolen = 0;
@@ -658,7 +663,8 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_160M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 160 * 1024;
 			} else {
 				stolen = 0;
@@ -666,7 +672,8 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_224M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 224 * 1024;
 			} else {
 				stolen = 0;
@@ -674,7 +681,8 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_352M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X) {
+			    sc->chiptype == CHIP_G4X ||
+			    sc->chiptype == CHIP_IRON) {
 				stolen = 352 * 1024;
 			} else {
 				stolen = 0;
@@ -832,7 +840,8 @@ agp_i810_write_gtt_entry(device_t dev, int offset, vm_offset_t physical,
 
 	pte = (u_int32_t)physical | 1;
 	if (sc->chiptype == CHIP_I965 || sc->chiptype == CHIP_G33 ||
-	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X) {
+	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X ||
+	    sc->chiptype == CHIP_IRON) {
 		pte |= (physical & 0x0000000f00000000ull) >> 28;
 	} else {
 		/* If we do actually have memory above 4GB on an older system,
