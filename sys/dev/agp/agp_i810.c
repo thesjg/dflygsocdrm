@@ -74,6 +74,7 @@ enum {
 	CHIP_G33,	/* G33/Q33/Q35 */
 	CHIP_IGD,	/* G33 like IGD */
 	CHIP_G4X,	/* G45/Q45 */
+	CHIP_IRON,	/* Ironlake */
 };
 
 /* The i810 through i855 have the registers at BAR 1, and the GATT gets
@@ -184,6 +185,10 @@ static const struct agp_i810_match {
 	    "Intel IGD SVGA controller"},
 	{0xA0118086, CHIP_IGD, 0x00010000,
 	    "Intel IGD SVGA controller"},
+	{0x00428086, CHIP_IRON, 0x00020000,
+	    "Intel Ironlake D SVGA controller"},
+	{0x00468086, CHIP_IRON, 0x00020000,
+	    "Intel Ironlake M SVGA controller"},
 	{0, 0, 0, NULL}
 };
 
@@ -295,6 +300,7 @@ agp_i810_probe(device_t dev)
 	case CHIP_G33:
 	case CHIP_IGD:
 	case CHIP_G4X:
+	case CHIP_IRON:
 		deven = pci_read_config(bdev, AGP_I915_DEVEN, 4);
 		if ((deven & AGP_I915_DEVEN_D2F0) ==
 		    AGP_I915_DEVEN_D2F0_DISABLED) {
@@ -362,6 +368,7 @@ agp_i810_dump_regs(device_t dev)
 	case CHIP_G33:
 	case CHIP_IGD:
 	case CHIP_G4X:
+	case CHIP_IRON:
 		device_printf(dev, "AGP_I855_GCC1: 0x%02x\n",
 		    pci_read_config(sc->bdev, AGP_I855_GCC1, 1));
 		device_printf(dev, "AGP_I915_MSAC: 0x%02x\n",
@@ -402,6 +409,7 @@ agp_i810_attach(device_t dev)
 		break;
 	case CHIP_I965:
 	case CHIP_G4X:
+	case CHIP_IRON:
 		sc->sc_res_spec = agp_i965_res_spec;
 		agp_set_aperture_resource(dev, AGP_I915_GMADR);
 		break;
@@ -413,6 +421,7 @@ agp_i810_attach(device_t dev)
 
 	if (sc->chiptype != CHIP_I965 && sc->chiptype != CHIP_G33 &&
 	    sc->chiptype != CHIP_IGD && sc->chiptype != CHIP_G4X &&
+	    sc->chiptype != CHIP_IRON &&
 	    ptoa((vm_paddr_t)Maxmem) > 0xfffffffful)
 	{
 		device_printf(dev, "agp_i810.c does not support physical "
@@ -502,7 +511,8 @@ agp_i810_attach(device_t dev)
 		gatt->ag_physical = pgtblctl & ~1;
 	} else if (sc->chiptype == CHIP_I855 || sc->chiptype == CHIP_I915 ||
 	    sc->chiptype == CHIP_I965 || sc->chiptype == CHIP_G33 ||
-	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X) {
+	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X ||
+	    sc->chiptype == CHIP_IRON) {
 		unsigned int gcc1, pgtblctl, stolen, gtt_size;
 
 		/* Stolen memory is set up at the beginning of the aperture by
@@ -566,6 +576,7 @@ agp_i810_attach(device_t dev)
 			break;
 		case CHIP_IGD:
 		case CHIP_G4X:
+		case CHIP_IRON:
 			gtt_size = 0;
 			break;
 		default:
@@ -801,6 +812,7 @@ agp_i810_set_aperture(device_t dev, u_int32_t aperture)
 	case CHIP_G33:
 	case CHIP_IGD:
 	case CHIP_G4X:
+	case CHIP_IRON:
 		return agp_generic_set_aperture(dev, aperture);
 	}
 
@@ -849,6 +861,7 @@ agp_i810_write_gtt_entry(device_t dev, int offset, vm_offset_t physical,
 		    (offset >> AGP_PAGE_SHIFT) * 4 + (512 * 1024), pte);
 		break;
 	case CHIP_G4X:
+	case CHIP_IRON:
 		bus_write_4(sc->sc_res[0],
 		    (offset >> AGP_PAGE_SHIFT) * 4 + (2 * 1024 * 1024), pte);
 		break;
