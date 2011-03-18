@@ -44,9 +44,12 @@
 
 #include "drmP.h"
 
+#ifndef __linux__
 #define DRM_NEWER_BUFS 1
 #define DRM_NEWER_37 1
 #define DRM_NEWER_BUFTRY 1
+static const char *types[] = { "FB", "REG", "SHM", "AGP", "SG", "CON" };
+#endif
 
 /* Allocation of PCI memory resources (framebuffer, registers, etc.) for
  * drm_get_resource_*.  Note that they are not RF_ACTIVE, so there's no virtual
@@ -410,10 +413,8 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 #ifndef __linux__
 			DRM_ERROR("drm_addmap_core() agp invalid\n");
 #endif
-#ifdef DRM_NEWER_BUFTRY 
 			free(map, DRM_MEM_MAPS);
 			return -EPERM;
-#endif
 		}
 		DRM_DEBUG("AGP offset = 0x%08llx, size = 0x%08lx\n",
 			  (unsigned long long)map->offset, map->size);
@@ -428,9 +429,8 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			free(map, DRM_MEM_MAPS);
 			return -EINVAL;
 		}
-#ifdef DRM_NEWER_BUFTRY
 		map->offset += (unsigned long)dev->sg->virtual;
-#else
+#if 0
 		map->offset += dev->sg->handle;
 #endif /* __linux__ */
 
@@ -607,13 +607,12 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	drm_local_map_t *map;
 	int err;
 
-#ifdef DRM_NEWER_BUFTRY
 	if (!(dev->flags & (FREAD|FWRITE)))
 		return -EPERM; /* Require read/write */
 
 	if (!DRM_SUSER(DRM_CURPROC) && request->type != _DRM_AGP && map->type != _DRM_SHM)
 		return -EPERM;
-#else
+#if 0
 	if (!(dev->flags & (FREAD|FWRITE)))
 		return EACCES; /* Require read/write */
 
@@ -672,8 +671,20 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		if (r_list->map == map) {
 			master = r_list->master;
 			list_del(&r_list->head);
+#ifdef __linux__
 			drm_ht_remove_key(&dev->map_hash,
 					  r_list->user_token >> PAGE_SHIFT);
+#else
+			int rethash;
+			unsigned long key = r_list->user_token >> PAGE_SHIFT;
+			rethash = drm_ht_remove_key(&dev->map_hash,
+					  r_list->user_token >> PAGE_SHIFT);
+			if (rethash)
+				DRM_ERROR("FAILED drm_ht_remove_key(): offset (%016lx), handle (%016lx), key (%016lx)\n",
+					(uint64_t)map->offset,
+					(uint64_t)map->handle,
+					key);
+#endif
 			free(r_list, DRM_MEM_MAPS);
 			found = 1;
 			break;
@@ -685,6 +696,18 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 			map->type, (unsigned long)map->offset, (unsigned long)map->handle);
 		return -EINVAL;
 	}
+
+#ifndef __linux__
+	const char *type;
+	if (map->type < 0 || map->type > 5)
+		type = "??";
+	else
+		type = types[map->type];
+	DRM_INFO("drm_rmmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx)\n",
+		type,
+		(uint64_t)map->offset,
+		(uint64_t)map->handle);
+#endif
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
@@ -784,6 +807,16 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 	struct drm_map_list *r_list;
 	int ret;
 
+#ifndef __linux__
+	const char *type;
+	if (request->type < 0 || request->type > 5)
+		type = "??";
+	else
+		type = types[request->type];
+	DRM_INFO("drm_rmmap_ioctl(): request->type (%4.4s), request->handle (0x%016lx)\n",
+		type, (uint64_t)request->handle);
+#endif
+
 	mutex_lock(&dev->struct_mutex);
 	list_for_each_entry(r_list, &dev->maplist, head) {
 #ifdef DRM_NEWER_USER_TOKEN
@@ -808,6 +841,10 @@ int drm_rmmap_ioctl(struct drm_device *dev, void *data,
 	 * find anything.
 	 */
 	if (list_empty(&dev->maplist) || !map) {
+#ifndef __linux__
+		DRM_ERROR("FAILED: type (%4.4s), handle (0x%016lx)\n",
+			type, (uint64_t)request->handle);
+#endif
 		mutex_unlock(&dev->struct_mutex);
 		return -EINVAL;
 	}
@@ -932,9 +969,7 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 #else
 		DRM_ERROR("drm_addbufs_agp(): zone invalid\n");
 #endif
-#ifdef DRM_NEWER_BUFTRY
 		return -EINVAL;
-#endif
 	}
 
 	spin_lock(&dev->count_lock);
@@ -988,9 +1023,8 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 		init_waitqueue_head(&buf->dma_wait);
 		buf->file_priv = NULL;
 
-#ifdef DRM_NEWER_37
 		buf->dev_priv_size = dev->driver->dev_priv_size;
-#else
+#if 0
 		buf->dev_priv_size = dev->driver->buf_priv_size;
 #endif
 		buf->dev_private = malloc(buf->dev_priv_size,
@@ -1199,9 +1233,8 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 			buf->order = order;
 			buf->used = 0;
 			buf->offset = (dma->byte_count + byte_count + offset);
-#ifdef DRM_NEWER_BUFTRY
 			buf->address = (void *)(dmah->vaddr + offset);
-#else
+#if 0
 			buf->address = ((char *)dmah->vaddr + offset);
 #endif
 			buf->bus_address = dmah->busaddr + offset;
@@ -1374,10 +1407,9 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 
 		buf->offset = (dma->byte_count + offset);
 		buf->bus_address = agp_offset + offset;
-#ifdef DRM_NEWER_BUFTRY
 		buf->address = (void *)(agp_offset + offset
 					+ (unsigned long)dev->sg->virtual);
-#else
+#if 0
 		buf->address = (void *)(agp_offset + offset
 					+ (unsigned long)dev->sg->handle);
 #endif
@@ -1664,7 +1696,7 @@ int drm_infobufs(struct drm_device *dev, void *data,
 	struct drm_buf_info *request = data;
 	int i;
 	int count;
-#ifndef DRM_NEWER_BUFTRY
+#if 0
 	int retcode = 0;
 #endif
 
@@ -1693,7 +1725,6 @@ int drm_infobufs(struct drm_device *dev, void *data,
 		for (i = 0, count = 0; i < DRM_MAX_ORDER + 1; i++) {
 			if (dma->bufs[i].buf_count) {
 
-#ifdef DRM_NEWER_BUFTRY
 				struct drm_buf_desc __user *to =
 				    &request->list[count];
 				struct drm_buf_entry *from = &dma->bufs[i];
@@ -1711,7 +1742,7 @@ int drm_infobufs(struct drm_device *dev, void *data,
 						 &list->high_mark,
 						 sizeof(list->high_mark)))
 					return -EFAULT;
-#else
+#if 0
 				struct drm_buf_desc from;
 
 				from.count = dma->bufs[i].buf_count;
@@ -1765,7 +1796,6 @@ int drm_markbufs(struct drm_device *dev, void *data,
 	struct drm_device_dma *dma = dev->dma;
 	struct drm_buf_desc *request = data;
 	int order;
-#ifdef DRM_NEWER_BUFTRY
 	struct drm_buf_entry *entry;
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
@@ -1788,7 +1818,7 @@ int drm_markbufs(struct drm_device *dev, void *data,
 
 	entry->freelist.low_mark = request->low_mark;
 	entry->freelist.high_mark = request->high_mark;
-#else
+#if 0
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
 		return -EINVAL;
@@ -1836,7 +1866,7 @@ int drm_freebufs(struct drm_device *dev, void *data,
 	int i;
 	int idx;
 	struct drm_buf *buf;
-#ifndef DRM_NEWER_BUFTRY
+#if 0
 	int retcode = 0;
 #endif
 
@@ -1848,7 +1878,6 @@ int drm_freebufs(struct drm_device *dev, void *data,
 
 	DRM_DEBUG("%d\n", request->count);
 	for (i = 0; i < request->count; i++) {
-#ifdef DRM_NEWER_BUFTRY
 		if (copy_from_user(&idx, &request->list[i], sizeof(idx)))
 			return -EFAULT;
 		if (idx < 0 || idx >= dma->buf_count) {
@@ -1862,7 +1891,7 @@ int drm_freebufs(struct drm_device *dev, void *data,
 				  task_pid_nr(current));
 			return -EINVAL;
 		}
-#else
+#if 0
 		if (DRM_COPY_FROM_USER(&idx, &request->list[i], sizeof(idx))) {
 			retcode = EFAULT;
 			break;
@@ -1884,9 +1913,8 @@ int drm_freebufs(struct drm_device *dev, void *data,
 		drm_free_buffer(dev, buf);
 	}
 
-#ifdef DRM_NEWER_BUFTRY
 	return 0;
-#else
+#if 0
 	return retcode;
 #endif
 }
@@ -1969,6 +1997,14 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 	}
 
 	vaddr = round_page((vm_offset_t)vms->vm_daddr + MAXDSIZ);
+
+#ifndef __linux__
+	DRM_INFO("vm_mmap() before: vaddr (%016lx), size (%016lx), foff (%016lx)\n",
+		(unsigned long)vaddr,
+		(unsigned long)size,
+		foff);
+#endif
+
 #if defined(__DragonFly__)
 	retcode = vm_mmap(&vms->vm_map, &vaddr, size, PROT_READ | PROT_WRITE,
 	    VM_PROT_ALL, MAP_SHARED | MAP_NOSYNC, OBJT_DEVICE,
@@ -1982,6 +2018,16 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 	    VM_PROT_ALL, MAP_SHARED | MAP_NOSYNC,
 	    SLIST_FIRST(&dev->devnode->si_hlist), foff);
 #endif
+
+#ifndef __linux__
+	DRM_INFO("vm_mmap() after: vaddr (%016lx), size (%016lx), foff (%016lx)\n",
+		(unsigned long)vaddr,
+		(unsigned long)size,
+		foff);
+	if (retcode)
+		DRM_ERROR("vm_mmap() retcode (%d)\n", retcode);
+#endif
+
 	if (retcode)
 		goto done;
 
@@ -2030,14 +2076,13 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 int drm_order(unsigned long size)
 {
 	int order;
-#ifdef DRM_NEWER_BUFTRY
 	unsigned long tmp;
 
 	for (order = 0, tmp = size >> 1; tmp; tmp >>= 1, order++) ;
 
 	if (size & (size - 1))
 		++order;
-#else
+#if 0
 
 	if (size == 0)
 		return 0;

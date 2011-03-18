@@ -68,6 +68,10 @@
 #endif
 #endif /* __linux__ */
 
+#ifndef __linux__
+	static int no_foff = 0;
+#endif
+
 /**
  * mmap DMA memory.
  *
@@ -95,6 +99,13 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	vm_paddr_t phys;
 	struct drm_local_map *map_foff = NULL;
 	struct drm_hash_item *hash;
+
+#ifndef __linux__
+	if (((off_t)foff == (off_t)(-1)) && !no_foff) {
+		no_foff = 1;
+		DRM_INFO("drm_mmap_legacy(): foff == -1 for offset (%016lx)\n", offset);
+	}
+#endif
 
         file_priv = drm_find_file_by_proc(dev, DRM_CURPROC);
 
