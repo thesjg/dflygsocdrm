@@ -62,14 +62,16 @@ struct drm_open_hash {
 #endif
 	unsigned int size;
 	unsigned int order;
-#ifdef __linux__
 	unsigned int fill;
+#ifdef __linux__
 	struct hlist_head *table;
+#endif
 	int use_vmalloc;
-#else
+#ifndef __linux__
 	unsigned long mask;
 #endif
 };
+
 
 extern int drm_ht_create(struct drm_open_hash *ht, unsigned int order);
 extern int drm_ht_insert_item(struct drm_open_hash *ht, struct drm_hash_item *item);
@@ -82,5 +84,6 @@ extern void drm_ht_verbose_list(struct drm_open_hash *ht, unsigned long key);
 extern int drm_ht_remove_key(struct drm_open_hash *ht, unsigned long key);
 extern int drm_ht_remove_item(struct drm_open_hash *ht, struct drm_hash_item *item);
 extern void drm_ht_remove(struct drm_open_hash *ht);
+
 
 #endif
