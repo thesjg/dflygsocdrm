@@ -79,7 +79,7 @@ static int __init ttm_init(void)
 	ttm_global_init();
 
 	atomic_set(&device_released, 0);
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	ret = drm_class_device_register(&ttm_drm_class_device);
 #endif
 	if (unlikely(ret != 0))
@@ -95,7 +95,7 @@ out_no_dev_reg:
 
 static void __exit ttm_exit(void)
 {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	drm_class_device_unregister(&ttm_drm_class_device);
 #endif
 

@@ -37,6 +37,9 @@
  */
 
 #ifdef __linux__
+#include "ttm/ttm_module.h"
+#include "ttm/ttm_bo_driver.h"
+#include "ttm/ttm_placement.h"
 #include <linux/jiffies.h>
 #include <linux/slab.h>
 #include <linux/sched.h>
@@ -84,6 +87,8 @@ static void ttm_mem_type_debug(struct ttm_bo_device *bdev, int mem_type)
 	printk(KERN_ERR TTM_PFX "    use_type: %d\n", man->use_type);
 	printk(KERN_ERR TTM_PFX "    flags: 0x%08X\n", man->flags);
 	printk(KERN_ERR TTM_PFX "    gpu_offset: 0x%08lX\n", man->gpu_offset);
+	printk(KERN_ERR TTM_PFX "    io_offset: 0x%08lX\n", man->io_offset);
+	printk(KERN_ERR TTM_PFX "    io_size: %ld\n", man->io_size);
 	printk(KERN_ERR TTM_PFX "    size: %llu\n", man->size);
 	printk(KERN_ERR TTM_PFX "    available_caching: 0x%08X\n",
 		man->available_caching);
@@ -236,15 +241,9 @@ static int ttm_bo_del_from_lru(struct ttm_buffer_object *bo)
 	return put_count;
 }
 
-#ifdef __linux__
 int ttm_bo_reserve_locked(struct ttm_buffer_object *bo,
 			  bool interruptible,
 			  bool no_wait, bool use_sequence, uint32_t sequence)
-#else
-static int ttm_bo_reserve_locked(struct ttm_buffer_object *bo,
-			  bool interruptible,
-			  bool no_wait, bool use_sequence, uint32_t sequence)
-#endif
 {
 	struct ttm_bo_global *glob = bo->glob;
 	int ret;
@@ -371,8 +370,7 @@ static int ttm_bo_add_ttm(struct ttm_buffer_object *bo, bool zero_alloc)
 
 static int ttm_bo_handle_move_mem(struct ttm_buffer_object *bo,
 				  struct ttm_mem_reg *mem,
-				  bool evict, bool interruptible,
-				  bool no_wait_reserve, bool no_wait_gpu)
+				  bool evict, bool interruptible, bool no_wait)
 {
 	struct ttm_bo_device *bdev = bo->bdev;
 	bool old_is_pci = ttm_mem_reg_is_pci(bdev, &bo->mem);
@@ -417,12 +415,12 @@ static int ttm_bo_handle_move_mem(struct ttm_buffer_object *bo,
 
 	if (!(old_man->flags & TTM_MEMTYPE_FLAG_FIXED) &&
 	    !(new_man->flags & TTM_MEMTYPE_FLAG_FIXED))
-		ret = ttm_bo_move_ttm(bo, evict, no_wait_reserve, no_wait_gpu, mem);
+		ret = ttm_bo_move_ttm(bo, evict, no_wait, mem);
 	else if (bdev->driver->move)
 		ret = bdev->driver->move(bo, evict, interruptible,
-					 no_wait_reserve, no_wait_gpu, mem);
+					 no_wait, mem);
 	else
-		ret = ttm_bo_move_memcpy(bo, evict, no_wait_reserve, no_wait_gpu, mem);
+		ret = ttm_bo_move_memcpy(bo, evict, no_wait, mem);
 
 	if (ret)
 		goto out_err;
@@ -620,22 +618,8 @@ void ttm_bo_unref(struct ttm_buffer_object **p_bo)
 }
 EXPORT_SYMBOL(ttm_bo_unref);
 
-int ttm_bo_lock_delayed_workqueue(struct ttm_bo_device *bdev)
-{
-	return cancel_delayed_work_sync(&bdev->wq);
-}
-EXPORT_SYMBOL(ttm_bo_lock_delayed_workqueue);
-
-void ttm_bo_unlock_delayed_workqueue(struct ttm_bo_device *bdev, int resched)
-{
-	if (resched)
-		schedule_delayed_work(&bdev->wq,
-				      ((HZ / 100) < 1) ? 1 : HZ / 100);
-}
-EXPORT_SYMBOL(ttm_bo_unlock_delayed_workqueue);
-
 static int ttm_bo_evict(struct ttm_buffer_object *bo, bool interruptible,
-			bool no_wait_reserve, bool no_wait_gpu)
+			bool no_wait)
 {
 	struct ttm_bo_device *bdev = bo->bdev;
 	struct ttm_bo_global *glob = bo->glob;
@@ -644,7 +628,7 @@ static int ttm_bo_evict(struct ttm_buffer_object *bo, bool interruptible,
 	int ret = 0;
 
 	spin_lock(&bo->lock);
-	ret = ttm_bo_wait(bo, false, interruptible, no_wait_gpu);
+	ret = ttm_bo_wait(bo, false, interruptible, no_wait);
 	spin_unlock(&bo->lock);
 
 	if (unlikely(ret != 0)) {
@@ -660,7 +644,6 @@ static int ttm_bo_evict(struct ttm_buffer_object *bo, bool interruptible,
 
 	evict_mem = bo->mem;
 	evict_mem.mm_node = NULL;
-	evict_mem.bus.io_reserved = false;
 
 	placement.fpfn = 0;
 	placement.lpfn = 0;
@@ -668,7 +651,7 @@ static int ttm_bo_evict(struct ttm_buffer_object *bo, bool interruptible,
 	placement.num_busy_placement = 0;
 	bdev->driver->evict_flags(bo, &placement);
 	ret = ttm_bo_mem_space(bo, &placement, &evict_mem, interruptible,
-				no_wait_reserve, no_wait_gpu);
+				no_wait);
 	if (ret) {
 		if (ret != -ERESTARTSYS) {
 			printk(KERN_ERR TTM_PFX
@@ -680,7 +663,7 @@ static int ttm_bo_evict(struct ttm_buffer_object *bo, bool interruptible,
 	}
 
 	ret = ttm_bo_handle_move_mem(bo, &evict_mem, true, interruptible,
-				     no_wait_reserve, no_wait_gpu);
+				     no_wait);
 	if (ret) {
 		if (ret != -ERESTARTSYS)
 			printk(KERN_ERR TTM_PFX "Buffer eviction failed\n");
@@ -700,8 +683,7 @@ out:
 
 static int ttm_mem_evict_first(struct ttm_bo_device *bdev,
 				uint32_t mem_type,
-				bool interruptible, bool no_wait_reserve,
-				bool no_wait_gpu)
+				bool interruptible, bool no_wait)
 {
 	struct ttm_bo_global *glob = bdev->glob;
 	struct ttm_mem_type_manager *man = &bdev->man[mem_type];
@@ -718,11 +700,11 @@ retry:
 	bo = list_first_entry(&man->lru, struct ttm_buffer_object, lru);
 	kref_get(&bo->list_kref);
 
-	ret = ttm_bo_reserve_locked(bo, false, no_wait_reserve, false, 0);
+	ret = ttm_bo_reserve_locked(bo, false, true, false, 0);
 
 	if (unlikely(ret == -EBUSY)) {
 		spin_unlock(&glob->lru_lock);
-		if (likely(!no_wait_gpu))
+		if (likely(!no_wait))
 			ret = ttm_bo_wait_unreserved(bo, interruptible);
 
 		kref_put(&bo->list_kref, ttm_bo_release_list);
@@ -744,7 +726,7 @@ retry:
 	while (put_count--)
 		kref_put(&bo->list_kref, ttm_bo_ref_bug);
 
-	ret = ttm_bo_evict(bo, interruptible, no_wait_reserve, no_wait_gpu);
+	ret = ttm_bo_evict(bo, interruptible, no_wait);
 	ttm_bo_unreserve(bo);
 
 	kref_put(&bo->list_kref, ttm_bo_release_list);
@@ -795,9 +777,7 @@ static int ttm_bo_mem_force_space(struct ttm_buffer_object *bo,
 					uint32_t mem_type,
 					struct ttm_placement *placement,
 					struct ttm_mem_reg *mem,
-					bool interruptible,
-					bool no_wait_reserve,
-					bool no_wait_gpu)
+					bool interruptible, bool no_wait)
 {
 	struct ttm_bo_device *bdev = bo->bdev;
 	struct ttm_bo_global *glob = bdev->glob;
@@ -818,7 +798,7 @@ static int ttm_bo_mem_force_space(struct ttm_buffer_object *bo,
 		}
 		spin_unlock(&glob->lru_lock);
 		ret = ttm_mem_evict_first(bdev, mem_type, interruptible,
-						no_wait_reserve, no_wait_gpu);
+						no_wait);
 		if (unlikely(ret != 0))
 			return ret;
 	} while (1);
@@ -888,8 +868,7 @@ static bool ttm_bo_mt_compatible(struct ttm_mem_type_manager *man,
 int ttm_bo_mem_space(struct ttm_buffer_object *bo,
 			struct ttm_placement *placement,
 			struct ttm_mem_reg *mem,
-			bool interruptible, bool no_wait_reserve,
-			bool no_wait_gpu)
+			bool interruptible, bool no_wait)
 {
 	struct ttm_bo_device *bdev = bo->bdev;
 	struct ttm_mem_type_manager *man;
@@ -986,7 +965,7 @@ int ttm_bo_mem_space(struct ttm_buffer_object *bo,
 		}
 
 		ret = ttm_bo_mem_force_space(bo, mem_type, placement, mem,
-						interruptible, no_wait_reserve, no_wait_gpu);
+						interruptible, no_wait);
 		if (ret == 0 && mem->mm_node) {
 			mem->placement = cur_flags;
 			mem->mm_node->private = bo;
@@ -1010,17 +989,9 @@ int ttm_bo_wait_cpu(struct ttm_buffer_object *bo, bool no_wait)
 }
 EXPORT_SYMBOL(ttm_bo_wait_cpu);
 
-#ifdef __linux__
 int ttm_bo_move_buffer(struct ttm_buffer_object *bo,
 			struct ttm_placement *placement,
-			bool interruptible, bool no_wait_reserve,
-			bool no_wait_gpu)
-#else
-static int ttm_bo_move_buffer(struct ttm_buffer_object *bo,
-			struct ttm_placement *placement,
-			bool interruptible, bool no_wait_reserve,
-			bool no_wait_gpu)
-#endif
+			bool interruptible, bool no_wait)
 {
 	struct ttm_bo_global *glob = bo->glob;
 	int ret = 0;
@@ -1034,28 +1005,25 @@ static int ttm_bo_move_buffer(struct ttm_buffer_object *bo,
 	 * instead of doing it here.
 	 */
 	spin_lock(&bo->lock);
-	ret = ttm_bo_wait(bo, false, interruptible, no_wait_gpu);
+	ret = ttm_bo_wait(bo, false, interruptible, no_wait);
 	spin_unlock(&bo->lock);
 	if (ret)
 		return ret;
 	mem.num_pages = bo->num_pages;
 	mem.size = mem.num_pages << PAGE_SHIFT;
 	mem.page_alignment = bo->mem.page_alignment;
-	mem.bus.io_reserved = false;
 	/*
 	 * Determine where to move the buffer.
 	 */
-	ret = ttm_bo_mem_space(bo, placement, &mem, interruptible, no_wait_reserve, no_wait_gpu);
+	ret = ttm_bo_mem_space(bo, placement, &mem, interruptible, no_wait);
 	if (ret)
 		goto out_unlock;
-	ret = ttm_bo_handle_move_mem(bo, &mem, false, interruptible, no_wait_reserve, no_wait_gpu);
+	ret = ttm_bo_handle_move_mem(bo, &mem, false, interruptible, no_wait);
 out_unlock:
 	if (ret && mem.mm_node) {
 		spin_lock(&glob->lru_lock);
 		mem.mm_node->private = NULL;
-#ifdef __linux__
 		drm_mm_put_block(mem.mm_node);
-#endif
 		spin_unlock(&glob->lru_lock);
 	}
 	return ret;
@@ -1084,8 +1052,7 @@ static int ttm_bo_mem_compat(struct ttm_placement *placement,
 
 int ttm_bo_validate(struct ttm_buffer_object *bo,
 			struct ttm_placement *placement,
-			bool interruptible, bool no_wait_reserve,
-			bool no_wait_gpu)
+			bool interruptible, bool no_wait)
 {
 	int ret;
 
@@ -1100,7 +1067,7 @@ int ttm_bo_validate(struct ttm_buffer_object *bo,
 	 */
 	ret = ttm_bo_mem_compat(placement, &bo->mem);
 	if (ret < 0) {
-		ret = ttm_bo_move_buffer(bo, placement, interruptible, no_wait_reserve, no_wait_gpu);
+		ret = ttm_bo_move_buffer(bo, placement, interruptible, no_wait);
 		if (ret)
 			return ret;
 	} else {
@@ -1199,7 +1166,6 @@ int ttm_bo_init(struct ttm_bo_device *bdev,
 	bo->mem.num_pages = bo->num_pages;
 	bo->mem.mm_node = NULL;
 	bo->mem.page_alignment = page_alignment;
-	bo->mem.bus.io_reserved = false;
 	bo->buffer_start = buffer_start & PAGE_MASK;
 	bo->priv_flags = 0;
 	bo->mem.placement = (TTM_PL_FLAG_SYSTEM | TTM_PL_FLAG_CACHED);
@@ -1222,7 +1188,7 @@ int ttm_bo_init(struct ttm_bo_device *bdev,
 			goto out_err;
 	}
 
-	ret = ttm_bo_validate(bo, placement, interruptible, false, false);
+	ret = ttm_bo_validate(bo, placement, interruptible, false);
 	if (ret)
 		goto out_err;
 
@@ -1296,7 +1262,7 @@ static int ttm_bo_force_list_clean(struct ttm_bo_device *bdev,
 	spin_lock(&glob->lru_lock);
 	while (!list_empty(&man->lru)) {
 		spin_unlock(&glob->lru_lock);
-		ret = ttm_mem_evict_first(bdev, mem_type, false, false, false);
+		ret = ttm_mem_evict_first(bdev, mem_type, false, false);
 		if (ret) {
 			if (allow_errors) {
 				return ret;
@@ -1555,7 +1521,7 @@ int ttm_bo_device_init(struct ttm_bo_device *bdev,
 	if (unlikely(ret != 0))
 		goto out_no_sys;
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	bdev->addr_space_rb = RB_ROOT;
 #endif
 	ret = drm_mm_init(&bdev->addr_space_mm, file_page_offset, 0x10000000);
@@ -1602,6 +1568,26 @@ bool ttm_mem_reg_is_pci(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem)
 	return true;
 }
 
+int ttm_bo_pci_offset(struct ttm_bo_device *bdev,
+		      struct ttm_mem_reg *mem,
+		      unsigned long *bus_base,
+		      unsigned long *bus_offset, unsigned long *bus_size)
+{
+	struct ttm_mem_type_manager *man = &bdev->man[mem->mem_type];
+
+	*bus_size = 0;
+	if (!(man->flags & TTM_MEMTYPE_FLAG_MAPPABLE))
+		return -EINVAL;
+
+	if (ttm_mem_reg_is_pci(bdev, mem)) {
+		*bus_offset = mem->mm_node->start << PAGE_SHIFT;
+		*bus_size = mem->num_pages << PAGE_SHIFT;
+		*bus_base = man->io_offset;
+	}
+
+	return 0;
+}
+
 void ttm_bo_unmap_virtual(struct ttm_buffer_object *bo)
 {
 	struct ttm_bo_device *bdev = bo->bdev;
@@ -1610,8 +1596,8 @@ void ttm_bo_unmap_virtual(struct ttm_buffer_object *bo)
 
 	if (!bdev->dev_mapping)
 		return;
+
 	unmap_mapping_range(bdev->dev_mapping, offset, holelen, 1);
-	ttm_mem_io_free(bdev, &bo->mem);
 }
 EXPORT_SYMBOL(ttm_bo_unmap_virtual);
 
@@ -1840,7 +1826,7 @@ static int ttm_bo_swapout(struct ttm_mem_shrink *shrink)
 		evict_mem.mem_type = TTM_PL_SYSTEM;
 
 		ret = ttm_bo_handle_move_mem(bo, &evict_mem, true,
-					     false, false, false);
+					     false, false);
 		if (unlikely(ret != 0))
 			goto out;
 	}
@@ -1875,5 +1861,4 @@ void ttm_bo_swapout_all(struct ttm_bo_device *bdev)
 	while (ttm_bo_swapout(&bdev->glob->shrink) == 0)
 		;
 }
-
 EXPORT_SYMBOL(ttm_bo_swapout_all);

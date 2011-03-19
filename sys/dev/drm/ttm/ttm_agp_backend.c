@@ -53,7 +53,7 @@ static int ttm_agp_populate(struct ttm_backend *backend,
 			    unsigned long num_pages, struct page **pages,
 			    struct page *dummy_read_page)
 {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	struct ttm_agp_backend *agp_be =
 	    container_of(backend, struct ttm_agp_backend, backend);
 	struct page **cur_page, **last_page = pages + num_pages;
@@ -78,7 +78,7 @@ static int ttm_agp_populate(struct ttm_backend *backend,
 
 static int ttm_agp_bind(struct ttm_backend *backend, struct ttm_mem_reg *bo_mem)
 {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	struct ttm_agp_backend *agp_be =
 	    container_of(backend, struct ttm_agp_backend, backend);
 	struct agp_memory *mem = agp_be->mem;
@@ -100,7 +100,7 @@ static int ttm_agp_bind(struct ttm_backend *backend, struct ttm_mem_reg *bo_mem)
 
 static int ttm_agp_unbind(struct ttm_backend *backend)
 {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	struct ttm_agp_backend *agp_be =
 	    container_of(backend, struct ttm_agp_backend, backend);
 
@@ -119,7 +119,7 @@ static void ttm_agp_clear(struct ttm_backend *backend)
 
 	if (mem) {
 		ttm_agp_unbind(backend);
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 		agp_free_memory(mem);
 #endif
 	}
@@ -149,7 +149,7 @@ static struct ttm_backend_func ttm_agp_func = {
 struct ttm_backend *ttm_agp_backend_init(struct ttm_bo_device *bdev,
 					 struct agp_bridge_data *bridge)
 {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	struct ttm_agp_backend *agp_be;
 	agp_be = kmalloc(sizeof(*agp_be), GFP_KERNEL);
 	if (!agp_be)
