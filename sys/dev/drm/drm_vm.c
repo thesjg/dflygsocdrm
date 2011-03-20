@@ -69,7 +69,7 @@
 #endif /* __linux__ */
 
 #ifndef __linux__
-	static int no_foff = 0;
+	static off_t previous_foff = (off_t)(-2);
 #endif
 
 /**
@@ -101,9 +101,11 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	struct drm_hash_item *hash;
 
 #ifndef __linux__
-	if (((off_t)foff == (off_t)(-1)) && !no_foff) {
-		no_foff = 1;
-		DRM_INFO("drm_mmap_legacy(): foff == -1 for offset (%016lx)\n", offset);
+	if ((off_t)ap->a_foff != previous_foff) {
+		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx)\n",
+			ap->a_foff,
+			offset);
+		previous_foff = ap->a_foff;
 	}
 #endif
 
