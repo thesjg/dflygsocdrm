@@ -83,6 +83,7 @@
 #define DRM_STRUCTPROC		struct thread
 
 #define DRM_CURRENTPID		curthread->td_proc->p_pid
+#define DRM_CURRENTUID		curthread->td_proc->p_ucred->cr_svuid
 
 /* Specific to BSD port of drm */
 /* drm_drv.c drm_ioctl() and drm_vm.c drm_mmap() */

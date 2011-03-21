@@ -39,8 +39,7 @@
 #include <linux/poll.h>
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
-#endif /* __linux__ */
-
+#else /* !__linux__ */
 extern devclass_t drm_devclass;
 
 #define DRIVER_SOFTC(unit) \
@@ -52,11 +51,18 @@ struct drm_file *drm_find_file_by_proc(struct drm_device *dev, DRM_STRUCTPROC *p
 	pid_t pid = p->td_proc->p_pid;
 	struct drm_file *priv;
 
+	list_for_each_entry(priv, &dev->filelist, lhead) {
+		if (priv->pid == pid && priv->uid == uid)
+			return priv;
+	}
+#if 0
 	TAILQ_FOREACH(priv, &dev->files, link)
 		if (priv->pid == pid && priv->uid == uid)
 			return priv;
+#endif
 	return NULL;
 }
+#endif /* !__linux__ */
 
 #ifdef __linux__
 static int drm_open_helper(struct inode *inode, struct file *filp,

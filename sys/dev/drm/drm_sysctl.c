@@ -363,10 +363,6 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	list_for_each_entry(priv, &dev->filelist, lhead) {
 		privcount++;
 	}
-#if 0
-	TAILQ_FOREACH(priv, &dev->files, link)
-		privcount++;
-#endif
 
 	tempprivs = malloc(sizeof(struct drm_file) * privcount,
 		DRM_MEM_DRIVER, M_WAITOK);
@@ -378,10 +374,6 @@ static int drm_clients_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	list_for_each_entry(priv, &dev->filelist, lhead) {
 		tempprivs[i++] = *priv;
 	}
-#if 0
-	TAILQ_FOREACH(priv, &dev->files, link)
-		tempprivs[i++] = *priv;
-#endif
 	mutex_unlock(&dev->struct_mutex);
 
 	DRM_SYSCTL_PRINT("\na dev	pid    uid	magic	  ioctls\n");

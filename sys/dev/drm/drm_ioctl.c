@@ -255,10 +255,6 @@ int drm_getclient(struct drm_device *dev, void *data,
 	int idx;
 	int i;
 
-#if 0
-	int i = 0;
-#endif
-
 	idx = client->idx;
 	mutex_lock(&dev->struct_mutex);
 
@@ -275,20 +271,6 @@ int drm_getclient(struct drm_device *dev, void *data,
 			return 0;
 		}
 	}
-#if 0
-	TAILQ_FOREACH(pt, &dev->files, link) {
-		if (i == idx) {
-			client->auth  = pt->authenticated;
-			client->pid   = pt->pid;
-			client->uid   = pt->uid;
-			client->magic = pt->magic;
-			client->iocs  = pt->ioctl_count;
-			mutex_unlock(&dev->struct_mutex);
-			return 0;
-		}
-		i++;
-	}
-#endif
 	mutex_unlock(&dev->struct_mutex);
 
 	return -EINVAL;
