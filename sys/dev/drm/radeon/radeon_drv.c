@@ -39,6 +39,7 @@
 #include <linux/console.h>
 #endif /* __linux__ */
 
+#define DRM_NEWER_MASTER 1
 
 /*
  * KMS wrapper.
@@ -210,6 +211,11 @@ static void radeon_configure(struct drm_device *dev)
 	dev->driver->irq_postinstall	= radeon_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= radeon_driver_irq_uninstall;
 	dev->driver->irq_handler	= radeon_driver_irq_handler;
+#ifdef DRM_NEWER_USER_TOKEN
+	dev->driver->reclaim_buffers = drm_core_reclaim_buffers;
+	dev->driver->get_map_ofs = drm_core_get_map_ofs;
+	dev->driver->get_reg_ofs = drm_core_get_reg_ofs;
+#endif
 	dev->driver->dma_ioctl		= radeon_cp_buffers;
 
 	dev->driver->ioctls		= radeon_ioctls;
@@ -258,11 +264,11 @@ static struct drm_driver driver_old = {
 	.irq_postinstall = radeon_driver_irq_postinstall,
 	.irq_uninstall = radeon_driver_irq_uninstall,
 	.irq_handler = radeon_driver_irq_handler,
-#ifdef __linux__
+#ifdef DRM_NEWER_MASTER
 	.reclaim_buffers = drm_core_reclaim_buffers,
 	.get_map_ofs = drm_core_get_map_ofs,
 	.get_reg_ofs = drm_core_get_reg_ofs,
-#endif /* __linux__ */
+#endif
 	.ioctls = radeon_ioctls,
 	.dma_ioctl = radeon_cp_buffers,
 #ifdef __linux__
