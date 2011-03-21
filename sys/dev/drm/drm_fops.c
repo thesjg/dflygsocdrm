@@ -514,7 +514,8 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	free(priv, DRM_MEM_FILES);
 #ifdef __linux__
 	filp->private_data = NULL;
-#else
+#endif
+#if 0
 	kdev->si_drv1 = NULL;
 #endif
 	return ret;
