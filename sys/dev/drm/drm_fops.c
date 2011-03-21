@@ -96,8 +96,9 @@ static int drm_setup(struct drm_device * dev)
 		atomic_set(&dev->buf_alloc, 0);
 
 		i = drm_dma_setup(dev);
+#ifdef __linux__
 		if (i < 0)
-#if 0
+#else
 		if (i != 0)
 #endif
 			return i;
@@ -799,7 +800,9 @@ int drm_close_legacy(struct dev_close_args *ap)
 	drm_master_put(&file_priv->master);
 	file_priv->is_master = 0;
 	list_del(&file_priv->lhead);
+#if 0
 	TAILQ_REMOVE(&dev->files, file_priv, link);
+#endif
 	mutex_unlock(&dev->struct_mutex);
 
 	if (dev->driver->postclose)
