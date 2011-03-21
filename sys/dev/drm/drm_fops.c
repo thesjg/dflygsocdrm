@@ -96,7 +96,10 @@ static int drm_setup(struct drm_device * dev)
 		atomic_set(&dev->buf_alloc, 0);
 
 		i = drm_dma_setup(dev);
+		if (i < 0)
+#if 0
 		if (i != 0)
+#endif
 			return i;
 	}
 
@@ -294,7 +297,7 @@ out:
  */
 static int drm_cpu_valid(void)
 {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 #if defined(__i386__)
 	if (boot_cpu_data.x86 == 3)
 		return 0;	/* No cmpxchg on a 386 */
@@ -330,8 +333,13 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	struct drm_file *priv;
 	int ret;
 
+#ifdef __linux__
+	if (filp->f_flags & O_EXCL)
+		return -EBUSY;	/* No exclusive opens */
+#else
 	if (flags & O_EXCL)
 		return EBUSY; /* No exclusive opens */
+#endif
 	if (!drm_cpu_valid())
 		return EINVAL;
 
@@ -345,7 +353,9 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	}
 
 	priv->refs = 1;
+#if 0
 	priv->minor_legacy = minor_id;
+#endif
 
 #ifdef __linux__
 	priv->uid = current_euid();
@@ -382,9 +392,11 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 			find_priv->minor->index,
 			find_priv->authenticated
 			);
+		if (kdev->si_drv1 != dev)
+			DRM_ERROR("kdev->si_drv1 != dev\n");
 		kdev->si_drv1 = dev;
 		ret = 0;
-		goto out_free;
+		goto out_free_found;
 	}
 #endif /* !__linux__ */
 
@@ -400,9 +412,11 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 
 	/* if there is no current master make this fd it */
 	mutex_lock(&dev->struct_mutex);
-#ifndef __linux__ /* legacy can be made redundant */
+#ifndef __linux__ /* legacy BSD needed for other */
 	kdev->si_drv1 = dev;
+#if 0
 	priv->master_legacy = TAILQ_EMPTY(&dev->files);
+#endif
 #endif
 	if (!priv->minor->master) {
 		/* create a new master */
@@ -412,9 +426,10 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 			ret = ENOMEM;
 			goto out_free;
 		}
-
+#ifndef __linux__
 		DRM_INFO("master created on minor_id (%d) by pid (%d), uid (%d)\n",
 			minor_id, priv->pid, priv->uid);
+#endif
 
 		priv->is_master = 1;
 		/* take another reference for the copy in the local file priv */
@@ -454,14 +469,35 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	}
 
 	mutex_lock(&dev->struct_mutex);
-#ifndef __linux__ /* legacy BSD */
+#if 0
 	TAILQ_INSERT_TAIL(&dev->files, priv, link);
 #endif
 	list_add(&priv->lhead, &dev->filelist);
 	mutex_unlock(&dev->struct_mutex);
 
+#ifdef __linux__
+#ifdef __alpha__
+	/*
+	 * Default the hose
+	 */
+	if (!dev->hose) {
+		struct pci_dev *pci_dev;
+		pci_dev = pci_get_class(PCI_CLASS_DISPLAY_VGA << 8, NULL);
+		if (pci_dev) {
+			dev->hose = pci_dev->sysdata;
+			pci_dev_put(pci_dev);
+		}
+		if (!dev->hose) {
+			struct pci_bus *b = pci_bus_b(pci_root_buses.next);
+			if (b)
+				dev->hose = b->sysdata;
+		}
+	}
+#endif
+#endif
+#ifndef __linux__
 	kdev->si_drv1 = dev;
-	DRM_INFO("open %d by pid (%d), uid (%d), on minor_id (%d), authenticated (%d)\n",
+	DRM_INFO("success open #(%d) by pid (%d), uid (%d), on minor_id (%d), authenticated (%d)\n",
 		priv->refs,
 		priv->pid,
 		priv->uid,
@@ -469,12 +505,25 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 		priv->authenticated
 	);
 	spin_unlock(&dev->file_priv_lock);
+#endif /* !__linux__ */
 	return 0;
-
-out_free:
+      out_free:
+#ifndef __linux__
+	spin_unlock(&dev->file_priv_lock);
+#endif
+	free(priv, DRM_MEM_FILES);
+#ifdef __linux__
+	filp->private_data = NULL;
+#else
+	kdev->si_drv1 = NULL;
+#endif
+	return ret;
+#ifndef __linux__
+      out_free_found:
 	spin_unlock(&dev->file_priv_lock);
 	free(priv, DRM_MEM_FILES);
 	return ret;
+#endif
 }
 
 /** No-op. */
