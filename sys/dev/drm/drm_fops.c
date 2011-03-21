@@ -571,15 +571,16 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 			spin_unlock_bh(&file_priv->master->lock.spinlock);
 			if (locked)
 				break;
+#ifdef __linux__
+			schedule();
+#else
 			tsleep_interlock((void *)&file_priv->master->lock.lock_queue, PCATCH);
 			spin_unlock(&dev->file_priv_lock);
 			tsleep((void *)&file_priv->master->lock.lock_queue,
 					 PCATCH | PINTERLOCKED, "drmlk2", _end);
 			spin_lock(&dev->file_priv_lock);
-		} while (!time_after_eq(jiffies, _end));
-#if 0
-		} while (0);
 #endif
+		} while (!time_after_eq(jiffies, _end));
 
 		if (!locked) {
 			DRM_ERROR("reclaim_buffers_locked() deadlock. Please rework this\n"
@@ -604,7 +605,11 @@ static void drm_master_release(struct drm_device *dev, struct drm_file *file_pri
 
 	if (dev->driver->reclaim_buffers_locked &&
 	    file_priv->master->lock.hw_lock)
+#ifdef __linux__
+		drm_reclaim_locked_buffers(dev, filp);
+#else
 		drm_reclaim_locked_buffers(dev, file_priv);
+#endif
 
 	if (dev->driver->reclaim_buffers_idlelocked &&
 	    file_priv->master->lock.hw_lock) {
@@ -623,12 +628,12 @@ static void drm_master_release(struct drm_device *dev, struct drm_file *file_pri
 			      _DRM_LOCKING_CONTEXT(file_priv->master->lock.hw_lock->lock));
 	}
 
-#ifdef __linux__ /* UNIMPLEMENTED driver->reclaim_buffers */
+#if 1
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !dev->driver->reclaim_buffers_locked) {
 		dev->driver->reclaim_buffers(dev, file_priv);
 	}
-#endif /* __linux__ */
+#endif
 }
 
 static void drm_events_release(struct drm_file *file_priv)

@@ -61,7 +61,6 @@ unsigned int i915_lvds_downclock = 0;
 module_param_named(lvds_downclock, i915_lvds_downclock, int, 0400);
 
 static struct drm_driver driver;
-
 #ifdef __linux__ /* not defined in drm */
 extern int intel_agp_enabled;
 #endif /* __linux__ */
@@ -576,6 +575,9 @@ static void i915_configure(struct drm_device *dev)
 	dev->driver->irq_postinstall	= i915_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= i915_driver_irq_uninstall;
 	dev->driver->irq_handler	= i915_driver_irq_handler;
+	dev->driver->reclaim_buffers = drm_core_reclaim_buffers,
+	dev->driver->get_map_ofs = drm_core_get_map_ofs,
+	dev->driver->get_reg_ofs = drm_core_get_reg_ofs,
 	dev->driver->master_create = i915_master_create;
 	dev->driver->master_destroy = i915_master_destroy;
 
@@ -629,12 +631,12 @@ static struct drm_driver driver = {
 	.irq_postinstall = i915_driver_irq_postinstall,
 	.irq_uninstall = i915_driver_irq_uninstall,
 	.irq_handler = i915_driver_irq_handler,
-#ifdef __linux__
 	.reclaim_buffers = drm_core_reclaim_buffers,
 	.get_map_ofs = drm_core_get_map_ofs,
 	.get_reg_ofs = drm_core_get_reg_ofs,
 	.master_create = i915_master_create,
 	.master_destroy = i915_master_destroy,
+#ifdef __linux__
 #if defined(CONFIG_DEBUG_FS)
 	.debugfs_init = i915_debugfs_init,
 	.debugfs_cleanup = i915_debugfs_cleanup,
