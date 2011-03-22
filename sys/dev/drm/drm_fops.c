@@ -942,6 +942,10 @@ int drm_read_legacy(struct dev_read_args *ap)
 	file_priv = drm_find_file_by_proc(dev, curthread);
 	spin_unlock(&dev->file_priv_lock);
 
+	DRM_INFO("drm_read_legacy(): by pid (%d), uid (%d)\n",
+		DRM_CURRENTPID,
+		DRM_CURRENTUID);
+
 	error = 0;
 	crit_enter();
 	for (;;) {
