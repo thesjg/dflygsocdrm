@@ -40,6 +40,10 @@
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #else /* !__linux__ */
+#define DRM_NEWER_KQUEUE 1
+#ifdef DRM_NEWER_KQUEUE
+#include <sys/vnode.h>
+#endif
 extern devclass_t drm_devclass;
 
 #define DRIVER_SOFTC(unit) \
@@ -62,6 +66,8 @@ struct drm_file *drm_find_file_by_proc(struct drm_device *dev, DRM_STRUCTPROC *p
 #endif
 	return NULL;
 }
+
+static struct kqinfo drm_kqevent;
 #endif /* !__linux__ */
 
 #ifdef __linux__
@@ -875,13 +881,6 @@ out:
 	return ret;
 }
 
-/* The drm_read_legacy and drm_poll_legacy are stubs to prevent spurious errors
- * on older X Servers (4.3.0 and earlier) */
-int drm_read_legacy(struct dev_read_args *ap)
-{
-	return 0;
-}
-
 ssize_t drm_read(struct file *filp, char __user *buffer,
 		 size_t count, loff_t *offset)
 {
@@ -911,38 +910,6 @@ ssize_t drm_read(struct file *filp, char __user *buffer,
 }
 EXPORT_SYMBOL(drm_read);
 
-static int
-drmfilt(struct knote *kn, long hint)
-{
-	return (0);
-}
-
-static void
-drmfilt_detach(struct knote *kn) {}
-
-static struct filterops drmfiltops =
-        { FILTEROP_ISFD, NULL, drmfilt_detach, drmfilt };
-
-int
-drm_kqfilter(struct dev_kqfilter_args *ap)
-{
-	struct knote *kn = ap->a_kn;
-
-	ap->a_result = 0;
-
-	switch (kn->kn_filter) {
-	case EVFILT_READ:
-	case EVFILT_WRITE:
-		kn->kn_fop = &drmfiltops;
-		break;
-	default:
-		ap->a_result = EOPNOTSUPP;
-		return (0);
-	}
-
-	return (0);
-}
-
 unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait)
 {
 	struct drm_file *file_priv = filp->private_data;
@@ -956,3 +923,137 @@ unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait)
 	return mask;
 }
 EXPORT_SYMBOL(drm_poll);
+
+/* The drm_read_legacy and drm_poll_legacy are stubs to prevent spurious errors
+ * on older X Servers (4.3.0 and earlier) */
+int drm_read_legacy(struct dev_read_args *ap)
+{
+#ifdef DRM_NEWER_KQUEUE
+	struct cdev *kdev = ap->a_head.a_dev;
+	struct uio *uio = ap->a_uio;
+	struct drm_device *dev = kdev->si_drv1;
+	struct drm_file *file_priv;
+	struct drm_pending_event *e;
+	size_t total;
+	ssize_t ret;
+	size_t count = uio->uio_resid;
+	int error;
+	spin_lock(&dev->file_priv_lock);
+	file_priv = drm_find_file_by_proc(dev, curthread);
+	spin_unlock(&dev->file_priv_lock);
+
+	error = 0;
+	crit_enter();
+	for (;;) {
+		if (!list_empty(&file_priv->event_list))
+			break;
+		if (ap->a_ioflag & IO_NDELAY) {
+			error = EWOULDBLOCK;
+			break;
+		}
+		error = tsleep(&file_priv->event_wait, PCATCH, "drmrek", 0);
+		if (error)
+			break;
+	}
+	crit_exit();
+	if (error)
+		return (error);
+
+	total = 0;
+	while (drm_dequeue_event(file_priv, total, count, &e)) {
+		if ((error = uiomove(e->event, e->event->length, uio)) != 0) {
+			break;
+		}
+
+		total += e->event->length;
+		e->destroy(e);
+	}
+
+	return (error);
+#else
+	return (0);
+#endif
+}
+
+static int
+drmfilt(struct knote *kn, long hint)
+{
+	return (0);
+}
+
+static void
+drmfilt_detach(struct knote *kn) {}
+
+static struct filterops drmfiltops =
+        { FILTEROP_ISFD, NULL, drmfilt_detach, drmfilt };
+
+static void
+drmreadfilt_detach(struct knote *kn)
+{
+#ifdef DRM_NEWER_KQUEUE
+	struct klist *klist;
+
+	klist = &drm_kqevent.ki_note;
+	knote_remove(klist, kn);
+#endif
+}
+
+static int
+drmreadfilt(struct knote *kn, long hint)
+{
+	int ready = 0;
+#ifdef DRM_NEWER_KQUEUE
+	cdev_t kdev = (cdev_t)kn->kn_hook;
+	struct drm_device *dev = kdev->si_drv1;
+	struct drm_file *file_priv;
+	spin_lock(&dev->file_priv_lock);
+	file_priv = drm_find_file_by_proc(dev, curthread);
+	spin_unlock(&dev->file_priv_lock);
+
+	crit_enter();
+	if (!list_empty(&file_priv->event_list))
+		ready = 1;
+	crit_exit();
+#endif
+
+	return (ready);
+}
+
+static struct filterops drmreadops =
+        { FILTEROP_ISFD, NULL, drmreadfilt_detach, drmreadfilt };
+
+int
+drm_kqfilter(struct dev_kqfilter_args *ap)
+{
+#ifdef DRM_NEWER_KQUEUE
+	cdev_t kdev = ap->a_head.a_dev;
+	struct knote *kn = ap->a_kn;
+	struct klist *klist;
+#else
+	struct knote *kn = ap->a_kn;
+#endif
+
+	ap->a_result = 0;
+
+	switch (kn->kn_filter) {
+	case EVFILT_READ:
+		kn->kn_fop = &drmreadops;
+#ifdef DRM_NEWER_KQUEUE
+		kn->kn_hook = (caddr_t)kdev;
+#endif
+		break;
+	case EVFILT_WRITE:
+		kn->kn_fop = &drmfiltops;
+		break;
+	default:
+		ap->a_result = EOPNOTSUPP;
+		return (0);
+	}
+
+#ifdef DRM_NEWER_KQUEUE
+	klist = &drm_kqevent.ki_note;
+	knote_insert(klist, kn);
+#endif
+
+	return (0);
+}
