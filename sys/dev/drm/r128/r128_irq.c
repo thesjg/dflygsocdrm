@@ -1,5 +1,5 @@
 /* r128_irq.c -- IRQ handling for radeon -*- linux-c -*- */
-/*-
+/*
  * Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
  *
  * The Weather Channel (TM) funded Tungsten Graphics to develop the
@@ -68,7 +68,7 @@ int r128_enable_vblank(struct drm_device *dev, int crtc)
 	drm_r128_private_t *dev_priv = dev->dev_private;
 
 	if (crtc != 0) {
-		DRM_ERROR("%s:  bad crtc %d\n", __FUNCTION__, crtc);
+		DRM_ERROR("%s:  bad crtc %d\n", __func__, crtc);
 		return -EINVAL;
 	}
 
@@ -79,7 +79,7 @@ int r128_enable_vblank(struct drm_device *dev, int crtc)
 void r128_disable_vblank(struct drm_device *dev, int crtc)
 {
 	if (crtc != 0)
-		DRM_ERROR("%s:  bad crtc %d\n", __FUNCTION__, crtc);
+		DRM_ERROR("%s:  bad crtc %d\n", __func__, crtc);
 
 	/*
 	 * FIXME: implement proper interrupt disable by using the vblank
@@ -100,7 +100,7 @@ void r128_driver_irq_preinstall(struct drm_device * dev)
 	R128_WRITE(R128_GEN_INT_STATUS, R128_CRTC_VBLANK_INT_AK);
 }
 
-int r128_driver_irq_postinstall(struct drm_device * dev)
+int r128_driver_irq_postinstall(struct drm_device *dev)
 {
 	return 0;
 }

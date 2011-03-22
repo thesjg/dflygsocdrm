@@ -49,7 +49,9 @@ static void savage_configure(struct drm_device *dev)
 	dev->driver->firstopen		= savage_driver_firstopen;
 	dev->driver->lastclose		= savage_driver_lastclose;
 	dev->driver->unload		= savage_driver_unload;
-	dev->driver->reclaim_buffers_locked = savage_reclaim_buffers;
+	dev->driver->reclaim_buffers = savage_reclaim_buffers;
+	dev->driver->get_map_ofs = drm_core_get_map_ofs;
+	dev->driver->get_reg_ofs = drm_core_get_reg_ofs;
 	dev->driver->dma_ioctl		= savage_bci_buffers;
 
 	dev->driver->ioctls		= savage_ioctls;
@@ -72,11 +74,9 @@ static struct drm_driver driver = {
 	.firstopen = savage_driver_firstopen,
 	.lastclose = savage_driver_lastclose,
 	.unload = savage_driver_unload,
-#ifdef __linux__
 	.reclaim_buffers = savage_reclaim_buffers,
 	.get_map_ofs = drm_core_get_map_ofs,
 	.get_reg_ofs = drm_core_get_reg_ofs,
-#endif /* __linux__ */
 	.ioctls = savage_ioctls,
 	.dma_ioctl = savage_bci_buffers,
 #ifdef __linux__

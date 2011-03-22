@@ -1,7 +1,7 @@
 /* r128_drv.h -- Private header for r128 driver -*- linux-c -*-
  * Created: Mon Dec 13 09:51:11 1999 by faith@precisioninsight.com
  */
-/*-
+/*
  * Copyright 1999 Precision Insight, Inc., Cedar Park, Texas.
  * Copyright 2000 VA Linux Systems, Inc., Sunnyvale, California.
  * All rights reserved.
@@ -156,7 +156,7 @@ extern void r128_disable_vblank(struct drm_device *dev, int crtc);
 extern u32 r128_get_vblank_counter(struct drm_device *dev, int crtc);
 extern irqreturn_t r128_driver_irq_handler(DRM_IRQ_ARGS);
 extern void r128_driver_irq_preinstall(struct drm_device * dev);
-extern int r128_driver_irq_postinstall(struct drm_device * dev);
+extern int r128_driver_irq_postinstall(struct drm_device *dev);
 extern void r128_driver_irq_uninstall(struct drm_device * dev);
 extern void r128_driver_lastclose(struct drm_device * dev);
 extern int r128_driver_load(struct drm_device * dev, unsigned long flags);
@@ -421,6 +421,14 @@ static __inline__ void r128_update_ring_snapshot(drm_r128_private_t * dev_priv)
 /* ================================================================
  * Misc helper macros
  */
+
+#define DEV_INIT_TEST_WITH_RETURN(_dev_priv)				\
+do {									\
+	if (!_dev_priv) {						\
+		DRM_ERROR("called with no initialization\n");		\
+		return -EINVAL;						\
+	}								\
+} while (0)
 
 #define RING_SPACE_TEST_WITH_RETURN( dev_priv )				\
 do {									\

@@ -1,6 +1,6 @@
 /* mga_irq.c -- IRQ handling for radeon -*- linux-c -*-
  */
-/*-
+/*
  * Copyright (C) The Weather Channel, Inc.  2002.  All Rights Reserved.
  *
  * The Weather Channel (TM) funded Tungsten Graphics to develop the
@@ -38,13 +38,11 @@
 
 u32 mga_get_vblank_counter(struct drm_device *dev, int crtc)
 {
-	const drm_mga_private_t *const dev_priv = 
+	const drm_mga_private_t *const dev_priv =
 		(drm_mga_private_t *) dev->dev_private;
 
-	if (crtc != 0) {
+	if (crtc != 0)
 		return 0;
-	}
-
 
 	return atomic_read(&dev_priv->vbl_received);
 }
@@ -136,9 +134,6 @@ int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence)
 		    (((cur_fence = atomic_read(&dev_priv->last_fence_retired))
 		      - *sequence) <= (1 << 23)));
 
-	if (ret == -ERESTART)
-		DRM_DEBUG("restarting syscall\n");
-
 	*sequence = cur_fence;
 
 	return ret;
@@ -154,7 +149,7 @@ void mga_driver_irq_preinstall(struct drm_device * dev)
 	MGA_WRITE(MGA_ICLEAR, ~0);
 }
 
-int mga_driver_irq_postinstall(struct drm_device * dev)
+int mga_driver_irq_postinstall(struct drm_device *dev)
 {
 	drm_mga_private_t *dev_priv = (drm_mga_private_t *) dev->dev_private;
 

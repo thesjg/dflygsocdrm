@@ -60,6 +60,9 @@ static void mach64_configure(struct drm_device *dev)
 	dev->driver->irq_postinstall	= mach64_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= mach64_driver_irq_uninstall;
 	dev->driver->irq_handler	= mach64_driver_irq_handler;
+	dev->driver->reclaim_buffers = drm_core_reclaim_buffers;
+	dev->driver->get_map_ofs = drm_core_get_map_ofs;
+	dev->driver->get_reg_ofs = drm_core_get_reg_ofs;
 	dev->driver->dma_ioctl		= mach64_dma_buffers;
 
 	dev->driver->ioctls		= mach64_ioctls;
@@ -90,11 +93,9 @@ static struct drm_driver driver = {
 	.irq_postinstall = mach64_driver_irq_postinstall,
 	.irq_uninstall = mach64_driver_irq_uninstall,
 	.irq_handler = mach64_driver_irq_handler,
-#ifdef __linux__
 	.reclaim_buffers = drm_core_reclaim_buffers,
 	.get_map_ofs = drm_core_get_map_ofs,
 	.get_reg_ofs = drm_core_get_reg_ofs,
-#endif /* __linux__ */
 	.ioctls = mach64_ioctls,
 	.dma_ioctl = mach64_dma_buffers,
 #ifdef __linux__

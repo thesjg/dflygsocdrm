@@ -325,7 +325,7 @@ static void r128_cce_init_ring_buffer(struct drm_device * dev,
 	else
 #endif
 		ring_start = dev_priv->cce_ring->offset -
-				(unsigned long)dev->sg->virtual;
+		    (unsigned long)dev->sg->virtual;
 
 	R128_WRITE(R128_PM4_BUFFER_OFFSET, ring_start | R128_AGP_OFFSET);
 
@@ -353,11 +353,14 @@ static int r128_do_init_cce(struct drm_device * dev, drm_r128_init_t * init)
 
 	DRM_DEBUG("\n");
 
-	dev_priv = drm_alloc(sizeof(drm_r128_private_t), DRM_MEM_DRIVER);
+	if (dev->dev_private) {
+		DRM_DEBUG("called when already initialized\n");
+		return -EINVAL;
+	}
+
+	dev_priv = malloc(sizeof(drm_r128_private_t), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (dev_priv == NULL)
 		return -ENOMEM;
-
-	memset(dev_priv, 0, sizeof(drm_r128_private_t));
 
 	dev_priv->is_pci = init->is_pci;
 
@@ -512,9 +515,9 @@ static int r128_do_init_cce(struct drm_device * dev, drm_r128_init_t * init)
 
 #if __OS_HAS_AGP
 	if (!dev_priv->is_pci) {
-		drm_core_ioremap(dev_priv->cce_ring, dev);
-		drm_core_ioremap(dev_priv->ring_rptr, dev);
-		drm_core_ioremap(dev->agp_buffer_map, dev);
+		drm_core_ioremap_wc(dev_priv->cce_ring, dev);
+		drm_core_ioremap_wc(dev_priv->ring_rptr, dev);
+		drm_core_ioremap_wc(dev->agp_buffer_map, dev);
 		if (!dev_priv->cce_ring->handle ||
 		    !dev_priv->ring_rptr->handle ||
 		    !dev->agp_buffer_map->handle) {
@@ -526,11 +529,12 @@ static int r128_do_init_cce(struct drm_device * dev, drm_r128_init_t * init)
 	} else
 #endif
 	{
-		dev_priv->cce_ring->handle = (void *)dev_priv->cce_ring->offset;
+		dev_priv->cce_ring->handle =
+			(void *)(unsigned long)dev_priv->cce_ring->offset;
 		dev_priv->ring_rptr->handle =
-		    (void *)dev_priv->ring_rptr->offset;
+			(void *)(unsigned long)dev_priv->ring_rptr->offset;
 		dev->agp_buffer_map->handle =
-		    (void *)dev->agp_buffer_map->offset;
+			(void *)(unsigned long)dev->agp_buffer_map->offset;
 	}
 
 #if __OS_HAS_AGP
@@ -613,8 +617,10 @@ int r128_do_cleanup_cce(struct drm_device * dev)
 #endif
 		{
 			if (dev_priv->gart_info.bus_addr)
-				if (!drm_ati_pcigart_cleanup(dev, &dev_priv->gart_info))
-					DRM_ERROR("failed to cleanup PCI GART!\n");
+				if (!drm_ati_pcigart_cleanup(dev,
+							&dev_priv->gart_info))
+					DRM_ERROR
+					    ("failed to cleanup PCI GART!\n");
 		}
 
 		drm_free(dev->dev_private, sizeof(drm_r128_private_t),
@@ -650,6 +656,8 @@ int r128_cce_start(struct drm_device *dev, void *data, struct drm_file *file_pri
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+	DEV_INIT_TEST_WITH_RETURN(dev_priv);
+
 	if (dev_priv->cce_running || dev_priv->cce_mode == R128_PM4_NONPM4) {
 		DRM_DEBUG("while CCE running\n");
 		return 0;
@@ -671,6 +679,8 @@ int r128_cce_stop(struct drm_device *dev, void *data, struct drm_file *file_priv
 	DRM_DEBUG("\n");
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
+
+	DEV_INIT_TEST_WITH_RETURN(dev_priv);
 
 	/* Flush any pending CCE commands.  This ensures any outstanding
 	 * commands are exectuted by the engine before we turn it off.
@@ -709,10 +719,7 @@ int r128_cce_reset(struct drm_device *dev, void *data, struct drm_file *file_pri
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
-	if (!dev_priv) {
-		DRM_DEBUG("called before init done\n");
-		return -EINVAL;
-	}
+	DEV_INIT_TEST_WITH_RETURN(dev_priv);
 
 	r128_do_cce_reset(dev_priv);
 
@@ -729,6 +736,8 @@ int r128_cce_idle(struct drm_device *dev, void *data, struct drm_file *file_priv
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
+	DEV_INIT_TEST_WITH_RETURN(dev_priv);
+
 	if (dev_priv->cce_running) {
 		r128_do_cce_flush(dev_priv);
 	}
@@ -741,6 +750,8 @@ int r128_engine_reset(struct drm_device *dev, void *data, struct drm_file *file_
 	DRM_DEBUG("\n");
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
+
+	DEV_INIT_TEST_WITH_RETURN(dev->dev_private);
 
 	return r128_do_engine_reset(dev);
 }
@@ -766,18 +777,17 @@ static int r128_freelist_init(struct drm_device * dev)
 	drm_r128_freelist_t *entry;
 	int i;
 
-	dev_priv->head = drm_alloc(sizeof(drm_r128_freelist_t), DRM_MEM_DRIVER);
+	dev_priv->head = malloc(sizeof(drm_r128_freelist_t), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (dev_priv->head == NULL)
 		return -ENOMEM;
 
-	memset(dev_priv->head, 0, sizeof(drm_r128_freelist_t));
 	dev_priv->head->age = R128_BUFFER_USED;
 
 	for (i = 0; i < dma->buf_count; i++) {
 		buf = dma->buflist[i];
 		buf_priv = buf->dev_private;
 
-		entry = drm_alloc(sizeof(drm_r128_freelist_t), DRM_MEM_DRIVER);
+		entry = malloc(sizeof(drm_r128_freelist_t), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 		if (!entry)
 			return -ENOMEM;
 
@@ -816,7 +826,7 @@ static struct drm_buf *r128_freelist_get(struct drm_device * dev)
 	for (i = 0; i < dma->buf_count; i++) {
 		buf = dma->buflist[i];
 		buf_priv = buf->dev_private;
-		if (buf->file_priv == 0)
+		if (!buf->file_priv)
 			return buf;
 	}
 

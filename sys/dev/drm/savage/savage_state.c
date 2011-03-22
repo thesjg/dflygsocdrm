@@ -22,24 +22,23 @@
  * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION
  * WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  */
-
 #include "drmP.h"
 #include "savage_drm.h"
 #include "savage_drv.h"
 
-void savage_emit_clip_rect_s3d(drm_savage_private_t *dev_priv,
-			       const struct drm_clip_rect *pbox)
+void savage_emit_clip_rect_s3d(drm_savage_private_t * dev_priv,
+			       const struct drm_clip_rect * pbox)
 {
 	uint32_t scstart = dev_priv->state.s3d.new_scstart;
 	uint32_t scend = dev_priv->state.s3d.new_scend;
 	scstart = (scstart & ~SAVAGE_SCISSOR_MASK_S3D) |
-		((uint32_t)pbox->x1 & 0x000007ff) |
-		(((uint32_t)pbox->y1 << 16) & 0x07ff0000);
-	scend   = (scend & ~SAVAGE_SCISSOR_MASK_S3D) |
-		(((uint32_t)pbox->x2 - 1) & 0x000007ff) |
-		((((uint32_t)pbox->y2 - 1) << 16) & 0x07ff0000);
+	    ((uint32_t) pbox->x1 & 0x000007ff) |
+	    (((uint32_t) pbox->y1 << 16) & 0x07ff0000);
+	scend = (scend & ~SAVAGE_SCISSOR_MASK_S3D) |
+	    (((uint32_t) pbox->x2 - 1) & 0x000007ff) |
+	    ((((uint32_t) pbox->y2 - 1) << 16) & 0x07ff0000);
 	if (scstart != dev_priv->state.s3d.scstart ||
-	    scend   != dev_priv->state.s3d.scend) {
+	    scend != dev_priv->state.s3d.scend) {
 		DMA_LOCALS;
 		BEGIN_DMA(4);
 		DMA_WRITE(BCI_CMD_WAIT | BCI_CMD_WAIT_3D);
@@ -53,17 +52,17 @@ void savage_emit_clip_rect_s3d(drm_savage_private_t *dev_priv,
 	}
 }
 
-void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
-			      const struct drm_clip_rect *pbox)
+void savage_emit_clip_rect_s4(drm_savage_private_t * dev_priv,
+			      const struct drm_clip_rect * pbox)
 {
 	uint32_t drawctrl0 = dev_priv->state.s4.new_drawctrl0;
 	uint32_t drawctrl1 = dev_priv->state.s4.new_drawctrl1;
 	drawctrl0 = (drawctrl0 & ~SAVAGE_SCISSOR_MASK_S4) |
-		((uint32_t)pbox->x1 & 0x000007ff) |
-		(((uint32_t)pbox->y1 << 12) & 0x00fff000);
+	    ((uint32_t) pbox->x1 & 0x000007ff) |
+	    (((uint32_t) pbox->y1 << 12) & 0x00fff000);
 	drawctrl1 = (drawctrl1 & ~SAVAGE_SCISSOR_MASK_S4) |
-		(((uint32_t)pbox->x2 - 1) & 0x000007ff) |
-		((((uint32_t)pbox->y2 - 1) << 12) & 0x00fff000);
+	    (((uint32_t) pbox->x2 - 1) & 0x000007ff) |
+	    ((((uint32_t) pbox->y2 - 1) << 12) & 0x00fff000);
 	if (drawctrl0 != dev_priv->state.s4.drawctrl0 ||
 	    drawctrl1 != dev_priv->state.s4.drawctrl1) {
 		DMA_LOCALS;
@@ -79,14 +78,14 @@ void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
 	}
 }
 
-static int savage_verify_texaddr(drm_savage_private_t *dev_priv, int unit,
+static int savage_verify_texaddr(drm_savage_private_t * dev_priv, int unit,
 				 uint32_t addr)
 {
-	if ((addr & 6) != 2) { /* reserved bits */
+	if ((addr & 6) != 2) {	/* reserved bits */
 		DRM_ERROR("bad texAddr%d %08x (reserved bits)\n", unit, addr);
 		return -EINVAL;
 	}
-	if (!(addr & 1)) { /* local */
+	if (!(addr & 1)) {	/* local */
 		addr &= ~7;
 		if (addr < dev_priv->texture_offset ||
 		    addr >= dev_priv->texture_offset + dev_priv->texture_size) {
@@ -95,7 +94,7 @@ static int savage_verify_texaddr(drm_savage_private_t *dev_priv, int unit,
 			     unit, addr);
 			return -EINVAL;
 		}
-	} else { /* AGP */
+	} else {		/* AGP */
 		if (!dev_priv->agp_textures) {
 			DRM_ERROR("bad texAddr%d %08x (AGP not available)\n",
 				  unit, addr);
@@ -115,17 +114,18 @@ static int savage_verify_texaddr(drm_savage_private_t *dev_priv, int unit,
 }
 
 #define SAVE_STATE(reg,where)			\
-	if(start <= reg && start + count > reg)	\
+	if(start <= reg && start+count > reg)	\
 		dev_priv->state.where = regs[reg - start]
 #define SAVE_STATE_MASK(reg,where,mask) do {			\
-	if(start <= reg && start + count > reg) {			\
+	if(start <= reg && start+count > reg) {			\
 		uint32_t tmp;					\
 		tmp = regs[reg - start];			\
 		dev_priv->state.where = (tmp & (mask)) |	\
 			(dev_priv->state.where & ~(mask));	\
 	}							\
 } while (0)
-static int savage_verify_state_s3d(drm_savage_private_t *dev_priv,
+
+static int savage_verify_state_s3d(drm_savage_private_t * dev_priv,
 				   unsigned int start, unsigned int count,
 				   const uint32_t *regs)
 {
@@ -155,7 +155,7 @@ static int savage_verify_state_s3d(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_verify_state_s4(drm_savage_private_t *dev_priv,
+static int savage_verify_state_s4(drm_savage_private_t * dev_priv,
 				  unsigned int start, unsigned int count,
 				  const uint32_t *regs)
 {
@@ -190,11 +190,12 @@ static int savage_verify_state_s4(drm_savage_private_t *dev_priv,
 
 	return ret;
 }
+
 #undef SAVE_STATE
 #undef SAVE_STATE_MASK
 
-static int savage_dispatch_state(drm_savage_private_t *dev_priv,
-				 const drm_savage_cmd_header_t *cmd_header,
+static int savage_dispatch_state(drm_savage_private_t * dev_priv,
+				 const drm_savage_cmd_header_t * cmd_header,
 				 const uint32_t *regs)
 {
 	unsigned int count = cmd_header->state.count;
@@ -274,9 +275,9 @@ static int savage_dispatch_state(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_dispatch_dma_prim(drm_savage_private_t *dev_priv,
-				    const drm_savage_cmd_header_t *cmd_header,
-				    const struct drm_buf *dmabuf)
+static int savage_dispatch_dma_prim(drm_savage_private_t * dev_priv,
+				    const drm_savage_cmd_header_t * cmd_header,
+				    const struct drm_buf * dmabuf)
 {
 	unsigned char reorder = 0;
 	unsigned int prim = cmd_header->prim.prim;
@@ -309,8 +310,8 @@ static int savage_dispatch_dma_prim(drm_savage_private_t *dev_priv,
 	case SAVAGE_PRIM_TRIFAN:
 		if (n < 3) {
 			DRM_ERROR
-			   ("wrong number of vertices %u in TRIFAN/STRIP\n",
-			    n);
+			    ("wrong number of vertices %u in TRIFAN/STRIP\n",
+			     n);
 			return -EINVAL;
 		}
 		break;
@@ -326,8 +327,8 @@ static int savage_dispatch_dma_prim(drm_savage_private_t *dev_priv,
 		}
 	} else {
 		unsigned int size = 10 - (skip & 1) - (skip >> 1 & 1) -
-			(skip >> 2 & 1) - (skip >> 3 & 1) - (skip >> 4 & 1) -
-			(skip >> 5 & 1) - (skip >> 6 & 1) - (skip >> 7 & 1);
+		    (skip >> 2 & 1) - (skip >> 3 & 1) - (skip >> 4 & 1) -
+		    (skip >> 5 & 1) - (skip >> 6 & 1) - (skip >> 7 & 1);
 		if (skip > SAVAGE_SKIP_ALL_S4 || size != 8) {
 			DRM_ERROR("invalid skip flags 0x%04x for DMA\n", skip);
 			return -EINVAL;
@@ -414,8 +415,8 @@ static int savage_dispatch_dma_prim(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_dispatch_vb_prim(drm_savage_private_t *dev_priv,
-				   const drm_savage_cmd_header_t *cmd_header,
+static int savage_dispatch_vb_prim(drm_savage_private_t * dev_priv,
+				   const drm_savage_cmd_header_t * cmd_header,
 				   const uint32_t *vtxbuf, unsigned int vb_size,
 				   unsigned int vb_stride)
 {
@@ -461,18 +462,18 @@ static int savage_dispatch_vb_prim(drm_savage_private_t *dev_priv,
 			DRM_ERROR("invalid skip flags 0x%04x\n", skip);
 			return -EINVAL;
 		}
-		vtx_size = 8; /* full vertex */
+		vtx_size = 8;	/* full vertex */
 	} else {
 		if (skip > SAVAGE_SKIP_ALL_S4) {
 			DRM_ERROR("invalid skip flags 0x%04x\n", skip);
 			return -EINVAL;
 		}
-		vtx_size = 10; /* full vertex */
+		vtx_size = 10;	/* full vertex */
 	}
 
 	vtx_size -= (skip & 1) + (skip >> 1 & 1) +
-		(skip >> 2 & 1) + (skip >> 3 & 1) + (skip >> 4 & 1) +
-		(skip >> 5 & 1) + (skip >> 6 & 1) + (skip >> 7 & 1);
+	    (skip >> 2 & 1) + (skip >> 3 & 1) + (skip >> 4 & 1) +
+	    (skip >> 5 & 1) + (skip >> 6 & 1) + (skip >> 7 & 1);
 
 	if (vtx_size > vb_stride) {
 		DRM_ERROR("vertex size greater than vb stride (%u > %u)\n",
@@ -515,7 +516,7 @@ static int savage_dispatch_vb_prim(drm_savage_private_t *dev_priv,
 					 vtx_size * count);
 			} else {
 				for (i = start; i < start + count; ++i) {
-					DMA_COPY(&vtxbuf[vb_stride * i],
+					DMA_COPY(&vtxbuf [vb_stride * i],
 						 vtx_size);
 				}
 			}
@@ -532,10 +533,10 @@ static int savage_dispatch_vb_prim(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_dispatch_dma_idx(drm_savage_private_t *dev_priv,
-				   const drm_savage_cmd_header_t *cmd_header,
+static int savage_dispatch_dma_idx(drm_savage_private_t * dev_priv,
+				   const drm_savage_cmd_header_t * cmd_header,
 				   const uint16_t *idx,
-				   const struct drm_buf *dmabuf)
+				   const struct drm_buf * dmabuf)
 {
 	unsigned char reorder = 0;
 	unsigned int prim = cmd_header->idx.prim;
@@ -582,8 +583,8 @@ static int savage_dispatch_dma_idx(drm_savage_private_t *dev_priv,
 		}
 	} else {
 		unsigned int size = 10 - (skip & 1) - (skip >> 1 & 1) -
-			(skip >> 2 & 1) - (skip >> 3 & 1) - (skip >> 4 & 1) -
-			(skip >> 5 & 1) - (skip >> 6 & 1) - (skip >> 7 & 1);
+		    (skip >> 2 & 1) - (skip >> 3 & 1) - (skip >> 4 & 1) -
+		    (skip >> 5 & 1) - (skip >> 6 & 1) - (skip >> 7 & 1);
 		if (skip > SAVAGE_SKIP_ALL_S4 || size != 8) {
 			DRM_ERROR("invalid skip flags 0x%04x for DMA\n", skip);
 			return -EINVAL;
@@ -673,8 +674,8 @@ static int savage_dispatch_dma_idx(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_dispatch_vb_idx(drm_savage_private_t *dev_priv,
-				  const drm_savage_cmd_header_t *cmd_header,
+static int savage_dispatch_vb_idx(drm_savage_private_t * dev_priv,
+				  const drm_savage_cmd_header_t * cmd_header,
 				  const uint16_t *idx,
 				  const uint32_t *vtxbuf,
 				  unsigned int vb_size, unsigned int vb_stride)
@@ -718,18 +719,18 @@ static int savage_dispatch_vb_idx(drm_savage_private_t *dev_priv,
 			DRM_ERROR("invalid skip flags 0x%04x\n", skip);
 			return -EINVAL;
 		}
-		vtx_size = 8; /* full vertex */
+		vtx_size = 8;	/* full vertex */
 	} else {
 		if (skip > SAVAGE_SKIP_ALL_S4) {
 			DRM_ERROR("invalid skip flags 0x%04x\n", skip);
 			return -EINVAL;
 		}
-		vtx_size = 10; /* full vertex */
+		vtx_size = 10;	/* full vertex */
 	}
 
 	vtx_size -= (skip & 1) + (skip >> 1 & 1) +
-		(skip >> 2 & 1) + (skip >> 3 & 1) + (skip >> 4 & 1) +
-		(skip >> 5 & 1) + (skip >> 6 & 1) + (skip >> 7 & 1);
+	    (skip >> 2 & 1) + (skip >> 3 & 1) + (skip >> 4 & 1) +
+	    (skip >> 5 & 1) + (skip >> 6 & 1) + (skip >> 7 & 1);
 
 	if (vtx_size > vb_stride) {
 		DRM_ERROR("vertex size greater than vb stride (%u > %u)\n",
@@ -746,7 +747,7 @@ static int savage_dispatch_vb_idx(drm_savage_private_t *dev_priv,
 		for (i = 0; i < count; ++i) {
 			if (idx[i] > vb_size / (vb_stride * 4)) {
 				DRM_ERROR("idx[%u]=%u out of range (0-%u)\n",
-					  i, idx[i],  vb_size / (vb_stride * 4));
+					  i, idx[i], vb_size / (vb_stride * 4));
 				return -EINVAL;
 			}
 		}
@@ -787,8 +788,8 @@ static int savage_dispatch_vb_idx(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_dispatch_clear(drm_savage_private_t *dev_priv,
-				 const drm_savage_cmd_header_t *cmd_header,
+static int savage_dispatch_clear(drm_savage_private_t * dev_priv,
+				 const drm_savage_cmd_header_t * cmd_header,
 				 const drm_savage_cmd_header_t *data,
 				 unsigned int nbox,
 				 const struct drm_clip_rect *boxes)
@@ -802,8 +803,8 @@ static int savage_dispatch_clear(drm_savage_private_t *dev_priv,
 		return 0;
 
 	clear_cmd = BCI_CMD_RECT | BCI_CMD_RECT_XP | BCI_CMD_RECT_YP |
-		BCI_CMD_SEND_COLOR | BCI_CMD_DEST_PBD_NEW;
-	BCI_CMD_SET_ROP(clear_cmd,0xCC);
+	    BCI_CMD_SEND_COLOR | BCI_CMD_DEST_PBD_NEW;
+	BCI_CMD_SET_ROP(clear_cmd, 0xCC);
 
 	nbufs = ((flags & SAVAGE_FRONT) ? 1 : 0) +
 	    ((flags & SAVAGE_BACK) ? 1 : 0) + ((flags & SAVAGE_DEPTH) ? 1 : 0);
@@ -820,7 +821,6 @@ static int savage_dispatch_clear(drm_savage_private_t *dev_priv,
 	for (i = 0; i < nbox; ++i) {
 		unsigned int x, y, w, h;
 		unsigned int buf;
-
 		x = boxes[i].x1, y = boxes[i].y1;
 		w = boxes[i].x2 - boxes[i].x1;
 		h = boxes[i].y2 - boxes[i].y1;
@@ -860,7 +860,7 @@ static int savage_dispatch_clear(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_dispatch_swap(drm_savage_private_t *dev_priv,
+static int savage_dispatch_swap(drm_savage_private_t * dev_priv,
 				unsigned int nbox, const struct drm_clip_rect *boxes)
 {
 	unsigned int swap_cmd;
@@ -871,8 +871,8 @@ static int savage_dispatch_swap(drm_savage_private_t *dev_priv,
 		return 0;
 
 	swap_cmd = BCI_CMD_RECT | BCI_CMD_RECT_XP | BCI_CMD_RECT_YP |
-		BCI_CMD_SRC_PBD_COLOR_NEW | BCI_CMD_DEST_GBD;
-	BCI_CMD_SET_ROP(swap_cmd,0xCC);
+	    BCI_CMD_SRC_PBD_COLOR_NEW | BCI_CMD_DEST_GBD;
+	BCI_CMD_SET_ROP(swap_cmd, 0xCC);
 
 	for (i = 0; i < nbox; ++i) {
 		BEGIN_DMA(6);
@@ -889,10 +889,10 @@ static int savage_dispatch_swap(drm_savage_private_t *dev_priv,
 	return 0;
 }
 
-static int savage_dispatch_draw(drm_savage_private_t *dev_priv,
+static int savage_dispatch_draw(drm_savage_private_t * dev_priv,
 				const drm_savage_cmd_header_t *start,
 				const drm_savage_cmd_header_t *end,
-				const struct drm_buf *dmabuf,
+				const struct drm_buf * dmabuf,
 				const unsigned int *vtxbuf,
 				unsigned int vb_size, unsigned int vb_stride,
 				unsigned int nbox,
@@ -988,20 +988,20 @@ int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_
 	 * for locking on FreeBSD.
 	 */
 	if (cmdbuf->size) {
-		kcmd_addr = drm_alloc(cmdbuf->size * 8, DRM_MEM_DRIVER);
+		kcmd_addr = kmalloc(cmdbuf->size * 8, DRM_MEM_DRIVER, M_WAITOK);
 		if (kcmd_addr == NULL)
 			return -ENOMEM;
 
 		if (DRM_COPY_FROM_USER(kcmd_addr, cmdbuf->cmd_addr,
 				       cmdbuf->size * 8))
 		{
-			drm_free(kcmd_addr, cmdbuf->size * 8, DRM_MEM_DRIVER);
+			free(kcmd_addr, DRM_MEM_DRIVER);
 			return -EFAULT;
 		}
 		cmdbuf->cmd_addr = kcmd_addr;
 	}
 	if (cmdbuf->vb_size) {
-		kvb_addr = drm_alloc(cmdbuf->vb_size, DRM_MEM_DRIVER);
+		kvb_addr = malloc(cmdbuf->vb_size, DRM_MEM_DRIVER, M_WAITOK);
 		if (kvb_addr == NULL) {
 			ret = -ENOMEM;
 			goto done;
@@ -1015,21 +1015,19 @@ int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_
 		cmdbuf->vb_addr = kvb_addr;
 	}
 	if (cmdbuf->nbox) {
-		kbox_addr = drm_alloc(cmdbuf->nbox *
-				      sizeof(struct drm_clip_rect),
-				      DRM_MEM_DRIVER);
+		kbox_addr = malloc(cmdbuf->nbox * sizeof(struct drm_clip_rect),
+				    DRM_MEM_DRIVER, M_WAITOK);
 		if (kbox_addr == NULL) {
 			ret = -ENOMEM;
 			goto done;
 		}
 
 		if (DRM_COPY_FROM_USER(kbox_addr, cmdbuf->box_addr,
-				       cmdbuf->nbox *
-				       sizeof(struct drm_clip_rect))) {
+				       cmdbuf->nbox * sizeof(struct drm_clip_rect))) {
 			ret = -EFAULT;
 			goto done;
 		}
-		cmdbuf->box_addr = kbox_addr;
+	cmdbuf->box_addr = kbox_addr;
 	}
 
 	/* Make sure writes to DMA buffers are finished before sending
@@ -1072,12 +1070,11 @@ int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_
 		default:
 			if (first_draw_cmd) {
 				ret = savage_dispatch_draw(
-					dev_priv, first_draw_cmd,
-					cmdbuf->cmd_addr - 1,
-					dmabuf, cmdbuf->vb_addr,
-					cmdbuf->vb_size,
-					cmdbuf->vb_stride,
-					cmdbuf->nbox, cmdbuf->box_addr);
+				      dev_priv, first_draw_cmd,
+				      cmdbuf->cmd_addr - 1,
+				      dmabuf, cmdbuf->vb_addr, cmdbuf->vb_size,
+				      cmdbuf->vb_stride,
+				      cmdbuf->nbox, cmdbuf->box_addr);
 				if (ret != 0)
 					return ret;
 				first_draw_cmd = NULL;
@@ -1135,7 +1132,7 @@ int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_
 	}
 
 	if (first_draw_cmd) {
-		ret = savage_dispatch_draw(
+		ret = savage_dispatch_draw (
 			dev_priv, first_draw_cmd, cmdbuf->cmd_addr, dmabuf,
 			cmdbuf->vb_addr, cmdbuf->vb_size, cmdbuf->vb_stride,
 			cmdbuf->nbox, cmdbuf->box_addr);
@@ -1157,10 +1154,9 @@ int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file *file_
 
 done:
 	/* If we didn't need to allocate them, these'll be NULL */
-	drm_free(kcmd_addr, cmdbuf->size * 8, DRM_MEM_DRIVER);
-	drm_free(kvb_addr, cmdbuf->vb_size, DRM_MEM_DRIVER);
-	drm_free(kbox_addr, cmdbuf->nbox * sizeof(struct drm_clip_rect),
-		 DRM_MEM_DRIVER);
+	free(kcmd_addr, DRM_MEM_DRIVER);
+	free(kvb_addr, DRM_MEM_DRIVER);
+	free(kbox_addr, DRM_MEM_DRIVER);
 
 	return ret;
 }

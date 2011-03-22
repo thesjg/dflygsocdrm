@@ -38,11 +38,11 @@
 
 #define DRIVER_NAME		"mga"
 #define DRIVER_DESC		"Matrox G200/G400"
-#define DRIVER_DATE		"20060319"
+#define DRIVER_DATE		"20051102"
 
 #define DRIVER_MAJOR		3
 #define DRIVER_MINOR		2
-#define DRIVER_PATCHLEVEL	2
+#define DRIVER_PATCHLEVEL	1
 
 typedef struct drm_mga_primary_buffer {
 	u8 *start;
@@ -112,15 +112,15 @@ typedef struct drm_mga_private {
 	 *
 	 * \sa drm_mga_private_t::mmio
 	 */
-	/*@{*/
-	u32 mmio_base;			/**< Bus address of base of MMIO. */
-	u32 mmio_size;			/**< Size of the MMIO region. */
-	/*@}*/
+	/*@{ */
+	resource_size_t mmio_base;	   /**< Bus address of base of MMIO. */
+	resource_size_t mmio_size;	   /**< Size of the MMIO region. */
+	/*@} */
 
 	u32 clear_cmd;
 	u32 maccess;
 
-	atomic_t vbl_received;		/**< Number of vblanks received. */
+	atomic_t vbl_received;          /**< Number of vblanks received. */
 	wait_queue_head_t fence_queue;
 	atomic_t last_fence_retired;
 	u32 next_fence_to_post;
@@ -177,7 +177,6 @@ extern void mga_do_dma_wrap_end(drm_mga_private_t * dev_priv);
 extern int mga_freelist_put(struct drm_device * dev, struct drm_buf * buf);
 
 				/* mga_warp.c */
-extern unsigned int mga_warp_microcode_size(const drm_mga_private_t * dev_priv);
 extern int mga_warp_install_microcode(drm_mga_private_t * dev_priv);
 extern int mga_warp_init(drm_mga_private_t * dev_priv);
 
@@ -189,7 +188,7 @@ extern int mga_driver_fence_wait(struct drm_device * dev, unsigned int *sequence
 extern int mga_driver_vblank_wait(struct drm_device * dev, unsigned int *sequence);
 extern irqreturn_t mga_driver_irq_handler(DRM_IRQ_ARGS);
 extern void mga_driver_irq_preinstall(struct drm_device * dev);
-extern int mga_driver_irq_postinstall(struct drm_device * dev);
+extern int mga_driver_irq_postinstall(struct drm_device *dev);
 extern void mga_driver_irq_uninstall(struct drm_device * dev);
 extern long mga_compat_ioctl(struct file *filp, unsigned int cmd,
 			     unsigned long arg);
@@ -317,8 +316,8 @@ do {									\
 		DRM_INFO( "\n" );					\
 		DRM_INFO( "   tail=0x%06x head=0x%06lx\n",		\
 			  dev_priv->prim.tail,				\
-			  MGA_READ( MGA_PRIMADDRESS ) -			\
-			  dev_priv->primary->offset );			\
+			  (unsigned long)(MGA_READ(MGA_PRIMADDRESS) -	\
+					  dev_priv->primary->offset));	\
 	}								\
 	if ( !test_bit( 0, &dev_priv->prim.wrapped ) ) {		\
 		if ( dev_priv->prim.space <				\

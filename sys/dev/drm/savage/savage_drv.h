@@ -1,5 +1,5 @@
 /* savage_drv.h -- Private header for the savage driver */
-/*-
+/*
  * Copyright 2004  Felix Kuehling
  * All Rights Reserved.
  *
@@ -65,7 +65,7 @@ typedef struct drm_savage_dma_page {
 	drm_savage_age_t age;
 	unsigned int used, flushed;
 } drm_savage_dma_page_t;
-#define SAVAGE_DMA_PAGE_SIZE 1024 /* in dwords */
+#define SAVAGE_DMA_PAGE_SIZE 1024	/* in dwords */
 /* Fake DMA buffer size in bytes. 4 pages. Allows a maximum command
  * size of 16kbytes or 4k entries. Minimum requirement would be
  * 10kbytes for 255 40-byte vertices in one drawing command. */
@@ -187,13 +187,13 @@ typedef struct drm_savage_private {
 	unsigned int waiting;
 
 	/* config/hardware-dependent function pointers */
-	int (*wait_fifo)(struct drm_savage_private *dev_priv, unsigned int n);
-	int (*wait_evnt)(struct drm_savage_private *dev_priv, uint16_t e);
+	int (*wait_fifo) (struct drm_savage_private * dev_priv, unsigned int n);
+	int (*wait_evnt) (struct drm_savage_private * dev_priv, uint16_t e);
 	/* Err, there is a macro wait_event in include/linux/wait.h.
 	 * Avoid unwanted macro expansion. */
-	void (*emit_clip_rect)(struct drm_savage_private *dev_priv,
-			       const struct drm_clip_rect *pbox);
-	void (*dma_flush)(struct drm_savage_private *dev_priv);
+	void (*emit_clip_rect) (struct drm_savage_private * dev_priv,
+				const struct drm_clip_rect * pbox);
+	void (*dma_flush) (struct drm_savage_private * dev_priv);
 } drm_savage_private_t;
 
 /* ioctls */
@@ -201,12 +201,12 @@ extern int savage_bci_cmdbuf(struct drm_device *dev, void *data, struct drm_file
 extern int savage_bci_buffers(struct drm_device *dev, void *data, struct drm_file *file_priv);
 
 /* BCI functions */
-extern uint16_t savage_bci_emit_event(drm_savage_private_t *dev_priv,
+extern uint16_t savage_bci_emit_event(drm_savage_private_t * dev_priv,
 				      unsigned int flags);
-extern void savage_freelist_put(struct drm_device *dev, struct drm_buf *buf);
-extern void savage_dma_reset(drm_savage_private_t *dev_priv);
-extern void savage_dma_wait(drm_savage_private_t *dev_priv, unsigned int page);
-extern uint32_t *savage_dma_alloc(drm_savage_private_t *dev_priv,
+extern void savage_freelist_put(struct drm_device * dev, struct drm_buf * buf);
+extern void savage_dma_reset(drm_savage_private_t * dev_priv);
+extern void savage_dma_wait(drm_savage_private_t * dev_priv, unsigned int page);
+extern uint32_t *savage_dma_alloc(drm_savage_private_t * dev_priv,
 				  unsigned int n);
 extern int savage_driver_load(struct drm_device *dev, unsigned long chipset);
 extern int savage_driver_firstopen(struct drm_device *dev);
@@ -216,10 +216,10 @@ extern void savage_reclaim_buffers(struct drm_device *dev,
 				   struct drm_file *file_priv);
 
 /* state functions */
-extern void savage_emit_clip_rect_s3d(drm_savage_private_t *dev_priv,
-				      const struct drm_clip_rect *pbox);
-extern void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
-				     const struct drm_clip_rect *pbox);
+extern void savage_emit_clip_rect_s3d(drm_savage_private_t * dev_priv,
+				      const struct drm_clip_rect * pbox);
+extern void savage_emit_clip_rect_s4(drm_savage_private_t * dev_priv,
+				     const struct drm_clip_rect * pbox);
 
 #define SAVAGE_FB_SIZE_S3	0x01000000	/*  16MB */
 #define SAVAGE_FB_SIZE_S4	0x02000000	/*  32MB */
@@ -227,17 +227,17 @@ extern void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
 #define SAVAGE_APERTURE_OFFSET  0x02000000	/*  32MB */
 #define SAVAGE_APERTURE_SIZE    0x05000000	/* 5 tiled surfaces, 16MB each */
 
-#define SAVAGE_BCI_OFFSET       0x00010000      /* offset of the BCI region
+#define SAVAGE_BCI_OFFSET       0x00010000	/* offset of the BCI region
 						 * inside the MMIO region */
-#define SAVAGE_BCI_FIFO_SIZE	32		/* number of entries in on-chip
-						 * BCI FIFO */
+#define SAVAGE_BCI_FIFO_SIZE	32	/* number of entries in on-chip
+					 * BCI FIFO */
 
 /*
  * MMIO registers
  */
 #define SAVAGE_STATUS_WORD0		0x48C00
 #define SAVAGE_STATUS_WORD1		0x48C04
-#define SAVAGE_ALT_STATUS_WORD0		0x48C60
+#define SAVAGE_ALT_STATUS_WORD0 	0x48C60
 
 #define SAVAGE_FIFO_USED_MASK_S3D	0x0001ffff
 #define SAVAGE_FIFO_USED_MASK_S4	0x001fffff
@@ -283,7 +283,7 @@ extern void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
 #define SAVAGE_TEXADDR1_S4		0x23
 #define SAVAGE_TEXBLEND0_S4		0x24
 #define SAVAGE_TEXBLEND1_S4		0x25
-#define SAVAGE_TEXXPRCLR_S4		0x26 /* never used */
+#define SAVAGE_TEXXPRCLR_S4		0x26	/* never used */
 #define SAVAGE_TEXDESCR_S4		0x27
 #define SAVAGE_FOGTABLE_S4		0x28
 #define SAVAGE_FOGCTRL_S4		0x30
@@ -298,7 +298,7 @@ extern void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
 #define SAVAGE_TEXBLENDCOLOR_S4		0x39
 /* Savage3D/MX/IX 3D registers */
 #define SAVAGE_TEXPALADDR_S3D		0x18
-#define SAVAGE_TEXXPRCLR_S3D		0x19 /* never used */
+#define SAVAGE_TEXXPRCLR_S3D		0x19	/* never used */
 #define SAVAGE_TEXADDR_S3D		0x1A
 #define SAVAGE_TEXDESCR_S3D		0x1B
 #define SAVAGE_TEXCTRL_S3D		0x1C
@@ -318,9 +318,9 @@ extern void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
 #define SAVAGE_DMABUFADDR		0x51
 
 /* texture enable bits (needed for tex addr checking) */
-#define SAVAGE_TEXCTRL_TEXEN_MASK	0x00010000 /* S3D */
-#define SAVAGE_TEXDESCR_TEX0EN_MASK	0x02000000 /* S4 */
-#define SAVAGE_TEXDESCR_TEX1EN_MASK	0x04000000 /* S4 */
+#define SAVAGE_TEXCTRL_TEXEN_MASK	0x00010000	/* S3D */
+#define SAVAGE_TEXDESCR_TEX0EN_MASK	0x02000000	/* S4 */
+#define SAVAGE_TEXDESCR_TEX1EN_MASK	0x04000000	/* S4 */
 
 /* Global fields in Savage4/Twister/ProSavage 3D registers:
  *
@@ -572,4 +572,4 @@ extern void savage_emit_clip_rect_s4(drm_savage_private_t *dev_priv,
 #define TEST_AGE( age, e, w )				\
 	( (age)->wrap < (w) || ( (age)->wrap == (w) && (age)->event <= (e) ) )
 
-#endif /* __SAVAGE_DRV_H__ */
+#endif				/* __SAVAGE_DRV_H__ */

@@ -59,6 +59,11 @@ static void r128_configure(struct drm_device *dev)
 	dev->driver->irq_postinstall	= r128_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= r128_driver_irq_uninstall;
 	dev->driver->irq_handler	= r128_driver_irq_handler;
+#if 1
+	dev->driver->reclaim_buffers = drm_core_reclaim_buffers;
+	dev->driver->get_map_ofs = drm_core_get_map_ofs;
+	dev->driver->get_reg_ofs = drm_core_get_reg_ofs;
+#endif
 	dev->driver->dma_ioctl		= r128_cce_buffers;
 
 	dev->driver->ioctls		= r128_ioctls;
@@ -94,7 +99,7 @@ static struct drm_driver driver = {
 	.irq_postinstall = r128_driver_irq_postinstall,
 	.irq_uninstall = r128_driver_irq_uninstall,
 	.irq_handler = r128_driver_irq_handler,
-#ifdef __linux__
+#if 1
 	.reclaim_buffers = drm_core_reclaim_buffers,
 	.get_map_ofs = drm_core_get_map_ofs,
 	.get_reg_ofs = drm_core_get_reg_ofs,
