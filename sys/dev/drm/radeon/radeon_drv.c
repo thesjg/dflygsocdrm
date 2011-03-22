@@ -211,7 +211,7 @@ static void radeon_configure(struct drm_device *dev)
 	dev->driver->irq_postinstall	= radeon_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= radeon_driver_irq_uninstall;
 	dev->driver->irq_handler	= radeon_driver_irq_handler;
-#ifdef DRM_NEWER_USER_TOKEN
+#if 1
 	dev->driver->reclaim_buffers = drm_core_reclaim_buffers;
 	dev->driver->get_map_ofs = drm_core_get_map_ofs;
 	dev->driver->get_reg_ofs = drm_core_get_reg_ofs;
