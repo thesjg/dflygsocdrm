@@ -40,7 +40,7 @@
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #else /* !__linux__ */
-#define DRM_NEWER_KQUEUE 1
+/* #define DRM_NEWER_KQUEUE 1 */
 #ifdef DRM_NEWER_KQUEUE
 #include <sys/vnode.h>
 #endif
