@@ -1718,7 +1718,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 #ifdef DRM_NEWER_REGMAP 
 	dev_priv->regs_size = size;
-	dev_priv->regs = ioremap(base, size);
+	dev_priv->regs = pmap_mapdev(base, size);
 	if (!dev_priv->regs) {
 		DRM_ERROR("failed to map registers\n");
 		ret = -EIO;
@@ -1978,9 +1978,9 @@ int i915_driver_unload(struct drm_device *dev)
 #else
 		pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
 #endif
-#else
+#else /* !__DRM_NEWER_REGMAP */
 	drm_rmmap(dev, dev_priv->mmio_map);
-#endif /* __linux__ */
+#endif /* !DRM_NEWER_REGMAP */
 
 #ifdef __linux__
 	intel_opregion_free(dev, 0);
