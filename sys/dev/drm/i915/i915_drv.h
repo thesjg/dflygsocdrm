@@ -259,9 +259,7 @@ typedef struct drm_i915_private {
 	struct drm_device *dev;
 
 /* legacy BSD serves in place of iomapped regs */
-#ifndef DRM_NEWER_REGMAP
 	drm_local_map_t *mmio_map;
-#endif
 
 	const struct intel_device_info *info;
 
