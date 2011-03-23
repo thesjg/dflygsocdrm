@@ -1707,11 +1707,10 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	size = drm_get_resource_len(dev, mmio_bar);
 
 	if (i915_get_bridge_dev(dev)) {
-#ifdef DRM_NEWER_REGMAP
 		DRM_ERROR("failed i915_get_bridge_dev\n");
 		ret = -EIO;
 		goto free_priv;
-#else
+#if 0
 		DRM_ERROR("failed i915_get_bridge_dev\n");
 #endif
 	}
@@ -1916,6 +1915,9 @@ out_rmmap:
 	pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
 put_bridge:
 	;
+free_priv:
+	free(dev_priv, DRM_MEM_DRIVER);
+#else
 free_priv:
 	free(dev_priv, DRM_MEM_DRIVER);
 #endif /* DRM_NEWER_REGMAP */
