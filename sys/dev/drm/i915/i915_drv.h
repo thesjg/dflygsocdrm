@@ -31,7 +31,7 @@
 #define _I915_DRV_H_
 
 #define DRM_NEWER_INTEL 1
-#define DRM_NEWER_REGMAP 1
+/* #define DRM_NEWER_REGMAP 1 */
 
 #include "i915_reg.h"
 #include "intel_bios.h"
