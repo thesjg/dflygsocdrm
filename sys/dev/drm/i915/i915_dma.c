@@ -1708,10 +1708,9 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	if (i915_get_bridge_dev(dev)) {
 		DRM_ERROR("failed i915_get_bridge_dev\n");
+#ifdef __linux__
 		ret = -EIO;
 		goto free_priv;
-#if 0
-		DRM_ERROR("failed i915_get_bridge_dev\n");
 #endif
 	}
 
@@ -1720,21 +1719,18 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	dev_priv->regs = ioremap(base, size);
 	if (!dev_priv->regs) {
 		DRM_ERROR("failed to map registers\n");
+#ifdef __linux__
 		ret = -EIO;
 		goto put_bridge;
-	}
-	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
-	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
-	if (ret) {
-		DRM_ERROR("failed to map registers\n");
-	}
-#else
-	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
-	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
-	if (ret) {
-		DRM_ERROR("failed to map registers\n");
-	}
 #endif
+	}
+#else /* !DRM_NEWER_REGMAP */
+	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
+	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
+	if (ret) {
+		DRM_ERROR("failed to map registers\n");
+	}
+#endif /* !DRM_NEWER_REGMAP */
 
         dev_priv->mm.gtt_mapping =
 		io_mapping_create_wc(dev->agp->base,
@@ -1742,8 +1738,10 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	if (dev_priv->mm.gtt_mapping == NULL) {
 #ifdef DRM_NEWER_REGMAP
 		DRM_ERROR("io_mapping_create_wc mm.gtt_mapping NULL\n");
+#ifdef __linux__
 		ret = -EIO;
 		goto out_rmmap;
+#endif
 #else
 		DRM_ERROR("io_mapping_create_wc mm.gtt_mapping NULL\n");
 #endif
@@ -1769,7 +1767,9 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	if (ret)
 #ifdef DRM_NEWER_REGMAP
 		DRM_ERROR("i915_probe_agp failed\n");
+#ifdef __linux__
 		goto out_iomapfree;
+#endif
 #else
 		DRM_ERROR("i915_probe_agp failed\n");
 #endif
@@ -1827,6 +1827,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #ifdef DRM_NEWER_REGMAP
 			goto out_workqueue_free;
 #else
+			drm_rmmap(dev, dev_priv->mmio_map);
 			drm_free(dev_priv, sizeof(struct drm_i915_private),
 			    DRM_MEM_DRIVER);
 			return ret;
@@ -1911,7 +1912,6 @@ out_iomapfree:
 	drm_io_mapping_free(dev->agp->base,
 			    dev->agp->agp_info.aper_size * 1024*1024);
 out_rmmap:
-	drm_rmmap(dev, dev_priv->mmio_map);
 	pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
 put_bridge:
 	;
@@ -1978,7 +1978,6 @@ int i915_driver_unload(struct drm_device *dev)
 #ifdef __linux__
 		iounmap(dev_priv->regs);
 #else
-		drm_rmmap(dev, dev_priv->mmio_map);
 		pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
 #endif
 #else /* !__DRM_NEWER_REGMAP */
