@@ -31,6 +31,7 @@
 #define _I915_DRV_H_
 
 #define DRM_NEWER_INTEL 1
+#define DRM_NEWER_REGMAP 1
 
 #include "i915_reg.h"
 #include "intel_bios.h"
@@ -257,14 +258,19 @@ struct intel_fbdev;
 typedef struct drm_i915_private {
 	struct drm_device *dev;
 
-/* legacy serves in place of iomapped regs */
+/* legacy BSD serves in place of iomapped regs */
+#ifndef DRM_NEWER_REGMAP
 	drm_local_map_t *mmio_map;
+#endif
 
 	const struct intel_device_info *info;
 
 	int has_gem;
 
 	void __iomem *regs;
+#ifdef DRM_NEWER_REGMAP
+	unsigned long regs_size;
+#endif
 
 #ifdef __linux__
 	struct pci_dev *bridge_dev;
@@ -1194,6 +1200,18 @@ extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 #define POSTING_READ(reg)	(void)I915_READ(reg)
 #define POSTING_READ16(reg)	(void)I915_READ16(reg)
 #else /* !__linux__ */
+#ifdef DRM_NEWER_REGMAP
+#define I915_READ(reg)         *(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
+#define I915_WRITE(reg, val)   *(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint32_t)(val)
+#define I915_READ16(reg)       *(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
+#define I915_WRITE16(reg, val) *(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint16_t)(val)
+#define I915_READ8(reg)	       *(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
+#define I915_WRITE8(reg, val)  *(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint8_t)(val)
+#define I915_WRITE64(reg, val) *(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint64_t)(val)
+#define I915_READ64(reg)       *(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
+#define POSTING_READ(reg)	(void)I915_READ(reg)
+#define POSTING_READ16(reg)	(void)I915_READ16(reg)
+#else /* !DRM_NEWER_REGMAP */
 #define I915_READ(reg)		DRM_READ32(dev_priv->mmio_map, (reg))
 #define I915_WRITE(reg,val)	DRM_WRITE32(dev_priv->mmio_map, (reg), (val))
 #define I915_READ16(reg)	DRM_READ16(dev_priv->mmio_map, (reg))
@@ -1204,6 +1222,7 @@ extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 #define I915_READ64(reg)	DRM_READ64(dev_priv->mmio_map, (reg))
 #define POSTING_READ(reg)	(void)I915_READ(reg)
 #define POSTING_READ16(reg)	(void)I915_READ16(reg)
+#endif /* !DRM_NEWER_REGMAP */
 #endif /* __linux__ */
 
 #define I915_VERBOSE 0

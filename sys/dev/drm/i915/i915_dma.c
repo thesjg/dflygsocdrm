@@ -1707,7 +1707,8 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	size = drm_get_resource_len(dev, mmio_bar);
 
 	if (i915_get_bridge_dev(dev)) {
-#ifdef __linux__
+#ifdef DRM_NEWER_REGMAP
+		DRM_ERROR("failed i915_get_bridge_dev\n");
 		ret = -EIO;
 		goto free_priv;
 #else
@@ -1715,7 +1716,8 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #endif
 	}
 
-#ifdef __linux__
+#ifdef DRM_NEWER_REGMAP 
+	dev_priv->regs_size = size;
 	dev_priv->regs = ioremap(base, size);
 	if (!dev_priv->regs) {
 		DRM_ERROR("failed to map registers\n");
@@ -1725,17 +1727,23 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #else
 	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
 	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
-
 	if (ret) {
 		DRM_ERROR("failed to map registers\n");
 	}
 #endif
 
+#ifdef DRM_NEWER_REGMAP
+        dev_priv->mm.gtt_mapping =
+		pmap_mapdev((unsigned long)dev->agp->base,
+				     dev->agp->agp_info.aper_size * 1024*1024);
+#else
         dev_priv->mm.gtt_mapping =
 		io_mapping_create_wc(dev->agp->base,
 				     dev->agp->agp_info.aper_size * 1024*1024);
+#endif
 	if (dev_priv->mm.gtt_mapping == NULL) {
-#ifdef __linux__
+#ifdef DRM_NEWER_REGMAP
+		DRM_ERROR("io_mapping_create_wc mm.gtt_mapping NULL\n");
 		ret = -EIO;
 		goto out_rmmap;
 #else
@@ -1761,13 +1769,14 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	ret = i915_probe_agp(dev, &agp_size, &prealloc_size, &prealloc_start);
 	if (ret)
-#ifdef __linux__
+#ifdef DRM_NEWER_REGMAP
+		DRM_ERROR("i915_probe_agp failed\n");
 		goto out_iomapfree;
 #else
 		DRM_ERROR("i915_probe_agp failed\n");
 #endif
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	dev_priv->wq = create_singlethread_workqueue("i915");
 	if (dev_priv->wq == NULL) {
 		DRM_ERROR("Failed to create our workqueue.\n");
@@ -1802,7 +1811,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		dev->driver->get_vblank_counter = gm45_get_vblank_counter;
 	}
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	/* Try to make sure MCHBAR is enabled before poking at it */
 	intel_setup_mchbar(dev);
 #endif /* __linux__ */
@@ -1817,10 +1826,14 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #ifdef __linux__
 			goto out_workqueue_free;
 #else
+#ifdef DRM_NEWER_REGMAP
+			goto out_workqueue_free;
+#else
 			drm_rmmap(dev, dev_priv->mmio_map);
 			drm_free(dev_priv, sizeof(struct drm_i915_private),
 			    DRM_MEM_DRIVER);
 			return ret;
+#endif
 #endif
 		}
 	}
@@ -1843,9 +1856,6 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		pci_enable_msi(dev->pdev);
 #endif
 
-#if 0
-	DRM_SPININIT(&dev_priv->user_irq_lock, "userirq");
-#endif
 	spin_lock_init(&dev_priv->user_irq_lock);
 	spin_lock_init(&dev_priv->error_lock);
 	dev_priv->user_irq_refcount = 0;
@@ -1895,9 +1905,21 @@ put_bridge:
 	pci_dev_put(dev_priv->bridge_dev);
 free_priv:
 	kfree(dev_priv);
-#else
+#else /* !__linux__ */
 	return ret;
-#endif /* __linux__ */
+out_workqueue_free:
+	;
+out_iomapfree:
+	pmap_unmapdev((vm_offset_t)dev_priv->mm.gtt_mapping,
+				     dev->agp->agp_info.aper_size * 1024*1024);
+out_rmmap:
+	pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
+put_bridge:
+	;
+free_priv:
+	free(dev_priv, DRM_MEM_DRIVER);
+	return ret;
+#endif /* !__linux__ */
 }
 
 int i915_driver_unload(struct drm_device *dev)
@@ -1918,8 +1940,13 @@ int i915_driver_unload(struct drm_device *dev)
 #ifdef __linux__
 	io_mapping_free(dev_priv->mm.gtt_mapping);
 #else
+#ifdef DRM_NEWER_REGMAP
+	pmap_unmapdev((vm_offset_t)dev_priv->mm.gtt_mapping,
+				     dev->agp->agp_info.aper_size * 1024*1024);
+#else
 	drm_io_mapping_free(dev_priv->mm.gtt_mapping,
 		dev->agp->agp_info.aper_size * 1024*1024);
+#endif
 #endif
 
 #ifdef __linux__
@@ -1948,9 +1975,13 @@ int i915_driver_unload(struct drm_device *dev)
 		pci_disable_msi(dev->pdev);
 #endif /* __linux__ */
 
-#ifdef __linux__
+#ifdef DRM_NEWER_REGMAP
 	if (dev_priv->regs != NULL)
+#ifdef __linux__
 		iounmap(dev_priv->regs);
+#else
+		pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
+#endif
 #else
 	drm_rmmap(dev, dev_priv->mmio_map);
 #endif /* __linux__ */

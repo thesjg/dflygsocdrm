@@ -1563,10 +1563,9 @@ extern int drm_addmap(struct drm_device *dev, resource_size_t offset,
 		      unsigned int size, enum drm_map_type type,
 		      enum drm_map_flags flags, struct drm_local_map **map_ptr);
 #else
-int	drm_addmap(struct drm_device *dev, unsigned long offset,
-		   unsigned long size,
-		   enum drm_map_type type, enum drm_map_flags flags,
-		   drm_local_map_t **map_ptr);
+extern int drm_addmap(struct drm_device *dev, resource_size_t offset,
+		      unsigned long size, enum drm_map_type type,
+		      enum drm_map_flags flags, struct drm_local_map **map_ptr);
 #endif
 extern int drm_addmap_ioctl(struct drm_device *dev, void *data,
 			    struct drm_file *file_priv);
