@@ -1734,10 +1734,6 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 #ifdef DRM_NEWER_REGMAP
         dev_priv->mm.gtt_mapping =
-		pmap_mapdev((unsigned long)dev->agp->base,
-				     dev->agp->agp_info.aper_size * 1024*1024);
-#else
-        dev_priv->mm.gtt_mapping =
 		io_mapping_create_wc(dev->agp->base,
 				     dev->agp->agp_info.aper_size * 1024*1024);
 #endif
@@ -1910,8 +1906,7 @@ free_priv:
 out_workqueue_free:
 	;
 out_iomapfree:
-	pmap_unmapdev((vm_offset_t)dev_priv->mm.gtt_mapping,
-				     dev->agp->agp_info.aper_size * 1024*1024);
+	io_mapping_free(dev_priv->mm.gtt_mapping);
 out_rmmap:
 	pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
 put_bridge:
