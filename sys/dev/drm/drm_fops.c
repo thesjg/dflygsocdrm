@@ -40,7 +40,7 @@
 #include <linux/slab.h>
 #include <linux/smp_lock.h>
 #else /* !__linux__ */
-/* #define DRM_NEWER_KQUEUE 1 */
+#define DRM_NEWER_KQUEUE 1
 #ifdef DRM_NEWER_KQUEUE
 #include <sys/vnode.h>
 #endif
@@ -59,11 +59,6 @@ struct drm_file *drm_find_file_by_proc(struct drm_device *dev, DRM_STRUCTPROC *p
 		if (priv->pid == pid && priv->uid == uid)
 			return priv;
 	}
-#if 0
-	TAILQ_FOREACH(priv, &dev->files, link)
-		if (priv->pid == pid && priv->uid == uid)
-			return priv;
-#endif
 	return NULL;
 }
 
@@ -92,7 +87,7 @@ static int drm_setup(struct drm_device * dev)
 	atomic_set(&dev->ioctl_count, 0);
 	atomic_set(&dev->vma_count, 0);
 
-#ifndef __linux__
+#if 0
 /* Intel i915 only driver that appears to not DRIVER_HAVE_DMA */
 	dev->buf_use = 0;
 #endif /* __linux__ */
@@ -219,7 +214,7 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
 		spin_lock(&dev->count_lock);
 
-#ifndef __linux__ /* legacy change balanced in drm_close_legacy */
+#ifndef __linux__ /* legacy BSD change balanced in drm_close_legacy */
 		device_busy(dev->device);
 #endif
 
@@ -244,7 +239,7 @@ out:
 	}
 #endif /* __linux__ */
 
-	return retcode;
+	return (retcode >= 0) ? retcode : -retcode;
 }
 EXPORT_SYMBOL(drm_open);
 
@@ -335,35 +330,41 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 		    struct drm_device *dev)
 #endif
 {
+#ifdef __linux__
+	int minor_id = iminor(inode);
+#else
 	int minor_id = minor(kdev);
-	struct drm_file *find_priv;
+#endif
 	struct drm_file *priv;
 	int ret;
 
+#ifndef __linux__
+	struct drm_file *find_priv;
+#endif
+
 #ifdef __linux__
 	if (filp->f_flags & O_EXCL)
-		return -EBUSY;	/* No exclusive opens */
 #else
 	if (flags & O_EXCL)
-		return EBUSY; /* No exclusive opens */
 #endif
+		return -EBUSY;	/* No exclusive opens */
 	if (!drm_cpu_valid())
-		return EINVAL;
+		return -EINVAL;
 
-	dev->flags = flags;
-
+#ifdef __linux__
+	DRM_DEBUG("pid = %d, minor = %d\n", task_pid_nr(current), minor_id);
+#else
 	DRM_DEBUG("pid = %d, minor = %d\n", DRM_CURRENTPID, minor_id);
+#endif
 
 	priv = malloc(sizeof(*priv), DRM_MEM_FILES, M_WAITOK | M_ZERO);
-	if (!priv) {
-		return ENOMEM;
-	}
+	if (!priv)
+		return -ENOMEM;
 
-	priv->refs = 1;
-#if 0
-	priv->minor_legacy = minor_id;
+#ifdef __linux__
+	filp->private_data = priv;
+	priv->filp = filp;
 #endif
-
 #ifdef __linux__
 	priv->uid = current_euid();
 	priv->pid = task_pid_nr(current);
@@ -388,6 +389,7 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	priv->event_space = 4096; /* set aside 4k for event buffer */
 
 #ifndef __linux__ /* legacy required because no file open state */
+	priv->refs = 1;
 	spin_lock(&dev->file_priv_lock);
         find_priv = drm_find_file_by_proc(dev, p);
         if (find_priv) {
@@ -399,9 +401,15 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 			find_priv->minor->index,
 			find_priv->authenticated
 			);
-		if (kdev->si_drv1 != dev)
+		if (kdev->si_drv1 != dev) {
 			DRM_ERROR("kdev->si_drv1 != dev\n");
-		kdev->si_drv1 = dev;
+			kdev->si_drv1 = dev;
+		}
+		if (flags != dev->flags) {
+			DRM_ERROR("dev->flags (%d) != flags (%d)\n",
+				dev->flags, flags);
+			dev->flags = flags;
+		}
 		ret = 0;
 		goto out_free_found;
 	}
@@ -421,16 +429,14 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	mutex_lock(&dev->struct_mutex);
 #ifndef __linux__ /* legacy BSD needed for other */
 	kdev->si_drv1 = dev;
-#if 0
-	priv->master_legacy = TAILQ_EMPTY(&dev->files);
-#endif
+	dev->flags = flags;
 #endif
 	if (!priv->minor->master) {
 		/* create a new master */
 		priv->minor->master = drm_master_create(priv->minor);
 		if (!priv->minor->master) {
 			mutex_unlock(&dev->struct_mutex);
-			ret = ENOMEM;
+			ret = -ENOMEM;
 			goto out_free;
 		}
 #ifndef __linux__
@@ -456,7 +462,6 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 				goto out_free;
 			}
 		}
-
 		mutex_lock(&dev->struct_mutex);
 		if (dev->driver->master_set) {
 			ret = dev->driver->master_set(dev, priv, true);
@@ -476,9 +481,6 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	}
 
 	mutex_lock(&dev->struct_mutex);
-#if 0
-	TAILQ_INSERT_TAIL(&dev->files, priv, link);
-#endif
 	list_add(&priv->lhead, &dev->filelist);
 	mutex_unlock(&dev->struct_mutex);
 
@@ -634,12 +636,10 @@ static void drm_master_release(struct drm_device *dev, struct drm_file *file_pri
 			      _DRM_LOCKING_CONTEXT(file_priv->master->lock.hw_lock->lock));
 	}
 
-#if 1
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !dev->driver->reclaim_buffers_locked) {
 		dev->driver->reclaim_buffers(dev, file_priv);
 	}
-#endif
 }
 
 static void drm_events_release(struct drm_file *file_priv)
@@ -719,23 +719,34 @@ int drm_close_legacy(struct dev_close_args *ap)
 	}
 #endif /* !__linux__ */
 
-	if (dev->driver->preclose != NULL)
+	if (dev->driver->preclose)
 		dev->driver->preclose(dev, file_priv);
 
 	/* ========================================================
 	 * Begin inline drm_release
 	 */
 
+#ifdef __linux__
 	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
-		DRM_CURRENTPID,
-		(long)dev->device,
-		dev->open_count);
+		  task_pid_nr(current),
+		  (long)old_encode_dev(file_priv->minor->device),
+		  dev->open_count);
+#else
+	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
+		  DRM_CURRENTPID,
+		  (long)dev->device,
+		  dev->open_count);
+#endif
 
 	/* if the master has gone away we can't do anything with the lock */
 	if (file_priv->minor->master)
+#ifdef __linux__
+		drm_master_release(dev, filp);
+#else
 		drm_master_release(dev, file_priv);
+#endif
 
-#ifndef __linux__
+#if 0
 /* There apparently is a savage_reclaim_buffers */
 	if (drm_core_check_feature(dev, DRIVER_HAVE_DMA) &&
 	    !dev->driver->reclaim_buffers_locked)
@@ -811,9 +822,6 @@ int drm_close_legacy(struct dev_close_args *ap)
 	drm_master_put(&file_priv->master);
 	file_priv->is_master = 0;
 	list_del(&file_priv->lhead);
-#if 0
-	TAILQ_REMOVE(&dev->files, file_priv, link);
-#endif
 	mutex_unlock(&dev->struct_mutex);
 
 	if (dev->driver->postclose)
@@ -848,7 +856,7 @@ done:
 
 	unlock_kernel();
 
-	return (0);
+	return retcode;
 }
 EXPORT_SYMBOL(drm_release);
 
@@ -929,13 +937,18 @@ EXPORT_SYMBOL(drm_poll);
 int drm_read_legacy(struct dev_read_args *ap)
 {
 #ifdef DRM_NEWER_KQUEUE
+#ifdef __linux__
+	struct drm_file *file_priv = filp->private_data;
+#else
 	struct cdev *kdev = ap->a_head.a_dev;
 	struct uio *uio = ap->a_uio;
 	struct drm_device *dev = kdev->si_drv1;
 	struct drm_file *file_priv;
+#endif
 	struct drm_pending_event *e;
 	size_t total;
 	ssize_t ret;
+#ifndef __linux__
 	size_t count = uio->uio_resid;
 	int error;
 	spin_lock(&dev->file_priv_lock);
@@ -945,7 +958,14 @@ int drm_read_legacy(struct dev_read_args *ap)
 	DRM_INFO("drm_read_legacy(): by pid (%d), uid (%d)\n",
 		DRM_CURRENTPID,
 		DRM_CURRENTUID);
+#endif
 
+#ifdef __linux__
+	ret = wait_event_interruptible(file_priv->event_wait,
+				       !list_empty(&file_priv->event_list));
+	if (ret < 0)
+		return ret;
+#else
 	error = 0;
 	crit_enter();
 	for (;;) {
@@ -962,12 +982,21 @@ int drm_read_legacy(struct dev_read_args *ap)
 	crit_exit();
 	if (error)
 		return (error);
+#endif
 
 	total = 0;
 	while (drm_dequeue_event(file_priv, total, count, &e)) {
+#ifdef __linux__
+		if (copy_to_user(buffer + total,
+				 e->event, e->event->length)) {
+			total = -EFAULT;
+			break;
+		}
+#else
 		if ((error = uiomove(e->event, e->event->length, uio)) != 0) {
 			break;
 		}
+#endif
 
 		total += e->event->length;
 		e->destroy(e);
