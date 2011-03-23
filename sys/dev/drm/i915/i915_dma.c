@@ -1906,7 +1906,8 @@ free_priv:
 out_workqueue_free:
 	;
 out_iomapfree:
-	io_mapping_free(dev_priv->mm.gtt_mapping);
+	drm_io_mapping_free(dev->agp->base,
+			    dev->agp->agp_info.aper_size * 1024*1024);
 out_rmmap:
 	pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
 put_bridge:
