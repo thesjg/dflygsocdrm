@@ -1202,12 +1202,12 @@ extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 #else /* !__linux__ */
 #ifdef DRM_NEWER_REGMAP
 #define I915_READ(reg)         *(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
-#define I915_WRITE(reg, val)   *(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint32_t)(val)
+#define I915_WRITE(reg, val)   *(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
 #define I915_READ16(reg)       *(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
-#define I915_WRITE16(reg, val) *(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint16_t)(val)
+#define I915_WRITE16(reg, val) *(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
 #define I915_READ8(reg)	       *(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
-#define I915_WRITE8(reg, val)  *(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint8_t)(val)
-#define I915_WRITE64(reg, val) *(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = (uint64_t)(val)
+#define I915_WRITE8(reg, val)  *(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
+#define I915_WRITE64(reg, val) *(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
 #define I915_READ64(reg)       *(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
 #define POSTING_READ(reg)	(void)I915_READ(reg)
 #define POSTING_READ16(reg)	(void)I915_READ16(reg)
