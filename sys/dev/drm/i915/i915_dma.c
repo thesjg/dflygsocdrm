@@ -1719,7 +1719,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	dev_priv->regs = ioremap(base, size);
 	if (!dev_priv->regs) {
 		DRM_ERROR("failed to map registers\n");
-#ifdef __linux__
+#if 1
 		ret = -EIO;
 		goto put_bridge;
 #endif
@@ -1918,6 +1918,8 @@ put_bridge:
 free_priv:
 	free(dev_priv, DRM_MEM_DRIVER);
 #else
+put_bridge:
+	;
 free_priv:
 	free(dev_priv, DRM_MEM_DRIVER);
 #endif /* DRM_NEWER_REGMAP */
