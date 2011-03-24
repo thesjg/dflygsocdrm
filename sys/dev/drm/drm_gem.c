@@ -543,6 +543,7 @@ void drm_gem_vm_close(struct vm_area_struct *vma)
 EXPORT_SYMBOL(drm_gem_vm_close);
 
 
+/* UNIMPLEMENTED */
 /**
  * drm_gem_mmap - memory map routine for GEM objects
  * @filp: DRM file pointer
