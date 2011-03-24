@@ -259,14 +259,16 @@ typedef struct drm_i915_private {
 	struct drm_device *dev;
 
 /* legacy BSD serves in place of iomapped regs */
+#if 0
 	drm_local_map_t *mmio_map;
+#endif
 
 	const struct intel_device_info *info;
 
 	int has_gem;
 
 	void __iomem *regs;
-#ifdef DRM_NEWER_REGMAP
+#ifndef __linux__ /* legacy BSD needs size for unmapping */
 	unsigned long regs_size;
 #endif
 
@@ -1195,21 +1197,19 @@ extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 #define I915_WRITE8(reg, val)	writeb(val, dev_priv->regs + (reg))
 #define I915_WRITE64(reg, val)	writeq(val, dev_priv->regs + (reg))
 #define I915_READ64(reg)	readq(dev_priv->regs + (reg))
-#define POSTING_READ(reg)	(void)I915_READ(reg)
-#define POSTING_READ16(reg)	(void)I915_READ16(reg)
 #else /* !__linux__ */
-#ifdef DRM_NEWER_REGMAP
-#define I915_READ(reg)         *(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
-#define I915_WRITE(reg, val)   *(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
-#define I915_READ16(reg)       *(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
-#define I915_WRITE16(reg, val) *(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
-#define I915_READ8(reg)	       *(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
-#define I915_WRITE8(reg, val)  *(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
-#define I915_WRITE64(reg, val) *(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val
-#define I915_READ64(reg)       *(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg))
+#define I915_READ(reg)         (*(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)))
+#define I915_WRITE(reg, val)   (*(volatile uint32_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val)
+#define I915_READ16(reg)       (*(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)))
+#define I915_WRITE16(reg, val) (*(volatile uint16_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val)
+#define I915_READ8(reg)	       (*(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)))
+#define I915_WRITE8(reg, val)  (*(volatile uint8_t  *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val)
+#define I915_WRITE64(reg, val) (*(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)) = val)
+#define I915_READ64(reg)       (*(volatile uint64_t *)((vm_offset_t)(dev_priv->regs) + (vm_offset_t)(reg)))
+#endif /* !__linux__ */
 #define POSTING_READ(reg)	(void)I915_READ(reg)
 #define POSTING_READ16(reg)	(void)I915_READ16(reg)
-#else /* !DRM_NEWER_REGMAP */
+#if 0
 #define I915_READ(reg)		DRM_READ32(dev_priv->mmio_map, (reg))
 #define I915_WRITE(reg,val)	DRM_WRITE32(dev_priv->mmio_map, (reg), (val))
 #define I915_READ16(reg)	DRM_READ16(dev_priv->mmio_map, (reg))
@@ -1221,7 +1221,6 @@ extern int intel_trans_dp_port_sel (struct drm_crtc *crtc);
 #define POSTING_READ(reg)	(void)I915_READ(reg)
 #define POSTING_READ16(reg)	(void)I915_READ16(reg)
 #endif /* !DRM_NEWER_REGMAP */
-#endif /* __linux__ */
 
 #define I915_VERBOSE 0
 
