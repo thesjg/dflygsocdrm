@@ -1715,13 +1715,12 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 	if (i915_get_bridge_dev(dev)) {
 		DRM_ERROR("failed i915_get_bridge_dev\n");
-#ifdef __linux__ /* UNIMPLEMENTED legacy BSD causes CRASH of driver */
+#if 1 /* UNIMPLEMENTED legacy BSD causes CRASH of driver */
 		ret = -EIO;
 		goto free_priv;
 #endif
 	}
 
-#if 1
 	dev_priv->regs_size = size;
 	dev_priv->regs = ioremap(base, size);
 	if (!dev_priv->regs) {
@@ -1729,7 +1728,6 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		ret = -EIO;
 		goto put_bridge;
 	}
-#endif
 #if 0 /* !DRM_NEWER_REGMAP */
 	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
 	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
