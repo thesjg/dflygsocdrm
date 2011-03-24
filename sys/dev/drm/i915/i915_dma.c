@@ -1774,11 +1774,11 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	}
 	device_t nowagpdev = drm_agp_find_bridge(dev);
 	if (nowagpdev) {
-		DRM_INFO("after i915_probe_agp() success, agp bridge vendor (%d) device (%d)\n",
+		DRM_INFO("after i915_probe_agp() success, agp bridge vendor (%x) device (%x)\n",
 			pci_get_vendor(nowagpdev),
 			pci_get_device(nowagpdev));
 		if (dev_priv->bridge_dev) {
-			DRM_INFO("earlier detected agp bridge vendor (%d) device (%d)\n",
+			DRM_INFO("earlier detected agp bridge vendor (%x) device (%x)\n",
 				pci_get_vendor(dev_priv->bridge_dev),
 				pci_get_device(dev_priv->bridge_dev));
 		}
