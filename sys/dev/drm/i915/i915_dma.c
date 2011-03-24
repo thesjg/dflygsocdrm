@@ -1764,15 +1764,28 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #endif /* __linux__ */
 
 	ret = i915_probe_agp(dev, &agp_size, &prealloc_size, &prealloc_start);
-	if (ret)
-#if 1
-		DRM_ERROR("i915_probe_agp failed\n");
 #ifdef __linux__
+	if (ret)
 		goto out_iomapfree;
-#endif
-#endif
-#if 0
+#else
+	if (ret) {
 		DRM_ERROR("i915_probe_agp failed\n");
+		goto out_iomapfree;
+	}
+	device_t nowagpdev = drm_agp_find_bridge(dev);
+	if (nowagpdev) {
+		DRM_INFO("after i915_probe_agp() success, agp bridge vendor (%d) device (%d)\n",
+			pci_get_vendor(nowagpdev),
+			pci_get_device(nowagpdev));
+		if (dev_priv->bridge_dev) {
+			DRM_INFO("earlier detected agp bridge vendor (%d) device (%d)\n",
+				pci_get_vendor(dev_priv->bridge_dev),
+				pci_get_device(dev_priv->bridge_dev));
+		}
+	}
+	else {
+		DRM_INFO("after i915_probe_agp() still no detected agp bridge\n");
+	}
 #endif
 
 #ifdef __linux__ /* UNIMPLEMENTED */
@@ -1952,7 +1965,7 @@ int i915_driver_unload(struct drm_device *dev)
 		dev->agp->agp_info.aper_size * 1024*1024);
 #endif
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	if (dev_priv->mm.gtt_mtrr >= 0) {
 		mtrr_del(dev_priv->mm.gtt_mtrr, dev->agp->base,
 			 dev->agp->agp_info.aper_size * 1024 * 1024);
