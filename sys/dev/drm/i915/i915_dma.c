@@ -1740,15 +1740,10 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		io_mapping_create_wc(dev->agp->base,
 				     dev->agp->agp_info.aper_size * 1024*1024);
 	if (dev_priv->mm.gtt_mapping == NULL) {
-#if 1
 		DRM_ERROR("io_mapping_create_wc mm.gtt_mapping NULL\n");
-#ifdef __linux__
+#if 1
 		ret = -EIO;
 		goto out_rmmap;
-#endif
-#endif
-#if 0
-		DRM_ERROR("io_mapping_create_wc mm.gtt_mapping NULL\n");
 #endif
 	}
 
@@ -1924,7 +1919,6 @@ put_bridge:
 free_priv:
 	kfree(dev_priv);
 #else /* !__linux__ */
-#if 1
 	return 0;
 out_workqueue_free:
 	;
@@ -1937,13 +1931,6 @@ put_bridge:
 	;
 free_priv:
 	free(dev_priv, DRM_MEM_DRIVER);
-#endif
-#if 0
-put_bridge:
-	;
-free_priv:
-	free(dev_priv, DRM_MEM_DRIVER);
-#endif /* DRM_NEWER_REGMAP */
 	return ret;
 #endif /* !__linux__ */
 }
