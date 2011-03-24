@@ -96,9 +96,6 @@ int drm_rmdraw(struct drm_device *dev, void *data, struct drm_file *file_priv)
 }
 
 int drm_update_drawable_info(struct drm_device *dev, void *data, struct drm_file *file_priv)
-#if 0
-int drm_update_draw(struct drm_device *dev, void *data, struct drm_file *file_priv)
-#endif
 {
 	struct drm_update_draw *update = data;
 	unsigned long irqflags;

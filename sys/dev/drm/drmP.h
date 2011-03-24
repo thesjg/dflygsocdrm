@@ -1403,7 +1403,6 @@ extern struct drm_file	*drm_find_file_by_proc(struct drm_device *dev,
 extern int drm_mmap(struct file *filp, struct vm_area_struct *vma);
 extern int drm_mmap_locked(struct file *filp, struct vm_area_struct *vma);
 extern void drm_vm_open_locked(struct vm_area_struct *vma);
-extern void drm_vm_close_locked(struct vm_area_struct *vma);
 extern resource_size_t drm_core_get_map_ofs(struct drm_local_map * map);
 extern resource_size_t drm_core_get_reg_ofs(struct drm_device *dev);
 extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
@@ -1416,11 +1415,8 @@ extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
 extern void drm_mem_init(void);
 extern int drm_mem_info(char *buf, char **start, off_t offset,
 			int request, int *eof, void *data);
-
-/* Neither declaration below appears to be used in any version of drm */
-#ifdef __linux__
 extern void *drm_realloc(void *oldpt, size_t oldsize, size_t size, int area);
-#else
+#if 0
 static __inline__ void *
 drm_realloc(void *oldpt, size_t oldsize, size_t size,
     struct malloc_type *area)
@@ -1504,21 +1500,11 @@ extern int drm_rmdraw(struct drm_device *dev, void *data,
 		      struct drm_file *file_priv);
 extern int drm_update_drawable_info(struct drm_device *dev, void *data,
 				    struct drm_file *file_priv);
-#ifndef __linux__ /* legacy */
-int	drm_update_draw(struct drm_device *dev, void *data,
-			struct drm_file *file_priv);
-#endif /* !__linux__ */
-/* drm_drawable_t is defined in drm.h to be unsigned int */
 extern struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev,
 						  drm_drawable_t id);
-#if 0
-struct drm_drawable_info *drm_get_drawable_info(struct drm_device *dev,
-						int handle);
-#endif
 extern void drm_drawable_free_all(struct drm_device *dev);
 
 				/* Authentication IOCTL support (drm_auth.h) */
-/* Authentication IOCTL support (drm_auth.c) */
 extern int drm_getmagic(struct drm_device *dev, void *data,
 			struct drm_file *file_priv);
 extern int drm_authmagic(struct drm_device *dev, void *data,
@@ -1540,13 +1526,6 @@ extern int drm_lock_take(struct drm_lock_data *lock_data, unsigned int context);
 extern int drm_lock_free(struct drm_lock_data *lock_data, unsigned int context);
 extern void drm_idlelock_take(struct drm_lock_data *lock_data);
 extern void drm_idlelock_release(struct drm_lock_data *lock_data);
-
-#if 0
-/* legacy */
-/* Locking IOCTL support (drm_lock.c) */
-int	drm_lock_transfer(struct drm_lock_data *lock_data,
-			  unsigned int context);
-#endif
 
 /*
  * These are exported to drivers so that they can implement fencing using
@@ -1756,13 +1735,10 @@ extern void drm_sysfs_connector_remove(struct drm_connector *connector);
 /* Graphics Execution Manager library functions (drm_gem.c) */
 int drm_gem_init(struct drm_device *dev);
 void drm_gem_destroy(struct drm_device *dev);
-void drm_gem_object_release(struct drm_gem_object *obj);
 void drm_gem_object_free(struct kref *kref);
 void drm_gem_object_free_unlocked(struct kref *kref);
 struct drm_gem_object *drm_gem_object_alloc(struct drm_device *dev,
 					    size_t size);
-int drm_gem_object_init(struct drm_device *dev,
-			struct drm_gem_object *obj, size_t size);
 void drm_gem_object_handle_free(struct kref *kref);
 void drm_gem_vm_open(struct vm_area_struct *vma);
 void drm_gem_vm_close(struct vm_area_struct *vma);
@@ -1784,17 +1760,8 @@ drm_gem_object_unreference(struct drm_gem_object *obj)
 static inline void
 drm_gem_object_unreference_unlocked(struct drm_gem_object *obj)
 {
-#ifdef __linux__ /* Linux 2.6.35.9 */
-	if (obj != NULL) {
-		struct drm_device *dev = obj->dev;
-		mutex_lock(&dev->struct_mutex);
-		kref_put(&obj->refcount, drm_gem_object_free);
-		mutex_unlock(&dev->struct_mutex);
-	}
-#else
 	if (obj != NULL)
 		kref_put(&obj->refcount, drm_gem_object_free_unlocked);
-#endif
 }
 
 int drm_gem_handle_create(struct drm_file *file_priv,
@@ -1865,7 +1832,7 @@ int	drm_dma(struct drm_device *dev, void *data, struct drm_file *file_priv);
 #ifdef DRM_NEWER_USER_TOKEN
 
 static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
-							 unsigned int token)
+							 unsigned long token)
 {
 	struct drm_map_list *_entry;
 	list_for_each_entry(_entry, &dev->maplist, head)
