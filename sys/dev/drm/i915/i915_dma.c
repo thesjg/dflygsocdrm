@@ -960,6 +960,13 @@ static int i915_get_bridge_dev(struct drm_device *dev)
 		DRM_ERROR("bridge device not found\n");
 		return -1;
 	}
+	else {
+		if (dev_priv->bridge_dev) {
+			DRM_INFO("i915_get_bridge_dev(): agp bridge vendor (%x) device (%x)\n",
+				pci_get_vendor(dev_priv->bridge_dev),
+				pci_get_device(dev_priv->bridge_dev));
+		}
+	}
 	return 0;
 }
 
