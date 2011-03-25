@@ -417,6 +417,7 @@ DRIVER_MODULE(iicbb, bti2c, iicbb_driver, iicbb_devclass, 0, 0);
 DRIVER_MODULE(iicbb, cxm_iic, iicbb_driver, iicbb_devclass, 0, 0);
 DRIVER_MODULE(iicbb, lpbb, iicbb_driver, iicbb_devclass, 0, 0);
 DRIVER_MODULE(iicbb, viapm, iicbb_driver, iicbb_devclass, 0, 0);
+DRIVER_MODULE(iicbb, i915_iic, iicbb_driver, iicbb_devclass, 0, 0);
 
 MODULE_DEPEND(iicbb, iicbus, IICBUS_MINVER, IICBUS_PREFVER, IICBUS_MAXVER);
 MODULE_VERSION(iicbb, IICBB_MODVER);

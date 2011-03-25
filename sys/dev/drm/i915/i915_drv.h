@@ -777,6 +777,7 @@ struct drm_i915_gem_object {
 	caddr_t pages_vaddr;
 	int num_pages;
 	DRM_PAGE_T *pages_legacy;
+	vm_object_t object;
 };
 
 #define to_intel_bo(x) ((struct drm_i915_gem_object *) (x)->driver_private)

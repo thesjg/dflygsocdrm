@@ -317,7 +317,7 @@ i915_iic_reset(device_t dev, u_char speed, u_char addr, u_char * oldaddr)
 	/* Get the device data */
 	sc = device_get_softc(dev);
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	intel_i2c_reset_gmbus(sc->drm_dev);
 
 	/* JJJ:  raise SCL and SDA? */

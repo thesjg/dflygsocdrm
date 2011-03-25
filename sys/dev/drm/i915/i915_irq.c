@@ -25,6 +25,7 @@
  * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
  *
  */
+
 #ifdef __linux__
 #include <linux/sysrq.h>
 #include <linux/slab.h>
@@ -37,7 +38,7 @@
 
 #ifdef __linux__
 #include "i915_trace.h"
-#else
+#else /* legacy stubs */
 #include "i915_trace_porting.h"
 #endif /* __linux__ */
 
@@ -82,7 +83,7 @@ ironlake_enable_graphics_irq(drm_i915_private_t *dev_priv, u32 mask)
 	}
 }
 
-void
+static inline void
 ironlake_disable_graphics_irq(drm_i915_private_t *dev_priv, u32 mask)
 {
 	if ((dev_priv->gt_irq_mask_reg & mask) != mask) {
@@ -123,7 +124,7 @@ i915_enable_irq(drm_i915_private_t *dev_priv, u32 mask)
 	}
 }
 
-void
+static inline void
 i915_disable_irq(drm_i915_private_t *dev_priv, u32 mask)
 {
 	if ((dev_priv->irq_mask_reg & mask) != mask) {
@@ -362,7 +363,7 @@ irqreturn_t ironlake_irq_handler(struct drm_device *dev)
 	}
 
 	if (gt_iir & GT_PIPE_NOTIFY) {
-#ifdef __linux__
+#ifdef DRM_NEWER_IGEM
 		u32 seqno = i915_get_gem_seqno(dev);
 		dev_priv->mm.irq_gem_seqno = seqno;
 		trace_i915_gem_request_complete(dev, seqno);
@@ -469,12 +470,20 @@ i915_error_object_create(struct drm_device *dev,
 
 	page_count = src->size / PAGE_SIZE;
 
+#ifdef __linux__
+	dst = kmalloc(sizeof(*dst) + page_count * sizeof (u32 *), GFP_ATOMIC);
+#else /* INVESTIGATE use M_NOWAIT instead? */
 	dst = malloc(sizeof(*dst) + page_count * sizeof (u32 *), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 	if (dst == NULL)
 		return NULL;
 
 	for (page = 0; page < page_count; page++) {
+#ifdef __linux__
+		void *s, *d = kmalloc(PAGE_SIZE, GFP_ATOMIC);
+#else /* INVESTIGATE use M_NOWAIT instead? */
 		void *s, *d = malloc(PAGE_SIZE, DRM_MEM_DRIVER, M_WAITOK);
+#endif
 		unsigned long flags;
 
 		if (d == NULL)
