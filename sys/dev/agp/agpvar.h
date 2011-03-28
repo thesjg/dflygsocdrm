@@ -100,6 +100,14 @@ int agp_enable(device_t dev, u_int32_t mode);
 void *agp_alloc_memory(device_t dev, int type, vm_size_t bytes);
 
 /*
+ * Allocate physical memory suitable for mapping into the AGP
+ * aperture.  The value returned is an opaque handle which can be
+ * passed to agp_bind(), agp_unbind() or agp_deallocate().
+ * Used by drm, allows specifying vm_object.
+ */
+void *agp_alloc_given(device_t dev, int type, vm_size_t bytes, void *handle);
+
+/*
  * Free memory which was allocated with agp_allocate().
  */
 void agp_free_memory(device_t dev, void *handle);

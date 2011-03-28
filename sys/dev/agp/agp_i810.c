@@ -1046,6 +1046,88 @@ agp_i810_alloc_memory(device_t dev, int type, vm_size_t size)
 	return mem;
 }
 
+static struct agp_memory *
+agp_i810_alloc_given(device_t dev, int type, vm_size_t size, void *handle)
+{
+	struct agp_i810_softc *sc = device_get_softc(dev);
+	struct agp_memory *mem;
+
+	if ((size & (AGP_PAGE_SIZE - 1)) != 0)
+		return 0;
+
+	if (sc->agp.as_allocated + size > sc->agp.as_maxmem)
+		return 0;
+
+	if (type == 1) {
+		/*
+		 * Mapping local DRAM into GATT.
+		 */
+		if ( sc->chiptype != CHIP_I810 )
+			return 0;
+		if (size != sc->dcache_size)
+			return 0;
+	} else if (type == 2) {
+		/*
+		 * Type 2 is the contiguous physical memory type, that hands
+		 * back a physical address.  This is used for cursors on i810.
+		 * Hand back as many single pages with physical as the user
+		 * wants, but only allow one larger allocation (ARGB cursor)
+		 * for simplicity.
+		 */
+		if (size != AGP_PAGE_SIZE) {
+			if (sc->argb_cursor != NULL)
+				return 0;
+
+			/* Allocate memory for ARGB cursor, if we can. */
+			sc->argb_cursor = contigmalloc(size, M_AGP,
+			   0, 0, ~0, PAGE_SIZE, 0);
+			if (sc->argb_cursor == NULL)
+				return 0;
+		}
+	}
+
+	mem = kmalloc(sizeof *mem, M_AGP, M_INTWAIT);
+	mem->am_id = sc->agp.as_nextid++;
+	mem->am_size = size;
+	mem->am_type = type;
+	if (type != 1 && (type != 2 || size == AGP_PAGE_SIZE))
+		mem->am_obj = (vm_object_t)handle; 
+	else
+		mem->am_obj = 0;
+
+	if (type == 2) {
+		if (size == AGP_PAGE_SIZE) {
+			/*
+			 * Allocate and wire down the page now so that we can
+			 * get its physical address.
+			 */
+			vm_page_t m;
+	
+			m = vm_page_grab(mem->am_obj, 0, 
+					 VM_ALLOC_NORMAL|VM_ALLOC_ZERO|VM_ALLOC_RETRY);
+			if ((m->flags & PG_ZERO) == 0)
+				vm_page_zero_fill(m);
+			vm_page_wire(m);
+			mem->am_physical = VM_PAGE_TO_PHYS(m);
+			vm_page_wakeup(m);
+		} else {
+			/* Our allocation is already nicely wired down for us.
+			 * Just grab the physical address.
+			 */
+			mem->am_physical = vtophys(sc->argb_cursor);
+		}
+	} else {
+		mem->am_physical = 0;
+	}
+
+	mem->am_offset = 0;
+	mem->am_is_bound = 0;
+	TAILQ_INSERT_TAIL(&sc->agp.as_memory, mem, am_link);
+	sc->agp.as_allocated += size;
+
+	return mem;
+}
+
 static int
 agp_i810_free_memory(device_t dev, struct agp_memory *mem)
 {
@@ -1179,6 +1261,7 @@ static device_method_t agp_i810_methods[] = {
 	DEVMETHOD(agp_flush_tlb,	agp_i810_flush_tlb),
 	DEVMETHOD(agp_enable,		agp_i810_enable),
 	DEVMETHOD(agp_alloc_memory,	agp_i810_alloc_memory),
+	DEVMETHOD(agp_alloc_given,	agp_i810_alloc_given),
 	DEVMETHOD(agp_free_memory,	agp_i810_free_memory),
 	DEVMETHOD(agp_bind_memory,	agp_i810_bind_memory),
 	DEVMETHOD(agp_unbind_memory,	agp_i810_unbind_memory),

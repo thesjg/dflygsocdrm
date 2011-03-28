@@ -622,61 +622,6 @@ int drm_agp_unbind_memory(DRM_AGP_MEM * handle)
 }
 
 /**
- * Binds pages from a vm_object into AGP memory at the given offset, returning
- * the drm AGP memory structure containing them.
- *
- * No reference is held on the pages during this time -- it is up to the
- * caller to handle that.
- */
-DRM_AGP_MEM *
-drm_agp_bind_object(struct drm_device *dev,
-		   vm_object_t object,
-		   unsigned long num_pages,
-		   uint32_t gtt_offset,
-		   u32 type)
-{
-	DRM_AGP_MEM *mem;
-	int ret;
-	device_t agpdev = drm_agp_find_bridge(NULL);
-
-	struct agp_memory *memory = malloc(sizeof(struct agp_memory), M_AGP, M_WAITOK | M_ZERO);
-	if (!memory) {
-		DRM_ERROR("Failed to allocate memory for %ld pages\n",
-			  num_pages);
-		return NULL;
-	}
-	memory->am_size = num_pages << PAGE_SHIFT;
-	memory->am_type = type;
-	memory->am_obj = object;
-	memory->am_offset = gtt_offset;
-	memory->am_is_bound = 0;
-
-	DRM_DEBUG("\n");
-
-	mem = drm_agp_allocate_memory(dev->agp->agpdev, num_pages,
-				      type);
-	if (mem == NULL) {
-		DRM_ERROR("Failed to allocate memory for %ld pages\n",
-			  num_pages);
-		free(memory, M_AGP);
-		return NULL;
-	}
-
-	mem->page_count = num_pages;
-
-	mem->is_flushed = true;
-	mem->memory = memory;
-	ret = agp_bind_memory(agpdev, memory, gtt_offset);
-	if (ret != 0) {
-		DRM_ERROR("Failed to bind AGP memory: %d\n", ret);
-		free(memory, M_AGP);
-		drm_agp_free_memory(mem);
-		return NULL;
-	}
-	return mem;
-}
-
-/**
  * Binds a collection of pages into AGP memory at the given offset, returning
  * the AGP memory structure containing them.
  *
@@ -735,5 +680,79 @@ void drm_agp_chipset_flush(struct drm_device *dev)
 #endif /* __linux__ */
 }
 EXPORT_SYMBOL(drm_agp_chipset_flush);
+
+
+/** Calls agp_allocate_memory() */
+static DRM_AGP_MEM *drm_agp_alloc_given(DRM_AGP_BRIDGE_DATA_T bridge,
+				     size_t pages, u32 type, void *object)
+{
+	DRM_AGP_MEM *handle = malloc(sizeof(DRM_AGP_MEM),
+		DRM_MEM_AGPLISTS, M_WAITOK | M_ZERO);
+	if (handle == NULL)
+		return NULL;
+
+	device_t agpdev;
+
+	agpdev = DRM_AGP_FIND_DEVICE();
+	if (!agpdev) {
+		free(handle, DRM_MEM_AGPLISTS);
+		return NULL;
+	}
+
+	if (bridge == NULL) {
+		DRM_ERROR("bridge == null\n");
+	}
+	if (agpdev != bridge) {
+		DRM_ERROR("agpdev != bridge argument\n");
+	}
+	handle->bridge = agpdev;
+
+	handle->object = (vm_object_t)object;
+
+/* QUESTION: Should one use PAGE_SHIFT or AGP_PAGE_SHIFT? */
+/* On DragonFly AGP_PAGE_SHIFT is defined to be 12 */
+	handle->memory = agp_alloc_given(agpdev, type, pages << AGP_PAGE_SHIFT, object);
+	return handle;
+}
+
+/**
+ * Binds pages from a vm_object into AGP memory at the given offset, returning
+ * the drm AGP memory structure containing them.
+ *
+ * No reference is held on the pages during this time -- it is up to the
+ * caller to handle that.
+ */
+DRM_AGP_MEM *
+drm_agp_bind_object(struct drm_device *dev,
+		   vm_object_t object,
+		   unsigned long num_pages,
+		   uint32_t gtt_offset,
+		   u32 type)
+{
+	DRM_AGP_MEM *mem;
+	int ret;
+	device_t agpdev = drm_agp_find_bridge(NULL);
+
+	DRM_DEBUG("\n");
+
+	mem = drm_agp_alloc_given(dev->agp->agpdev, num_pages,
+				      type, (void *)object);
+	if (mem == NULL) {
+		DRM_ERROR("Failed to allocate memory for %ld pages\n",
+			  num_pages);
+		return NULL;
+	}
+
+	mem->page_count = num_pages;
+
+	mem->is_flushed = true;
+	ret = agp_bind_memory(agpdev, mem->memory, gtt_offset);
+	if (ret != 0) {
+		DRM_ERROR("Failed to bind AGP memory: %d\n", ret);
+		drm_agp_free_memory(mem);
+		return NULL;
+	}
+	return mem;
+}
 
 #endif /* __OS_HAS_AGP */

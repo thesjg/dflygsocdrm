@@ -405,15 +405,24 @@ i915_gem_get_tiling(struct drm_device *dev, void *data,
  * by the GPU.
  */
 static int
+#ifdef __linux__
+i915_gem_swizzle_page(struct page *page)
+#else
 i915_gem_swizzle_page(DRM_PAGE_T page)
+#endif
 {
 	char *vaddr;
 	int i;
 	char temp[64];
-
+#ifndef __linux__
 	DRM_LWBUF_T lwbuf;
+#endif
 
+#ifdef __linux__
+	vaddr = kmap(page);
+#else
 	vaddr = drm_kmap(page, &lwbuf);
+#endif
 	if (vaddr == NULL)
 		return -ENOMEM;
 
@@ -423,7 +432,11 @@ i915_gem_swizzle_page(DRM_PAGE_T page)
 		memcpy(&vaddr[i + 64], temp, 64);
 	}
 
+#ifdef __linux__
+	kunmap(page);
+#else
 	drm_kunmap(page, lwbuf);
+#endif
 
 	return 0;
 }
@@ -442,38 +455,31 @@ i915_gem_object_do_bit_17_swizzle(struct drm_gem_object *obj)
 
 	if (obj_priv->bit_17 == NULL)
 		return;
-#ifdef __linux__
+
 	for (i = 0; i < page_count; i++) {
+#ifdef __linux__
 		char new_bit_17 = page_to_phys(obj_priv->pages[i]) >> 17;
+#else
+		char new_bit_17 = drm_page_to_phys(obj_priv->pages_legacy[i]) >> 17;
+#endif
 		if ((new_bit_17 & 0x1) !=
 		    (test_bit(i, obj_priv->bit_17) != 0)) {
+#ifdef __linux__
 			int ret = i915_gem_swizzle_page(obj_priv->pages[i]);
+#else
+			int ret = i915_gem_swizzle_page(obj_priv->pages_legacy[i]);
+#endif
 			if (ret != 0) {
 				DRM_ERROR("Failed to swizzle page\n");
 				return;
 			}
+#ifdef __linux__
 			set_page_dirty(obj_priv->pages[i]);
+#else
+			drm_set_page_dirty(obj_priv->pages_legacy[i]);
+#endif
 		}
 	}
-#else /* !__linux__ */
-	vm_object_t object = obj->object;
-	vm_page_t p;
-	int k;
-	for (k = 0; k < obj->size; k += PAGE_SIZE) {
-		p = vm_page_lookup(object, OFF_TO_IDX(k));
-		char new_bit_17 = p->phys_addr >> 17;
-		i = (int)p->pindex;
-		if ((new_bit_17 & 0x1) !=
-		    (test_bit(i, obj_priv->bit_17) != 0)) {
-			int ret = i915_gem_swizzle_page(p);
-			if (ret != 0) {
-				DRM_ERROR("Failed to swizzle page\n");
-				return;
-			}
-			drm_set_page_dirty(p);
-		}
-	}
-#endif /* __linux__ */
 }
 
 void
@@ -498,24 +504,14 @@ i915_gem_object_save_bit_17_swizzle(struct drm_gem_object *obj)
 		}
 	}
 
-#ifdef __linux__
 	for (i = 0; i < page_count; i++) {
+#ifdef __linux__
 		if (page_to_phys(obj_priv->pages[i]) & (1 << 17))
-			__set_bit(i, obj_priv->bit_17);
-		else
-			__clear_bit(i, obj_priv->bit_17);
-	}
 #else
-	vm_object_t object = obj->object;
-	vm_page_t p;
-	int k;
-	for (k = 0; k < obj->size; k += PAGE_SIZE) {
-		p = vm_page_lookup(object, OFF_TO_IDX(k));
-		i = (int)p->pindex;
-		if (p->phys_addr & (1 << 17))
+		if (drm_page_to_phys(obj_priv->pages_legacy[i]) & (1 << 17))
+#endif
 			__set_bit(i, obj_priv->bit_17);
 		else
 			__clear_bit(i, obj_priv->bit_17);
 	}
-#endif
 }

@@ -342,7 +342,11 @@ ssize_t ttm_bo_io(struct ttm_bo_device *bdev, struct file *filp,
 		goto out_unref;
 	}
 
+#ifdef __linux__
 	page_offset = *f_pos & ~PAGE_MASK;
+#else
+	page_offset = *f_pos & PAGE_MASK;
+#endif
 	io_size = bo->num_pages - kmap_offset;
 	io_size = (io_size << PAGE_SHIFT) - page_offset;
 	if (count < io_size)
@@ -411,7 +415,11 @@ ssize_t ttm_bo_fbdev_io(struct ttm_buffer_object *bo, const char __user *wbuf,
 	if (unlikely(kmap_offset >= bo->num_pages))
 		return -EFBIG;
 
+#ifdef __linux__
 	page_offset = *f_pos & ~PAGE_MASK;
+#else
+	page_offset = *f_pos & PAGE_MASK;
+#endif
 	io_size = bo->num_pages - kmap_offset;
 	io_size = (io_size << PAGE_SHIFT) - page_offset;
 	if (count < io_size)

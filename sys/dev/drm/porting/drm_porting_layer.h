@@ -1991,10 +1991,10 @@ io_mapping_map_atomic_wc(
 	struct io_mapping *mapping,
 	unsigned long page_base
 ) {
-#if 0 /* variant iomapped only on __x86_64__ */
-	return (void *)mapping + page_base;
-#endif
+	return (void *)((unsigned long)mapping + page_base);
+#if 0
 	return kmalloc(PAGE_SIZE, M_TEMP, M_WAITOK | M_ZERO);
+#endif
 }
 
 /* file i915_gem.c, function fast_user_write() */
@@ -2003,10 +2003,10 @@ static __inline__ void
 io_mapping_unmap_atomic(
 	void *vaddr
 ) {
-#if 0 /* variant iomapped only on __x86_64__ */
 	;
-#endif
+#if 0
 	kfree(vaddr, M_TEMP);
+#endif
 }
 
 /*

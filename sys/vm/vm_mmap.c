@@ -1175,7 +1175,8 @@ sys_munlock(struct munlock_args *uap)
 int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	vm_prot_t maxprot, int flags,
-	objtype_t handle_type, void *handle, vm_ooffset_t foff)
+	objtype_t handle_type,
+	void *handle, vm_ooffset_t foff)
 {
 	boolean_t fitit;
 	vm_object_t object;
@@ -1436,7 +1437,7 @@ out:
 
 /*
  * Internal version of mmap for a vm_object_t without a vnode.
- * Currently used by mmap, exec, and sys5 shared memory.
+ * Currently used by drm.
  * Handle is either a vnode pointer or NULL for MAP_ANON.
  *
  * No requirements; kern_mmap path holds the vm_token
@@ -1451,6 +1452,10 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	vm_object_t object;
 	vm_offset_t eaddr;
 	vm_size_t   esize;
+#if 0
+	struct vnode *vp;
+	struct thread *td = curthread;
+#endif
 	struct proc *p;
 	int rv = KERN_SUCCESS;
 	off_t objsize;
@@ -1492,7 +1497,7 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 	 * NOTE: Overflow checks require discrete statements or GCC4
 	 * will optimize it out.
 	 */
-	if ((foff & PAGE_MASK) && (handle_type != OBJT_DEVICE)) {
+	if (foff & PAGE_MASK) {
 		lwkt_reltoken(&vm_token);
 		return (EINVAL);
 	}
@@ -1530,6 +1535,10 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 				lwkt_reltoken(&vm_token);
 				return(EINVAL);
 			}
+	/*
+	 * Add an object reference.
+	 */
+			vm_object_reference(object);
 			docow = MAP_PREFAULT_PARTIAL;
 
 	/*
@@ -1598,6 +1607,17 @@ drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 		}
 	}
 
+	/* If a process has marked all future mappings for wiring, do so */
+	if ((rv == KERN_SUCCESS) && (map->flags & MAP_WIREFUTURE))
+		vm_map_unwire(map, *addr, *addr + size, FALSE);
+
+#if 0
+	/*
+	 * Set the access time on the vnode
+	 */
+	if (vp != NULL)
+		vn_mark_atime(vp, td);
+#endif
 out:
 	lwkt_reltoken(&vm_token);
 

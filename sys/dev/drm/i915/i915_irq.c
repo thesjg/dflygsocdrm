@@ -465,7 +465,11 @@ i915_error_object_create(struct drm_device *dev,
 		return NULL;
 
 	src_priv = to_intel_bo(src);
+#ifdef __linux__
 	if (src_priv->pages == NULL)
+#else
+	if (src_priv->pages_legacy == NULL)
+#endif
 		return NULL;
 
 	page_count = src->size / PAGE_SIZE;
@@ -485,13 +489,24 @@ i915_error_object_create(struct drm_device *dev,
 		void *s, *d = malloc(PAGE_SIZE, DRM_MEM_DRIVER, M_WAITOK);
 #endif
 		unsigned long flags;
+#ifndef __linux__
+		DRM_LWBUF_T lwbuf;
+#endif
 
 		if (d == NULL)
 			goto unwind;
 		local_irq_save(flags);
+#ifdef __linux__
 		s = kmap_atomic(src_priv->pages[page], KM_IRQ0);
+#else
+		s = drm_kmap_atomic(src_priv->pages_legacy[page], &lwbuf);
+#endif
 		memcpy(d, s, PAGE_SIZE);
+#ifdef __linux__
 		kunmap_atomic(s, KM_IRQ0);
+#else
+		drm_kunmap_atomic(s, lwbuf);
+#endif
 		local_irq_restore(flags);
 		dst->pages[page] = d;
 	}
@@ -591,7 +606,6 @@ i915_ringbuffer_last_batch(struct drm_device *dev)
  */
 static void i915_capture_error_state(struct drm_device *dev)
 {
-#ifdef __linux__
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_i915_gem_object *obj_priv;
 	struct drm_i915_error_state *error;
@@ -606,7 +620,11 @@ static void i915_capture_error_state(struct drm_device *dev)
 	if (error)
 		return;
 
+#ifdef __linux__
 	error = kmalloc(sizeof(*error), GFP_ATOMIC);
+#else
+	error = malloc(sizeof(*error), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 	if (!error) {
 		DRM_DEBUG_DRIVER("out of memory, not capturing error state\n");
 		return;
@@ -671,8 +689,13 @@ static void i915_capture_error_state(struct drm_device *dev)
 	error->active_bo_count = 0;
 
 	if (count)
+#ifdef __linux__
 		error->active_bo = kmalloc(sizeof(*error->active_bo)*count,
 					   GFP_ATOMIC);
+#else
+		error->active_bo = malloc(sizeof(*error->active_bo)*count,
+					   DRM_MEM_DRIVER, M_WAITOK);
+#endif
 
 	if (error->active_bo) {
 		int i = 0;
@@ -712,7 +735,6 @@ static void i915_capture_error_state(struct drm_device *dev)
 
 	if (error)
 		i915_error_state_free(dev, error);
-#endif /* __linux__ */
 }
 
 void i915_destroy_error_state(struct drm_device *dev)
@@ -746,7 +768,9 @@ static void i915_handle_error(struct drm_device *dev, bool wedged)
 	u32 pipea_stats = I915_READ(PIPEASTAT);
 	u32 pipeb_stats = I915_READ(PIPEBSTAT);
 
+#ifdef DRM_NEWER_IGEM
 	i915_capture_error_state(dev);
+#endif
 
 	printk(KERN_ERR "render error detected, EIR: 0x%08x\n",
 	       eir);
@@ -930,7 +954,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 
 		ret = IRQ_HANDLED;
 
-#ifdef __linux__ /* UNIMPLEMENTED i915 hotplug */
+#ifdef DRM_NEWER_HOTPLUG /* UNIMPLEMENTED i915 hotplug */
 		/* Consume port.  Then clear IIR or we'll miss events */
 		if ((I915_HAS_HOTPLUG(dev)) &&
 		    (iir & I915_DISPLAY_PORT_INTERRUPT)) {
@@ -945,7 +969,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 			I915_WRITE(PORT_HOTPLUG_STAT, hotplug_status);
 			I915_READ(PORT_HOTPLUG_STAT);
 		}
-#endif /* __linux__ */
+#endif
 
 		I915_WRITE(IIR, iir);
 		new_iir = I915_READ(IIR); /* Flush posted writes */
@@ -958,11 +982,11 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		}
 
 		if (iir & I915_USER_INTERRUPT) {
-#ifdef __linux__ /* UNIMPLEMENTED i915_get_gem_seqno() */
+#ifdef DRM_NEWER_IGEM
 			u32 seqno = i915_get_gem_seqno(dev);
 			dev_priv->mm.irq_gem_seqno = seqno;
 			trace_i915_gem_request_complete(dev, seqno);
-#endif /* __linux__*/
+#endif
 			DRM_WAKEUP(&dev_priv->irq_queue);
 			dev_priv->hangcheck_count = 0;
 #ifdef __linux__
@@ -974,7 +998,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 
 		}
 
-#ifdef __linux__ /* UNIMPLEMENTED intel_finish_page_flip_plane() */
+#ifdef DRM_NEWER_MODESET /* UNIMPLEMENTED intel_finish_page_flip_plane() */
 		if (iir & I915_DISPLAY_PLANE_A_FLIP_PENDING_INTERRUPT) {
 			intel_prepare_page_flip(dev, 0);
 			if (dev_priv->flip_pending_is_done)
@@ -991,7 +1015,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		if (pipea_stats & vblank_status) {
 			vblank++;
 			drm_handle_vblank(dev, 0);
-#ifdef __linux__ /* UNIMPLEMENTED intel_finish_page_flip() */
+#ifdef DRM_NEWER_MODESET /* UNIMPLEMENTED intel_finish_page_flip() */
 			if (!dev_priv->flip_pending_is_done)
 				intel_finish_page_flip(dev, 0);
 #endif
@@ -1000,7 +1024,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		if (pipeb_stats & vblank_status) {
 			vblank++;
 			drm_handle_vblank(dev, 1);
-#ifdef __linux__ /* UNIMPLEMENTED intel_finish_page_flip() */
+#ifdef DRM_NEWER_MODESET /* UNIMPLEMENTED intel_finish_page_flip() */
 			if (!dev_priv->flip_pending_is_done)
 				intel_finish_page_flip(dev, 1);
 #endif
@@ -1145,7 +1169,7 @@ int i915_irq_emit(struct drm_device *dev, void *data,
 	drm_i915_irq_emit_t *emit = data;
 	int result;
 
-#ifdef __linux__
+#ifdef DRM_NEWER_IGEM
 	if (!dev_priv || !dev_priv->ring.virtual_start) {
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
@@ -1155,7 +1179,7 @@ int i915_irq_emit(struct drm_device *dev, void *data,
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
 	}
-#endif /* __linux__ */
+#endif
 
 	RING_LOCK_TEST_WITH_RETURN(dev, file_priv);
 
@@ -1242,7 +1266,7 @@ void i915_enable_interrupt (struct drm_device *dev)
 	if (!HAS_PCH_SPLIT(dev))
 		opregion_enable_asle(dev);
 	dev_priv->irq_enabled = 1;
-#else
+#else /* INVESTIGATE */
 	dev_priv->irq_enabled = 0;
 #endif /* __linux__ */
 }
@@ -1328,7 +1352,7 @@ void i915_hangcheck_elapsed(void *data)
 		acthd = I915_READ(ACTHD_I965);
 
 	/* If all work is done then ACTHD clearly hasn't advanced. */
-#ifdef __linux__
+#ifdef DRM_NEWER_IGEM
 	if (list_empty(&dev_priv->mm.request_list) ||
 		       i915_seqno_passed(i915_get_gem_seqno(dev), i915_get_tail_request(dev)->seqno)) {
 		dev_priv->hangcheck_count = 0;
@@ -1345,10 +1369,12 @@ void i915_hangcheck_elapsed(void *data)
 		DRM_ERROR("Hangcheck timer elapsed... GPU hung\n");
 		i915_handle_error(dev, true);
 		return;
-	}
+	} 
 
-#if 1
 	/* Reset timer case chip hangs without another request being added */
+#ifdef __linux__
+	mod_timer(&dev_priv->hangcheck_timer, jiffies + DRM_I915_HANGCHECK_PERIOD);
+#else
 	callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
 		i915_hangcheck_elapsed, dev);
 #endif
@@ -1359,12 +1385,6 @@ void i915_hangcheck_elapsed(void *data)
 		dev_priv->hangcheck_count++;
 
 	dev_priv->last_acthd = acthd;
-
-#if 0
-	/* Reset timer case chip hangs without another request being added */
-	callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
-		i915_hangcheck_elapsed, dev);
-#endif
 }
 
 /* drm_dma.h hooks
@@ -1444,7 +1464,7 @@ void i915_driver_irq_preinstall(struct drm_device * dev)
 
 	atomic_set(&dev_priv->irq_received, 0);
 
-#ifdef __linux__
+#ifdef DRM_NEWER_HOTPLUG
 	INIT_WORK(&dev_priv->hotplug_work, i915_hotplug_work_func);
 	INIT_WORK(&dev_priv->error_work, i915_error_work_func);
 
@@ -1490,8 +1510,7 @@ int i915_driver_irq_postinstall(struct drm_device *dev)
 	dev_priv->pipestat[0] = 0;
 	dev_priv->pipestat[1] = 0;
 
-#ifdef __linux__
-
+#ifdef DRM_NEWER_HOTPLUG
 	if (I915_HAS_HOTPLUG(dev)) {
 		u32 hotplug_en = I915_READ(PORT_HOTPLUG_EN);
 
@@ -1517,7 +1536,7 @@ int i915_driver_irq_postinstall(struct drm_device *dev)
 		/* and unmask in IMR */
 		i915_enable_irq(dev_priv, I915_DISPLAY_PORT_INTERRUPT);
 	}
-#endif /* __linux__ */
+#endif
 
 	/*
 	 * Enable some error detection, note the instruction error mask
@@ -1545,7 +1564,7 @@ int i915_driver_irq_postinstall(struct drm_device *dev)
 
 	(void) I915_READ(IER);
 
-#if 0
+#if DRM_NEWER_MODESET
 	opregion_enable_asle(dev);
 #endif
 
@@ -1580,7 +1599,7 @@ void i915_driver_irq_uninstall(struct drm_device * dev)
 		return;
 	}
 
-#ifdef __linux__
+#ifdef DRM_NEWER_HOTPLUG
 	if (I915_HAS_HOTPLUG(dev)) {
 		I915_WRITE(PORT_HOTPLUG_EN, 0);
 		I915_WRITE(PORT_HOTPLUG_STAT, I915_READ(PORT_HOTPLUG_STAT));

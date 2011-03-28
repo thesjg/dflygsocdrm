@@ -1140,7 +1140,11 @@ int ttm_bo_init(struct ttm_bo_device *bdev,
 	int ret = 0;
 	unsigned long num_pages;
 
+#ifdef __linux__
 	size += buffer_start & ~PAGE_MASK;
+#else
+	size += buffer_start & PAGE_MASK;
+#endif
 	num_pages = (size + PAGE_SIZE - 1) >> PAGE_SHIFT;
 	if (num_pages == 0) {
 		printk(KERN_ERR TTM_PFX "Illegal buffer object size.\n");
@@ -1166,7 +1170,11 @@ int ttm_bo_init(struct ttm_bo_device *bdev,
 	bo->mem.num_pages = bo->num_pages;
 	bo->mem.mm_node = NULL;
 	bo->mem.page_alignment = page_alignment;
+#ifdef __linux__
 	bo->buffer_start = buffer_start & PAGE_MASK;
+#else
+	bo->buffer_start = buffer_start & ~PAGE_MASK;
+#endif
 	bo->priv_flags = 0;
 	bo->mem.placement = (TTM_PL_FLAG_SYSTEM | TTM_PL_FLAG_CACHED);
 	bo->seq_valid = false;
@@ -1207,7 +1215,11 @@ static inline size_t ttm_bo_size(struct ttm_bo_global *glob,
 				 unsigned long num_pages)
 {
 	size_t page_array_size = (num_pages * sizeof(void *) + PAGE_SIZE - 1) &
+#ifdef __linux__
 	    PAGE_MASK;
+#else
+	    ~PAGE_MASK;
+#endif
 
 	return glob->ttm_bo_size + 2 * page_array_size;
 }

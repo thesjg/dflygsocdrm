@@ -32,7 +32,7 @@
 
 #ifdef __linux__
 #include "i915_trace.h"
-#else
+#else /* stubs */
 #include "i915_trace_porting.h"
 #endif /* __linux__ */
 
@@ -65,7 +65,11 @@ static int i915_gem_phys_pwrite(struct drm_device *dev, struct drm_gem_object *o
 				struct drm_i915_gem_pwrite *args,
 				struct drm_file *file_priv);
 
+#ifdef __linux__
+static LIST_HEAD(shrink_list);
+#else /* API clash */
 static DRM_LIST_HEAD(shrink_list);
+#endif
 static DEFINE_SPINLOCK(shrink_list_lock);
 
 int i915_gem_do_init(struct drm_device *dev, unsigned long start,
@@ -179,45 +183,83 @@ static int i915_gem_object_needs_bit17_swizzle(struct drm_gem_object *obj)
 }
 
 static inline int
+#ifdef __linux__
+slow_shmem_copy(struct page *dst_page,
+		int dst_offset,
+		struct page *src_page,
+		int src_offset,
+		int length)
+#else
 slow_shmem_copy(DRM_PAGE_T dst_page,
 		int dst_offset,
 		DRM_PAGE_T src_page,
 		int src_offset,
 		int length)
+#endif
 {
 	char *dst_vaddr, *src_vaddr;
+#ifndef __linux__
 	DRM_LWBUF_T dst_lwb;
 	DRM_LWBUF_T src_lwb;
+#endif
 
+#ifdef __linux__
+	dst_vaddr = kmap_atomic(dst_page, KM_USER0);
+#else
 	dst_vaddr = drm_kmap_atomic(dst_page, &dst_lwb);
+#endif
 	if (dst_vaddr == NULL)
 		return -ENOMEM;
 
+#ifdef __linux__
+	src_vaddr = kmap_atomic(src_page, KM_USER1);
+#else
 	src_vaddr = drm_kmap_atomic(src_page, &src_lwb);
+#endif
 	if (src_vaddr == NULL) {
+#ifdef __linux__
+		kunmap_atomic(dst_vaddr, KM_USER0);
+#else
 		drm_kunmap_atomic(dst_vaddr, dst_lwb);
+#endif
 		return -ENOMEM;
 	}
 
 	memcpy(dst_vaddr + dst_offset, src_vaddr + src_offset, length);
 
+#ifdef __linux__
+	kunmap_atomic(src_vaddr, KM_USER1);
+	kunmap_atomic(dst_vaddr, KM_USER0);
+#else
 	drm_kunmap_atomic(src_vaddr, src_lwb);
 	drm_kunmap_atomic(dst_vaddr, dst_lwb);
+#endif
 
 	return 0;
 }
 
 static inline int
+#ifdef __linux__
+slow_shmem_bit17_copy(struct page *gpu_page,
+		      int gpu_offset,
+		      struct page *cpu_page,
+		      int cpu_offset,
+		      int length,
+		      int is_read)
+#else
 slow_shmem_bit17_copy(DRM_PAGE_T gpu_page,
 		      int gpu_offset,
 		      DRM_PAGE_T cpu_page,
 		      int cpu_offset,
 		      int length,
 		      int is_read)
+#endif
 {
 	char *gpu_vaddr, *cpu_vaddr;
+#ifndef __linux__
 	DRM_LWBUF_T gpu_lwb;
 	DRM_LWBUF_T cpu_lwb;
+#endif
 
 	/* Use the unswizzled path if this page isn't affected. */
 	if ((drm_page_to_phys(gpu_page) & (1 << 17)) == 0) {
@@ -402,9 +444,8 @@ i915_gem_shmem_pread_slow(struct drm_device *dev, struct drm_gem_object *obj,
 				      num_pages, 1, 0, user_pages, NULL);
 	up_read(&mm->mmap_sem);
 #else
-	vslock((void *)(uintptr_t)args->data_ptr, args->size);
 	pinned_pages = drm_get_user_pages((unsigned long)args->data_ptr,
-		num_pages, VM_PROT_READ, user_pages);
+		num_pages, VM_PROT_READ | VM_PROT_WRITE, user_pages);
 #endif
 	if (pinned_pages < num_pages) {
 		ret = -EFAULT;
@@ -437,9 +478,17 @@ i915_gem_shmem_pread_slow(struct drm_device *dev, struct drm_gem_object *obj,
 		 * page_length = bytes to copy for this page
 		 */
 		shmem_page_index = offset / PAGE_SIZE;
+#ifdef __linux__
 		shmem_page_offset = offset & ~PAGE_MASK;
+#else /* legacy BSD */
+		shmem_page_offset = offset & PAGE_MASK;
+#endif
 		data_page_index = data_ptr / PAGE_SIZE - first_data_page;
+#ifdef __linux__
 		data_page_offset = data_ptr & ~PAGE_MASK;
+#else /* legacy BSD */
+		data_page_offset = data_ptr & PAGE_MASK;
+#endif
 
 		page_length = remain;
 		if ((shmem_page_offset + page_length) > PAGE_SIZE)
@@ -515,7 +564,7 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 	if (i915_gem_object_needs_bit17_swizzle(obj)) {
 		ret = i915_gem_shmem_pread_slow(dev, obj, args, file_priv);
 	} else {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 		ret = i915_gem_shmem_pread_fast(dev, obj, args, file_priv);
 		if (ret != 0)
 #endif
@@ -555,22 +604,38 @@ fast_user_write(struct io_mapping *mapping,
  */
 
 static inline int
+#ifdef __linux__
+slow_kernel_write(struct io_mapping *mapping,
+		  loff_t gtt_base, int gtt_offset,
+		  struct page *user_page, int user_offset,
+		  int length)
+#else
 slow_kernel_write(struct io_mapping *mapping,
 		  loff_t gtt_base, int gtt_offset,
 		  DRM_PAGE_T user_page, int user_offset,
 		  int length)
+#endif
 {
 	char *src_vaddr, *dst_vaddr;
 	unsigned long unwritten;
-
+#ifndef __linux__
 	DRM_LWBUF_T src_lwbuf;
+#endif
 
 	dst_vaddr = io_mapping_map_atomic_wc(mapping, gtt_base);
+#ifdef __linux__
+	src_vaddr = kmap_atomic(user_page, KM_USER1);
+#else
 	src_vaddr = drm_kmap_atomic(user_page, &src_lwbuf);
+#endif
 	unwritten = __copy_from_user_inatomic_nocache(dst_vaddr + gtt_offset,
 						      src_vaddr + user_offset,
 						      length);
+#ifdef __linux__
+	kunmap_atomic(src_vaddr, KM_USER1);
+#else
 	drm_kunmap_atomic(src_vaddr, src_lwbuf);
+#endif
 	io_mapping_unmap_atomic(dst_vaddr);
 	if (unwritten)
 		return -EFAULT;
@@ -689,7 +754,11 @@ i915_gem_gtt_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	loff_t gtt_page_base, offset;
 	loff_t first_data_page, last_data_page, num_pages;
 	loff_t pinned_pages, i;
+#ifdef __linux__
+	struct page **user_pages;
+#else
 	DRM_PAGE_T *user_pages;
+#endif
 	struct mm_struct *mm = DRM_GET_CURRENT_MM();
 	int gtt_page_offset, data_page_offset, data_page_index, page_length;
 	int ret;
@@ -715,9 +784,8 @@ i915_gem_gtt_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 				      num_pages, 0, 0, user_pages, NULL);
 	up_read(&mm->mmap_sem);
 #else
-	vslock((void *)(uintptr_t)args->data_ptr, args->size);
 	pinned_pages = drm_get_user_pages((unsigned long)args->data_ptr,
-		num_pages, VM_PROT_READ | VM_PROT_WRITE, user_pages);
+		num_pages, VM_PROT_READ, user_pages);
 #endif
 	if (pinned_pages < num_pages) {
 		ret = -EFAULT;
@@ -745,10 +813,19 @@ i915_gem_gtt_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 		 * data_page_offset = offset with data_page_index page.
 		 * page_length = bytes to copy for this page
 		 */
+#ifdef __linux__
 		gtt_page_base = offset & PAGE_MASK;
 		gtt_page_offset = offset & ~PAGE_MASK;
+#else
+		gtt_page_base = offset & ~PAGE_MASK;
+		gtt_page_offset = offset & PAGE_MASK;
+#endif
 		data_page_index = data_ptr / PAGE_SIZE - first_data_page;
+#ifdef __linux__
 		data_page_offset = data_ptr & ~PAGE_MASK;
+#else
+		data_page_offset = data_ptr & PAGE_MASK;
+#endif
 
 		page_length = remain;
 		if ((gtt_page_offset + page_length) > PAGE_SIZE)
@@ -781,7 +858,6 @@ out_unlock:
 out_unpin_pages:
 	for (i = 0; i < pinned_pages; i++)
 		drm_page_cache_release(user_pages[i]);
-	vsunlock((void *)(uintptr_t)args->data_ptr, args->size);
 	drm_free_large(user_pages);
 
 	return ret;
@@ -867,8 +943,10 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
 #ifdef __linux__
 	struct mm_struct *mm = DRM_GET_CURRENT_MM();
-#endif
+	struct page **user_pages;
+#else
 	DRM_PAGE_T *user_pages;
+#endif
 	ssize_t remain;
 	loff_t offset, pinned_pages, i;
 	loff_t first_data_page, last_data_page, num_pages;
@@ -899,9 +977,8 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 				      num_pages, 0, 0, user_pages, NULL);
 	up_read(&mm->mmap_sem);
 #else
-	vslock((void *)(uintptr_t)args->data_ptr, args->size);
 	pinned_pages = drm_get_user_pages((unsigned long)args->data_ptr,
-		num_pages, VM_PROT_READ | VM_PROT_WRITE, user_pages);
+		num_pages, VM_PROT_READ, user_pages);
 #endif
 	if (pinned_pages < num_pages) {
 		ret = -EFAULT;
@@ -934,9 +1011,17 @@ i915_gem_shmem_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 		 * page_length = bytes to copy for this page
 		 */
 		shmem_page_index = offset / PAGE_SIZE;
+#ifdef __linux__
 		shmem_page_offset = offset & ~PAGE_MASK;
+#else
+		shmem_page_offset = offset & PAGE_MASK;
+#endif
 		data_page_index = data_ptr / PAGE_SIZE - first_data_page;
+#ifdef __linux__
 		data_page_offset = data_ptr & ~PAGE_MASK;
+#else
+		data_page_offset = data_ptr & PAGE_MASK;
+#endif
 
 		page_length = remain;
 		if ((shmem_page_offset + page_length) > PAGE_SIZE)
@@ -973,7 +1058,6 @@ fail_unlock:
 fail_put_user_pages:
 	for (i = 0; i < pinned_pages; i++)
 		drm_page_cache_release(user_pages[i]);
-	vsunlock((void *)(uintptr_t)args->data_ptr, args->size);
 	drm_free_large(user_pages);
 
 	return ret;
@@ -1192,7 +1276,7 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 #else
 	retcode = drm_vm_mmap(&vms->vm_map, &vaddr, args->size, PROT_READ | PROT_WRITE,
 		VM_PROT_ALL, MAP_SHARED | MAP_NOSYNC,
-		OBJT_DRM, obj, (vm_ooffset_t)args->offset,
+		OBJT_DEVICE, obj, (vm_ooffset_t)args->offset,
 		&obj->object);
 	addr = (unsigned long)vaddr;
 #endif
@@ -1586,12 +1670,14 @@ static void
 i915_gem_object_truncate(struct drm_gem_object *obj)
 {
 	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	struct inode *inode;
 
 	inode = obj->filp->f_path.dentry->d_inode;
 	if (inode->i_op->truncate)
 		inode->i_op->truncate (inode);
+#else
+	vm_object_page_remove(obj->object, 0, obj->object->size - 1, 0);	
 #endif
 
 	obj_priv->madv = __I915_MADV_PURGED;
@@ -2369,6 +2455,10 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 	struct address_space *mapping;
 	struct inode *inode;
 	struct page *page;
+#else
+	DRM_PAGE_T page_legacy;
+	int error;
+#endif
 
 	if (obj_priv->pages_refcount++ != 0)
 		return 0;
@@ -2377,54 +2467,52 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 	 * at this point until we release them.
 	 */
 	page_count = obj->size / PAGE_SIZE;
+#ifdef __linux__
 	BUG_ON(obj_priv->pages != NULL);
 	obj_priv->pages = drm_calloc_large(page_count, sizeof(struct page *));
 	if (obj_priv->pages == NULL) {
 		obj_priv->pages_refcount--;
 		return -ENOMEM;
 	}
-
-	inode = obj->filp->f_path.dentry->d_inode;
-	mapping = inode->i_mapping;
-	for (i = 0; i < page_count; i++) {
-		page = read_cache_page_gfp(mapping, i,
-					   GFP_HIGHUSER |
-					   __GFP_COLD |
-					   __GFP_RECLAIMABLE |
-					   gfpmask);
-		if (IS_ERR(page))
-			goto err_pages;
-
-		obj_priv->pages[i] = page;
-	}
 #else
-	DRM_PAGE_T page_legacy;
-	int error;
-	if (obj_priv->pages_refcount++ != 0)
-		return 0;
-
-	/* Get the list of pages out of our struct file.  They'll be pinned
-	 * at this point until we release them.
-	 */
-	page_count = obj->size / PAGE_SIZE;
-
+	BUG_ON(obj_priv->pages_legacy != NULL);
 	obj_priv->pages_legacy = drm_calloc_large(page_count, sizeof(DRM_PAGE_T));
 	if (!obj_priv->pages_legacy) {
 		obj_priv->pages_refcount--;
 		return -ENOMEM;
 	}
+#endif
+
+#ifdef __linux__
+	inode = obj->filp->f_path.dentry->d_inode;
+	mapping = inode->i_mapping;
+#endif
 	for (i = 0; i < page_count; i++) {
+#ifdef __linux__
+		page = read_cache_page_gfp(mapping, i,
+					   GFP_HIGHUSER |
+					   __GFP_COLD |
+					   __GFP_RECLAIMABLE |
+					   gfpmask);
+#else
 		page_legacy = vm_fault_object_page(obj->object,
 			i * PAGE_SIZE,
-			VM_PROT_WRITE | VM_PROT_READ,
-			0,
+			VM_PROT_WRITE | VM_PROT_READ, /* fault type */
+			0, /* fault_flags */
 			&error);
+#endif
+#ifdef __linux__
+		if (IS_ERR(page))
+			goto err_pages;
+
+		obj_priv->pages[i] = page;
+#else
 		if (!page_legacy)
 			goto err_pages;
 
 		obj_priv->pages_legacy[i] = page_legacy;
-	}
 #endif
+	}
 
 	if (obj_priv->tiling_mode != I915_TILING_NONE)
 		i915_gem_object_do_bit_17_swizzle(obj);
@@ -2432,22 +2520,25 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 	return 0;
 
 err_pages:
-#ifdef __linux__
 	while (i--)
+#ifdef __linux__
 		page_cache_release(obj_priv->pages[i]);
+#else
+		vm_page_unhold(obj_priv->pages_legacy[i]);
+#endif
 
+#ifdef __linux__
 	drm_free_large(obj_priv->pages);
 	obj_priv->pages = NULL;
-	obj_priv->pages_refcount--;
-	return PTR_ERR(page);
 #else
-	while (i--)
-		vm_page_unhold(obj_priv->pages_legacy[i]);
-
 	drm_free_large(obj_priv->pages_legacy);
 	obj_priv->pages_legacy = NULL;
+#endif
 	obj_priv->pages_refcount--;
-	return ENODEV;
+#ifdef __linux__
+	return PTR_ERR(page);
+#else /* INVESTIGATE */
+	return -ENOMEM;
 #endif
 }
 
@@ -2808,11 +2899,7 @@ i915_gem_object_bind_to_gtt(struct drm_gem_object *obj, unsigned alignment)
 	 */
 	if (obj->size > dev->gtt_total) {
 		DRM_ERROR("Attempting to bind an object larger than the aperture\n");
-#ifdef __linux__
 		return -E2BIG;
-#else
-		return -EINVAL;
-#endif
 	}
 
  search_free:
