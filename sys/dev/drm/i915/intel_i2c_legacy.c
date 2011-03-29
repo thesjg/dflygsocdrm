@@ -160,10 +160,6 @@ i915_iic_attach(device_t dev)
 	int numkids;
 	int i;
 	int unit;
-#if 0
-	bus_space_handle_t *bhandlep;
-	bus_space_tag_t *btagp;
-#endif
 	struct i915_iic_softc *sc;
 	device_t child;
 
@@ -172,23 +168,11 @@ i915_iic_attach(device_t dev)
 	unit = device_get_unit(dev);
 
 	sc->drm_dev = (struct drm_device *)device_get_softc(device_get_parent(dev));
+	sc->drm_dev->iicbus_request_bus = iicbus_request_bus;
+	sc->drm_dev->iicbus_release_bus = iicbus_release_bus;
+	sc->drm_dev->iicbus_transfer = iicbus_transfer;
 	sc->iicdrm = dev;
 	sc->drm_dev->iicdrm = dev;
-
-#if 0
-	/* retrieve the cxm btag and bhandle */
-	if (BUS_READ_IVAR(device_get_parent(dev), dev,
-			  CXM_IVAR_BTAG, (uintptr_t *)&btagp)
-	    || BUS_READ_IVAR(device_get_parent(dev), dev,
-			     CXM_IVAR_BHANDLE, (uintptr_t *)&bhandlep)) {
-		device_printf(dev,
-			      "could not retrieve bus space information\n");
-		return ENXIO;
-	}
-
-	sc->btag = *btagp;
-	sc->bhandle = *bhandlep;
-#endif
 
 	/* add bit-banging generic code onto i915_iic interface */
 	sc->iicbb = device_add_child(dev, "iicbb", -1);

@@ -51,10 +51,10 @@ i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
 	int error;
 	device_t iicbus = adapter->iicbus;
 	device_t iicdev = adapter->iicbus; /* no device file */
-	if ((error = iicbus_request_bus(iicbus, iicdev, IIC_WAIT | IIC_INTR)))
+	if ((error = adapter->iicbus_request_bus(iicbus, iicdev, IIC_WAIT | IIC_INTR)))
 		return error;
-	error = iicbus_transfer(iicbus, msgs, num);
-	iicbus_release_bus(iicbus, iicdev);
+	error = adapter->iicbus_transfer(iicbus, msgs, num);
+	adapter->iicbus_release_bus(iicbus, iicdev);
 	return (error); 
 }
 

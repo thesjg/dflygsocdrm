@@ -3454,6 +3454,9 @@ struct i2c_adapter {
 	device_t iicdrm;
 /* legacy BSD for use in i2c_transfer */
 	void *iic_private;
+	int (*iicbus_request_bus)(device_t bus, device_t dev, int how);
+	int (*iicbus_release_bus)(device_t bus, device_t dev);
+	int (*iicbus_transfer)(device_t bus, struct iic_msg *msgs, uint32_t nmsgs);
 };
 
 /* file radeon_i2c.c, function pre_xfer() */

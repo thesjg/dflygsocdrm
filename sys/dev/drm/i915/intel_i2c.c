@@ -209,6 +209,9 @@ struct i2c_adapter *intel_i2c_create(struct drm_device *dev, const u32 reg,
 	chan->adapter.dev.parent = &dev->pdev->dev;
 #else
 	chan->adapter.iicbus = dev->iicbus;
+	chan->adapter.iicbus_request_bus = chan->drm_dev->iicbus_request_bus;
+	chan->adapter.iicbus_release_bus = chan->drm_dev->iicbus_release_bus;
+	chan->adapter.iicbus_transfer = chan->drm_dev->iicbus_transfer;
 #endif
 #ifdef __linux__ /* UNIMPLEMENTED */
 	chan->algo.setsda = set_data;
