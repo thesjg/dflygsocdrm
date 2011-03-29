@@ -1276,6 +1276,8 @@ struct drm_device {
 	device_t iicbus; /* iicbus device */
 	device_t iicbb;  /* iicbb device */
 	device_t iic;    /* _iic device */
+	device_t iicdrm; /* _iic device */
+	void *iic_private; /* iic transfer private data */
 	unsigned long agp_buffer_token_long; /* preserves 64-bits */
 };
 

@@ -36,6 +36,7 @@
 struct iic_msg
 {
 	uint16_t	slave;
+	uint16_t	addr; /* same field name as Linux for slave */
 	uint16_t	flags;
 #define	IIC_M_WR	0	/* Fake flag for write */
 #define	IIC_M_RD	0x0001	/* read vs write */

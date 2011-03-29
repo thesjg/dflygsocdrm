@@ -131,5 +131,8 @@
 
 /* for cpu_procinfo */
 #include <machine/md_var.h>
+
+/* for i2c */
+#include <bus/iicbus/iiconf.h>
 #endif /* __KERNEL__ */
 #endif

@@ -36,8 +36,27 @@
 #include "drm_edid.h"
 
 #include <bus/iicbus/iic.h>
-#include "iicbb_if.h"
+#include <bus/iicbus/iiconf.h>
+#include <bus/iicbus/iicbus.h>
 #include "iicbus_if.h"
+
+/**********************************************************
+ * I2C                                                    *
+ **********************************************************/
+
+int
+i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
+	struct drm_device *drm_dev = (struct drm_device *)adapter->iic_private;
+	drm_dev->iic_private = adapter->algo_data;
+	int error;
+	device_t iicbus = adapter->iicbus;
+	device_t iicdev = adapter->iicbus; /* no device file */
+	if ((error = iicbus_request_bus(iicbus, iicdev, IIC_WAIT | IIC_INTR)))
+		return error;
+	error = iicbus_transfer(iicbus, msgs, num);
+	iicbus_release_bus(iicbus, iicdev);
+	return (error); 
+}
 
 int
 drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {

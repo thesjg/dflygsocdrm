@@ -77,16 +77,10 @@
 #include "intel_drv.h"
 #include "i915_drm.h"
 #include "i915_drv.h"
-
+#ifndef __linux__
 #include <bus/iicbus/iiconf.h>
-
 #include "iicbb_if.h"
-
-/*
- * Intel GPIO access functions
- */
-
-#define I2C_RISEFALL_TIME 20
+#endif
 
 static int	i915_iic_probe(device_t dev);
 static int	i915_iic_attach(device_t dev);
@@ -95,10 +89,12 @@ static void	i915_iic_child_detached(device_t dev, device_t child);
 
 static int	i915_iic_callback(device_t, int, caddr_t *);
 static int	i915_iic_reset(device_t, u_char, u_char, u_char *);
-static int	i915_get_clock(device_t);
-static int	i915_get_data(device_t);
-static void	i915_set_clock(device_t, int);
-static void	i915_set_data(device_t, int);
+#if 0 /* specified in intel_drv.h */
+int	i915_get_clock(device_t);
+int	i915_get_data(device_t);
+void	i915_set_clock(device_t, int);
+void	i915_set_data(device_t, int);
+#endif
 
 static device_method_t i915_iic_methods[] = {
 	/* Device interface */
@@ -125,7 +121,7 @@ static device_method_t i915_iic_methods[] = {
 static driver_t i915_iic_driver = {
 	"i915_iic",
 	i915_iic_methods,
-	sizeof(struct intel_i2c_chan),
+	sizeof(struct i915_iic_softc),
 };
 
 static devclass_t i915_iic_devclass;
@@ -168,7 +164,7 @@ i915_iic_attach(device_t dev)
 	bus_space_handle_t *bhandlep;
 	bus_space_tag_t *btagp;
 #endif
-	struct intel_i2c_chan *sc;
+	struct i915_iic_softc *sc;
 	device_t child;
 
 	/* Get the device data */
@@ -176,6 +172,8 @@ i915_iic_attach(device_t dev)
 	unit = device_get_unit(dev);
 
 	sc->drm_dev = (struct drm_device *)device_get_softc(device_get_parent(dev));
+	sc->iicdrm = dev;
+	sc->drm_dev->iicdrm = dev;
 
 #if 0
 	/* retrieve the cxm btag and bhandle */
@@ -261,7 +259,7 @@ fail:
 static int
 i915_iic_detach(device_t dev)
 {
-	struct intel_i2c_chan *sc;
+	struct i915_iic_softc *sc;
 	device_t child;
 
 	/* Get the device data */
@@ -294,7 +292,7 @@ i915_iic_detach(device_t dev)
 static void
 i915_iic_child_detached(device_t dev, device_t child)
 {
-	struct intel_i2c_chan *sc;
+	struct i915_iic_softc *sc;
 
 	/* Get the device data */
 	sc = device_get_softc(dev);
@@ -312,12 +310,12 @@ i915_iic_callback(device_t dev, int index, caddr_t *data)
 static int
 i915_iic_reset(device_t dev, u_char speed, u_char addr, u_char * oldaddr)
 {
-	struct intel_i2c_chan *sc;
+	struct i915_iic_softc *sc;
 
 	/* Get the device data */
 	sc = device_get_softc(dev);
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef DRM_NEWER_MODESET
 	intel_i2c_reset_gmbus(sc->drm_dev);
 
 	/* JJJ:  raise SCL and SDA? */
@@ -329,80 +327,4 @@ i915_iic_reset(device_t dev, u_char speed, u_char addr, u_char * oldaddr)
 #endif
 
 	return IIC_ENOADDR;
-}
-
-
-static int i915_get_clock(device_t dev)
-{
-	struct intel_i2c_chan *chan;
-	/* Get the device data */
-	chan = (struct intel_i2c_chan *)device_get_softc(dev);
-
-	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
-	u32 val;
-
-	val = I915_READ(chan->reg);
-	return ((val & GPIO_CLOCK_VAL_IN) != 0);
-}
-
-static int i915_get_data(device_t dev)
-{
-	struct intel_i2c_chan *chan;
-	/* Get the device data */
-	chan = (struct intel_i2c_chan *)device_get_softc(dev);
-
-	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
-	u32 val;
-
-	val = I915_READ(chan->reg);
-	return ((val & GPIO_DATA_VAL_IN) != 0);
-}
-
-static void i915_set_clock(device_t dev, int state_high)
-{
-	struct intel_i2c_chan *chan;
-	/* Get the device data */
-	chan = (struct intel_i2c_chan *)device_get_softc(dev);
-
-	struct drm_device *drm_dev = chan->drm_dev;
-	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
-	u32 reserved = 0, clock_bits;
-
-	/* On most chips, these bits must be preserved in software. */
-	if (!IS_I830(drm_dev) && !IS_845G(drm_dev))
-		reserved = I915_READ(chan->reg) & (GPIO_DATA_PULLUP_DISABLE |
-						   GPIO_CLOCK_PULLUP_DISABLE);
-
-	if (state_high)
-		clock_bits = GPIO_CLOCK_DIR_IN | GPIO_CLOCK_DIR_MASK;
-	else
-		clock_bits = GPIO_CLOCK_DIR_OUT | GPIO_CLOCK_DIR_MASK |
-			GPIO_CLOCK_VAL_MASK;
-	I915_WRITE(chan->reg, reserved | clock_bits);
-	udelay(I2C_RISEFALL_TIME); /* wait for the line to change state */
-}
-
-static void i915_set_data(device_t dev, int state_high)
-{
-	struct intel_i2c_chan *chan;
-	/* Get the device data */
-	chan = (struct intel_i2c_chan *)device_get_softc(dev);
-
-	struct drm_device *drm_dev = chan->drm_dev;
-	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
-	u32 reserved = 0, data_bits;
-
-	/* On most chips, these bits must be preserved in software. */
-	if (!IS_I830(drm_dev) && !IS_845G(drm_dev))
-		reserved = I915_READ(chan->reg) & (GPIO_DATA_PULLUP_DISABLE |
-						   GPIO_CLOCK_PULLUP_DISABLE);
-
-	if (state_high)
-		data_bits = GPIO_DATA_DIR_IN | GPIO_DATA_DIR_MASK;
-	else
-		data_bits = GPIO_DATA_DIR_OUT | GPIO_DATA_DIR_MASK |
-			GPIO_DATA_VAL_MASK;
-
-	I915_WRITE(chan->reg, reserved | data_bits);
-	udelay(I2C_RISEFALL_TIME); /* wait for the line to change state */
 }

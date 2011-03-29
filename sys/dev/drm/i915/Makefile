@@ -31,7 +31,7 @@ SRCS    = \
 	intel_sdvo.c \
 	intel_tv.c
 
-SRCS   += device_if.h bus_if.h pci_if.h opt_drm.h
+SRCS   += device_if.h bus_if.h pci_if.h iicbb_if.h opt_drm.h
 CFLAGS += ${DEBUG_FLAGS} -I. -I.. -I@/dev/drm -I@/dev/drm/i915
 
 SUBDIR =

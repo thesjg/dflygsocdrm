@@ -89,7 +89,7 @@ struct intel_i2c_chan {
 	u32 reg; /* GPIO reg */
 	struct i2c_adapter adapter;
 	struct i2c_algo_bit_data algo;
-/* legacy change porting addition for iic */
+/* legacy BSD change porting addition for iic */
 	device_t iicbb;
 };
 
@@ -168,6 +168,12 @@ int intel_ddc_get_modes(struct intel_encoder *intel_encoder);
 extern bool intel_ddc_probe(struct intel_encoder *intel_encoder);
 void intel_i2c_quirk_set(struct drm_device *dev, bool enable);
 void intel_i2c_reset_gmbus(struct drm_device *dev);
+#ifndef __linux__
+int i915_get_clock(device_t dev);
+int i915_get_data(device_t dev);
+void i915_set_clock(device_t dev, int state_high);
+void i915_set_data(device_t dev, int state_high);
+#endif
 
 extern void intel_crt_init(struct drm_device *dev);
 extern void intel_hdmi_init(struct drm_device *dev, int sdvox_reg);

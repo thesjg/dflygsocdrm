@@ -3402,7 +3402,7 @@ struct edi {
 
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 #define I2C_MODULE_PREFIX "iic"
-#define I2C_NAME_SIZE 32
+#define I2C_NAME_SIZE 50 
 
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 /* file radeon_i2c.c, function r500_hw_i2c_xfer() */
@@ -3415,6 +3415,8 @@ struct edi {
 
 struct i2c_algorithm;
 
+#define i2c_msg  iic_msg
+#if 0
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 struct i2c_msg {
 /* spec seems to say 10-bit addresses possible */
@@ -3426,6 +3428,7 @@ struct i2c_msg {
 	uint16_t len;
 	char *buf;
 };
+#endif
 
 /* file drm_crtc.h, function drm_get_edid() */
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
@@ -3438,13 +3441,19 @@ struct i2c_adapter {
 	uint32_t retries;
 	const struct i2c_algorithm *algo;
 /* file dvo_ch7017.c */
-	char *name;
+	char name[I2C_NAME_SIZE + 1];
 /* file intel_dp.c, function intel_dp_i2c_init() */
 	int class;
 /* file intel_dp.c, function intel_dp_i2c_init() */
 	struct device dev;
-/* legacy for use in drm_i2c_transfer */
+/* legacy BSD for use in i2c_transfer */
 	device_t iicbb;
+/* legacy BSD for use in i2c_transfer */
+	device_t iicbus;
+/* legacy BSD for use in i2c_transfer */
+	device_t iicdrm;
+/* legacy BSD for use in i2c_transfer */
+	void *iic_private;
 };
 
 /* file radeon_i2c.c, function pre_xfer() */
@@ -3491,10 +3500,14 @@ i2c_bit_add_bus(struct i2c_adapter *adapter) {
 /* file drm_crtc.h, function drm_get_edid() */
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 /* file radeon_i2c.c, function radeon_ddc_probe() */
+int
+i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
+#if 0
 static __inline__ int
 i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
 	return 0;
 }
+#endif
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_init */
 struct i2c_board_info {

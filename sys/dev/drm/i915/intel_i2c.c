@@ -25,7 +25,6 @@
  * Authors:
  *	Eric Anholt <eric@anholt.net>
  */
-
 #ifdef __linux__
 #include <linux/i2c.h>
 #include <linux/slab.h>
@@ -38,6 +37,10 @@
 #include "intel_drv.h"
 #include "i915_drm.h"
 #include "i915_drv.h"
+#ifndef __linux__
+#include <bus/iicbus/iiconf.h>
+#include "iicbb_if.h"
+#endif
 
 void intel_i2c_quirk_set(struct drm_device *dev, bool enable)
 {
@@ -60,9 +63,15 @@ void intel_i2c_quirk_set(struct drm_device *dev, bool enable)
 
 #define I2C_RISEFALL_TIME 20
 
+#ifdef __linux__
 static int get_clock(void *data)
+#else
+int i915_get_clock(device_t dev)
+#endif
 {
-	struct intel_i2c_chan *chan = data;
+	struct i915_iic_softc *sc = (struct i915_iic_softc *)device_get_softc(dev);
+	struct intel_i2c_chan *chan = (struct intel_i2c_chan *)sc->drm_dev->iic_private;
+
 	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
 	u32 val;
 
@@ -70,9 +79,15 @@ static int get_clock(void *data)
 	return ((val & GPIO_CLOCK_VAL_IN) != 0);
 }
 
+#ifdef __linux__
 static int get_data(void *data)
+#else
+int i915_get_data(device_t dev)
+#endif
 {
-	struct intel_i2c_chan *chan = data;
+	struct i915_iic_softc *sc = (struct i915_iic_softc *)device_get_softc(dev);
+	struct intel_i2c_chan *chan = (struct intel_i2c_chan *)sc->drm_dev->iic_private;
+
 	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
 	u32 val;
 
@@ -80,15 +95,21 @@ static int get_data(void *data)
 	return ((val & GPIO_DATA_VAL_IN) != 0);
 }
 
+#ifdef __linux__
 static void set_clock(void *data, int state_high)
+#else
+void i915_set_clock(device_t dev, int state_high)
+#endif
 {
-	struct intel_i2c_chan *chan = data;
-	struct drm_device *dev = chan->drm_dev;
+	struct i915_iic_softc *sc = (struct i915_iic_softc *)device_get_softc(dev);
+	struct intel_i2c_chan *chan = (struct intel_i2c_chan *)sc->drm_dev->iic_private;
+
+	struct drm_device *drm_dev = chan->drm_dev;
 	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
 	u32 reserved = 0, clock_bits;
 
 	/* On most chips, these bits must be preserved in software. */
-	if (!IS_I830(dev) && !IS_845G(dev))
+	if (!IS_I830(drm_dev) && !IS_845G(drm_dev))
 		reserved = I915_READ(chan->reg) & (GPIO_DATA_PULLUP_DISABLE |
 						   GPIO_CLOCK_PULLUP_DISABLE);
 
@@ -101,15 +122,21 @@ static void set_clock(void *data, int state_high)
 	udelay(I2C_RISEFALL_TIME); /* wait for the line to change state */
 }
 
+#ifdef __linux__
 static void set_data(void *data, int state_high)
+#else
+void i915_set_data(device_t dev, int state_high)
+#endif
 {
-	struct intel_i2c_chan *chan = data;
-	struct drm_device *dev = chan->drm_dev;
+	struct i915_iic_softc *sc = (struct i915_iic_softc *)device_get_softc(dev);
+	struct intel_i2c_chan *chan = (struct intel_i2c_chan *)sc->drm_dev->iic_private;
+
+	struct drm_device *drm_dev = chan->drm_dev;
 	struct drm_i915_private *dev_priv = chan->drm_dev->dev_private;
 	u32 reserved = 0, data_bits;
 
 	/* On most chips, these bits must be preserved in software. */
-	if (!IS_I830(dev) && !IS_845G(dev))
+	if (!IS_I830(drm_dev) && !IS_845G(drm_dev))
 		reserved = I915_READ(chan->reg) & (GPIO_DATA_PULLUP_DISABLE |
 						   GPIO_CLOCK_PULLUP_DISABLE);
 
@@ -174,13 +201,21 @@ struct i2c_adapter *intel_i2c_create(struct drm_device *dev, const u32 reg,
 	chan->drm_dev = dev;
 	chan->reg = reg;
 	snprintf(chan->adapter.name, I2C_NAME_SIZE, "intel drm %s", name);
+#ifdef __linux__ /* UNIMPLEMENTED */
 	chan->adapter.owner = THIS_MODULE;
+#endif
 	chan->adapter.algo_data	= &chan->algo;
+#ifdef __linux__
 	chan->adapter.dev.parent = &dev->pdev->dev;
+#else
+	chan->adapter.iicbus = dev->iicbus;
+#endif
+#ifdef __linux__ /* UNIMPLEMENTED */
 	chan->algo.setsda = set_data;
 	chan->algo.setscl = set_clock;
 	chan->algo.getsda = get_data;
 	chan->algo.getscl = get_clock;
+#endif
 	chan->algo.udelay = 20;
 	chan->algo.timeout = usecs_to_jiffies(2200);
 	chan->algo.data = chan;
@@ -194,8 +229,8 @@ struct i2c_adapter *intel_i2c_create(struct drm_device *dev, const u32 reg,
 
 	/* JJJ:  raise SCL and SDA? */
 	intel_i2c_quirk_set(dev, true);
-	set_data(chan, 1);
-	set_clock(chan, 1);
+	i915_set_data(dev->iicdrm, 1);
+	i915_set_clock(dev->iicdrm, 1);
 	intel_i2c_quirk_set(dev, false);
 	udelay(20);
 

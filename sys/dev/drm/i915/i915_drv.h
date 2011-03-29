@@ -812,6 +812,14 @@ struct drm_i915_file_private {
 	} mm;
 };
 
+#ifndef __linux__
+struct i915_iic_softc {
+	struct drm_device *drm_dev;
+	device_t iicbb;
+	device_t iicdrm;
+};
+#endif
+
 enum intel_chip_family {
 	CHIP_I8XX = 0x01,
 	CHIP_I9XX = 0x02,
