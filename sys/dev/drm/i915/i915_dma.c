@@ -960,13 +960,13 @@ static int i915_get_bridge_dev(struct drm_device *dev)
 		DRM_ERROR("bridge device not found\n");
 		return -1;
 	}
+#ifndef __linux__
 	else {
-		if (dev_priv->bridge_dev) {
-			DRM_INFO("i915_get_bridge_dev(): agp bridge vendor (%x) device (%x)\n",
-				pci_get_vendor(dev_priv->bridge_dev),
-				pci_get_device(dev_priv->bridge_dev));
-		}
+		DRM_INFO("i915_get_bridge_dev(): agp vendor (%x) device (%x)\n",
+			pci_get_vendor(dev_priv->bridge_dev),
+			pci_get_device(dev_priv->bridge_dev));
 	}
+#endif
 	return 0;
 }
 
@@ -986,15 +986,23 @@ intel_alloc_mchbar_resource(struct drm_device *dev)
 	u32 temp_lo, temp_hi = 0;
 	u64 mchbar_addr;
 	int ret = 0;
+#ifdef DRM_NEWER_MCHBAR
+	struct resource *pmchbar_res;
+	struct resource *paddr = &dev_priv->mch_res;
+	int rid;
+#endif
 
 	if (IS_I965G(dev))
 		temp_hi = pci_read_config(dev_priv->bridge_dev, reg + 4, 4);
 	temp_lo = pci_read_config(dev_priv->bridge_dev, reg, 4);
 	mchbar_addr = ((u64)temp_hi << 32) | temp_lo;
+#ifndef __linux__
+	DRM_INFO("intel_alloc_mchbar_resource: mchbar_addr (%016lx)\n", mchbar_addr);
+#endif
 
-#ifdef __linux__
+#ifdef DRM_NEWER_MCHBAR
 	/* If ACPI doesn't have it, assume we need to allocate it ourselves */
-#ifdef CONFIG_PNP
+#ifdef CONFIG_PNP /* UNIMPLEMENTED */
 	if (mchbar_addr &&
 	    pnp_range_reserved(mchbar_addr, mchbar_addr + MCHBAR_SIZE)) {
 		ret = 0;
@@ -1003,30 +1011,58 @@ intel_alloc_mchbar_resource(struct drm_device *dev)
 #endif
 
 	/* Get some space for it */
+#ifdef __linux__
 	ret = pci_bus_alloc_resource(dev_priv->bridge_dev->bus, &dev_priv->mch_res,
 				     MCHBAR_SIZE, MCHBAR_SIZE,
 				     PCIBIOS_MIN_MEM,
 				     0,   pcibios_align_resource,
 				     dev_priv->bridge_dev);
+#else
+	rid = 0;
+	pmchbar_addr = bus_alloc_resource(dev_priv->bridge_dev,
+		SYS_RES_MEMORY, &rid,
+		(u_long)mchbar_addr, (u_long)mchbar_addr + (MCHBAR_SIZE - 1), 0,
+		RF_ACTIVE);
+#endif
+#ifdef __linux__
 	if (ret) {
 		DRM_DEBUG_DRIVER("failed bus alloc: %d\n", ret);
 		dev_priv->mch_res.start = 0;
 		goto out;
 	}
+#else
+	if (!pmchbar_addr) {
+		DRM_ERROR("failed bus alloc:");
+		dev_priv->mch_res.r_start = 0;
+		ret = -EINVAL;
+		goto out;
+	}
+#endif
+	*paddr = *pmchbar_addr;	
 
 	if (IS_I965G(dev))
+#ifdef __linux__
 		pci_write_config_dword(dev_priv->bridge_dev, reg + 4,
 				       upper_32_bits(dev_priv->mch_res.start));
+#else
+		pci_write_config(dev_priv->bridge_dev, reg + 4,
+				       upper_32_bits((uint64_t)rman_get_start(&dev_priv->mch_res)), 4);
+#endif
 
+#ifdef __linux__
 	pci_write_config_dword(dev_priv->bridge_dev, reg,
 			       lower_32_bits(dev_priv->mch_res.start));
-#else /* __linux__ */
+#else
+	pci_write_config(dev_priv->bridge_dev, reg,
+			       lower_32_bits((uint64_t)rman_get_start(&dev_priv->mch_res)), 4);
+#endif
+#else /* !DRM_NEWER_MCHBAR */
 	if (mchbar_addr) { /* assume acpi is working */
 		DRM_INFO("registers returned MCHBAR address\n");
 		ret = 0;
 		goto out;
 	}
-#endif /* __linux__ */
+#endif /* !DRM_NEWER_MCHBAR */
 out:
 	return ret;
 }
