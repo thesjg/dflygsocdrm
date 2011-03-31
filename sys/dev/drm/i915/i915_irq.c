@@ -1305,7 +1305,7 @@ void i915_enable_interrupt (struct drm_device *dev)
 		opregion_enable_asle(dev);
 	dev_priv->irq_enabled = 1;
 #else /* INVESTIGATE */
-	dev_priv->irq_enabled = 0;
+	dev_priv->irq_enabled = 1;
 #endif /* __linux__ */
 }
 
