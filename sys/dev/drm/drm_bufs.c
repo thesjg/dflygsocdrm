@@ -389,12 +389,21 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		 * address if the map's offset isn't already within the
 		 * aperture.
 		 */
+#ifdef __linux__
+		if (map->offset < dev->agp->base ||
+		    map->offset > dev->agp->base +
+		    dev->agp->agp_info.aper_size * 1024 * 1024 - 1) {
+			map->offset += dev->agp->base;
+		}
+		map->mtrr = dev->agp->agp_mtrr;	/* for getmap */
+#else
 		if (map->offset < dev->agp->base ||
 		    map->offset > dev->agp->base +
 		    dev->agp->info.ai_aperture_size - 1) {
 			map->offset += dev->agp->base;
 		}
 		map->mtrr   = dev->agp->mtrr; /* for getmap */
+#endif
 
 		/* This assumes the DRM is in total control of AGP space.
 		 * It's not always the case as AGP can be in the control
