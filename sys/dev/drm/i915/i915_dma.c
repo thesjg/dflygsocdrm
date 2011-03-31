@@ -1095,18 +1095,26 @@ intel_setup_mchbar(struct drm_device *dev)
 	if (intel_alloc_mchbar_resource(dev))
 		return;
 
-#ifdef __linux__
 	dev_priv->mchbar_need_disable = true;
 
 	/* Space is allocated or reserved, so enable it. */
 	if (IS_I915G(dev) || IS_I915GM(dev)) {
+#ifdef __linux__
 		pci_write_config_dword(dev_priv->bridge_dev, DEVEN_REG,
 				       temp | DEVEN_MCHBAR_EN);
+#else
+		pci_write_config(dev_priv->bridge_dev, DEVEN_REG,
+				       temp | DEVEN_MCHBAR_EN, 4);
+#endif
 	} else {
+#ifdef __linux__
 		pci_read_config_dword(dev_priv->bridge_dev, mchbar_reg, &temp);
 		pci_write_config_dword(dev_priv->bridge_dev, mchbar_reg, temp | 1);
+#else
+		temp = pci_read_config(dev_priv->bridge_dev, mchbar_reg, 4);
+		pci_write_config(dev_priv->bridge_dev, mchbar_reg, temp | 1, 4);
+#endif
 	}
-#endif /* __linux__ */
 }
 
 static void
@@ -1130,6 +1138,10 @@ intel_teardown_mchbar(struct drm_device *dev)
 #ifdef __linux__
 	if (dev_priv->mch_res.start)
 		release_resource(&dev_priv->mch_res);
+#else
+	if (rman_get_start(&dev_priv->mch_res))
+		bus_release_resource(dev_priv->bridge_dev,
+			SYS_RES_MEMORY, dev_priv->mch_res.r_rid, &dev_priv->mch_res);
 #endif /* __linux__ */
 }
 
@@ -1499,7 +1511,7 @@ static void i915_cleanup_compression(struct drm_device *dev)
 /* true = enable decode, false = disable decoder */
 static unsigned int i915_vga_set_decode(void *cookie, bool state)
 {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	struct drm_device *dev = cookie;
 
 	intel_modeset_vga_set_state(dev, state);
@@ -1601,7 +1613,7 @@ static int i915_load_modeset_init(struct drm_device *dev,
 	if (ret)
 		DRM_INFO("failed to find VBIOS tables\n");
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	/* if we have > 1 VGA cards, then disable the radeon VGA resources */
 	ret = vga_client_register(dev->pdev, dev, NULL, i915_vga_set_decode);
 	if (ret)
@@ -1764,13 +1776,6 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		ret = -EIO;
 		goto put_bridge;
 	}
-#if 0 /* !DRM_NEWER_REGMAP */
-	ret = drm_addmap(dev, base, size, _DRM_REGISTERS,
-	    _DRM_KERNEL | _DRM_DRIVER, &dev_priv->mmio_map);
-	if (ret) {
-		DRM_ERROR("failed to map registers\n");
-	}
-#endif /* !DRM_NEWER_REGMAP */
 
         dev_priv->mm.gtt_mapping =
 		io_mapping_create_wc(dev->agp->base,
@@ -1783,21 +1788,31 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #endif
 	}
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	/* Set up a WC MTRR for non-PAT systems.  This is more common than
 	 * one would think, because the kernel disables PAT on first
 	 * generation Core chips because WC PAT gets overridden by a UC
 	 * MTRR if present.  Even if a UC MTRR isn't present.
 	 */
+#ifdef __linux__
 	dev_priv->mm.gtt_mtrr = mtrr_add(dev->agp->base,
 					 dev->agp->agp_info.aper_size *
 					 1024 * 1024,
 					 MTRR_TYPE_WRCOMB, 1);
+#else
+	if (drm_mtrr_add(dev->agp->base,
+					 dev->agp->agp_info.aper_size *
+					 1024 * 1024,
+					 DRM_MTRR_WC) == 0) {
+		dev_priv->mm.gtt_mtrr = 0;
+	}
+	else {
+		dev_priv->mm.gtt_mtrr = -1;
+	} 
+#endif /* __linux__ */
 	if (dev_priv->mm.gtt_mtrr < 0) {
 		DRM_INFO("MTRR allocation failed.  Graphics "
 			 "performance may suffer.\n");
 	}
-#endif /* __linux__ */
 
 	ret = i915_probe_agp(dev, &agp_size, &prealloc_size, &prealloc_start);
 #ifdef __linux__
@@ -1824,7 +1839,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	}
 #endif
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__
 	dev_priv->wq = create_singlethread_workqueue("i915");
 	if (dev_priv->wq == NULL) {
 		DRM_ERROR("Failed to create our workqueue.\n");
@@ -1864,7 +1879,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		dev->driver->get_vblank_counter = gm45_get_vblank_counter;
 	}
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef DRM_NEWER_MCHBAR 
 	/* Try to make sure MCHBAR is enabled before poking at it */
 	intel_setup_mchbar(dev);
 #endif /* __linux__ */
@@ -1922,7 +1937,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 		return ret;
 	}
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef DRM_NEWER_MODESET 
 	/* Start out suspended */
 	dev_priv->mm.suspended = 1;
 
@@ -2002,13 +2017,19 @@ int i915_driver_unload(struct drm_device *dev)
 		dev->agp->agp_info.aper_size * 1024*1024);
 #endif
 
-#ifdef __linux__ /* UNIMPLEMENTED */
 	if (dev_priv->mm.gtt_mtrr >= 0) {
+#ifdef __linux__
 		mtrr_del(dev_priv->mm.gtt_mtrr, dev->agp->base,
 			 dev->agp->agp_info.aper_size * 1024 * 1024);
+#else
+		drm_mtrr_del(dev_priv->mm.gtt_mtrr, dev->agp->base,
+			 dev->agp->agp_info.aper_size * 1024 * 1024,
+			 DRM_MTRR_WC);
+#endif
 		dev_priv->mm.gtt_mtrr = -1;
 	}
 
+#ifdef DRM_NEWER_MODESET
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
 		/*
 		 * free the memory space allocated for the child device
@@ -2023,24 +2044,21 @@ int i915_driver_unload(struct drm_device *dev)
 		vga_switcheroo_unregister_client(dev->pdev);
 		vga_client_register(dev->pdev, NULL, NULL, NULL);
 	}
+#endif
 
+#ifdef __linux__ /* UNIMPLEMENTED msi */
 	if (dev->pdev->msi_enabled)
 		pci_disable_msi(dev->pdev);
-#endif /* __linux__ */
+#endif
 
-#if 1
 	if (dev_priv->regs != NULL)
 #ifdef __linux__
 		iounmap(dev_priv->regs);
 #else
 		pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
 #endif
-#endif
-#if 0 /* !__DRM_NEWER_REGMAP */
-	drm_rmmap(dev, dev_priv->mmio_map);
-#endif /* !DRM_NEWER_REGMAP */
 
-#ifdef __linux__
+#ifdef DRM_NEWER_MODESET 
 	intel_opregion_free(dev, 0);
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
@@ -2058,11 +2076,15 @@ int i915_driver_unload(struct drm_device *dev)
 
 		intel_cleanup_overlay(dev);
 	}
+#endif
 
+#ifdef DRM_NEWER_MCHBAR
 	intel_teardown_mchbar(dev);
+#endif
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 	pci_dev_put(dev_priv->bridge_dev);
-#endif /* __linux__ */
+#endif
 
 #ifdef __linux__
 	kfree(dev->dev_private);
@@ -2071,7 +2093,7 @@ int i915_driver_unload(struct drm_device *dev)
 
 	drm_free(dev->dev_private, sizeof(drm_i915_private_t),
 		 DRM_MEM_DRIVER);
-#endif /* __linux__ */
+#endif
 
 	return 0;
 }
@@ -2090,10 +2112,6 @@ int i915_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 	file_priv->driver_priv = i915_file_priv;
 
 	INIT_LIST_HEAD(&i915_file_priv->mm.request_list);
-
-#ifndef __linux__ /* legacy change debug */
-	DRM_INFO("i915_driver_open initialized mm.request_list as empty list\n");
-#endif /* !__linux__ */
 
 	return 0;
 }
