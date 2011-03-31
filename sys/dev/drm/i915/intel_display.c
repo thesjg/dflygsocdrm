@@ -30,8 +30,7 @@
 #include <linux/i2c.h>
 #include <linux/kernel.h>
 #include <linux/slab.h>
-#endif /* __linux__ */
-
+#endif
 #include "drmP.h"
 #include "intel_drv.h"
 #include "i915_drm.h"
@@ -366,7 +365,7 @@ static const intel_limit_t intel_limits_i8xx_lvds = {
 		 .p2_slow = I8XX_P2_LVDS_SLOW,	.p2_fast = I8XX_P2_LVDS_FAST },
 	.find_pll = intel_find_best_PLL,
 };
-
+	
 static const intel_limit_t intel_limits_i9xx_sdvo = {
         .dot = { .min = I9XX_DOT_MIN,		.max = I9XX_DOT_MAX },
         .vco = { .min = I9XX_VCO_MIN,		.max = I9XX_VCO_MAX },
@@ -992,6 +991,7 @@ intel_find_pll_g4x_dp(const intel_limit_t *limit, struct drm_crtc *crtc,
     return true;
 }
 
+/* BSD INVESTIGATE if msleep using curthread in taskqueue makes sense */
 void
 intel_wait_for_vblank(struct drm_device *dev)
 {
@@ -1266,7 +1266,7 @@ intel_pin_and_fence_fb_obj(struct drm_device *dev, struct drm_gem_object *obj)
 #ifdef __linux__
 		BUG();
 #else
-		DRM_ERROR("BUG default case\n");
+		DRM_ERROR("obj_priv->tiling mode invalid default case\n");
 		return -EINVAL;
 #endif
 	}
@@ -2153,7 +2153,11 @@ static int i915gm_get_display_clock_speed(struct drm_device *dev)
 {
 	u16 gcfgc = 0;
 
+#ifdef __linux__
+	pci_read_config_word(dev->pdev, GCFGC, &gcfgc);
+#else
 	gcfgc = (u16) pci_read_config(dev->device, GCFGC, 2);
+#endif
 
 	if (gcfgc & GC_LOW_FREQUENCY_ENABLE)
 		return 133000;
@@ -3922,12 +3926,20 @@ static void intel_gpu_idle_timer(void *arg)
 
 	dev_priv->busy = false;
 
+#ifdef __linux__
 	queue_work(dev_priv->wq, &dev_priv->idle_work);
+#else
+	taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->idle_work);
+#endif
 }
 
 #define CRTC_IDLE_TIMEOUT 1000 /* ms */
 
+#ifdef __linux__
+static void intel_crtc_idle_timer(unsigned long arg)
+#else /* adapted for BSD callout api */
 static void intel_crtc_idle_timer(void *arg)
+#endif
 {
 	struct intel_crtc *intel_crtc = (struct intel_crtc *)arg;
 	struct drm_crtc *crtc = &intel_crtc->base;
@@ -3937,7 +3949,11 @@ static void intel_crtc_idle_timer(void *arg)
 
 	intel_crtc->busy = false;
 
+#ifdef __linux__
 	queue_work(dev_priv->wq, &dev_priv->idle_work);
+#else
+	taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->idle_work);
+#endif
 }
 
 static void intel_increase_pllclock(struct drm_crtc *crtc, bool schedule)
@@ -3976,8 +3992,14 @@ static void intel_increase_pllclock(struct drm_crtc *crtc, bool schedule)
 
 	/* Schedule downclock */
 	if (schedule)
+#ifdef __linux__
 		mod_timer(&intel_crtc->idle_timer, jiffies +
 			  msecs_to_jiffies(CRTC_IDLE_TIMEOUT));
+#else
+		callout_reset(&intel_crtc->idle_timer,
+			  msecs_to_jiffies(CRTC_IDLE_TIMEOUT),
+			  intel_crtc_idle_timer, (void *)intel_crtc);
+#endif
 }
 
 static void intel_decrease_pllclock(struct drm_crtc *crtc)
@@ -4027,10 +4049,18 @@ static void intel_decrease_pllclock(struct drm_crtc *crtc)
  * Either the GPU or display (or both) went idle.  Check the busy status
  * here and adjust the CRTC and GPU clocks as necessary.
  */
+#ifdef __linux__
 static void intel_idle_update(struct work_struct *work)
+#else /* adapted for BSD task */
+static void intel_idle_update(void *context, int pending)
+#endif
 {
+#ifdef __linux__
 	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
 						    idle_work);
+#else
+	drm_i915_private_t *dev_priv = (drm_i915_private_t *)context;
+#endif
 	struct drm_device *dev = dev_priv->dev;
 	struct drm_crtc *crtc;
 	struct intel_crtc *intel_crtc;
@@ -4089,8 +4119,14 @@ void intel_mark_busy(struct drm_device *dev, struct drm_gem_object *obj)
 		}
 		dev_priv->busy = true;
 	} else
+#ifdef __linux__
 		mod_timer(&dev_priv->idle_timer, jiffies +
 			  msecs_to_jiffies(GPU_IDLE_TIMEOUT));
+#else
+		callout_reset(&dev_priv->idle_timer,
+			  msecs_to_jiffies(GPU_IDLE_TIMEOUT),
+			  intel_gpu_idle_timer, (void *)dev);
+#endif
 
 	list_for_each_entry(crtc, &dev->mode_config.crtc_list, head) {
 		if (!crtc->fb)
@@ -4113,8 +4149,14 @@ void intel_mark_busy(struct drm_device *dev, struct drm_gem_object *obj)
 				intel_crtc->busy = true;
 			} else {
 				/* Busy -> busy, put off timer */
+#ifdef __linux__
 				mod_timer(&intel_crtc->idle_timer, jiffies +
 					  msecs_to_jiffies(CRTC_IDLE_TIMEOUT));
+#else
+				callout_reset(&intel_crtc->idle_timer,
+					  msecs_to_jiffies(CRTC_IDLE_TIMEOUT),
+					  intel_crtc_idle_timer, (void *)intel_crtc);
+#endif
 			}
 		}
 	}
@@ -4402,8 +4444,12 @@ static void intel_crtc_init(struct drm_device *dev, int pipe)
 
 	intel_crtc->busy = false;
 
+#ifdef __linux__
 	setup_timer(&intel_crtc->idle_timer, intel_crtc_idle_timer,
 		    (void *)intel_crtc);
+#else
+	callout_init(&intel_crtc->idle_timer);
+#endif
 }
 
 int intel_get_pipe_from_crtc_id(struct drm_device *dev, void *data,
@@ -4949,9 +4995,17 @@ void intel_modeset_init(struct drm_device *dev)
 
 	/* set memory base */
 	if (IS_I9XX(dev))
+#ifdef __linux__
+		dev->mode_config.fb_base = pci_resource_start(dev->pdev, 2);
+#else
 		dev->mode_config.fb_base = drm_get_resource_start(dev, 2);
+#endif
 	else
+#ifdef __linux__
+		dev->mode_config.fb_base = pci_resource_start(dev->pdev, 0);
+#else
 		dev->mode_config.fb_base = drm_get_resource_start(dev, 0);
+#endif
 
 	if (IS_MOBILE(dev) || IS_I9XX(dev))
 		num_pipe = 2;
@@ -4971,9 +5025,17 @@ void intel_modeset_init(struct drm_device *dev)
 	if (IS_IRONLAKE_M(dev))
 		ironlake_enable_drps(dev);
 
+#ifdef __linux__
 	INIT_WORK(&dev_priv->idle_work, intel_idle_update);
+#else
+	TASK_INIT(&dev_priv->idle_work, 0, intel_idle_update, (void *)dev_priv);
+#endif
+#ifdef __linux__
 	setup_timer(&dev_priv->idle_timer, intel_gpu_idle_timer,
-		    (void *)dev);
+		    (unsigned long)dev);
+#else
+	callout_init(&dev_priv->idle_timer);
+#endif
 
 	intel_setup_overlay(dev);
 
@@ -4990,6 +5052,9 @@ void intel_modeset_cleanup(struct drm_device *dev)
 	struct drm_i915_private *dev_priv = dev->dev_private;
 	struct drm_crtc *crtc;
 	struct intel_crtc *intel_crtc;
+#ifndef __linux__
+	int pending;
+#endif
 
 	mutex_lock(&dev->struct_mutex);
 
@@ -5000,10 +5065,26 @@ void intel_modeset_cleanup(struct drm_device *dev)
 
 		intel_crtc = to_intel_crtc(crtc);
 		intel_increase_pllclock(crtc, false);
+#ifdef __linux__
 		del_timer_sync(&intel_crtc->idle_timer);
+#else
+		pending = callout_pending(&intel_crtc->idle_timer);
+		callout_stop(&intel_crtc->idle_timer);
+		if (pending) {
+			intel_crtc_idle_timer((void *)intel_crtc);
+		}
+#endif
 	}
 
+#ifdef __linux__
 	del_timer_sync(&dev_priv->idle_timer);
+#else
+	pending = callout_pending(&dev_priv->idle_timer);
+	callout_stop(&dev_priv->idle_timer);
+	if (pending) {
+		intel_gpu_idle_timer((void *)dev);
+	}
+#endif
 
 	if (dev_priv->display.disable_fbc)
 		dev_priv->display.disable_fbc(dev);

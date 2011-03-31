@@ -301,7 +301,11 @@ typedef struct drm_i915_private {
 	u32 pch_irq_enable_reg;
 
 	u32 hotplug_supported_mask;
+#ifdef __linux__
 	struct work_struct hotplug_work;
+#else
+	struct task hotplug_work;
+#endif
 
 	int tex_lru_log_granularity;
 	int allow_batchbuffer;
@@ -357,7 +361,11 @@ typedef struct drm_i915_private {
 
 	spinlock_t error_lock;
 	struct drm_i915_error_state *first_error;
+#ifdef __linux__
 	struct work_struct error_work;
+#else
+	struct task error_work;
+#endif
 	struct workqueue_struct *wq;
 /* legacy BSD change addition while workqueue_struct ported */
 #ifndef __linux__
@@ -595,7 +603,7 @@ typedef struct drm_i915_private {
 		 * fire periodically while the ring is running. When it
 		 * fires, go retire requests.
 		 */
-		struct delayed_work retire_work;
+		struct DRM_DELAYED_WORK retire_work;
 
 		uint32_t next_gem_seqno;
 
@@ -652,7 +660,11 @@ typedef struct drm_i915_private {
 	bool lvds_edid_good;
 	/* indicates the reduced downclock for LVDS*/
 	int lvds_downclock;
+#ifdef __linux__
 	struct work_struct idle_work;
+#else
+	struct task idle_work;
+#endif
 	struct timer_list idle_timer;
 	bool busy;
 	u16 orig_clock;
@@ -967,7 +979,11 @@ bool i915_seqno_passed(uint32_t seq1, uint32_t seq2);
 int i915_gem_object_get_fence_reg(struct drm_gem_object *obj);
 int i915_gem_object_put_fence_reg(struct drm_gem_object *obj);
 void i915_gem_retire_requests(struct drm_device *dev);
+#ifdef __linux__
 void i915_gem_retire_work_handler(struct work_struct *work);
+#else
+void i915_gem_retire_work_handler(void *context, int pending);
+#endif
 void i915_gem_clflush_object(struct drm_gem_object *obj);
 int i915_gem_object_set_domain(struct drm_gem_object *obj,
 			       uint32_t read_domains,

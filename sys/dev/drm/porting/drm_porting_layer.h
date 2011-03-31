@@ -1152,9 +1152,16 @@ struct work {
 	int placeholder;
 };
 
+struct DRM_DELAYED_WORK {
+	struct task task;
+	unsigned long delay; /* in jiffies */
+	int cancel;
+};
+
 struct work_struct {
 	void (*function)(void *data);
 	void *data;
+	struct task task;
 };
 
 /* file ttm_memory.c, function ttm_mem_global_init() */

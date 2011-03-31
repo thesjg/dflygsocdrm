@@ -1834,7 +1834,12 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 #else
 	dev_priv->wq_legacy = taskqueue_create("i915", M_WAITOK,
 		taskqueue_thread_enqueue, &dev_priv->wq_legacy);
-#endif /* __linux__ */
+	if (dev_priv->wq_legacy == NULL) {
+		DRM_ERROR("Failed to create our workqueue.\n");
+		ret = -ENOMEM;
+		goto out_iomapfree;
+	}
+#endif
 
 	/* enable GEM by default */
 #ifdef __linux__ /* UNIMPLEMENTED */
@@ -1957,7 +1962,7 @@ free_priv:
 #else /* !__linux__ */
 	return 0;
 out_workqueue_free:
-	;
+	taskqueue_free(dev_priv->wq_legacy);
 out_iomapfree:
 	drm_io_mapping_free(dev->agp->base,
 			    dev->agp->agp_info.aper_size * 1024*1024);
@@ -1974,6 +1979,9 @@ free_priv:
 int i915_driver_unload(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
+#ifndef __linux__
+	int pending = 0;
+#endif
 
 #ifdef __linux__
 	i915_destroy_error_state(dev);
@@ -1984,6 +1992,7 @@ int i915_driver_unload(struct drm_device *dev)
 	del_timer_sync(&dev_priv->hangcheck_timer);
 #else
 	taskqueue_free(dev_priv->wq_legacy);
+	pending = callout_stop(&dev_priv->hangcheck_timer);
 #endif
 
 #ifdef __linux__
