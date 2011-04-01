@@ -103,10 +103,9 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 #ifndef __linux__
 	if ((off_t)ap->a_foff != previous_foff) {
-		DRM_INFO("drm_mmap: foff (%016lx), offset (%016lx), pid (%d)\n",
+		DRM_INFO("drm_mmap: foff (%016lx), offset (%016lx)\n",
 			ap->a_foff,
-			offset,
-			DRM_CURRENTPID);
+			offset);
 		previous_foff = ap->a_foff;
 		new_foff = 1;
 	}
@@ -164,12 +163,9 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 			unsigned long phys = dma->pagelist[page];
 			ap->a_result = atop(phys);
 			if (new_foff)
-				DRM_INFO("drm_mmap: dev->dma for foff (%016lx), offset (%016lx) < ptoa page_count (%016lx), a_result (%016lx), pid (%d)\n",
-					ap->a_foff,
-					offset,
-					ptoa(dev->dma->page_count),
-					(unsigned long)ap->a_result,
-					DRM_CURRENTPID);
+				DRM_INFO("drm_mmap: dev->dma for foff (%016lx), offset (%016lx)\n",
+					(unsigned long)foff,
+					(unsigned long)offset);
 			return 0;
 		} else {
 			return -1;
