@@ -89,7 +89,6 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
 	unsigned long foff = (unsigned long)ap->a_foff;
-	int new_foff = 0;
 	vm_offset_t offset = ap->a_offset;
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv = NULL;
@@ -103,11 +102,10 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 #ifndef __linux__
 	if ((off_t)ap->a_foff != previous_foff) {
-		DRM_INFO("drm_mmap: foff (%016lx), offset (%016lx)\n",
+		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx)\n",
 			ap->a_foff,
 			offset);
 		previous_foff = ap->a_foff;
-		new_foff = 1;
 	}
 #endif
 
@@ -162,10 +160,6 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 			unsigned long page = offset >> PAGE_SHIFT;
 			unsigned long phys = dma->pagelist[page];
 			ap->a_result = atop(phys);
-			if (new_foff)
-				DRM_INFO("drm_mmap: dev->dma for foff (%016lx), offset (%016lx)\n",
-					(unsigned long)foff,
-					(unsigned long)offset);
 			return 0;
 		} else {
 			return -1;
@@ -199,14 +193,14 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 /*		return -1; */
 		if (drm_ht_find_item(&dev->map_hash, foff, &hash)) {
-			DRM_ERROR("Could not find map for foff (%016lx)\n", foff);
+			DRM_ERROR("Could not find map for foff = 0x%lx\n", foff);
 			return -1;
 		}
 		map = drm_hash_entry(hash, struct drm_map_list, hash)->map;
 	}
 
-	if (foff && drm_ht_find_item(&dev->map_hash, foff, &hash) && new_foff) {
-		DRM_ERROR("Could not find map for foff (%016lx)\n", foff);
+	if (foff && drm_ht_find_item(&dev->map_hash, foff, &hash)) {
+/*		DRM_ERROR("Could not find map for foff = 0x%lx\n", foff); */
 	}
 	else if (foff) {
 		map_foff = drm_hash_entry(hash, struct drm_map_list, hash)->map;
