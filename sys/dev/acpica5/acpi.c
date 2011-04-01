@@ -67,6 +67,8 @@
 
 #include <vm/vm_param.h>
 
+#define ACPI_LENOVO_S10 1
+
 MALLOC_DEFINE(M_ACPIDEV, "acpidev", "ACPI devices");
 
 #define GIANT_REQUIRED
@@ -1607,8 +1609,12 @@ acpi_probe_child(ACPI_HANDLE handle, UINT32 level, void *context, void **status)
     ACPI_HANDLE h;
     device_t bus, child;
     int order;
+#ifdef ACPI_LENOVO_S10
+    char *handle_str;
+#else
     char *handle_str, **search;
     static char *scopes[] = {"\\_PR_", "\\_TZ_", "\\_SI_", "\\_SB_", NULL};
+#endif
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
@@ -1624,9 +1630,24 @@ acpi_probe_child(ACPI_HANDLE handle, UINT32 level, void *context, void **status)
 	handle_str = acpi_name(handle);
 	switch (type) {
 	case ACPI_TYPE_DEVICE:
+#ifdef ACPI_LENOVO_S10
+	    /*
+	     * Since we scan from \, be sure to skip system scope objects.
+	     * \_SB_ and \_TZ_ are defined in ACPICA as devices to work around
+	     * BIOS bugs.  For example, \_SB_ is to allow \_SB_._INI to be run
+	     * during the intialization and \_TZ_ is to support Notify() on it.
+	     */
+	    if (strcmp(handle_str, "\\_SB_") == 0 ||
+		strcmp(handle_str, "\\_TZ_") == 0)
+		break;
+	    if (acpi_parse_prw(handle, &prw) == 0)
+		AcpiSetupGpeForWake(handle, prw.gpe_handle, prw.gpe_bit);
+	    /* FALLTHROUGH */
+#endif
 	case ACPI_TYPE_PROCESSOR:
 	case ACPI_TYPE_THERMAL:
 	case ACPI_TYPE_POWER:
+#ifndef ACPI_LENOVO_S10
 	    /*
 	     * Since we scan from \, be sure to skip system scope objects.
 	     * At least \_SB and \_TZ are detected as devices (ACPI-CA bug?)
@@ -1640,14 +1661,13 @@ acpi_probe_child(ACPI_HANDLE handle, UINT32 level, void *context, void **status)
 
 	    if (type == ACPI_TYPE_DEVICE && acpi_parse_prw(handle, &prw) == 0)
 		AcpiSetupGpeForWake(handle, prw.gpe_handle, prw.gpe_bit);
-
+#endif
 	    /* 
 	     * Create a placeholder device for this node.  Sort the
 	     * placeholder so that the probe/attach passes will run
 	     * breadth-first.  Orders less than ACPI_DEV_BASE_ORDER
 	     * are reserved for special objects (i.e., system
-	     * resources).  CPU devices have a very high order to
-	     * ensure they are probed after other devices.
+	     * resources).
 	     */
 	    ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "scanning '%s'\n", handle_str));
 	    order = level * 10 + 100;
