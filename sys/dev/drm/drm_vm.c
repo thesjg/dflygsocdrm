@@ -106,7 +106,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 		DRM_INFO("drm_mmap: foff (%016lx), offset (%016lx), pid (%d)\n",
 			ap->a_foff,
 			offset,
-			DRM_CURRENTPID)
+			DRM_CURRENTPID);
 		previous_foff = ap->a_foff;
 		new_foff = 1;
 	}
@@ -169,7 +169,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 					offset,
 					ptoa(dev->dma->page_count),
 					(unsigned long)ap->a_result,
-					DRM_CURRENTPID)
+					DRM_CURRENTPID);
 			return 0;
 		} else {
 			return -1;
