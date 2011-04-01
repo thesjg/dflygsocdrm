@@ -346,6 +346,15 @@ acpi_identify(driver_t *driver, device_t parent)
 
     ksnprintf(acpi_ca_version, sizeof(acpi_ca_version), "%x", ACPI_CA_VERSION);
 
+#ifdef ACPI_LENOVO_S10
+    /* Check for other PM systems. */
+    if (power_pm_get_type() != POWER_PM_TYPE_NONE &&
+	power_pm_get_type() != POWER_PM_TYPE_ACPI) {
+	printf("ACPI identify failed, other PM system enabled.\n");
+	return_void;
+    }
+#endif
+
     /* Initialize root tables. */
     if (ACPI_FAILURE(acpi_Startup())) {
 	kprintf("ACPI: Try disabling either ACPI or apic support.\n");
