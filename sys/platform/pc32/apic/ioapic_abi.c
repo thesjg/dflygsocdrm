@@ -56,6 +56,8 @@
 
 #include <sys/thread2.h>
 
+#include <machine_base/icu/icu_var.h>
+#include <machine_base/apic/ioapic_abi.h>
 #include <machine_base/apic/ioapic_ipl.h>
 
 #ifdef SMP /* APIC-IO */
@@ -454,13 +456,17 @@ static inthand_t *ioapic_intr[IOAPIC_HWI_VECTORS] = {
 static struct ioapic_irqmap {
 	int			im_type;	/* IOAPIC_IMT_ */
 	enum intr_trigger	im_trig;
+	enum intr_polarity	im_pola;
 	int			im_gsi;
+	uint32_t		im_flags;	/* IOAPIC_IMF_ */
 } ioapic_irqmaps[MAX_HARDINTS];	/* XXX MAX_HARDINTS may not be correct */
 
 #define IOAPIC_IMT_UNUSED	0
 #define IOAPIC_IMT_RESERVED	1
 #define IOAPIC_IMT_LINE		2
 #define IOAPIC_IMT_SYSCALL	3
+
+#define IOAPIC_IMF_CONF		0x1
 
 extern void	IOAPIC_INTREN(int);
 extern void	IOAPIC_INTRDIS(int);
@@ -473,8 +479,7 @@ static void	ioapic_cleanup(void);
 static void	ioapic_setdefault(void);
 static void	ioapic_stabilize(void);
 static void	ioapic_initmap(void);
-
-static int	ioapic_imcr_present;
+static void	ioapic_intr_config(int, enum intr_trigger, enum intr_polarity);
 
 struct machintr_abi MachIntrABI_IOAPIC = {
 	MACHINTR_IOAPIC,
@@ -487,107 +492,38 @@ struct machintr_abi MachIntrABI_IOAPIC = {
 	.cleanup	= ioapic_cleanup,
 	.setdefault	= ioapic_setdefault,
 	.stabilize	= ioapic_stabilize,
-	.initmap	= ioapic_initmap
+	.initmap	= ioapic_initmap,
+	.intr_config	= ioapic_intr_config
 };
+
+static int	ioapic_abi_extint_irq = -1;
 
 static int
 ioapic_setvar(int varid, const void *buf)
 {
-	int error = 0;
-
-	switch (varid) {
-	case MACHINTR_VAR_IMCR_PRESENT:
-		ioapic_imcr_present = *(const int *)buf;
-		break;
-
-	default:
-		error = ENOENT;
-		break;
-	}
-	return error;
+	return ENOENT;
 }
 
 static int
 ioapic_getvar(int varid, void *buf)
 {
-	int error = 0;
-
-	switch (varid) {
-	case MACHINTR_VAR_IMCR_PRESENT:
-		*(int *)buf = ioapic_imcr_present;
-		break;
-
-	default:
-		error = ENOENT;
-		break;
-	}
-	return error;
+	return ENOENT;
 }
 
-/*
- * Called from ICU's finalize if I/O APIC is enabled, after BSP's LAPIC
- * is initialized; some of the BSP's LAPIC configuration are adjusted.
- *
- * - disable 'pic mode'.
- * - switch MachIntrABI.
- * - disable 'virtual wire mode'.
- * - enable NMI.
- */
 static void
 ioapic_finalize(void)
 {
-	u_long ef;
-	uint32_t temp;
-
-	KKASSERT(MachIntrABI.type == MACHINTR_ICU);
+	KKASSERT(MachIntrABI.type == MACHINTR_IOAPIC);
 	KKASSERT(apic_io_enable);
 
 	/*
 	 * If an IMCR is present, program bit 0 to disconnect the 8259
-	 * from the BSP.  The 8259 may still be connected to LINT0 on
-	 * the BSP's LAPIC.
+	 * from the BSP.
 	 */
-	if (ioapic_imcr_present) {
+	if (imcr_present) {
 		outb(0x22, 0x70);	/* select IMCR */
 		outb(0x23, 0x01);	/* disconnect 8259 */
 	}
-
-	/*
-	 * Setup LINT0 (the 8259 'virtual wire' connection).  We
-	 * mask the interrupt, completing the disconnection of the
-	 * 8259.
-	 */
-	temp = lapic.lvt_lint0;
-	temp |= APIC_LVT_MASKED;
-	lapic.lvt_lint0 = temp;
-
-	crit_enter();
-
-	ef = read_eflags();
-	cpu_disable_intr();
-
-	/*
-	 * 8259 is completely disconnected; switch to IOAPIC MachIntrABI
-	 * and reconfigure the default IDT entries.
-	 */
-	MachIntrABI = MachIntrABI_IOAPIC;
-	MachIntrABI.setdefault();
-
-	write_eflags(ef);
-
-	MachIntrABI.cleanup();
-
-	crit_exit();
-
-	/*
-	 * Setup LINT1 to handle NMI
-	 */
-	temp = lapic.lvt_lint1;
-	temp &= ~APIC_LVT_MASKED;
-	lapic.lvt_lint1 = temp;
-
-	if (bootverbose)
-		apic_dump("ioapic_finalize()");
 }
 
 /*
@@ -717,20 +653,261 @@ ioapic_setdefault(void)
 	}
 }
 
-/* XXX magic number */
 static void
 ioapic_initmap(void)
+{
+	int i;
+
+	for (i = 0; i < IOAPIC_HWI_VECTORS; ++i)
+		ioapic_irqmaps[i].im_gsi = -1;
+	ioapic_irqmaps[IOAPIC_HWI_SYSCALL].im_type = IOAPIC_IMT_SYSCALL;
+}
+
+void
+ioapic_abi_set_irqmap(int irq, int gsi, enum intr_trigger trig,
+    enum intr_polarity pola)
+{
+	struct apic_intmapinfo *info;
+	struct ioapic_irqmap *map;
+	void *ioaddr;
+	int pin;
+
+	KKASSERT(trig == INTR_TRIGGER_EDGE || trig == INTR_TRIGGER_LEVEL);
+	KKASSERT(pola == INTR_POLARITY_HIGH || pola == INTR_POLARITY_LOW);
+
+	KKASSERT(irq >= 0 && irq < IOAPIC_HWI_VECTORS);
+	map = &ioapic_irqmaps[irq];
+
+	KKASSERT(map->im_type == IOAPIC_IMT_UNUSED);
+	map->im_type = IOAPIC_IMT_LINE;
+
+	map->im_gsi = gsi;
+	map->im_trig = trig;
+	map->im_pola = pola;
+
+	if (bootverbose) {
+		kprintf("IOAPIC: irq %d -> gsi %d %s/%s\n",
+			irq, map->im_gsi,
+			intr_str_trigger(map->im_trig),
+			intr_str_polarity(map->im_pola));
+	}
+
+	pin = ioapic_gsi_pin(map->im_gsi);
+	ioaddr = ioapic_gsi_ioaddr(map->im_gsi);
+
+	info = &int_to_apicintpin[irq];
+
+	imen_lock();
+
+	info->ioapic = 0; /* XXX unused */
+	info->int_pin = pin;
+	info->apic_address = ioaddr;
+	info->redirindex = IOAPIC_REDTBL + (2 * pin);
+	info->flags = IOAPIC_IM_FLAG_MASKED;
+	if (map->im_trig == INTR_TRIGGER_LEVEL)
+		info->flags |= IOAPIC_IM_FLAG_LEVEL;
+
+	ioapic_pin_setup(ioaddr, pin, IDT_OFFSET + irq,
+	    map->im_trig, map->im_pola);
+
+	imen_unlock();
+}
+
+void
+ioapic_abi_fixup_irqmap(void)
 {
 	int i;
 
 	for (i = 0; i < 16; ++i) {
 		struct ioapic_irqmap *map = &ioapic_irqmaps[i];
 
-		map->im_type = IOAPIC_IMT_LINE;
-		map->im_trig = INTR_TRIGGER_EDGE;
-		map->im_gsi = i;
+		if (map->im_type == IOAPIC_IMT_UNUSED) {
+			map->im_type = IOAPIC_IMT_RESERVED;
+			if (bootverbose)
+				kprintf("IOAPIC: irq %d reserved\n", i);
+		}
 	}
-	ioapic_irqmaps[IOAPIC_HWI_SYSCALL].im_type = IOAPIC_IMT_SYSCALL;
+}
+
+int
+ioapic_abi_find_gsi(int gsi, enum intr_trigger trig, enum intr_polarity pola)
+{
+	int irq;
+
+	KKASSERT(trig == INTR_TRIGGER_EDGE || trig == INTR_TRIGGER_LEVEL);
+	KKASSERT(pola == INTR_POLARITY_HIGH || pola == INTR_POLARITY_LOW);
+
+	for (irq = 0; irq < IOAPIC_HWI_VECTORS; ++irq) {
+		const struct ioapic_irqmap *map = &ioapic_irqmaps[irq];
+
+		if (map->im_gsi == gsi) {
+			KKASSERT(map->im_type == IOAPIC_IMT_LINE);
+
+			if (map->im_flags & IOAPIC_IMF_CONF) {
+				if (map->im_trig != trig ||
+				    map->im_pola != pola)
+					return -1;
+			}
+			return irq;
+		}
+	}
+	return -1;
+}
+
+int
+ioapic_abi_find_irq(int irq, enum intr_trigger trig, enum intr_polarity pola)
+{
+	const struct ioapic_irqmap *map;
+
+	KKASSERT(trig == INTR_TRIGGER_EDGE || trig == INTR_TRIGGER_LEVEL);
+	KKASSERT(pola == INTR_POLARITY_HIGH || pola == INTR_POLARITY_LOW);
+
+	if (irq < 0 || irq >= IOAPIC_HWI_VECTORS)
+		return -1;
+	map = &ioapic_irqmaps[irq];
+
+	if (map->im_type != IOAPIC_IMT_LINE)
+		return -1;
+
+	if (map->im_flags & IOAPIC_IMF_CONF) {
+		if (map->im_trig != trig || map->im_pola != pola)
+			return -1;
+	}
+	return irq;
+}
+
+static void
+ioapic_intr_config(int irq, enum intr_trigger trig, enum intr_polarity pola)
+{
+	struct apic_intmapinfo *info;
+	struct ioapic_irqmap *map;
+	void *ioaddr;
+	int pin;
+
+	if (ioapic_use_old) {
+		if (bootverbose) {
+			kprintf("irq %d, trig %c\n", irq,
+				trig == INTR_TRIGGER_EDGE ? 'E' : 'L');
+		}
+		return;
+	}
+
+	KKASSERT(trig == INTR_TRIGGER_EDGE || trig == INTR_TRIGGER_LEVEL);
+	KKASSERT(pola == INTR_POLARITY_HIGH || pola == INTR_POLARITY_LOW);
+
+	KKASSERT(irq >= 0 && irq < IOAPIC_HWI_VECTORS);
+	map = &ioapic_irqmaps[irq];
+
+	KKASSERT(map->im_type == IOAPIC_IMT_LINE);
+
+	if (map->im_flags & IOAPIC_IMF_CONF) {
+		if (trig != map->im_trig) {
+			panic("ioapic_intr_config: trig %s -> %s\n",
+			      intr_str_trigger(map->im_trig),
+			      intr_str_trigger(trig));
+		}
+		if (pola != map->im_pola) {
+			panic("ioapic_intr_config: pola %s -> %s\n",
+			      intr_str_polarity(map->im_pola),
+			      intr_str_polarity(pola));
+		}
+		return;
+	}
+	map->im_flags |= IOAPIC_IMF_CONF;
+
+	if (trig == map->im_trig && pola == map->im_pola)
+		return;
+
+	if (bootverbose) {
+		kprintf("IOAPIC: irq %d, gsi %d %s/%s -> %s/%s\n",
+			irq, map->im_gsi,
+			intr_str_trigger(map->im_trig),
+			intr_str_polarity(map->im_pola),
+			intr_str_trigger(trig),
+			intr_str_polarity(pola));
+	}
+	map->im_trig = trig;
+	map->im_pola = pola;
+
+	pin = ioapic_gsi_pin(map->im_gsi);
+	ioaddr = ioapic_gsi_ioaddr(map->im_gsi);
+
+	info = &int_to_apicintpin[irq];
+
+	imen_lock();
+
+	info->flags &= ~IOAPIC_IM_FLAG_LEVEL;
+	if (map->im_trig == INTR_TRIGGER_LEVEL)
+		info->flags |= IOAPIC_IM_FLAG_LEVEL;
+
+	ioapic_pin_setup(ioaddr, pin, IDT_OFFSET + irq,
+	    map->im_trig, map->im_pola);
+
+	imen_unlock();
+}
+
+int
+ioapic_abi_extint_irqmap(int irq)
+{
+	struct apic_intmapinfo *info;
+	struct ioapic_irqmap *map;
+	void *ioaddr;
+	int pin, error, vec;
+
+	vec = IDT_OFFSET + irq;
+
+	if (ioapic_abi_extint_irq == irq)
+		return 0;
+	else if (ioapic_abi_extint_irq >= 0)
+		return EEXIST;
+
+	error = icu_ioapic_extint(irq, vec);
+	if (error)
+		return error;
+
+	map = &ioapic_irqmaps[irq];
+
+	KKASSERT(map->im_type == IOAPIC_IMT_RESERVED ||
+		 map->im_type == IOAPIC_IMT_LINE);
+	if (map->im_type == IOAPIC_IMT_LINE) {
+		if (map->im_flags & IOAPIC_IMF_CONF)
+			return EEXIST;
+	}
+	ioapic_abi_extint_irq = irq;
+
+	map->im_type = IOAPIC_IMT_LINE;
+	map->im_trig = INTR_TRIGGER_EDGE;
+	map->im_pola = INTR_POLARITY_HIGH;
+	map->im_flags = IOAPIC_IMF_CONF;
+
+	map->im_gsi = ioapic_extpin_gsi();
+	KKASSERT(map->im_gsi >= 0);
+
+	if (bootverbose) {
+		kprintf("IOAPIC: irq %d -> extint gsi %d %s/%s\n",
+			irq, map->im_gsi,
+			intr_str_trigger(map->im_trig),
+			intr_str_polarity(map->im_pola));
+	}
+
+	pin = ioapic_gsi_pin(map->im_gsi);
+	ioaddr = ioapic_gsi_ioaddr(map->im_gsi);
+
+	info = &int_to_apicintpin[irq];
+
+	imen_lock();
+
+	info->ioapic = 0; /* XXX unused */
+	info->int_pin = pin;
+	info->apic_address = ioaddr;
+	info->redirindex = IOAPIC_REDTBL + (2 * pin);
+	info->flags = IOAPIC_IM_FLAG_MASKED;
+
+	ioapic_extpin_setup(ioaddr, pin, vec);
+
+	imen_unlock();
+
+	return 0;
 }
 
 #endif	/* SMP */

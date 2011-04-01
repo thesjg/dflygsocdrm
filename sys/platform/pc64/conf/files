@@ -152,8 +152,8 @@ platform/pc64/x86_64/support.s		standard
 platform/pc64/x86_64/sigtramp.s		standard
 platform/pc64/x86_64/swtch.s		standard
 platform/pc64/x86_64/npx.c		standard
-platform/pc64/x86_64/db_interface.c	standard
-platform/pc64/x86_64/db_trace.c		standard
+platform/pc64/x86_64/db_interface.c	optional	ddb
+platform/pc64/x86_64/db_trace.c		optional	ddb
 platform/pc64/x86_64/dump_machdep.c	standard
 platform/pc64/x86_64/minidump_machdep.c	standard
 platform/pc64/x86_64/vm_machdep.c	standard
@@ -199,7 +199,9 @@ platform/pc64/x86_64/console.c	standard
 platform/pc64/x86_64/ipl_funcs.c	standard
 kern/syscalls.c			standard
 platform/pc64/x86_64/mp_machdep.c		optional	smp
-platform/pc64/x86_64/mp_madt.c		optional	smp
+platform/pc64/acpica5/acpi_sdt.c	optional	smp
+platform/pc64/acpica5/acpi_madt.c	optional	smp
+platform/pc64/acpica5/acpi_fadt.c	optional	smp
 dev/misc/atkbd/atkbd_isa.c		optional	atkbd
 dev/misc/atkbdc_layer/atkbdc_isa.c	optional	atkbdc
 dev/misc/ppc/ppc.c			optional	ppc

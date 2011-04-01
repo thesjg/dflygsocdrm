@@ -80,8 +80,7 @@ static device_method_t acpi_pcib_pci_methods[] = {
     DEVMETHOD(bus_print_child,		bus_generic_print_child),
     DEVMETHOD(bus_read_ivar,		acpi_pcib_read_ivar),
     DEVMETHOD(bus_write_ivar,		pcib_write_ivar),
-   // DEVMETHOD(bus_alloc_resource,	pcib_alloc_resource),
-    DEVMETHOD(bus_alloc_resource,	bus_generic_alloc_resource),
+    DEVMETHOD(bus_alloc_resource,	pcib_alloc_resource),
     DEVMETHOD(bus_release_resource,	bus_generic_release_resource),
     DEVMETHOD(bus_activate_resource,	bus_generic_activate_resource),
     DEVMETHOD(bus_deactivate_resource, 	bus_generic_deactivate_resource),
@@ -112,7 +111,6 @@ MODULE_DEPEND(acpi_pcib, acpi, 1, 1, 1);
 static int
 acpi_pcib_pci_probe(device_t dev)
 {
-
     if (pci_get_class(dev) != PCIC_BRIDGE ||
 	pci_get_subclass(dev) != PCIS_BRIDGE_PCI ||
 	!acpi_enabled("pci"))
@@ -130,7 +128,9 @@ static int
 acpi_pcib_pci_attach(device_t dev)
 {
     struct acpi_pcib_softc *sc;
+
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
+
     pcib_attach_common(dev);
     sc = device_get_softc(dev);
     sc->ap_handle = acpi_get_handle(dev);
@@ -140,7 +140,6 @@ acpi_pcib_pci_attach(device_t dev)
 static int
 acpi_pcib_pci_resume(device_t dev)
 {
-
     return (acpi_pcib_resume(dev));
 }
 
@@ -160,18 +159,16 @@ acpi_pcib_read_ivar(device_t dev, device_t child, int which, uintptr_t *result)
 static int
 acpi_pcib_pci_route_interrupt(device_t pcib, device_t dev, int pin)
 {
-    struct acpi_pcib_softc *sc;
-
-    sc = device_get_softc(pcib);
+    struct acpi_pcib_softc *sc = device_get_softc(pcib);
 
     /*
      * If we don't have a _PRT, fall back to the swizzle method
      * for routing interrupts.
      */
     if (sc->ap_prt.Pointer == NULL) {
-device_printf(pcib, "No _PRT found, routing with pci\n");
+	device_printf(pcib, "No _PRT found, routing with pci\n");
 	return (pcib_route_interrupt(pcib, dev, pin));
-}
-    else
+    } else {
 	return (acpi_pcib_route_interrupt(pcib, dev, pin, &sc->ap_prt));
+    }
 }

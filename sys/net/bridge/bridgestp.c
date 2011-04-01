@@ -189,6 +189,14 @@ static int	bstp_addr_cmp(const uint8_t *, const uint8_t *);
 /*
  * When transmitting a config we tack on our path cost to
  * our aggregated path-to-root cost.
+ *
+ * Note that sc_designated_cost is the lowest root path cost from all
+ * incoming links.  When one is talking about two bridges with multiple
+ * links between them the root path cost the secondary bridge transmits
+ * will be the lowest root path cost it received across those three
+ * links and NOT necessarily the root path cost it received specifically
+ * on that particular link.  The receiving end must still add its local
+ * link cost back in for differentiation purposes.
  */
 static void
 bstp_transmit_config(struct bridge_softc *sc, struct bridge_iflist *bif)
@@ -319,20 +327,42 @@ bstp_supersedes_port_info(struct bridge_softc *sc, struct bridge_iflist *bif)
 		return (0);
 
 	/*
-	 * Both bif_peer_cost and sc_designated_cost have NOT added in
-	 * bif->bif_path_cost, so we can optimize it out.
+	 * bif_peer_cost and sc_designated_cost do not include the local
+	 * bif_path_cost, otherwise we would not be able to make this
+	 * comparison.
 	 */
 	if (bif->bif_peer_cost < sc->sc_designated_cost)
 		return (1);
 	if (bif->bif_peer_cost > sc->sc_designated_cost)
 		return (0);
 
+	/*
+	 * When the peer costs match we have to check the local path
+	 * cost against the selected root port.  sc_designated_cost
+	 * in an aggregation and cannot be used.
+	 */
+	if (sc->sc_root_port &&
+	    bif->bif_path_cost < sc->sc_root_port->bif_path_cost)
+		return (1);
+	if (sc->sc_root_port &&
+	    bif->bif_path_cost > sc->sc_root_port->bif_path_cost)
+		return (0);
+
+	/*
+	 * If the path costs are identical the bridge with the lowest
+	 * bridge_id wins.
+	 */
 	if (bif->bif_peer_bridge < sc->sc_designated_bridge)
 		return (1);
 	if (bif->bif_peer_bridge > sc->sc_designated_bridge)
 		return (0);
 
-	/* bridge_id or bridge+port collision w/peer returns TRUE */
+	/*
+	 * bridge_id or bridge+port collision w/peer returns TRUE.
+	 *
+	 * This case can also occur when two bridges are connected
+	 * via multiple links whos path costs have not been set.
+	 */
 	if (bif->bif_peer_bridge != sc->sc_bridge_id)
 		return (1);
 	if (bif->bif_peer_port <= sc->sc_designated_port)
@@ -548,18 +578,17 @@ set_port:
 		 * select the root port (IFBIF_DESIGNATED is set at the
 		 * end).
 		 *
-		 * Since we are the root the peer cost should already include
-		 * our path cost.  We still need the combined costs from both
-		 * our point of view and the peer's point of view to match
-		 * up with the peer.
-		 *
-		 * If we used ONLY our path cost here we would have no peer
-		 * path cost in the calculation and would reach a different
-		 * conclusion than our peer has reached.
+		 * The peer cost will incorporate the peer bridge's best
+		 * cost to the root bridge (us), which is NOT necessarily
+		 * our path cost, plus the peer bridge's own path cost.
+		 * Because of this we must still add in our path cost for
+		 * further differentiation.  Because the peer's 'best' cost
+		 * is applied to all of its outgoing messages we should
+		 * still come to the same conclusion as the peer.
 		 */
-		if (bif->bif_peer_cost > designated_cost)
+		if (bif->bif_peer_cost + bif->bif_path_cost > designated_cost)
 			continue;
-		if (bif->bif_peer_cost < designated_cost)
+		if (bif->bif_peer_cost + bif->bif_path_cost < designated_cost)
 			goto set_port2;
 
 		if (bif->bif_port_id > designated_port)
@@ -570,11 +599,15 @@ set_port:
 
 		/*
 		 * New port.  Since we are the root, the root cost is always
-		 * 0.  Since we are the root the peer path should be our
-		 * path cost + peer path cost.
+		 * 0.  The peer's cu_root_path_cost does not necessarily
+		 * incorporate our peer path cost, but instead incorporates
+		 * the lowest path cost to root for the target bridge
+		 * when multiple links are present between the two bridges.
+		 * Thus for selection purposes we must still add in our
+		 * local path cost.
 		 */
 set_port2:
-		designated_cost = bif->bif_peer_cost;
+		designated_cost = bif->bif_peer_cost + bif->bif_path_cost;
 		designated_root_cost = 0;
 		designated_bridge = sc->sc_bridge_id;
 		designated_port = bif->bif_port_id;
@@ -1045,6 +1078,8 @@ bstp_forward_delay_timer_expiry(struct bridge_softc *sc,
 		    bif->bif_change_detection_enabled) {
 			bstp_topology_change_detection(sc);
 		}
+		bstp_configuration_update(sc);
+		bstp_port_state_selection(sc);
 		if (sc->sc_ifp->if_flags & IFF_LINK2)
 			bstp_adjust_bonded_states(sc, bif);
 	}
@@ -1216,6 +1251,15 @@ bstp_stop(struct bridge_softc *sc)
 	crit_exit();
 }
 
+/*
+ * [re]initialize a port.  The port is initialized to a L1BLOCKING state
+ * or a BLOCKING state.  When link ping/pong is enabled (LINK1) we start
+ * out in the L1BLOCKING state to prevent flapping from blowing up the
+ * state of the other ports.
+ *
+ * Either way the first config packet received will knock the port into
+ * the LISTENING state.
+ */
 static void
 bstp_initialize_port(struct bridge_softc *sc, struct bridge_iflist *bif)
 {
@@ -1223,7 +1267,10 @@ bstp_initialize_port(struct bridge_softc *sc, struct bridge_iflist *bif)
 			    bif->bif_state == BSTP_IFSTATE_BLOCKING ||
 			    bif->bif_state == BSTP_IFSTATE_BONDED);
 
-	bstp_set_port_state(bif, BSTP_IFSTATE_BLOCKING);
+	if (sc->sc_ifp->if_flags & IFF_LINK1)
+		bstp_set_port_state(bif, BSTP_IFSTATE_L1BLOCKING);
+	else
+		bstp_set_port_state(bif, BSTP_IFSTATE_BLOCKING);
 	bstp_clear_peer_info(sc, bif);
 	bif->bif_topology_change_acknowledge = 0;
 	bif->bif_config_pending = 0;
@@ -1236,20 +1283,38 @@ bstp_initialize_port(struct bridge_softc *sc, struct bridge_iflist *bif)
 		bstp_adjust_bonded_states(sc, bif);
 }
 
+/*
+ * When enabling a port that was previously disabled no configuration
+ * update occurs, otherwise down/up or running/not-running flapping
+ * (e.g. by openvpn on a TAP interface) will blow up the other ports.
+ */
 static void
 bstp_enable_port(struct bridge_softc *sc, struct bridge_iflist *bif)
 {
+	int was_disabled = (bif->bif_state == BSTP_IFSTATE_DISABLED ||
+			    bif->bif_state == BSTP_IFSTATE_L1BLOCKING);
+
 	bstp_initialize_port(sc, bif);
 	if (sc->sc_ifp->if_flags & IFF_LINK1)
 		bstp_timer_start(&bif->bif_link1_timer, 0);
-	bstp_configuration_update(sc);
-	bstp_port_state_selection(sc);
+	if (was_disabled == 0) {
+		bstp_configuration_update(sc);
+		bstp_port_state_selection(sc);
+	}
+	bstp_adjust_bonded_states(sc, bif);
 }
 
+/*
+ * When disabling a port that was previously in a non-forwarding or bonded
+ * state no configuration update occurs, otherwise down/up or
+ * running/not-running flapping (e.g. by openvpn on a TAP interface) will
+ * blow up the other ports.
+ */
 static void
 bstp_disable_port(struct bridge_softc *sc, struct bridge_iflist *bif)
 {
 	int was_forwarding = (bif->bif_state == BSTP_IFSTATE_FORWARDING);
+	int was_bonded = (bif->bif_state == BSTP_IFSTATE_BONDED);
 	int iamroot;
 
 	iamroot = bstp_root_bridge(sc);
@@ -1261,8 +1326,10 @@ bstp_disable_port(struct bridge_softc *sc, struct bridge_iflist *bif)
 	bstp_timer_stop(&bif->bif_message_age_timer);
 	bstp_timer_stop(&bif->bif_forward_delay_timer);
 	bstp_timer_stop(&bif->bif_link1_timer);
-	bstp_configuration_update(sc);
-	bstp_port_state_selection(sc);
+	if (was_forwarding || was_bonded) {
+		bstp_configuration_update(sc);
+		bstp_port_state_selection(sc);
+	}
 	bridge_rtdelete(sc, bif->bif_ifp, IFBF_FLUSHDYN);
 	if (was_forwarding && (sc->sc_ifp->if_flags & IFF_LINK2))
 		bstp_adjust_bonded_states(sc, bif);

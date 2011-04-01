@@ -41,8 +41,21 @@
 #ifndef _ARCH_APIC_IOAPIC_ABI_H_
 #define _ARCH_APIC_IOAPIC_ABI_H_
 
-#ifdef SMP	/* APIC_IO */
-extern struct machintr_abi MachIntrABI_IOAPIC;
+#ifndef _SYS_BUS_H_
+#include <sys/bus.h>
 #endif
+
+#ifdef SMP	/* APIC_IO */
+
+extern struct machintr_abi MachIntrABI_IOAPIC;
+
+int	ioapic_abi_extint_irqmap(int);
+void	ioapic_abi_set_irqmap(int, int, enum intr_trigger, enum intr_polarity);
+void	ioapic_abi_fixup_irqmap(void);
+
+int	ioapic_abi_find_gsi(int, enum intr_trigger, enum intr_polarity);
+int	ioapic_abi_find_irq(int, enum intr_trigger, enum intr_polarity);
+
+#endif	/* SMP */
 
 #endif	/* !_ARCH_APIC_IOAPIC_ABI_H_ */

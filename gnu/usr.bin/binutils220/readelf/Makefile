@@ -2,10 +2,13 @@
 
 .PATH: ${SRCDIR}/binutils ${SRCDIR}/binutils/doc
 
-# No a.out vs. ELF version so don't install in /usr/libexec/elf
-BINDIR=/usr/bin
-
 PROG=	readelf
+MAN=	readelf220.1
 WARNS=	1
+
+readelf220.1: ${SRCDIR}/binutils/doc/readelf.1
+	cp ${.ALLSRC} ${.TARGET}
+
+CLEANFILES+=	readelf220.1
 
 .include <bsd.prog.mk>

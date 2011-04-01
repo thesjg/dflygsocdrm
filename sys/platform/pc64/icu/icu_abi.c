@@ -54,7 +54,6 @@
 
 #include <sys/thread2.h>
 
-#include <machine_base/apic/ioapic_abi.h>
 #include <machine_base/isa/elcr_var.h>
 
 #include "icu.h"
@@ -102,6 +101,7 @@ static void	icu_cleanup(void);
 static void	icu_setdefault(void);
 static void	icu_stabilize(void);
 static void	icu_initmap(void);
+static void	icu_intr_config(int, enum intr_trigger, enum intr_polarity);
 
 struct machintr_abi MachIntrABI_ICU = {
 	MACHINTR_ICU,
@@ -114,10 +114,9 @@ struct machintr_abi MachIntrABI_ICU = {
 	.cleanup	= icu_cleanup,
 	.setdefault	= icu_setdefault,
 	.stabilize	= icu_stabilize,
-	.initmap	= icu_initmap
+	.initmap	= icu_initmap,
+	.intr_config	= icu_intr_config
 };
-
-static int	icu_imcr_present;
 
 /*
  * WARNING!  SMP builds can use the ICU now so this code must be MP safe.
@@ -125,35 +124,13 @@ static int	icu_imcr_present;
 static int
 icu_setvar(int varid, const void *buf)
 {
-	int error = 0;
-	
-	switch(varid) {
-	case MACHINTR_VAR_IMCR_PRESENT:
-		icu_imcr_present = *(const int *)buf;
-		break;
-
-	default:
-		error = ENOENT;
-		break;
-	}
-	return error;
+	return ENOENT;
 }
 
 static int
 icu_getvar(int varid, void *buf)
 {
-	int error = 0;
-	
-	switch(varid) {
-	case MACHINTR_VAR_IMCR_PRESENT:
-		*(int *)buf = icu_imcr_present;
-		break;
-
-	default:
-		error = ENOENT;
-		break;
-	}
-	return error;
+	return ENOENT;
 }
 
 /*
@@ -182,9 +159,6 @@ icu_cleanup(void)
 /*
  * Called after stablize and cleanup; critical section is not
  * held and interrupts are not physically disabled.
- *
- * For SMP:
- * Further delayed after BSP's LAPIC is initialized
  */
 static void
 icu_finalize(void)
@@ -192,16 +166,7 @@ icu_finalize(void)
 	KKASSERT(MachIntrABI.type == MACHINTR_ICU);
 
 #ifdef SMP
-	if (apic_io_enable) {
-		/*
-		 * MachIntrABI switching will happen in
-		 * MachIntrABI_IOAPIC.finalize()
-		 */
-		MachIntrABI_IOAPIC.setvar(MACHINTR_VAR_IMCR_PRESENT,
-					  &icu_imcr_present);
-		MachIntrABI_IOAPIC.finalize();
-		return;
-	}
+	KKASSERT(!apic_io_enable);
 
 	/*
 	 * If an IMCR is present, programming bit 0 disconnects the 8259
@@ -212,20 +177,9 @@ icu_finalize(void)
 	 * wire mode so we can use other interrupt sources within the LAPIC
 	 * in addition to the 8259.
 	 */
-	if (icu_imcr_present) {
-		register_t ef;
-
-		crit_enter();
-
-		ef = read_rflags();
-		cpu_disable_intr();
-
+	if (imcr_present) {
 		outb(0x22, 0x70);
 		outb(0x23, 0x01);
-
-		write_rflags(ef);
-
-		crit_exit();
 	}
 #endif	/* SMP */
 }
@@ -306,5 +260,11 @@ icu_initmap(void)
 			}
 		}
 	}
-	icu_irqmaps[i].im_type = ICU_IMT_SYSCALL;
+	icu_irqmaps[IDT_OFFSET_SYSCALL - IDT_OFFSET].im_type = ICU_IMT_SYSCALL;
+}
+
+static void
+icu_intr_config(int irq __unused, enum intr_trigger trig __unused,
+    enum intr_polarity pola __unused)
+{
 }

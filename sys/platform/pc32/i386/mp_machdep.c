@@ -56,6 +56,7 @@
 #include <machine/atomic.h>
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
+#include <machine_base/apic/ioapic_abi.h>
 #include <machine_base/apic/mpapic.h>
 #include <machine/psl.h>
 #include <machine/segments.h>
@@ -199,6 +200,8 @@ struct mptable_ioapic {
 	int		mio_idx;
 	int		mio_apic_id;
 	uint32_t	mio_addr;
+	int		mio_gsi_base;
+	int		mio_npin;
 	TAILQ_ENTRY(mptable_ioapic) mio_link;
 };
 
@@ -328,6 +331,7 @@ static basetable_entry basetable_entry_types[] =
 static u_int	boot_address;
 static u_int	base_memory;
 static int	mp_finish;
+static int	mp_finish_lapic;
 
 static void	mp_enable(u_int boot_addr);
 
@@ -344,7 +348,6 @@ static void	mptable_fix(void);
 #endif
 static int	mptable_map(struct mptable_pos *);
 static void	mptable_unmap(struct mptable_pos *);
-static void	mptable_imcr(struct mptable_pos *);
 static void	mptable_bus_info_alloc(const mpcth_t,
 		    struct mptable_bus_info *);
 static void	mptable_bus_info_free(struct mptable_bus_info *);
@@ -366,8 +369,11 @@ static int	start_ap(struct mdglobaldata *gd, u_int boot_addr, int smibest);
 static int	smitest(void);
 
 static cpumask_t smp_startup_mask = 1;	/* which cpus have been started */
+static cpumask_t smp_lapic_mask = 1;	/* which cpus have lapic been inited */
 cpumask_t smp_active_mask = 1;	/* which cpus are ready for IPIs etc? */
 SYSCTL_INT(_machdep, OID_AUTO, smp_active, CTLFLAG_RD, &smp_active_mask, 0, "");
+
+int			imcr_present;
 
 static vm_paddr_t	mptable_fps_phyaddr;
 static int		mptable_use_default;
@@ -416,6 +422,8 @@ mptable_probe(void)
 		kprintf("MPTABLE: use default configuration\n");
 		mptable_use_default = 1;
 	}
+	if (mpt.mp_fps->mpfb2 & 0x80)
+		imcr_present = 1;
 
 	mptable_unmap(&mpt);
 }
@@ -547,10 +555,12 @@ mp_announce(void)
 	}
 
 if (apic_io_enable) {
-	for (x = 0; x < mp_napics; ++x) {
-		kprintf(" io%d (APIC): apic id: %2d", x, IO_TO_ID(x));
-		kprintf(", version: 0x%08x", io_apic_versions[x]);
-		kprintf(", at 0x%08lx\n", io_apic_address[x]);
+	if (ioapic_use_old) {
+		for (x = 0; x < mp_napics; ++x) {
+			kprintf(" io%d (APIC): apic id: %2d", x, IO_TO_ID(x));
+			kprintf(", version: 0x%08x", io_apic_versions[x]);
+			kprintf(", at 0x%08lx\n", io_apic_address[x]);
+		}
 	}
 } else {
 	kprintf(" Warning: APIC I/O disabled\n");
@@ -645,18 +655,32 @@ mp_enable(u_int boot_addr)
 
 	lapic_config();
 
+	/* Initialize BSP's local APIC */
+	lapic_init(TRUE);
+
+	/* start each Application Processor */
+	start_all_aps(boot_addr);
+
 	if (apic_io_enable)
 		ioapic_config();
 
-	if (mptable_fps_phyaddr) {
-		mptable_map(&mpt);
-		mptable_imcr(&mpt);
-		mptable_unmap(&mpt);
-	}
-if (apic_io_enable) {
+if (apic_io_enable && ioapic_use_old) {
+	u_long ef;
 
 	if (!mptable_fps_phyaddr)
 		panic("no MP table, disable APIC_IO! (set hw.apic_io_enable=0)\n");
+
+	crit_enter();
+
+	ef = read_eflags();
+	cpu_disable_intr();
+
+	/*
+	 * Switch to I/O APIC MachIntrABI and reconfigure
+	 * the default IDT entries.
+	 */
+	MachIntrABI = MachIntrABI_IOAPIC;
+	MachIntrABI.setdefault();
 
 	mptable_map(&mpt);
 
@@ -685,34 +709,15 @@ if (apic_io_enable) {
 		if (io_apic_setup(apic) < 0)
 			panic("IO APIC setup failure");
 
+	write_eflags(ef);
+
+	MachIntrABI.cleanup();
+
+	crit_exit();
 }
 
-	/*
-	 * These are required for SMP operation
-	 */
-
-	/* install a 'Spurious INTerrupt' vector */
-	setidt(XSPURIOUSINT_OFFSET, Xspuriousint,
-	       SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
-
-	/* install an inter-CPU IPI for TLB invalidation */
-	setidt(XINVLTLB_OFFSET, Xinvltlb,
-	       SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
-
-	/* install an inter-CPU IPI for IPIQ messaging */
-	setidt(XIPIQ_OFFSET, Xipiq,
-	       SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
-
-	/* install a timer vector */
-	setidt(XTIMER_OFFSET, Xtimer,
-	       SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
-	
-	/* install an inter-CPU IPI for CPU stop/restart */
-	setidt(XCPUSTOP_OFFSET, Xcpustop,
-	       SDT_SYS386IGT, SEL_KPL, GSEL(GCODE_SEL, SEL_KPL));
-
-	/* start each Application Processor */
-	start_all_aps(boot_addr);
+	/* Finalize PIC */
+	MachIntrABI.finalize();
 }
 
 
@@ -2159,12 +2164,6 @@ start_all_aps(u_int boot_addr)
 
 	POSTCODE(START_ALL_APS_POST);
 
-	/* Initialize BSP's local APIC */
-	apic_initialize(TRUE);
-
-	/* Finalize PIC */
-	MachIntrABI.finalize();
-
 	/* install the AP 1st level boot code */
 	install_ap_tramp(boot_addr);
 
@@ -2331,6 +2330,24 @@ start_all_aps(u_int boot_addr)
 	for (x = 0; x < NKPT; x++)
 		PTD[x] = 0;
 	pmap_set_opt();
+
+	/*
+	 * Wait all APs to finish initializing LAPIC
+	 */
+	mp_finish_lapic = 1;
+	if (bootverbose)
+		kprintf("SMP: Waiting APs LAPIC initialization\n");
+	if (cpu_feature & CPUID_TSC)
+		tsc0_offset = rdtsc();
+	tsc_offsets[0] = 0;
+	rel_mplock();
+	while (smp_lapic_mask != smp_startup_mask) {
+		cpu_lfence();
+		if (cpu_feature & CPUID_TSC)
+			tsc0_offset = rdtsc();
+	}
+	while (try_mplock() == 0)
+		;
 
 	/* number of APs actually started */
 	return ncpus - 1;
@@ -2760,18 +2777,18 @@ ap_init(void)
 	cpu_mfence();
 
 	/*
-	 * Interlock for finalization.  Wait until mp_finish is non-zero,
-	 * then get the MP lock.
+	 * Interlock for LAPIC initialization.  Wait until mp_finish_lapic is
+	 * non-zero, then get the MP lock.
 	 *
 	 * Note: We are in a critical section.
 	 *
 	 * Note: we are the idle thread, we can only spin.
 	 *
 	 * Note: The load fence is memory volatile and prevents the compiler
-	 * from improperly caching mp_finish, and the cpu from improperly
+	 * from improperly caching mp_finish_lapic, and the cpu from improperly
 	 * caching it.
 	 */
-	while (mp_finish == 0)
+	while (mp_finish_lapic == 0)
 		cpu_lfence();
 	while (try_mplock() == 0)
 		;
@@ -2794,8 +2811,6 @@ ap_init(void)
 	/* Build our map of 'other' CPUs. */
 	mycpu->gd_other_cpus = smp_startup_mask & ~CPUMASK(mycpu->gd_cpuid);
 
-	kprintf("SMP: AP CPU #%d Launched!\n", mycpu->gd_cpuid);
-
 	/* A quick check from sanity claus */
 	apic_id = (apic_id_to_logical[(lapic.id & 0xff000000) >> 24]);
 	if (mycpu->gd_cpuid != apic_id) {
@@ -2806,7 +2821,34 @@ ap_init(void)
 	}
 
 	/* Initialize AP's local APIC for irq's */
-	apic_initialize(FALSE);
+	lapic_init(FALSE);
+
+	/* LAPIC initialization is done */
+	smp_lapic_mask |= CPUMASK(mycpu->gd_cpuid);
+	cpu_mfence();
+
+	/* Let BSP move onto the next initialization stage */
+	rel_mplock();
+
+	/*
+	 * Interlock for finalization.  Wait until mp_finish is non-zero,
+	 * then get the MP lock.
+	 *
+	 * Note: We are in a critical section.
+	 *
+	 * Note: we are the idle thread, we can only spin.
+	 *
+	 * Note: The load fence is memory volatile and prevents the compiler
+	 * from improperly caching mp_finish, and the cpu from improperly
+	 * caching it.
+	 */
+	while (mp_finish == 0)
+		cpu_lfence();
+	while (try_mplock() == 0)
+		;
+
+	/* BSP may have changed PTD while we're waiting for the lock */
+	cpu_invltlb();
 
 	/* Set memory range attributes for this CPU to match the BSP */
 	mem_range_AP_init();
@@ -2857,15 +2899,9 @@ ap_finish(void)
 	mp_finish = 1;
 	if (bootverbose)
 		kprintf("Finish MP startup\n");
-	if (cpu_feature & CPUID_TSC)
-		tsc0_offset = rdtsc();
-	tsc_offsets[0] = 0;
 	rel_mplock();
-	while (smp_active_mask != smp_startup_mask) {
+	while (smp_active_mask != smp_startup_mask)
 		cpu_lfence();
-		if (cpu_feature & CPUID_TSC)
-			tsc0_offset = rdtsc();
-	}
 	while (try_mplock() == 0)
 		;
 	if (bootverbose)
@@ -3030,14 +3066,6 @@ mptable_lapic_pass2_callback(void *xarg, const void *pos, int type)
 		}
 	}
 	return 0;
-}
-
-static void
-mptable_imcr(struct mptable_pos *mpt)
-{
-	/* record whether PIC or virtual-wire mode */
-	machintr_setvar_simple(MACHINTR_VAR_IMCR_PRESENT,
-			       mpt->mp_fps->mpfb2 & 0x80);
 }
 
 static void
@@ -3437,6 +3465,7 @@ mptable_pci_int_register(void)
 	if (TAILQ_EMPTY(&bus_info.mbi_list))
 		goto done;
 
+	force_pci0 = 0;
 	npcibus = 0;
 	TAILQ_FOREACH(bus, &bus_info.mbi_list, mb_link) {
 		if (bus->mb_type == MPTABLE_BUS_PCI)
@@ -3566,6 +3595,7 @@ static int
 mptable_ioapic_int_callback(void *xarg, const void *pos, int type)
 {
 	struct mptable_ioapic_int_cbarg *arg = xarg;
+	const struct mptable_ioapic *ioapic;
 	const struct mptable_bus *bus;
 	const struct INTENTRY *ent;
 
@@ -3586,11 +3616,41 @@ mptable_ioapic_int_callback(void *xarg, const void *pos, int type)
 	if (bus == NULL)
 		return 0;
 
-	/* XXX rough estimation */
-	if (ent->src_bus_irq != ent->dst_apic_int) {
-		if (bootverbose) {
-			kprintf("MPTABLE: INTSRC irq %d -> GSI %d\n",
-				ent->src_bus_irq, ent->dst_apic_int);
+	TAILQ_FOREACH(ioapic, &mptable_ioapic_list, mio_link) {
+		if (ioapic->mio_apic_id == ent->dst_apic_id)
+			break;
+	}
+	if (ioapic == NULL) {
+		kprintf("MPTABLE: warning ISA int dst apic id %d "
+			"does not exist\n", ent->dst_apic_id);
+		return 0;
+	}
+
+	if (!ioapic_use_old) {
+		int gsi;
+
+		if (ent->dst_apic_int >= ioapic->mio_npin) {
+			panic("mptable_ioapic_enumerate: invalid I/O APIC "
+			      "pin %d, should be < %d",
+			      ent->dst_apic_int, ioapic->mio_npin);
+		}
+		gsi = ioapic->mio_gsi_base + ent->dst_apic_int;
+
+		if (ent->src_bus_irq != gsi) {
+			if (bootverbose) {
+				kprintf("MPTABLE: INTSRC irq %d -> GSI %d\n",
+					ent->src_bus_irq, gsi);
+			}
+			ioapic_intsrc(ent->src_bus_irq, gsi,
+			    INTR_TRIGGER_EDGE, INTR_POLARITY_HIGH);
+		}
+	} else {
+		/* XXX rough estimation */
+		if (ent->src_bus_irq != ent->dst_apic_int) {
+			if (bootverbose) {
+				kprintf("MPTABLE: INTSRC irq %d -> GSI %d\n",
+					ent->src_bus_irq, ent->dst_apic_int);
+			}
 		}
 	}
 	return 0;
@@ -3600,7 +3660,7 @@ static void
 mptable_ioapic_enumerate(struct ioapic_enumerator *e)
 {
 	struct mptable_bus_info bus_info;
-	const struct mptable_ioapic *ioapic;
+	struct mptable_ioapic *ioapic;
 	struct mptable_pos mpt;
 	mpcth_t cth;
 	int error;
@@ -3609,19 +3669,44 @@ mptable_ioapic_enumerate(struct ioapic_enumerator *e)
 	KKASSERT(!TAILQ_EMPTY(&mptable_ioapic_list));
 
 	TAILQ_FOREACH(ioapic, &mptable_ioapic_list, mio_link) {
+		if (!ioapic_use_old) {
+			const struct mptable_ioapic *prev_ioapic;
+			uint32_t ver;
+			void *addr;
+
+			addr = ioapic_map(ioapic->mio_addr);
+
+			ver = ioapic_read(addr, IOAPIC_VER);
+			ioapic->mio_npin = ((ver & IOART_VER_MAXREDIR)
+					    >> MAXREDIRSHIFT) + 1;
+
+			prev_ioapic = TAILQ_PREV(ioapic,
+					mptable_ioapic_list, mio_link);
+			if (prev_ioapic == NULL) {
+				ioapic->mio_gsi_base = 0;
+			} else {
+				ioapic->mio_gsi_base =
+					prev_ioapic->mio_gsi_base +
+					prev_ioapic->mio_npin;
+			}
+			ioapic_add(addr, ioapic->mio_gsi_base,
+			    ioapic->mio_npin);
+		}
 		if (bootverbose) {
 			kprintf("MPTABLE: IOAPIC addr 0x%08x, "
-				"apic id %d, idx %d\n",
+				"apic id %d, idx %d, gsi base %d, npin %d\n",
 				ioapic->mio_addr,
-				ioapic->mio_apic_id, ioapic->mio_idx);
+				ioapic->mio_apic_id,
+				ioapic->mio_idx,
+				ioapic->mio_gsi_base,
+				ioapic->mio_npin);
 		}
-		/* TODO */
 	}
 
 	if (mptable_use_default) {
 		if (bootverbose)
 			kprintf("MPTABLE: INTSRC irq 0 -> GSI 2 (default)\n");
-		/* TODO default intsrc */
+		ioapic_intsrc(0, 2, INTR_TRIGGER_EDGE, INTR_POLARITY_HIGH);
 		return;
 	}
 
@@ -3637,7 +3722,7 @@ mptable_ioapic_enumerate(struct ioapic_enumerator *e)
 	if (TAILQ_EMPTY(&bus_info.mbi_list)) {
 		if (bootverbose)
 			kprintf("MPTABLE: INTSRC irq 0 -> GSI 2 (no bus)\n");
-		/* TODO default intsrc */
+		ioapic_intsrc(0, 2, INTR_TRIGGER_EDGE, INTR_POLARITY_HIGH);
 	} else {
 		struct mptable_ioapic_int_cbarg arg;
 
@@ -3654,7 +3739,8 @@ mptable_ioapic_enumerate(struct ioapic_enumerator *e)
 				kprintf("MPTABLE: INTSRC irq 0 -> GSI 2 "
 					"(no int)\n");
 			}
-			/* TODO default intsrc */
+			ioapic_intsrc(0, 2, INTR_TRIGGER_EDGE,
+			    INTR_POLARITY_HIGH);
 		}
 	}
 
@@ -3676,3 +3762,61 @@ mptable_ioapic_enum_register(void)
 }
 SYSINIT(mptable_ioapic, SI_BOOT2_PRESMP, SI_ORDER_ANY,
 	mptable_ioapic_enum_register, 0);
+
+void
+mptable_pci_int_dump(void)
+{
+	const struct mptable_pci_int *pci_int;
+
+	TAILQ_FOREACH(pci_int, &mptable_pci_int_list, mpci_link) {
+		kprintf("MPTABLE: %d:%d INT%c -> IOAPIC %d.%d\n",
+			pci_int->mpci_bus,
+			pci_int->mpci_dev,
+			pci_int->mpci_pin + 'A',
+			pci_int->mpci_ioapic_idx,
+			pci_int->mpci_ioapic_pin);
+	}
+}
+
+int
+mptable_pci_int_route(int bus, int dev, int pin, int intline)
+{
+	const struct mptable_pci_int *pci_int;
+	int irq = -1;
+
+	KKASSERT(pin >= 1);
+	--pin;	/* zero based */
+
+	TAILQ_FOREACH(pci_int, &mptable_pci_int_list, mpci_link) {
+		if (pci_int->mpci_bus == bus &&
+		    pci_int->mpci_dev == dev &&
+		    pci_int->mpci_pin == pin)
+			break;
+	}
+	if (pci_int != NULL) {
+		int gsi;
+
+		gsi = ioapic_gsi(pci_int->mpci_ioapic_idx,
+			pci_int->mpci_ioapic_pin);
+		if (gsi >= 0) {
+			irq = ioapic_abi_find_gsi(gsi,
+				INTR_TRIGGER_LEVEL, INTR_POLARITY_LOW);
+		}
+	}
+
+	if (irq < 0) {
+		if (bootverbose) {
+			kprintf("MPTABLE: fixed interrupt routing "
+				"for %d:%d INT%c\n", bus, dev, pin + 'A');
+		}
+
+		irq = ioapic_abi_find_irq(intline,
+			INTR_TRIGGER_LEVEL, INTR_POLARITY_LOW);
+	}
+
+	if (irq >= 0 && bootverbose) {
+		kprintf("MPTABLE: %d:%d INT%c routed to irq %d\n",
+			bus, dev, pin + 'A', irq);
+	}
+	return irq;
+}

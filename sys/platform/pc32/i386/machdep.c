@@ -923,7 +923,7 @@ void
 cpu_idle(void)
 {
 	globaldata_t gd = mycpu;
-	struct thread *td = gd->gd_curthread;
+	struct thread *td __debugvar = gd->gd_curthread;
 	int reqflags;
 	int quick;
 
@@ -1876,13 +1876,13 @@ do_next:
 }
 
 #ifdef SMP
+int ioapic_use_old = 0;
+
 #ifdef APIC_IO
 int apic_io_enable = 1; /* Enabled by default for kernels compiled w/APIC_IO */
 #else
 int apic_io_enable = 0; /* Disabled by default for kernels compiled without */
 #endif
-TUNABLE_INT("hw.apic_io_enable", &apic_io_enable);
-extern struct machintr_abi MachIntrABI_APIC;
 #endif
 
 struct machintr_abi MachIntrABI;
@@ -1946,6 +1946,7 @@ init386(int first)
 	MachIntrABI = MachIntrABI_ICU;
 #ifdef SMP
 	TUNABLE_INT_FETCH("hw.apic_io_enable", &apic_io_enable);
+	TUNABLE_INT_FETCH("hw.ioapic_use_old", &ioapic_use_old);
 #endif
 
 	/*
