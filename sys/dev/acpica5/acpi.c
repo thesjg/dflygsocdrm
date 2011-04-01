@@ -351,7 +351,7 @@ acpi_identify(driver_t *driver, device_t parent)
     if (power_pm_get_type() != POWER_PM_TYPE_NONE &&
 	power_pm_get_type() != POWER_PM_TYPE_ACPI) {
 	printf("ACPI identify failed, other PM system enabled.\n");
-	return_void;
+	return_VOID;
     }
 #endif
 
