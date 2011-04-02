@@ -41,8 +41,6 @@
 #include <dev/acpica5/acpivar.h>
 #include "acutils.h"
 
-#define ACPI_LENOVO_S10 1
-
 /* Hooks for the ACPI CA debugging infrastructure */
 #define _COMPONENT	ACPI_EC
 ACPI_MODULE_NAME("EC")
@@ -154,11 +152,7 @@ struct acpi_ec_softc {
     int			ec_glkhandle;
     int			ec_burstactive;
     int			ec_sci_pend;
-#ifdef ACPI_LENOVO_S10
-    volatile u_int	ec_gencount;
-#else
     u_int		ec_gencount;
-#endif
     int			ec_suspending;
 };
 
@@ -170,11 +164,7 @@ struct acpi_ec_softc {
 #define EC_LOCK_TIMEOUT	1000
 
 /* Default delay in microseconds between each run of the status polling loop. */
-#ifdef ACPI_LENOVO_S10
-#define EC_POLL_DELAY	50
-#else
 #define EC_POLL_DELAY	5
-#endif
 
 /* Total time in ms spent waiting for a response from EC. */
 #define EC_TIMEOUT	750
@@ -208,37 +198,23 @@ EcLock(struct acpi_ec_softc *sc)
 {
     ACPI_STATUS	status;
 
-#ifndef ACPI_LENOVO_S10
     ACPI_SERIAL_BEGIN(ec);
-#endif
     /* If _GLK is non-zero, acquire the global lock. */
     status = AE_OK;
     if (sc->ec_glk) {
 	status = AcpiAcquireGlobalLock(EC_LOCK_TIMEOUT, &sc->ec_glkhandle);
 	if (ACPI_FAILURE(status))
-#ifdef ACPI_LENOVO_S10
-	    return (status);
-#else
 	    ACPI_SERIAL_END(ec);
-#endif
     }
-#ifdef ACPI_LENOVO_S10
-    ACPI_SERIAL_BEGIN(ec);
-#endif
     return (status);
 }
 
 static void
 EcUnlock(struct acpi_ec_softc *sc)
 {
-#ifdef ACPI_LENOVO_S10
-    ACPI_SERIAL_END(ec);
-#endif
     if (sc->ec_glk)
 	AcpiReleaseGlobalLock(sc->ec_glkhandle);
-#ifndef ACPI_LENOVO_S10
     ACPI_SERIAL_END(ec);
-#endif
 }
 
 static uint32_t		EcGpeHandler(ACPI_HANDLE GpeDevice,
@@ -254,13 +230,8 @@ static ACPI_STATUS	EcWaitEvent(struct acpi_ec_softc *sc, EC_EVENT Event,
 static ACPI_STATUS	EcCommand(struct acpi_ec_softc *sc, EC_COMMAND cmd);
 static ACPI_STATUS	EcRead(struct acpi_ec_softc *sc, UINT8 Address,
 				UINT8 *Data);
-#ifdef ACPI_LENOVO_S10
-static ACPI_STATUS	EcWrite(struct acpi_ec_softc *sc, UINT8 Address,
-				UINT8 Data);
-#else
 static ACPI_STATUS	EcWrite(struct acpi_ec_softc *sc, UINT8 Address,
 				UINT8 *Data);
-#endif
 static int		acpi_ec_probe(device_t dev);
 static int		acpi_ec_attach(device_t dev);
 static int		acpi_ec_suspend(device_t dev);
@@ -629,40 +600,12 @@ acpi_ec_write_method(device_t dev, u_int addr, ACPI_INTEGER val, int width)
     return (0);
 }
 
-#ifdef ACPI_LENOVO_S10
-static ACPI_STATUS
-EcCheckStatus(struct acpi_ec_softc *sc, const char *msg, EC_EVENT event)
-{
-    ACPI_STATUS status;
-    EC_STATUS ec_status;
-
-    status = AE_NO_HARDWARE_RESPONSE;
-    ec_status = EC_GET_CSR(sc);
-    if (sc->ec_burstactive && !(ec_status & EC_FLAG_BURST_MODE)) {
-#if 0
-	CTR1(KTR_ACPI, "ec burst disabled in waitevent (%s)", msg);
-#endif
-	sc->ec_burstactive = FALSE;
-    }
-    if (EVENT_READY(event, ec_status)) {
-#if 0
-	CTR2(KTR_ACPI, "ec %s wait ready, status %#x", msg, ec_status);
-#endif
-	status = AE_OK;
-    }
-    return (status);
-}
-#endif
-
 static void
 EcGpeQueryHandler(void *Context)
 {
     struct acpi_ec_softc	*sc = (struct acpi_ec_softc *)Context;
     UINT8			Data;
     ACPI_STATUS			Status;
-#ifdef ACPI_LENOVO_S10
-    int				retry;
-#endif
     char			qxx[5];
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
@@ -683,20 +626,7 @@ EcGpeQueryHandler(void *Context)
      * that may arise from running the query from causing another query
      * to be queued, we clear the pending flag only after running it.
      */
-#ifdef ACPI_LENOVO_S10
-    for (retry = 0; retry < 2; retry++) {
-	Status = EcCommand(sc, EC_COMMAND_QUERY);
-	if (ACPI_SUCCESS(Status))
-	    break;
-	if (EcCheckStatus(sc, "retr_check",
-	    EC_EVENT_INPUT_BUFFER_EMPTY) == AE_OK)
-	    continue;
-	else
-	    break;
-    }
-#else
     Status = EcCommand(sc, EC_COMMAND_QUERY);
-#endif
     sc->ec_sci_pend = FALSE;
     if (ACPI_FAILURE(Status)) {
 	EcUnlock(sc);
@@ -761,11 +691,7 @@ EcGpeHandler(ACPI_HANDLE GpeDevice, UINT32 GpeNumber, void *Context)
      * address and then data values.)
      */
     atomic_add_int(&sc->ec_gencount, 1);
-#ifdef ACPI_LENOVO_S10
-    wakeup(sc);
-#else
     wakeup(&sc->ec_gencount);
-#endif
 
     /*
      * If the EC_SCI bit of the status register is set, queue a query handler.
@@ -809,53 +735,26 @@ EcSpaceHandler(UINT32 Function, ACPI_PHYSICAL_ADDRESS Address, UINT32 width,
 	       ACPI_INTEGER *Value, void *Context, void *RegionContext)
 {
     struct acpi_ec_softc	*sc = (struct acpi_ec_softc *)Context;
-#ifdef ACPI_LENOVO_S10
-    ACPI_PHYSICAL_ADDRESS	EcAddr;
-    UINT8			*EcData;
-    ACPI_STATUS			Status;
-#else
     ACPI_STATUS			Status;
     UINT8			EcAddr, EcData;
     int				i;
-#endif
 
     ACPI_FUNCTION_TRACE_U32((char *)(uintptr_t)__func__, (UINT32)Address);
 
-#ifdef ACPI_LENOVO_S10
-    if (Function != ACPI_READ && Function != ACPI_WRITE)
-	return_ACPI_STATUS (AE_BAD_PARAMETER);
-#endif
     if (width % 8 != 0 || Value == NULL || Context == NULL)
 	return_ACPI_STATUS (AE_BAD_PARAMETER);
-#ifdef ACPI_LENOVO_S10
-    if (Address + width / 8 > 256)
-	return_ACPI_STATUS (AE_BAD_ADDRESS);
-#else
     if (Address + (width / 8) - 1 > 0xFF)
 	return_ACPI_STATUS (AE_BAD_ADDRESS);
-#endif
 
-#ifndef ACPI_LENOVO_S10
     if (Function == ACPI_READ)
 	*Value = 0;
     EcAddr = Address;
     Status = AE_ERROR;
-#endif
 
     /*
      * If booting, check if we need to run the query handler.  If so, we
      * we call it directly here since our thread taskq is not active yet.
      */
-#ifdef ACPI_LENOVO_S10
-    if (cold || rebooting || sc->ec_suspending) {
-	if ((EC_GET_CSR(sc) & EC_EVENT_SCI)) {
-#if 0
-	    CTR0(KTR_ACPI, "ec running gpe handler directly");
-#endif
-	    EcGpeQueryHandler(sc);
-	}
-    }
-#else
     if (cold || rebooting) {
 	if ((EC_GET_CSR(sc) & EC_EVENT_SCI)) {
 #if 0
@@ -864,7 +763,6 @@ EcSpaceHandler(UINT32 Function, ACPI_PHYSICAL_ADDRESS Address, UINT32 width,
 	    EcGpeQueryHandler(sc);
 	}
     }
-#endif
 
     /* Serialize with EcGpeQueryHandler() at transaction granularity. */
     Status = EcLock(sc);
@@ -872,40 +770,7 @@ EcSpaceHandler(UINT32 Function, ACPI_PHYSICAL_ADDRESS Address, UINT32 width,
 	return_ACPI_STATUS (Status);
     }
 
-#ifdef ACPI_LENOVO_S10
-    /* If we can't start burst mode, continue anyway. */
-    Status = EcCommand(sc, EC_COMMAND_BURST_ENABLE);
-    if (ACPI_SUCCESS(Status)) {
-	if (EC_GET_DATA(sc) == EC_BURST_ACK) {
-#if 0
-	    CTR0(KTR_ACPI, "ec burst enabled");
-#endif
-	    sc->ec_burstactive = TRUE;
-	}
-    }
-#endif
-
     /* Perform the transaction(s), based on width. */
-#ifdef ACPI_LENOVO_S10
-    EcAddr = Address;
-    EcData = (UINT8 *)Value;
-    if (Function == ACPI_READ)
-	*Value = 0;
-    do {
-	switch (Function) {
-	case ACPI_READ:
-	    Status = EcRead(sc, EcAddr, EcData);
-	    break;
-	case ACPI_WRITE:
-	    Status = EcWrite(sc, EcAddr, *EcData);
-	    break;
-	}
-	if (ACPI_FAILURE(Status))
-	    break;
-	EcAddr++;
-	EcData++;
-    } while (EcAddr < Address + width / 8);
-#else
     for (i = 0; i < width; i += 8, EcAddr++) {
 	switch (Function) {
 	case ACPI_READ:
@@ -926,24 +791,11 @@ EcSpaceHandler(UINT32 Function, ACPI_PHYSICAL_ADDRESS Address, UINT32 width,
 	if (ACPI_FAILURE(Status))
 	    break;
     }
-#endif
-
-#ifdef ACPI_LENOVO_S10
-    if (sc->ec_burstactive) {
-	sc->ec_burstactive = FALSE;
-	EcCommand(sc, EC_COMMAND_BURST_DISABLE);
-#if 0
-	if (ACPI_SUCCESS(EcCommand(sc, EC_COMMAND_BURST_DISABLE)))
-	    CTR0(KTR_ACPI, "ec disabled burst ok");
-#endif
-    }
-#endif
 
     EcUnlock(sc);
     return_ACPI_STATUS (Status);
 }
 
-#ifndef ACPI_LENOVO_S10
 static ACPI_STATUS
 EcCheckStatus(struct acpi_ec_softc *sc, const char *msg, EC_EVENT event)
 {
@@ -966,26 +818,15 @@ EcCheckStatus(struct acpi_ec_softc *sc, const char *msg, EC_EVENT event)
     }
     return (status);
 }
-#endif
 
 static ACPI_STATUS
 EcWaitEvent(struct acpi_ec_softc *sc, EC_EVENT Event, u_int gen_count)
 {
-#ifdef ACPI_LENOVO_S10
-    static int	no_intr = 0;
-#endif
     ACPI_STATUS	Status;
-#ifdef ACPI_LENOVO_S10
-    int		count, i, need_poll, slp_ival;
-#else
     int		count, i, slp_ival;
-#endif
 
     ACPI_SERIAL_ASSERT(ec);
     Status = AE_NO_HARDWARE_RESPONSE;
-#ifdef ACPI_LENOVO_S10
-    need_poll = cold || rebooting || ec_polled_mode || sc->ec_suspending;
-#else
     int need_poll = cold || rebooting || ec_polled_mode || sc->ec_suspending;
     /*
      * The main CPU should be much faster than the EC.  So the status should
@@ -1011,25 +852,17 @@ EcWaitEvent(struct acpi_ec_softc *sc, EC_EVENT Event, u_int gen_count)
 	    AcpiOsStall(10);
 	}
     }
-#endif
 
     /* Wait for event by polling or GPE (interrupt). */
     if (need_poll) {
 	count = (ec_timeout * 1000) / EC_POLL_DELAY;
 	if (count == 0)
 	    count = 1;
-#ifdef ACPI_LENOVO_S10
-	DELAY(10);
-#endif
 	for (i = 0; i < count; i++) {
 	    Status = EcCheckStatus(sc, "poll", Event);
 	    if (Status == AE_OK)
 		break;
-#ifdef ACPI_LENOVO_S10
-	    DELAY(EC_POLL_DELAY);
-#else
 	    AcpiOsStall(EC_POLL_DELAY);
-#endif
 	}
     } else {
 	slp_ival = hz / 1000;
@@ -1048,25 +881,6 @@ EcWaitEvent(struct acpi_ec_softc *sc, EC_EVENT Event, u_int gen_count)
 	 * EC query).
 	 */
 	for (i = 0; i < count; i++) {
-#ifdef ACPI_LENOVO_S10
-	    if (gen_count == sc->ec_gencount)
-		tsleep(sc, 0, "ecgpe", slp_ival);
-	    /*
-	     * Record new generation count.  It's possible the GPE was
-	     * just to notify us that a query is needed and we need to
-	     * wait for a second GPE to signal the completion of the
-	     * event we are actually waiting for.
-	     */
-	    Status = EcCheckStatus(sc, "sleep", Event);
-	    if (Status == AE_OK) {
-		if (gen_count == sc->ec_gencount)
-		    no_intr++;
-		else
-		    no_intr = 0;
-		break;
-	    }
-	    gen_count = sc->ec_gencount;
-#else
 	    if (gen_count != sc->ec_gencount) {
 		/*
 		 * Record new generation count.  It's possible the GPE was
@@ -1080,18 +894,8 @@ EcWaitEvent(struct acpi_ec_softc *sc, EC_EVENT Event, u_int gen_count)
 		    break;
 	    }
 	    tsleep(&sc->ec_gencount, PZERO, "ecgpe", slp_ival);
-#endif
 	}
 
-#ifdef ACPI_LENOVO_S10
-	/*
-	 * We finished waiting for the GPE and it never arrived.  Try to
-	 * read the register once and trust whatever value we got.  This is
-	 * the best we can do at this point.
-	 */
-	if (Status != AE_OK)
-	    Status = EcCheckStatus(sc, "sleep_end", Event);
-#else
 	/*
 	 * We finished waiting for the GPE and it never arrived.  Try to
 	 * read the register once and trust whatever value we got.  This is
@@ -1105,15 +909,7 @@ EcWaitEvent(struct acpi_ec_softc *sc, EC_EVENT Event, u_int gen_count)
 		Status == AE_OK ? "" : "no ");
 	    ec_polled_mode = TRUE;
 	}
-#endif
     }
-#ifdef ACPI_LENOVO_S10
-    if (!need_poll && no_intr > 10) {
-	device_printf(sc->ec_dev,
-	    "not getting interrupts, switched to polled mode\n");
-	ec_polled_mode = 1;
-    }
-#endif
 #if 0
     if (Status != AE_OK)
 	    CTR0(KTR_ACPI, "error: ec wait timed out");
@@ -1151,15 +947,6 @@ EcCommand(struct acpi_ec_softc *sc, EC_COMMAND cmd)
 	return (AE_BAD_PARAMETER);
     }
 
-#ifdef ACPI_LENOVO_S10
-    /*
-     * Ensure empty input buffer before issuing command.
-     * Use generation count of zero to force a quick check.
-     */
-    status = EcWaitEvent(sc, EC_EVENT_INPUT_BUFFER_EMPTY, 0);
-    if (ACPI_FAILURE(status))
-	return (status);
-#endif
     /* Run the command and wait for the chosen event. */
 #if 0
     CTR1(KTR_ACPI, "ec running command %#x", cmd);
@@ -1183,20 +970,13 @@ static ACPI_STATUS
 EcRead(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
 {
     ACPI_STATUS	status;
-#ifndef ACPI_LENOVO_S10
     UINT8 data;
-#endif
     u_int gen_count;
-#ifdef ACPI_LENOVO_S10
-    int retry;
-#endif
 
     ACPI_SERIAL_ASSERT(ec);
 #if 0
     CTR1(KTR_ACPI, "ec read from %#x", Address);
 #endif
-
-#ifndef ACPI_LENOVO_S10
     /* If we can't start burst mode, continue anyway. */
     status = EcCommand(sc, EC_COMMAND_BURST_ENABLE);
     if (status == AE_OK) {
@@ -1208,30 +988,7 @@ EcRead(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
 	    sc->ec_burstactive = TRUE;
 	}
     }
-#endif
 
-#ifdef ACPI_LENOVO_S10
-    for (retry = 0; retry < 2; retry++) {
-	status = EcCommand(sc, EC_COMMAND_READ);
-	if (ACPI_FAILURE(status))
-	    return (status);
-
-	gen_count = sc->ec_gencount;
-	EC_SET_DATA(sc, Address);
-	status = EcWaitEvent(sc, EC_EVENT_OUTPUT_BUFFER_FULL, gen_count);
-	if (ACPI_FAILURE(status)) {
-	    if (EcCheckStatus(sc, "retr_check",
-		EC_EVENT_INPUT_BUFFER_EMPTY) == AE_OK)
-		continue;
-	    else
-		break;
-	}
-	*Data = EC_GET_DATA(sc);
-	return (AE_OK);
-    }
-    device_printf(sc->ec_dev, "EcRead: failed waiting to get data\n");
-    return (status);
-#else
     status = EcCommand(sc, EC_COMMAND_READ);
     if (ACPI_FAILURE(status))
 	return (status);
@@ -1256,20 +1013,13 @@ EcRead(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
     }
 
     return (AE_OK);
-#endif
 }
 
 static ACPI_STATUS
-#ifdef ACPI_LENOVO_S10
-EcWrite(struct acpi_ec_softc *sc, UINT8 Address, UINT8 Data)
-#else
 EcWrite(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
-#endif
 {
     ACPI_STATUS	status;
-#ifndef ACPI_LENOVO_S10
     UINT8 data;
-#endif
     u_int gen_count;
 
     ACPI_SERIAL_ASSERT(ec);
@@ -1277,7 +1027,6 @@ EcWrite(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
     CTR2(KTR_ACPI, "ec write to %#x, data %#x", Address, *Data);
 #endif
 
-#ifndef ACPI_LENOVO_S10
     /* If we can't start burst mode, continue anyway. */
     status = EcCommand(sc, EC_COMMAND_BURST_ENABLE);
     if (status == AE_OK) {
@@ -1289,7 +1038,6 @@ EcWrite(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
 	    sc->ec_burstactive = TRUE;
 	}
     }
-#endif
 
     status = EcCommand(sc, EC_COMMAND_WRITE);
     if (ACPI_FAILURE(status))
@@ -1304,18 +1052,13 @@ EcWrite(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
     }
 
     gen_count = sc->ec_gencount;
-#ifdef ACPI_LENOVO_S10
-    EC_SET_DATA(sc, Data);
-#else
     EC_SET_DATA(sc, *Data);
-#endif
     status = EcWaitEvent(sc, EC_EVENT_INPUT_BUFFER_EMPTY, gen_count);
     if (ACPI_FAILURE(status)) {
 	device_printf(sc->ec_dev, "EcWrite: failed waiting for sent data\n");
 	return (status);
     }
 
-#ifndef ACPI_LENOVO_S10
     if (sc->ec_burstactive) {
 	sc->ec_burstactive = FALSE;
 	status = EcCommand(sc, EC_COMMAND_BURST_DISABLE);
@@ -1325,7 +1068,6 @@ EcWrite(struct acpi_ec_softc *sc, UINT8 Address, UINT8 *Data)
 	CTR0(KTR_ACPI, "ec disabled burst ok");
 #endif
     }
-#endif
 
     return (AE_OK);
 }
