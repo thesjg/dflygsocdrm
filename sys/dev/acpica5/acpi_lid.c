@@ -41,6 +41,8 @@
 
 #include <dev/acpica5/acpivar.h>
 
+#define ACPI_LENOVO_S10 1
+
 /* Hooks for the ACPI CA debugging infrastructure */
 #define _COMPONENT	ACPI_BUTTON
 ACPI_MODULE_NAME("LID")
@@ -99,6 +101,9 @@ acpi_lid_probe(device_t dev)
 static int
 acpi_lid_attach(device_t dev)
 {
+#ifdef ACPI_LENOVO_S10
+    struct acpi_prw_data	prw;
+#endif
     struct acpi_lid_softc	*sc;
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
@@ -117,8 +122,15 @@ acpi_lid_attach(device_t dev)
     AcpiInstallNotifyHandler(sc->lid_handle, ACPI_DEVICE_NOTIFY,
 			     acpi_lid_notify_handler, sc);
 
+#ifdef ACPI_LENOVO_S10
+    /* Enable the GPE for wake/runtime. */
+    acpi_wake_set_enable(dev, 1);
+    if (acpi_parse_prw(sc->lid_handle, &prw) == 0)
+	AcpiEnableGpe(prw.gpe_handle, prw.gpe_bit);
+#else
     /* Enable the GPE for wake */
     acpi_wake_set_enable(dev, 1);
+#endif
 
     return (0);
 }
