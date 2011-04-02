@@ -208,37 +208,23 @@ EcLock(struct acpi_ec_softc *sc)
 {
     ACPI_STATUS	status;
 
-#ifndef ACPI_LENOVO_S10
     ACPI_SERIAL_BEGIN(ec);
-#endif
     /* If _GLK is non-zero, acquire the global lock. */
     status = AE_OK;
     if (sc->ec_glk) {
 	status = AcpiAcquireGlobalLock(EC_LOCK_TIMEOUT, &sc->ec_glkhandle);
 	if (ACPI_FAILURE(status))
-#ifdef ACPI_LENOVO_S10
-	    return (status);
-#else
 	    ACPI_SERIAL_END(ec);
-#endif
     }
-#ifdef ACPI_LENOVO_S10
-    ACPI_SERIAL_BEGIN(ec);
-#endif
     return (status);
 }
 
 static void
 EcUnlock(struct acpi_ec_softc *sc)
 {
-#ifdef ACPI_LENOVO_S10
-    ACPI_SERIAL_END(ec);
-#endif
     if (sc->ec_glk)
 	AcpiReleaseGlobalLock(sc->ec_glkhandle);
-#ifndef ACPI_LENOVO_S10
     ACPI_SERIAL_END(ec);
-#endif
 }
 
 static uint32_t		EcGpeHandler(ACPI_HANDLE GpeDevice,
