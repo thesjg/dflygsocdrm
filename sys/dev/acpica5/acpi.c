@@ -1640,12 +1640,14 @@ acpi_probe_child(ACPI_HANDLE handle, UINT32 level, void *context, void **status)
 
 	    if (type == ACPI_TYPE_DEVICE && acpi_parse_prw(handle, &prw) == 0)
 		AcpiSetupGpeForWake(handle, prw.gpe_handle, prw.gpe_bit);
+
 	    /* 
 	     * Create a placeholder device for this node.  Sort the
 	     * placeholder so that the probe/attach passes will run
 	     * breadth-first.  Orders less than ACPI_DEV_BASE_ORDER
 	     * are reserved for special objects (i.e., system
-	     * resources).
+	     * resources).  CPU devices have a very high order to
+	     * ensure they are probed after other devices.
 	     */
 	    ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "scanning '%s'\n", handle_str));
 	    order = level * 10 + 100;
