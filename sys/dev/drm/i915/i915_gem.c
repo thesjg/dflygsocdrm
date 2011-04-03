@@ -153,19 +153,37 @@ i915_gem_create_ioctl(struct drm_device *dev, void *data,
 }
 
 static inline int
+#ifdef __linux__
 fast_shmem_read(struct page **pages,
 		loff_t page_base, int page_offset,
 		char __user *data,
 		int length)
+#else
+fast_shmem_read(DRM_PAGE_T *pages,
+		loff_t page_base, int page_offset,
+		char __user *data,
+		int length)
+#endif
 {
 	char __iomem *vaddr;
 	int unwritten;
+#ifndef __linux__
+	DRM_LWBUF_T lwb;
+#endif
 
+#ifdef __linux__
 	vaddr = kmap_atomic(pages[page_base >> PAGE_SHIFT], KM_USER0);
+#else
+	vaddr = drm_kmap_atomic(pages[page_base >> PAGE_SHIFT], &lwb);
+#endif
 	if (vaddr == NULL)
 		return -ENOMEM;
 	unwritten = __copy_to_user_inatomic(data, vaddr + page_offset, length);
+#ifdef __linux__
 	kunmap_atomic(vaddr, KM_USER0);
+#else
+	drm_kunmap_atomic(vaddr, lwb);
+#endif
 
 	if (unwritten)
 		return -EFAULT;
@@ -356,9 +374,15 @@ i915_gem_shmem_pread_fast(struct drm_device *dev, struct drm_gem_object *obj,
 		if ((page_offset + remain) > PAGE_SIZE)
 			page_length = PAGE_SIZE - page_offset;
 
+#ifdef __linux__
 		ret = fast_shmem_read(obj_priv->pages,
 				      page_base, page_offset,
 				      user_data, page_length);
+#else
+		ret = fast_shmem_read(obj_priv->pages_legacy,
+				      page_base, page_offset,
+				      user_data, page_length);
+#endif
 		if (ret)
 			goto fail_put_pages;
 
@@ -564,10 +588,8 @@ i915_gem_pread_ioctl(struct drm_device *dev, void *data,
 	if (i915_gem_object_needs_bit17_swizzle(obj)) {
 		ret = i915_gem_shmem_pread_slow(dev, obj, args, file_priv);
 	} else {
-#ifdef __linux__ /* UNIMPLEMENTED */
 		ret = i915_gem_shmem_pread_fast(dev, obj, args, file_priv);
 		if (ret != 0)
-#endif
 			ret = i915_gem_shmem_pread_slow(dev, obj, args,
 							file_priv);
 	}
@@ -643,22 +665,37 @@ slow_kernel_write(struct io_mapping *mapping,
 }
 
 static inline int
-fast_shmem_write(DRM_VM_OBJECT_T pages,
+#ifdef __linux__
+fast_shmem_write(struct page **pages,
 		 loff_t page_base, int page_offset,
 		 char __user *data,
 		 int length)
+#else
+fast_shmem_write(DRM_PAGE_T *pages,
+		 loff_t page_base, int page_offset,
+		 char __user *data,
+		 int length)
+#endif
 {
 	char __iomem *vaddr;
 	unsigned long unwritten;
-
+#ifndef __linux__
 	DRM_LWBUF_T lwbuf;
-	vm_page_t p = vm_page_lookup(pages, page_base >> PAGE_SHIFT);
+#endif
 
-	vaddr = drm_kmap_atomic(p, &lwbuf);
+#ifdef __linux__
+	vaddr = kmap_atomic(pages[page_base >> PAGE_SHIFT], KM_USER0);
+#else
+	vaddr = drm_kmap_atomic(pages[page_base >> PAGE_SHIFT], &lwbuf);
+#endif
 	if (vaddr == NULL)
 		return -ENOMEM;
 	unwritten = __copy_from_user_inatomic(vaddr + page_offset, data, length);
+#ifdef __linux__
+	kunmap_atomic(vaddr, KM_USER0);
+#else
 	drm_kunmap_atomic(vaddr, lwbuf);
+#endif
 
 	if (unwritten)
 		return -EFAULT;
@@ -756,10 +793,10 @@ i915_gem_gtt_pwrite_slow(struct drm_device *dev, struct drm_gem_object *obj,
 	loff_t pinned_pages, i;
 #ifdef __linux__
 	struct page **user_pages;
+	struct mm_struct *mm = DRM_GET_CURRENT_MM();
 #else
 	DRM_PAGE_T *user_pages;
 #endif
-	struct mm_struct *mm = DRM_GET_CURRENT_MM();
 	int gtt_page_offset, data_page_offset, data_page_index, page_length;
 	int ret;
 	uint64_t data_ptr = args->data_ptr;
@@ -909,9 +946,15 @@ i915_gem_shmem_pwrite_fast(struct drm_device *dev, struct drm_gem_object *obj,
 		if ((page_offset + remain) > PAGE_SIZE)
 			page_length = PAGE_SIZE - page_offset;
 
-		ret = fast_shmem_write(obj->object,
+#ifdef __linux__
+		ret = fast_shmem_write(obj_priv->pages,
 				       page_base, page_offset,
 				       user_data, page_length);
+#else
+		ret = fast_shmem_write(obj_priv->pages_legacy,
+				       page_base, page_offset,
+				       user_data, page_length);
+#endif
 		if (ret)
 			goto fail_put_pages;
 
@@ -1102,15 +1145,11 @@ i915_gem_pwrite_ioctl(struct drm_device *dev, void *data,
 		ret = i915_gem_phys_pwrite(dev, obj, args, file_priv);
 	else if (obj_priv->tiling_mode == I915_TILING_NONE &&
 		 dev->gtt_total != 0) {
-#ifdef __linux__ /* UNIMPLEMENTED */
 		ret = i915_gem_gtt_pwrite_fast(dev, obj, args, file_priv);
 		if (ret == -EFAULT) {
-#endif
 			ret = i915_gem_gtt_pwrite_slow(dev, obj, args,
 						       file_priv);
-#ifdef __linux__ /* UNIMPLEMENTED */
 		}
-#endif
 	} else if (i915_gem_object_needs_bit17_swizzle(obj)) {
 		ret = i915_gem_shmem_pwrite_slow(dev, obj, args, file_priv);
 	} else {
@@ -1254,9 +1293,11 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 	struct drm_gem_object *obj;
 	loff_t offset;
 	unsigned long addr;
+#ifndef __linux__
 	int retcode;
 	struct vmspace *vms = DRM_CURPROC->td_proc->p_vmspace;
 	vm_offset_t vaddr = 0;
+#endif
 
 	if (!(dev->driver->driver_features & DRIVER_GEM))
 		return -ENODEV;
@@ -1267,7 +1308,7 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 
 	offset = args->offset;
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__
 	down_write(&current->mm->mmap_sem);
 	addr = do_mmap(obj->filp, 0, args->size,
 		       PROT_READ | PROT_WRITE, MAP_SHARED,
@@ -1294,6 +1335,7 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 	return 0;
 }
 
+/* UNIMPLEMENTED */
 /**
  * i915_gem_fault - fault a page into the GTT
  * vma: VMA in question
@@ -1350,6 +1392,7 @@ int i915_gem_fault(struct vm_area_struct *vma, struct vm_fault *vmf)
 		page_offset;
 
 	/* Finally, remap it using the new GTT offset */
+/* UNIMPLEMENTED */
 	ret = vm_insert_pfn(vma, (unsigned long)vmf->virtual_address, pfn);
 unlock:
 	mutex_unlock(&dev->struct_mutex);
