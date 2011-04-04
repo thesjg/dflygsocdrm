@@ -1,4 +1,4 @@
-// std::ctype implementation details, generic version -*- C++ -*-
+// std::ctype implementation details, GNU version -*- C++ -*-
 
 // Copyright (C) 2001, 2002, 2003, 2004, 2005, 2006, 2007, 2008, 2009
 // Free Software Foundation, Inc.
@@ -30,17 +30,19 @@
 // Written by Benjamin Kosnik <bkoz@redhat.com>
 
 #include <locale>
+#include <bits/c++locale_internal.h>
 #include <cstdlib>
 #include <cstring>
 #include <cstdio>
 
-_GLIBCXX_BEGIN_NAMESPACE(std)
-
+namespace std
+{
   // NB: The other ctype<char> specializations are in src/locale.cc and
   // various /config/os/* files.
+
   ctype_byname<char>::ctype_byname(const char* __s, size_t __refs)
   : ctype<char>(0, false, __refs) 
-  { 	
+  { 		
     if (std::strcmp(__s, "C") != 0 && std::strcmp(__s, "POSIX") != 0)
       {
 	this->_S_destroy_c_locale(this->_M_c_locale_ctype);
@@ -53,48 +55,10 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
 
 #ifdef _GLIBCXX_USE_WCHAR_T  
   ctype<wchar_t>::__wmask_type
-  ctype<wchar_t>::_M_convert_to_wmask(const mask __m) const
+  ctype<wchar_t>::_M_convert_to_wmask(const mask /* __m */) const
   {
-    __wmask_type __ret;
-    switch (__m)
-      {
-      case space:
-	__ret = wctype("space");
-	break;
-      case print:
-	__ret = wctype("print");
-	break;
-      case cntrl:
-	__ret = wctype("cntrl");
-	break;
-      case upper:
-	__ret = wctype("upper");
-	break;
-      case lower:
-	__ret = wctype("lower");
-	break;
-      case alpha:
-	__ret = wctype("alpha");
-	break;
-      case digit:
-	__ret = wctype("digit");
-	break;
-      case punct:
-	__ret = wctype("punct");
-	break;
-      case xdigit:
-	__ret = wctype("xdigit");
-	break;
-      case alnum:
-	__ret = wctype("alnum");
-	break;
-      case graph:
-	__ret = wctype("graph");
-	break;
-      default:
-	__ret = __wmask_type();
-      }
-    return __ret;
+    // This routine never gets called on DragonFly.
+    return 0;
   };
   
   wchar_t
@@ -127,65 +91,11 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
     return __hi;
   }
 
-  bool
-  ctype<wchar_t>::
-  do_is(mask __m, char_type __c) const
-  { 
-    bool __ret = false;
-    // Generically, 15 (instead of 10) since we don't know the numerical
-    // encoding of the various categories in /usr/include/ctype.h.
-    const size_t __bitmasksize = 15; 
-    for (size_t __bitcur = 0; __bitcur <= __bitmasksize; ++__bitcur)
-      if (__m & _M_bit[__bitcur]
-	  && iswctype(__c, _M_wmask[__bitcur]))
-	{
-	  __ret = true;
-	  break;
-	}
-    return __ret;    
-  }
-  
-  const wchar_t* 
-  ctype<wchar_t>::
-  do_is(const wchar_t* __lo, const wchar_t* __hi, mask* __vec) const
-  {
-    for (;__lo < __hi; ++__vec, ++__lo)
-      {
-	// Generically, 15 (instead of 10) since we don't know the numerical
-	// encoding of the various categories in /usr/include/ctype.h.
-	const size_t __bitmasksize = 15; 
-	mask __m = 0;
-	for (size_t __bitcur = 0; __bitcur <= __bitmasksize; ++__bitcur)
-	  if (iswctype(*__lo, _M_wmask[__bitcur]))
-	    __m |= _M_bit[__bitcur];
-	*__vec = __m;
-      }
-    return __hi;
-  }
-  
-  const wchar_t* 
-  ctype<wchar_t>::
-  do_scan_is(mask __m, const wchar_t* __lo, const wchar_t* __hi) const
-  {
-    while (__lo < __hi && !this->do_is(__m, *__lo))
-      ++__lo;
-    return __lo;
-  }
-
-  const wchar_t*
-  ctype<wchar_t>::
-  do_scan_not(mask __m, const char_type* __lo, const char_type* __hi) const
-  {
-    while (__lo < __hi && this->do_is(__m, *__lo) != 0)
-      ++__lo;
-    return __lo;
-  }
-
   wchar_t
   ctype<wchar_t>::
   do_widen(char __c) const
   { return _M_widen[static_cast<unsigned char>(__c)]; }
-  
+
   const char* 
   ctype<wchar_t>::
   do_widen(const char* __lo, const char* __hi, wchar_t* __dest) const
@@ -257,13 +167,6 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
     for (size_t __i = 0;
 	 __i < sizeof(_M_widen) / sizeof(wint_t); ++__i)
       _M_widen[__i] = btowc(__i);
-
-    for (size_t __i = 0; __i <= 15; ++__i)
-      { 
-	_M_bit[__i] = static_cast<mask>(1 << __i);
-	_M_wmask[__i] = _M_convert_to_wmask(_M_bit[__i]);
-      }  
   }
 #endif //  _GLIBCXX_USE_WCHAR_T
-
-_GLIBCXX_END_NAMESPACE
+}

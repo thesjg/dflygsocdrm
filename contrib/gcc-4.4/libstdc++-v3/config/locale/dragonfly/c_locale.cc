@@ -206,16 +206,47 @@ _GLIBCXX_BEGIN_NAMESPACE(std)
       delete [] __sav;
     }
 
+  /*  DragonFly's implemenation of setlocale won't accept something like
+      "de_DE".  According to nls manpage, the expected format is:
+      language[_territory][.codeset][@modifier], but it seems that both
+      the _territory and .codeset components are required.
+      
+      As an attempt to correct for this, we'll tack on ".UTF-8" if 
+      a period is not detected in the locale string.  
+
+      There are no locales with modifiers on DragonFly so if found, they
+      will just be stripped off silently.  e.g "de_DE@euro" will be reduced
+      to "de_DE".  The UTF-8 default would be added after that.
+  */
+
   void
-  locale::facet::_S_create_c_locale(__c_locale& __cloc, const char* __s, 
+  locale::facet::_S_create_c_locale(__c_locale& __cloc, const char* __s,
 				    __c_locale)
   {
-    // Currently, the generic model only supports the "C" locale.
-    // See http://gcc.gnu.org/ml/libstdc++/2003-02/msg00345.html
-    __cloc = NULL;
-    if (strcmp(__s, "C"))
+    const size_t size__s = (__s == NULL) ? 1 : strlen (__s);
+    const char UTF8[] = ".UTF-8";
+    char localspec[size__s + 6 + 1];
+    
+    if (__s == NULL) {
+       localspec[0] = NULL;
+    } else {
+       strcpy (localspec, __s);
+       char * pch = strchr (localspec, '@');
+       if (pch != NULL)
+          *pch = 0;
+
+       if (  (strchr (__s, '.') == NULL)
+          && (strcmp (__s, "C") != 0)
+          && (strcmp (__s, "POSIX") != 0))
+          strncat (localspec, UTF8, 6);
+    }
+
+    const char * result = std::setlocale(LC_ALL, localspec);
+    
+    if ((strcmp(result, "C") != 0) && (strcmp (result, localspec) != 0))
       __throw_runtime_error(__N("locale::facet::_S_create_c_locale "
 			    "name not valid"));
+    __cloc = 0;
   }
 
   void
