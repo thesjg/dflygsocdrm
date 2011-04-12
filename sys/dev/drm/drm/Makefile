@@ -1,6 +1,6 @@
 # $DragonFly: src/sys/dev/drm/drm/Makefile,v 1.1 2008/04/05 18:12:29 hasso Exp $
 
-.PATH:	${.CURDIR}/../porting ${.CURDIR}/..
+.PATH:	${.CURDIR}/..
 KMOD	= drm
 NO_MAN	= YES
 SRCS    = \

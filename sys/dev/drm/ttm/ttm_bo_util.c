@@ -38,7 +38,7 @@
 #include <linux/vmalloc.h>
 #include <linux/module.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_placement.h"
 #endif

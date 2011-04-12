@@ -47,11 +47,11 @@
 #include <linux/file.h>
 #include <linux/module.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #include "ttm/ttm_module.h"
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_placement.h"
-#include "porting/drm_porting_memory.h"
+#include "drm_porting_memory.h"
 #endif
 
 #define TTM_ASSERT_LOCKED(param)

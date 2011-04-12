@@ -35,7 +35,7 @@
 #include <linux/sched.h>
 #include <linux/module.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 #include "ttm/ttm_lock.h"
 #include "ttm/ttm_module.h"

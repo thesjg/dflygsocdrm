@@ -29,7 +29,7 @@
 
 #if defined(_KERNEL) || defined(__KERNEL__)
 
-#include "dev/drm/porting/drm_porting_include.h"
+#include "dev/drm/drm_porting_include.h"
 #include "dev/drm/drm_linux_list.h"
 #include "dev/drm/drm_atomic.h"
 

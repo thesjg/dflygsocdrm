@@ -43,14 +43,14 @@
 #include <asm/atomic.h>
 #include <asm/agp.h>
 #else /* __linux__ */
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif /* __linux__ */
 
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_page_alloc.h"
 
 #ifndef __linux__
-#include "porting/drm_porting_memory.h"
+#include "drm_porting_memory.h"
 #endif
 
 #define NUM_PAGES_TO_ALLOC		(PAGE_SIZE/sizeof(struct page *))

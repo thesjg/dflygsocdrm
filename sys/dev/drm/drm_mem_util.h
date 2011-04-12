@@ -30,7 +30,7 @@
 #ifdef __linux__
 #include <linux/vmalloc.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 
 static __inline__ void *drm_calloc_large(size_t nmemb, size_t size)

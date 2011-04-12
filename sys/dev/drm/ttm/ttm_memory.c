@@ -35,10 +35,10 @@
 #include <linux/module.h>
 #include <linux/slab.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #include "ttm/ttm_memory.h"
 #include "ttm/ttm_module.h"
-#include "porting/drm_porting_memory.h"
+#include "drm_porting_memory.h"
 #endif
 
 #define TTM_MEMORY_ALLOC_RETRIES 4

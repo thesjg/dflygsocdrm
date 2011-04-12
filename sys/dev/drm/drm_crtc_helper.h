@@ -40,7 +40,7 @@
 
 #include <linux/fb.h>
 #else /* __linux__ */
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif /* __linux__ */
 
 #include "drm_fb_helper.h"

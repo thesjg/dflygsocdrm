@@ -34,7 +34,7 @@
 #ifdef __linux__
 #include <linux/kernel.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 struct kobject;
 

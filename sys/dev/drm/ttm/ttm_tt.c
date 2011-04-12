@@ -36,7 +36,7 @@
 #include <linux/swap.h>
 #include <linux/slab.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 #include "drm_cache.h"
 #include "drm_mem_util.h"

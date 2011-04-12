@@ -66,7 +66,7 @@
 #include <linux/list.h>
 #include <linux/kref.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif /* __linux__ */
 
 #include <ttm/ttm_bo_api.h>

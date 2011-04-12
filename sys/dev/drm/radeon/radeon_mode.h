@@ -31,7 +31,7 @@
 #define RADEON_MODE_H
 
 #ifndef __linux__
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif /* !__linux__ */
 #include <drm_crtc.h>
 #include <drm_mode.h>

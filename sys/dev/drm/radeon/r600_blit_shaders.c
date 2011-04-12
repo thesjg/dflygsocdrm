@@ -28,7 +28,7 @@
 #include <linux/types.h>
 #include <linux/kernel.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 
 /*

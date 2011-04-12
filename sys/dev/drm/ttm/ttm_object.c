@@ -58,10 +58,10 @@
 #include <linux/module.h>
 #include <asm/atomic.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #include "ttm/ttm_object.h"
 #include "ttm/ttm_module.h"
-#include "porting/drm_porting_memory.h"
+#include "drm_porting_memory.h"
 #endif
 
 struct ttm_object_file {

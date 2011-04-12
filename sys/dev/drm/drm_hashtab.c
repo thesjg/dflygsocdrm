@@ -38,7 +38,7 @@
 #include "drm_hashtab.h"
 
 #if defined(__DragonFly__)
-#include "porting/drm_porting_hash.h"
+#include "drm_porting_hash.h"
 #else
 #include <sys/hash.h>
 #endif

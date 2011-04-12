@@ -36,7 +36,7 @@
 #include <linux/kobject.h>
 #include <linux/mm.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 
 /**

@@ -40,7 +40,7 @@
 #include <linux/io.h>
 #include <asm/agp.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 
 struct ttm_agp_backend {

@@ -33,7 +33,7 @@
 #include <linux/device.h>
 #include <linux/sched.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #endif
 #include "ttm/ttm_module.h"
 #ifdef __linux__

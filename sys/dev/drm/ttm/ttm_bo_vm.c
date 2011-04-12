@@ -37,7 +37,7 @@
 #include <linux/module.h>
 #include <linux/uaccess.h>
 #else
-#include "porting/drm_porting_layer.h"
+#include "drm_porting_layer.h"
 #include <ttm/ttm_module.h>
 #include <ttm/ttm_bo_driver.h>
 #include <ttm/ttm_placement.h>

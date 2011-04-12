@@ -1940,8 +1940,8 @@ crypto/via/padlock.c			optional padlock
 crypto/via/padlock_cipher.c		optional padlock
 crypto/via/padlock_hash.c		optional padlock
 #dev/drm/drmtest/drmtest_drv.c		optional drmtest drm
-dev/drm/porting/drm_porting_layer.c	optional drm
-dev/drm/porting/drm_porting_subr_hash.c	optional drm
+dev/drm/drm_porting_layer.c		optional drm
+dev/drm/drm_porting_subr_hash.c		optional drm
 dev/drm/ttm/ttm_agp_backend.c		optional ttmdrm drm
 dev/drm/ttm/ttm_bo.c			optional ttmdrm drm
 dev/drm/ttm/ttm_bo_util.c		optional ttmdrm drm

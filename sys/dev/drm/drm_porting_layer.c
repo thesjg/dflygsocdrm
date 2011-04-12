@@ -24,7 +24,7 @@
  *
  */
 
-#include "dev/drm/porting/drm_porting_layer.h"
+#include "dev/drm/drm_porting_layer.h"
 
 #include <sys/tree.h>
 
