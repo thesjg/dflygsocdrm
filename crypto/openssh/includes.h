@@ -30,7 +30,7 @@
 # include <bstring.h>
 #endif
 #if defined(HAVE_GLOB_H) && defined(GLOB_HAS_ALTDIRFUNC) && \
-    defined(GLOB_HAS_GL_MATCHC) && \
+    defined(GLOB_HAS_GL_MATCHC) && defined(GLOB_HAS_GL_STATV) && \
     defined(HAVE_DECL_GLOB_NOMATCH) &&  HAVE_DECL_GLOB_NOMATCH != 0 && \
     !defined(BROKEN_GLOB)
 # include <glob.h>
@@ -111,6 +111,7 @@
 
 #include <netinet/in.h>
 #include <netinet/in_systm.h> /* For typedefs */
+#include <netinet/ip.h>
 #ifdef HAVE_RPC_TYPES_H
 # include <rpc/types.h> /* For INADDR_LOOPBACK */
 #endif

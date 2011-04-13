@@ -1,6 +1,6 @@
-/*	$Id: man_argv.c,v 1.5 2011/01/03 22:42:37 schwarze Exp $ */
+/*	$OpenBSD: timingsafe_bcmp.c,v 1.1 2010/09/24 13:33:00 matthew Exp $	*/
 /*
- * Copyright (c) 2011 Ingo Schwarze <schwarze@openbsd.org>
+ * Copyright (c) 2010 Damien Miller.  All rights reserved.
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -14,31 +14,21 @@
  * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
 
-#include <sys/types.h>
+/* OPENBSD ORIGINAL: lib/libc/string/timingsafe_bcmp.c */
 
-#include <assert.h>
-
-#include "mandoc.h"
-#include "libman.h"
-#include "libmandoc.h"
-
+#include "includes.h"
+#ifndef HAVE_TIMINGSAFE_BCMP
 
 int
-man_args(struct man *m, int line, int *pos, char *buf, char **v)
+timingsafe_bcmp(const void *b1, const void *b2, size_t n)
 {
-	char	 *start;
+	const unsigned char *p1 = b1, *p2 = b2;
+	int ret = 0;
 
-	assert(*pos);
-	*v = start = buf + *pos;
-	assert(' ' != *start);
-
-	if ('\0' == *start)
-		return(ARGS_EOLN);
-
-	*v = mandoc_getarg(v, m->msg, m->data, line, pos);
-	return('"' == *start ? ARGS_QWORD : ARGS_WORD);
+	for (; n > 0; n--)
+		ret |= *p1++ ^ *p2++;
+	return (ret != 0);
 }
+
+#endif /* TIMINGSAFE_BCMP */
