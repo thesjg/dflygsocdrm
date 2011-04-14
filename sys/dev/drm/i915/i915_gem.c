@@ -168,13 +168,14 @@ fast_shmem_read(DRM_PAGE_T *pages,
 	char __iomem *vaddr;
 	int unwritten;
 #ifndef __linux__
-	DRM_LWBUF_T lwb;
+	DRM_LWBUF_T *lwb;
+	DRM_LWBUF_T lwb_cache;
 #endif
 
 #ifdef __linux__
 	vaddr = kmap_atomic(pages[page_base >> PAGE_SHIFT], KM_USER0);
 #else
-	vaddr = drm_kmap_atomic(pages[page_base >> PAGE_SHIFT], &lwb);
+	vaddr = drm_kmap_atomic(pages[page_base >> PAGE_SHIFT], &lwb_cache, &lwb);
 #endif
 	if (vaddr == NULL)
 		return -ENOMEM;
@@ -217,14 +218,16 @@ slow_shmem_copy(DRM_PAGE_T dst_page,
 {
 	char *dst_vaddr, *src_vaddr;
 #ifndef __linux__
-	DRM_LWBUF_T dst_lwb;
-	DRM_LWBUF_T src_lwb;
+	DRM_LWBUF_T *dst_lwb;
+	DRM_LWBUF_T *src_lwb;
+	DRM_LWBUF_T dst_lwb_cache;
+	DRM_LWBUF_T src_lwb_cache;
 #endif
 
 #ifdef __linux__
 	dst_vaddr = kmap_atomic(dst_page, KM_USER0);
 #else
-	dst_vaddr = drm_kmap_atomic(dst_page, &dst_lwb);
+	dst_vaddr = drm_kmap_atomic(dst_page, &dst_lwb_cache, &dst_lwb);
 #endif
 	if (dst_vaddr == NULL)
 		return -ENOMEM;
@@ -232,7 +235,7 @@ slow_shmem_copy(DRM_PAGE_T dst_page,
 #ifdef __linux__
 	src_vaddr = kmap_atomic(src_page, KM_USER1);
 #else
-	src_vaddr = drm_kmap_atomic(src_page, &src_lwb);
+	src_vaddr = drm_kmap_atomic(src_page, &src_lwb_cache, &src_lwb);
 #endif
 	if (src_vaddr == NULL) {
 #ifdef __linux__
@@ -275,8 +278,10 @@ slow_shmem_bit17_copy(DRM_PAGE_T gpu_page,
 {
 	char *gpu_vaddr, *cpu_vaddr;
 #ifndef __linux__
-	DRM_LWBUF_T gpu_lwb;
-	DRM_LWBUF_T cpu_lwb;
+	DRM_LWBUF_T *gpu_lwb;
+	DRM_LWBUF_T *cpu_lwb;
+	DRM_LWBUF_T gpu_lwb_cache;
+	DRM_LWBUF_T cpu_lwb_cache;
 #endif
 
 	/* Use the unswizzled path if this page isn't affected. */
@@ -289,11 +294,11 @@ slow_shmem_bit17_copy(DRM_PAGE_T gpu_page,
 					       cpu_page, cpu_offset, length);
 	}
 
-	gpu_vaddr = drm_kmap_atomic(gpu_page, &gpu_lwb);
+	gpu_vaddr = drm_kmap_atomic(gpu_page, &gpu_lwb_cache, &gpu_lwb);
 	if (gpu_vaddr == NULL)
 		return -ENOMEM;
 
-	cpu_vaddr = drm_kmap_atomic(cpu_page, &cpu_lwb);
+	cpu_vaddr = drm_kmap_atomic(cpu_page, &cpu_lwb_cache, &cpu_lwb);
 	if (cpu_vaddr == NULL) {
 		drm_kunmap_atomic(gpu_vaddr, gpu_lwb);
 		return -ENOMEM;
@@ -641,14 +646,15 @@ slow_kernel_write(struct io_mapping *mapping,
 	char *src_vaddr, *dst_vaddr;
 	unsigned long unwritten;
 #ifndef __linux__
-	DRM_LWBUF_T src_lwbuf;
+	DRM_LWBUF_T *src_lwbuf;
+	DRM_LWBUF_T src_lwbuf_cache;
 #endif
 
 	dst_vaddr = io_mapping_map_atomic_wc(mapping, gtt_base);
 #ifdef __linux__
 	src_vaddr = kmap_atomic(user_page, KM_USER1);
 #else
-	src_vaddr = drm_kmap_atomic(user_page, &src_lwbuf);
+	src_vaddr = drm_kmap_atomic(user_page, &src_lwbuf_cache, &src_lwbuf);
 #endif
 	unwritten = __copy_from_user_inatomic_nocache(dst_vaddr + gtt_offset,
 						      src_vaddr + user_offset,
@@ -680,13 +686,14 @@ fast_shmem_write(DRM_PAGE_T *pages,
 	char __iomem *vaddr;
 	unsigned long unwritten;
 #ifndef __linux__
-	DRM_LWBUF_T lwbuf;
+	DRM_LWBUF_T *lwbuf;
+	DRM_LWBUF_T lwbuf_cache;
 #endif
 
 #ifdef __linux__
 	vaddr = kmap_atomic(pages[page_base >> PAGE_SHIFT], KM_USER0);
 #else
-	vaddr = drm_kmap_atomic(pages[page_base >> PAGE_SHIFT], &lwbuf);
+	vaddr = drm_kmap_atomic(pages[page_base >> PAGE_SHIFT], &lwbuf_cache, &lwbuf);
 #endif
 	if (vaddr == NULL)
 		return -ENOMEM;
@@ -5397,11 +5404,21 @@ void i915_gem_detach_phys_object(struct drm_device *dev,
 	page_count = obj->size / PAGE_SIZE;
 
 	for (i = 0; i < page_count; i++) {
+#ifdef __linux__
 		char *dst = kmap_atomic(obj_priv->pages[i], KM_USER0);
+#else
+		DRM_LWBUF_T *lwbuf;
+		DRM_LWBUF_T lwbuf_cache;
+		char *dst = drm_kmap_atomic(obj_priv->pages_legacy[i], &lwbuf_cache, &lwbuf);
+#endif
 		char *src = obj_priv->phys_obj->handle->vaddr + (i * PAGE_SIZE);
 
 		memcpy(dst, src, PAGE_SIZE);
+#ifdef __linux__
 		kunmap_atomic(dst, KM_USER0);
+#else
+		drm_kunmap_atomic(dst, lwbuf);
+#endif
 	}
 	drm_clflush_pages(obj_priv->pages, page_count);
 	drm_agp_chipset_flush(dev);
@@ -5457,11 +5474,21 @@ i915_gem_attach_phys_object(struct drm_device *dev,
 	page_count = obj->size / PAGE_SIZE;
 
 	for (i = 0; i < page_count; i++) {
+#ifdef __linux__
 		char *src = kmap_atomic(obj_priv->pages[i], KM_USER0);
+#else
+		DRM_LWBUF_T *lwbuf;
+		DRM_LWBUF_T lwbuf_cache;
+		char *src = drm_kmap_atomic(obj_priv->pages_legacy[i], &lwbuf_cache, &lwbuf);
+#endif
 		char *dst = obj_priv->phys_obj->handle->vaddr + (i * PAGE_SIZE);
 
 		memcpy(dst, src, PAGE_SIZE);
+#ifdef __linux__
 		kunmap_atomic(src, KM_USER0);
+#else
+		drm_kunmap_atomic(src, lwbuf);
+#endif
 	}
 
 	i915_gem_object_put_pages(obj);

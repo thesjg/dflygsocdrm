@@ -415,13 +415,14 @@ i915_gem_swizzle_page(DRM_PAGE_T page)
 	int i;
 	char temp[64];
 #ifndef __linux__
-	DRM_LWBUF_T lwbuf;
+	DRM_LWBUF_T *lwbuf;
+	DRM_LWBUF_T lwbuf_cache;
 #endif
 
 #ifdef __linux__
 	vaddr = kmap(page);
 #else
-	vaddr = drm_kmap(page, &lwbuf);
+	vaddr = drm_kmap(page, &lwbuf_cache, &lwbuf);
 #endif
 	if (vaddr == NULL)
 		return -ENOMEM;

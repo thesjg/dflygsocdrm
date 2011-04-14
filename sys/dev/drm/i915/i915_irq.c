@@ -521,7 +521,8 @@ i915_error_object_create(struct drm_device *dev,
 #endif
 		unsigned long flags;
 #ifndef __linux__
-		DRM_LWBUF_T lwbuf;
+		DRM_LWBUF_T *lwbuf;
+		DRM_LWBUF_T lwbuf_cache;
 #endif
 
 		if (d == NULL)
@@ -530,7 +531,7 @@ i915_error_object_create(struct drm_device *dev,
 #ifdef __linux__
 		s = kmap_atomic(src_priv->pages[page], KM_IRQ0);
 #else
-		s = drm_kmap_atomic(src_priv->pages_legacy[page], &lwbuf);
+		s = drm_kmap_atomic(src_priv->pages_legacy[page], &lwbuf_cache, &lwbuf);
 #endif
 		memcpy(d, s, PAGE_SIZE);
 #ifdef __linux__
