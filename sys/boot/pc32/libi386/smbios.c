@@ -30,6 +30,7 @@
 
 #include <stand.h>
 #include <bootstrap.h>
+#include <sys/param.h>
 #include <sys/endian.h>
 
 #include "btxv86.h"
