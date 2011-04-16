@@ -59,7 +59,7 @@
 
 #define DRM_NEWER_IOCTL 1
 
-uint32_t cpu_clflush_line_size;
+uint32_t drm_cpu_clflush_line_size;
 
 #ifdef DRM_DEBUG_DEFAULT_ON
 int drm_debug_flag = 1;
@@ -394,7 +394,7 @@ static int __init drm_core_init(void)
 {
 
 /* From FreeBSD file machine initcpu.c, function initializecpucache() */
-	cpu_clflush_line_size = ((cpu_procinfo >> 8) & 0xff) * 8;
+	drm_cpu_clflush_line_size = ((cpu_procinfo >> 8) & 0xff) * 8;
 
 	int ret = -ENOMEM;
 

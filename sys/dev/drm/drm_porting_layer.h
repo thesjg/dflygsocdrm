@@ -1801,11 +1801,13 @@ unlock_kernel(void) {
 #define wbinvd()	__asm __volatile( \
 			"wbinvd");
 
+#if 0
 /* file drm_cache.c, function drm_clflush_pages() */
 static __inline__ void
 clflush(uint32_t location) {
 	;
 }
+#endif
 
 /* file drm_cache.c, function drm_clflush_pages() */
 #define cpu_has_clflush 1
