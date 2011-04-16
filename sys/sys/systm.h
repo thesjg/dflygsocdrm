@@ -84,6 +84,15 @@ extern int bootverbose;		/* nonzero to print verbose messages */
 
 extern int maxusers;		/* system tune hint */
 
+extern int vm_guest;		/* Running as virtual machine guest? */
+
+/*
+ * Detected virtual machine guest types. The intention is to expand
+ * and/or add to the VM_GUEST_VM type if specific VM functionality is
+ * ever implemented (e.g. vendor-specific paravirtualization features).
+ */
+enum VM_GUEST { VM_GUEST_NO = 0, VM_GUEST_VM, VM_GUEST_XEN };
+
 extern int ncpus;		/* total number of cpus (real, hyper, virtual)*/
 extern int ncpus2;		/* ncpus rounded down to power of 2 */
 extern int ncpus2_shift;	/* log base 2 of ncpus2 */

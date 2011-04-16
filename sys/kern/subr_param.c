@@ -46,6 +46,8 @@
 #include <sys/param.h>
 #include <sys/systm.h>
 #include <sys/kernel.h>
+#include <sys/sysctl.h>
+
 #include <vm/pmap.h>
 #include <machine/vmparam.h>
 
@@ -55,6 +57,13 @@
 
 #ifndef HZ
 #define	HZ 100
+#  ifndef HZ_VM
+#    define	HZ_VM 100
+#  endif
+#else
+#  ifndef HZ_VM
+#    define	HZ_VM HZ
+#  endif
 #endif
 #define	NPROC (20 + 16 * maxusers)
 #ifndef NBUF
@@ -66,6 +75,8 @@
 #ifndef MAXPOSIXLOCKSPERUID
 #define MAXPOSIXLOCKSPERUID (maxusers * 64) /* Should be a safe value */
 #endif
+
+static int sysctl_kern_vm_guest(SYSCTL_HANDLER_ARGS);
 
 int	hz;
 int	stathz;
@@ -87,12 +98,17 @@ int	nbuf;
 int	nswbuf;
 long	maxswzone;			/* max swmeta KVA storage */
 long	maxbcache;			/* max buffer cache KVA storage */
+int 	vm_guest;			/* Running as virtual machine guest? */
 u_quad_t	maxtsiz;			/* max text size */
 u_quad_t	dfldsiz;			/* initial data size limit */
 u_quad_t	maxdsiz;			/* max data size */
 u_quad_t	dflssiz;			/* initial stack size limit */
 u_quad_t	maxssiz;			/* max stack size */
 u_quad_t	sgrowsiz;			/* amount to grow stack */
+
+SYSCTL_PROC(_kern, OID_AUTO, vm_guest, CTLFLAG_RD | CTLTYPE_STRING,
+    NULL, 0, sysctl_kern_vm_guest, "A",
+    "Virtual machine guest detected? (none|generic|xen)");
 
 /*
  * These have to be allocated somewhere; allocating
@@ -102,13 +118,80 @@ u_quad_t	sgrowsiz;			/* amount to grow stack */
 struct	buf *swbuf;
 
 /*
+ * The elements of this array are ordered based upon the values of the
+ * corresponding enum VM_GUEST members.
+ */
+static const char *const vm_guest_sysctl_names[] = {
+	"none",
+	"generic",
+	"xen",
+	NULL
+};
+
+#ifndef XEN
+static const char *const vm_bnames[] = {
+	"QEMU",				/* QEMU */
+	"Plex86",			/* Plex86 */
+	"Bochs",			/* Bochs */
+	"Xen",				/* Xen */
+	NULL
+};
+
+static const char *const vm_pnames[] = {
+	"VMware Virtual Platform",	/* VMWare VM */
+	"Virtual Machine",		/* Microsoft VirtualPC */
+	"VirtualBox",			/* Sun xVM VirtualBox */
+	"Parallels Virtual Platform",	/* Parallels VM */
+	NULL
+};
+
+
+/*
+ * Detect known Virtual Machine hosts by inspecting the emulated BIOS.
+ */
+static enum VM_GUEST
+detect_virtual(void)
+{
+	char *sysenv;
+	int i;
+
+	sysenv = kgetenv("smbios.bios.vendor");
+	if (sysenv != NULL) {
+		for (i = 0; vm_bnames[i] != NULL; i++)
+			if (strcmp(sysenv, vm_bnames[i]) == 0) {
+				kfreeenv(sysenv);
+				return (VM_GUEST_VM);
+			}
+		kfreeenv(sysenv);
+	}
+	sysenv = kgetenv("smbios.system.product");
+	if (sysenv != NULL) {
+		for (i = 0; vm_pnames[i] != NULL; i++)
+			if (strcmp(sysenv, vm_pnames[i]) == 0) {
+				kfreeenv(sysenv);
+				return (VM_GUEST_VM);
+			}
+		kfreeenv(sysenv);
+	}
+	return (VM_GUEST_NO);
+}
+#endif
+
+/*
  * Boot time overrides that are not scaled against main memory
  */
 void
 init_param1(void)
 {
-	hz = HZ;
+#ifndef XEN
+	vm_guest = detect_virtual();
+#else
+	vm_guest = VM_GUEST_XEN;
+#endif
+	hz = -1;
 	TUNABLE_INT_FETCH("kern.hz", &hz);
+	if (hz == -1)
+		hz = vm_guest > VM_GUEST_NO ? HZ_VM : HZ;
 	stathz = hz * 128 / 100;
 	profhz = stathz;
 	ustick = 1000000 / hz;
@@ -214,3 +297,12 @@ init_param2(int physpages)
 	TUNABLE_INT_FETCH("kern.ncallout", &ncallout);
 }
 
+/*
+ * Sysctl stringiying handler for kern.vm_guest.
+ */
+static int
+sysctl_kern_vm_guest(SYSCTL_HANDLER_ARGS)
+{
+	return (SYSCTL_OUT(req, vm_guest_sysctl_names[vm_guest], 
+	    strlen(vm_guest_sysctl_names[vm_guest])));
+}
