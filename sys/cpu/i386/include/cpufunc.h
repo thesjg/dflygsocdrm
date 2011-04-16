@@ -105,6 +105,13 @@ bsrl(u_int mask)
 	return (result);
 }
 
+static __inline void
+clflush(u_long addr)
+{
+
+	__asm __volatile("clflush %0" : : "m" (*(char *)addr));
+}
+
 /*
  * Test and set the specified bit (1 << bit) in the integer.  The
  * previous value of the bit is returned (0 or 1).

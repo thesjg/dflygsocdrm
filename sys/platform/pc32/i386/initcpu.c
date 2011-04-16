@@ -41,6 +41,13 @@
 #include <machine/md_var.h>
 #include <machine/specialreg.h>
 
+#include <vm/vm.h>
+#include <vm/pmap.h>
+
+#if !defined(CPU_DISABLE_SSE) && defined(I686_CPU)
+#define CPU_ENABLE_SSE
+#endif
+
 void initializecpu(void);
 #if defined(I586_CPU) && defined(CPU_WT_ALLOC)
 void	enable_K5_wt_alloc(void);
@@ -68,6 +75,12 @@ static void	init_mendocino(void);
 static int	hw_instruction_sse;
 SYSCTL_INT(_hw, OID_AUTO, instruction_sse, CTLFLAG_RD,
     &hw_instruction_sse, 0, "SIMD/MMX2 instructions available in CPU");
+/*
+ * -1: automatic (default)
+ *  0: keep enable CLFLUSH
+ *  1: force disable CLFLUSH
+ */
+static int	hw_clflush_disable = -1;
 
 /* Must *NOT* be BSS or locore will bzero these after setting them */
 int	cpu = 0;		/* Are we 386, 386sx, 486, etc? */
@@ -84,14 +97,23 @@ u_int	cpu_procinfo = 0;	/* HyperThreading Info / Brand Index / CLFUSH */
 u_int	cpu_procinfo2 = 0;	/* Multicore info */
 char	cpu_vendor[20] = "";	/* CPU Origin code */
 u_int	cpu_vendor_id = 0;	/* CPU vendor ID */
+u_int	cpu_clflush_line_size = 32;
 
 SYSCTL_UINT(_hw, OID_AUTO, via_feature_rng, CTLFLAG_RD,
 	&via_feature_rng, 0, "VIA C3/C7 RNG feature available in CPU");
 SYSCTL_UINT(_hw, OID_AUTO, via_feature_xcrypt, CTLFLAG_RD,
 	&via_feature_xcrypt, 0, "VIA C3/C7 xcrypt feature available in CPU");
 
+#if 0
 #ifndef CPU_DISABLE_SSE
 u_int	cpu_fxsr;		/* SSE enabled */
+#endif
+#endif
+#ifdef CPU_ENABLE_SSE
+u_int	cpu_fxsr;		/* SSE enabled */
+#if 0
+u_int	cpu_mxcsr_mask;		/* valid bits in mxcsr */
+#endif
 #endif
 
 #ifdef I486_CPU
@@ -588,8 +610,16 @@ init_via(void)
 void
 enable_sse(void)
 {
+#if 0
 #ifndef CPU_DISABLE_SSE
 	if ((cpu_feature & CPUID_SSE) && (cpu_feature & CPUID_FXSR)) {
+		load_cr4(rcr4() | CR4_FXSR | CR4_XMM);
+		cpu_fxsr = hw_instruction_sse = 1;
+	}
+#endif
+#endif
+#if defined(CPU_ENABLE_SSE)
+	if ((cpu_feature & CPUID_XMM) && (cpu_feature & CPUID_FXSR)) {
 		load_cr4(rcr4() | CR4_FXSR | CR4_XMM);
 		cpu_fxsr = hw_instruction_sse = 1;
 	}
@@ -716,6 +746,29 @@ initializecpu(void)
 		break;
 	}
 	enable_sse();
+
+	/*
+	 * CPUID with %eax = 1, %ebx returns
+	 * Bits 15-8: CLFLUSH line size
+	 * 	(Value * 8 = cache line size in bytes)
+	 */
+	if ((cpu_feature & CPUID_CLFSH) != 0)
+		cpu_clflush_line_size = ((cpu_procinfo >> 8) & 0xff) * 8;
+	/*
+	 * XXXKIB: (temporary) hack to work around traps generated
+	 * when CLFLUSHing APIC register window under virtualization
+	 * environments.  These environments tend to disable the
+	 * CPUID_SS feature even though the native CPU supports it.
+	 */
+	TUNABLE_INT_FETCH("hw.clflush_disable", &hw_clflush_disable);
+	if (vm_guest != VM_GUEST_NO && hw_clflush_disable == -1)
+		cpu_feature &= ~CPUID_CLFSH;
+	/*
+	 * Allow to disable CLFLUSH feature manually by
+	 * hw.clflush_disable tunable.
+	 */
+	if (hw_clflush_disable == 1)
+		cpu_feature &= ~CPUID_CLFSH;
 }
 
 #if defined(I586_CPU) && defined(CPU_WT_ALLOC)
