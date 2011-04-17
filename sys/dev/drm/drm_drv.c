@@ -59,8 +59,6 @@
 
 #define DRM_NEWER_IOCTL 1
 
-uint32_t drm_cpu_clflush_line_size;
-
 #ifdef DRM_DEBUG_DEFAULT_ON
 int drm_debug_flag = 1;
 #else
@@ -392,10 +390,6 @@ static const struct file_operations drm_stub_fops = {
 
 static int __init drm_core_init(void)
 {
-
-/* From FreeBSD file machine initcpu.c, function initializecpucache() */
-	drm_cpu_clflush_line_size = ((cpu_procinfo >> 8) & 0xff) * 8;
-
 	int ret = -ENOMEM;
 
 	idr_init(&drm_minors_idr);

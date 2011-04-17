@@ -29,34 +29,55 @@
  */
 
 #include "drmP.h"
-#include "drm_cache.h"
-
-void drm_clflush(volatile void *addr) {
-	__asm __volatile("clflush %0" : : "m" (*(char *)addr));
-}
+#ifndef __linux__ /* for CPUID_CLFSH */
+#include <machine/specialreg.h>
+#include <sys/thread2.h>
+#endif
 
 #if defined(CONFIG_X86)
 static void
+#ifdef __linux__
 drm_clflush_page(struct page *page)
+#else
+drm_clflush_page(DRM_PAGE_T page)
+#endif
 {
 	uint8_t *page_virtual;
 	unsigned int i;
+#ifndef __linux__
+	DRM_LWBUF_T *lwbuf;
+	DRM_LWBUF_T lwbuf_cache;
+#endif
 
 	if (unlikely(page == NULL))
 		return;
 
+#ifdef __linux__
 	page_virtual = kmap_atomic(page, KM_USER0);
+#else
+	page_virtual = drm_kmap_atomic(page, &lwbuf_cache, &lwbuf);
+#endif
 #ifdef __linux__
 	for (i = 0; i < PAGE_SIZE; i += boot_cpu_data.x86_clflush_size)
 		clflush(page_virtual + i);
-#else /* just to avoid unused variable warning */
-	i = 0;
+#else
+	for (i = 0; i < PAGE_SIZE; i += cpu_clflush_line_size)
+		clflush((unsigned long)(page_virtual + i));
 #endif
+#ifdef __linux__
 	kunmap_atomic(page_virtual, KM_USER0);
+#else
+	drm_kunmap_atomic(page_virtual, lwbuf);
+#endif
 }
 
+#ifdef __linux__
 static void drm_cache_flush_clflush(struct page *pages[],
 				    unsigned long num_pages)
+#else
+static void drm_cache_flush_clflush(DRM_PAGE_T pages[],
+				    unsigned long num_pages)
+#endif
 {
 	unsigned long i;
 
@@ -74,17 +95,45 @@ drm_clflush_ipi_handler(void *null)
 #endif
 
 void
+#ifdef __linux__
 drm_clflush_pages(struct page *pages[], unsigned long num_pages)
+#else
+drm_clflush_pages(DRM_PAGE_T pages[], unsigned long num_pages)
+#endif
 {
 
 #if defined(CONFIG_X86)
+#ifdef __linux__
 	if (cpu_has_clflush) {
 		drm_cache_flush_clflush(pages, num_pages);
 		return;
 	}
+#else
+	if (cpu_feature & CPUID_CLFSH) {
+		drm_cache_flush_clflush(pages, num_pages);
+		return;
+	}
+#endif
 
+#ifdef __linux__
 	if (on_each_cpu(drm_clflush_ipi_handler, NULL, 1) != 0)
 		printk(KERN_ERR "Timed out waiting for cache flush.\n");
+#else /* !__linux__ */
+#ifdef SMP
+	int n;
+	int retcode = 0;
+	for (n = 0; n < ncpus; ++n) {
+		int res = lwkt_send_ipiq(globaldata_find(n), (ipifunc1_t)drm_clflush_ipi_handler, NULL);
+		if (res != 0) {
+			retcode = res;
+		}	
+	}
+	if (retcode)
+		printk(KERN_ERR "Timed out waiting for cache flush.\n");
+#else
+	drm_clflush_ipi_handler(NULL);
+#endif
+#endif /* !__linux__ */
 
 #elif defined(__powerpc__)
 	unsigned long i;

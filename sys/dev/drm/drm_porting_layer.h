@@ -1787,6 +1787,7 @@ unlock_kernel(void) {
 
 /* file drm_cache.c, function drm_cache_flush_clflush() */
 /* Previous version of drmP.h for DRM_MEMORYBARRIER() */
+#if 0
 #if defined(__i386__)
 #define mb()				__asm __volatile( \
 					"lock; addl $0,0(%%esp)" : : : "memory");
@@ -1796,10 +1797,16 @@ unlock_kernel(void) {
 #define mb()				__asm __volatile( \
 					"lock; addl $0,0(%%rsp)" : : : "memory");
 #endif
+#endif
+#ifndef mb
+#define mb()   cpu_mfence()
+#endif
 
+#if 0
 /* file drm_cache.c, function drm_clflush_pages() */
 #define wbinvd()	__asm __volatile( \
 			"wbinvd");
+#endif
 
 #if 0
 /* file drm_cache.c, function drm_clflush_pages() */

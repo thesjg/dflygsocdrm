@@ -3077,7 +3077,7 @@ i915_gem_clflush_object(struct drm_gem_object *obj)
 
 	trace_i915_gem_object_clflush(obj);
 
-	drm_clflush_pages(obj_priv->pages, obj->size / PAGE_SIZE);
+	drm_clflush_pages(obj_priv->pages_legacy, obj->size / PAGE_SIZE);
 }
 
 /** Flushes any GPU write domain for the object if it's dirty. */
@@ -3528,7 +3528,7 @@ i915_gem_object_set_to_full_cpu_read_domain(struct drm_gem_object *obj)
 		for (i = 0; i <= (obj->size - 1) / PAGE_SIZE; i++) {
 			if (obj_priv->page_cpu_valid[i])
 				continue;
-			drm_clflush_pages(obj_priv->pages + i, 1);
+			drm_clflush_pages(obj_priv->pages_legacy + i, 1);
 		}
 	}
 
@@ -3593,7 +3593,7 @@ i915_gem_object_set_cpu_read_domain_range(struct drm_gem_object *obj,
 		if (obj_priv->page_cpu_valid[i])
 			continue;
 
-		drm_clflush_pages(obj_priv->pages + i, 1);
+		drm_clflush_pages(obj_priv->pages_legacy + i, 1);
 
 		obj_priv->page_cpu_valid[i] = 1;
 	}
@@ -5420,7 +5420,7 @@ void i915_gem_detach_phys_object(struct drm_device *dev,
 		drm_kunmap_atomic(dst, lwbuf);
 #endif
 	}
-	drm_clflush_pages(obj_priv->pages, page_count);
+	drm_clflush_pages(obj_priv->pages_legacy, page_count);
 	drm_agp_chipset_flush(dev);
 
 	i915_gem_object_put_pages(obj);

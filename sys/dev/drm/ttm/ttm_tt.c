@@ -38,7 +38,9 @@
 #else
 #include "drm_porting_layer.h"
 #endif
+#ifdef __linux__ /* drm_clflush_pages also defined in drmP.h */
 #include "drm_cache.h"
+#endif
 #include "drm_mem_util.h"
 #include "ttm/ttm_module.h"
 #include "ttm/ttm_bo_driver.h"

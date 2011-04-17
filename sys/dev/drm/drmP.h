@@ -1516,11 +1516,11 @@ extern int drm_authmagic(struct drm_device *dev, void *data,
 			 struct drm_file *file_priv);
 
 /* Cache management (drm_cache.c) */
+#ifdef __linux__
 void drm_clflush_pages(struct page *pages[], unsigned long num_pages);
-
-/* legacy added */
-extern uint32_t drm_cpu_clflush_line_size;
-extern void drm_clflush(volatile void *data);
+#else
+void drm_clflush_pages(DRM_PAGE_T pages[], unsigned long num_pages);
+#endif
 
 				/* Locking IOCTL support (drm_lock.h) */
 extern int drm_lock(struct drm_device *dev, void *data,

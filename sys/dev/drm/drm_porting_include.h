@@ -134,5 +134,8 @@
 
 /* for i2c */
 #include <bus/iicbus/iiconf.h>
+
+/* for wbinvd and mfence */
+#include <machine/cpufunc.h>
 #endif /* __KERNEL__ */
 #endif
