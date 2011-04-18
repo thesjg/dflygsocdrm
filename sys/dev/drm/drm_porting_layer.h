@@ -180,9 +180,12 @@ module_exit(void (*func)(void)) {
 /* DragonFly BSD sys/cdefs.h __predict_true */
 #define likely(x)              __builtin_expect(!!(x), 1)
 
+#ifndef container_of
 #define container_of(ptr, type, member) ({			\
 	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
 	(type *)( (char *)__mptr - offsetof(type,member) );})
+#endif
+
 /*
  * Integer types
  */
@@ -512,9 +515,6 @@ list_splice_init(struct list_head* newp, struct list_head* head) {
 	list_splice(newp, head);
 	list_empty(newp);
 }
-
-/* file ttm/ttm_bo.c, function ttm_bo_delayed_delete() */
-#define list_first_entry(ptr, type, member) list_entry(((ptr)->next), type, member)
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_pool_get_pages() */
 static __inline__ void

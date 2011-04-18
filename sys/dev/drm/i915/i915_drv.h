@@ -260,7 +260,15 @@ typedef struct drm_i915_private {
 
 	drm_dma_handle_t *status_page_dmah;
 	void *hw_status_page;
+#ifndef __linux__ /* legacy BSD */
+	DRM_LWBUF_T *hw_status_lwbuf;
+	DRM_LWBUF_T hw_status_lwbuf_cache;
+#endif
 	void *seqno_page;
+#ifndef __linux__ /* legacy BSD */
+	DRM_LWBUF_T *seqno_lwbuf;
+	DRM_LWBUF_T seqno_lwbuf_cache;
+#endif
 	dma_addr_t dma_status_page;
 	uint32_t counter;
 	unsigned int status_gfx_addr;
@@ -785,11 +793,13 @@ struct drm_i915_gem_object {
 	atomic_t pending_flip;
 
 /* legacy members */
+#ifndef __linux__
 	caddr_t user_data_ptr;
 	caddr_t pages_vaddr;
 	int num_pages;
 	DRM_PAGE_T *pages_legacy;
 	vm_object_t object;
+#endif
 };
 
 #define to_intel_bo(x) ((struct drm_i915_gem_object *) (x)->driver_private)

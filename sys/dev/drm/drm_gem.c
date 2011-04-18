@@ -131,9 +131,6 @@ drm_gem_destroy(struct drm_device *dev)
 struct drm_gem_object *
 drm_gem_object_alloc(struct drm_device *dev, size_t size)
 {
-#ifndef __linux__
-	vm_object_t object;
-#endif
 	struct drm_gem_object *obj;
 
 	BUG_ON((size & (PAGE_SIZE - 1)) != 0);

@@ -34,6 +34,12 @@
 #ifndef _DRM_LINUX_LIST_H_
 #define _DRM_LINUX_LIST_H_
 
+#ifndef container_of
+#define container_of(ptr, type, member) ({			\
+	__typeof( ((type *)0)->member ) *__mptr = (ptr);	\
+	(type *)( (char *)__mptr - offsetof(type,member) );})
+#endif
+
 struct list_head {
 	struct list_head *next, *prev;
 };
@@ -126,5 +132,7 @@ list_move_tail(struct list_head *entry, struct list_head *toadd) {
 	list_del(entry);
 	list_add_tail(entry, toadd);
 }
+
+#define list_first_entry(ptr, type, member) list_entry(((ptr)->next), type, member)	
 
 #endif /* _DRM_LINUX_LIST_H_ */

@@ -2571,8 +2571,8 @@ i915_gem_object_get_pages(struct drm_gem_object *obj,
 #else
 		page_legacy = vm_fault_object_page(obj->object,
 			i * PAGE_SIZE,
-			VM_PROT_WRITE | VM_PROT_READ, /* fault type */
-			0, /* fault_flags */
+			VM_PROT_NONE, /* fault type */
+			VM_FAULT_NORMAL, /* fault_flags */
 			&error);
 #endif
 #ifdef __linux__
@@ -2953,6 +2953,7 @@ i915_gem_object_bind_to_gtt(struct drm_gem_object *obj, unsigned alignment)
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	struct drm_i915_gem_object *obj_priv = to_intel_bo(obj);
 	struct drm_mm_node *free_space;
+/* UNIMPLEMENTED */
 	gfp_t gfpmask =  __GFP_NORETRY | __GFP_NOWARN;
 	int ret;
 
@@ -4088,8 +4089,13 @@ i915_gem_do_execbuffer(struct drm_device *dev, void *data,
 	}
 
 	if (args->num_cliprects != 0) {
+#ifdef __linux__
+		cliprects = kcalloc(args->num_cliprects, sizeof(*cliprects),
+				    GFP_KERNEL);
+#else
 		cliprects = malloc(args->num_cliprects * sizeof(*cliprects),
 				    DRM_MEM_DRAWABLE, M_WAITOK | M_ZERO);
+#endif
 		if (cliprects == NULL) {
 			ret = -ENOMEM;
 			goto pre_mutex_err;
@@ -4935,7 +4941,7 @@ i915_gem_init_pipe_control(struct drm_device *dev)
 		goto err_unref;
 
 	dev_priv->seqno_gfx_addr = obj_priv->gtt_offset;
-	dev_priv->seqno_page =  kmap(obj_priv->pages[0]);
+	dev_priv->seqno_page = drm_kmap(obj_priv->pages_legacy[0], &dev_priv->seqno_lwbuf_cache, &dev_priv->seqno_lwbuf);
 	if (dev_priv->seqno_page == NULL)
 		goto err_unpin;
 
@@ -4983,7 +4989,7 @@ i915_gem_init_hws(struct drm_device *dev)
 
 	dev_priv->status_gfx_addr = obj_priv->gtt_offset;
 
-	dev_priv->hw_status_page = kmap(obj_priv->pages[0]);
+	dev_priv->hw_status_page = drm_kmap(obj_priv->pages_legacy[0], &dev_priv->hw_status_lwbuf_cache, &dev_priv->hw_status_lwbuf);
 	if (dev_priv->hw_status_page == NULL) {
 		DRM_ERROR("Failed to map status page.\n");
 		memset(&dev_priv->hws_map, 0, sizeof(dev_priv->hws_map));
@@ -5027,7 +5033,7 @@ i915_gem_cleanup_pipe_control(struct drm_device *dev)
 
 	obj = dev_priv->seqno_obj;
 	obj_priv = to_intel_bo(obj);
-	kunmap(obj_priv->pages[0]);
+	drm_kunmap(obj_priv->pages[0], dev_priv->seqno_lwbuf);
 	i915_gem_object_unpin(obj);
 	drm_gem_object_unreference(obj);
 	dev_priv->seqno_obj = NULL;
@@ -5048,7 +5054,7 @@ i915_gem_cleanup_hws(struct drm_device *dev)
 	obj = dev_priv->hws_obj;
 	obj_priv = to_intel_bo(obj);
 
-	kunmap(obj_priv->pages[0]);
+	drm_kunmap(obj_priv->pages_legacy[0], dev_priv->hw_status_lwbuf);
 	i915_gem_object_unpin(obj);
 	drm_gem_object_unreference(obj);
 	dev_priv->hws_obj = NULL;
@@ -5344,7 +5350,7 @@ int i915_gem_init_phys_object(struct drm_device *dev,
 		ret = -ENOMEM;
 		goto kfree_obj;
 	}
-#ifdef CONFIG_X86
+#ifdef CONFIG_X86 /* UNIMPLEMENTED */
 	set_memory_wc((unsigned long)phys_obj->handle->vaddr, phys_obj->handle->size / PAGE_SIZE);
 #endif
 
@@ -5369,7 +5375,7 @@ void i915_gem_free_phys_object(struct drm_device *dev, int id)
 		i915_gem_detach_phys_object(dev, phys_obj->cur_obj);
 	}
 
-#ifdef CONFIG_X86
+#ifdef CONFIG_X86 /* UNIMPLEMENTED */
 	set_memory_wb((unsigned long)phys_obj->handle->vaddr, phys_obj->handle->size / PAGE_SIZE);
 #endif
 	drm_pci_free(dev, phys_obj->handle);
