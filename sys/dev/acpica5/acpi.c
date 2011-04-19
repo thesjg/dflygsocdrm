@@ -406,7 +406,6 @@ static int
 acpi_attach(device_t dev)
 {
     struct acpi_softc	*sc;
-    ACPI_TABLE_FACS	*facs;
     ACPI_STATUS		status;
     int			error, state;
     UINT32		flags;
@@ -586,15 +585,12 @@ acpi_attach(device_t dev)
 	kfreeenv(env);
     }
 
+    /* Only enable reboot by default if the FADT says it is available. */
+    if (AcpiGbl_FADT.Flags & ACPI_FADT_RESET_REGISTER)
+	sc->acpi_handle_reboot = 1;
+
     /* Only enable S4BIOS by default if the FACS says it is available. */
-    status = AcpiGetTable(ACPI_SIG_FACS, 0, (ACPI_TABLE_HEADER **)&facs);
-    if (ACPI_FAILURE(status)) {
-	device_printf(dev, "couldn't get FACS: %s\n",
-		      AcpiFormatException(status));
-	error = ENXIO;
-	goto out;
-    }
-    if (facs->Flags & ACPI_FACS_S4_BIOS_PRESENT)
+    if (AcpiGbl_FACS->Flags & ACPI_FACS_S4_BIOS_PRESENT)
 	sc->acpi_s4bios = 1;
 
     /*
@@ -1419,8 +1415,8 @@ acpi_device_scan_children(device_t bus, device_t dev, int max_depth,
     ctx.user_fn = user_fn;
     ctx.arg = arg;
     ctx.parent = h;
-    return (AcpiWalkNamespace(ACPI_TYPE_ANY, h, max_depth, NULL,
-	acpi_device_scan_cb, &ctx, NULL));
+    return (AcpiWalkNamespace(ACPI_TYPE_ANY, h, max_depth,
+	acpi_device_scan_cb, NULL, &ctx, NULL));
 }
 
 /*
@@ -1543,8 +1539,8 @@ acpi_probe_children(device_t bus)
      * devices as they appear, which might be smarter.)
      */
     ACPI_DEBUG_PRINT((ACPI_DB_OBJECTS, "namespace scan\n"));
-    AcpiWalkNamespace(ACPI_TYPE_ANY, ACPI_ROOT_OBJECT, 100, NULL,
-	acpi_probe_child, bus, NULL);
+    AcpiWalkNamespace(ACPI_TYPE_ANY, ACPI_ROOT_OBJECT, 100,
+	acpi_probe_child, NULL, bus, NULL);
 
     /* Pre-allocate resources for our rman from any sysresource devices. */
     acpi_sysres_alloc(bus);
@@ -1607,8 +1603,7 @@ acpi_probe_child(ACPI_HANDLE handle, UINT32 level, void *context, void **status)
     ACPI_HANDLE h;
     device_t bus, child;
     int order;
-    char *handle_str, **search;
-    static char *scopes[] = {"\\_PR_", "\\_TZ_", "\\_SI_", "\\_SB_", NULL};
+    char *handle_str;
 
     ACPI_FUNCTION_TRACE((char *)(uintptr_t)__func__);
 
@@ -1624,23 +1619,23 @@ acpi_probe_child(ACPI_HANDLE handle, UINT32 level, void *context, void **status)
 	handle_str = acpi_name(handle);
 	switch (type) {
 	case ACPI_TYPE_DEVICE:
+	    /*
+	     * Since we scan from \, be sure to skip system scope objects.
+	     * \_SB_ and \_TZ_ are defined in ACPICA as devices to work around
+	     * BIOS bugs.  For example, \_SB_ is to allow \_SB_._INI to be run
+	     * during the intialization and \_TZ_ is to support Notify() on it.
+	     */
+	    if (strcmp(handle_str, "\\_SB_") == 0 ||
+		strcmp(handle_str, "\\_TZ_") == 0)
+		break;
+
+	    if (acpi_parse_prw(handle, &prw) == 0)
+		AcpiSetupGpeForWake(handle, prw.gpe_handle, prw.gpe_bit);
+
+	    /* FALLTHROUGH */
 	case ACPI_TYPE_PROCESSOR:
 	case ACPI_TYPE_THERMAL:
 	case ACPI_TYPE_POWER:
-	    /*
-	     * Since we scan from \, be sure to skip system scope objects.
-	     * At least \_SB and \_TZ are detected as devices (ACPI-CA bug?)
-	     */
-	    for (search = scopes; *search != NULL; search++) {
-		if (strcmp(handle_str, *search) == 0)
-		    break;
-	    }
-	    if (*search != NULL)
-		break;
-
-	    if (type == ACPI_TYPE_DEVICE && acpi_parse_prw(handle, &prw) == 0)
-		AcpiSetupGpeForWake(handle, prw.gpe_handle, prw.gpe_bit);
-
 	    /* 
 	     * Create a placeholder device for this node.  Sort the
 	     * placeholder so that the probe/attach passes will run
@@ -1736,12 +1731,9 @@ acpi_shutdown_final(void *arg, int howto)
 	    DELAY(1000000);
 	    kprintf("ACPI power-off failed - timeout\n");
 	}
-    } else if ((howto & RB_HALT) == 0 &&
-	(AcpiGbl_FADT.Flags & ACPI_FADT_RESET_REGISTER) &&
-	sc->acpi_handle_reboot) {
+    } else if ((howto & RB_HALT) == 0 && sc->acpi_handle_reboot) {
 	/* Reboot using the reset register. */
-	status = AcpiWrite(
-	    AcpiGbl_FADT.ResetValue, &AcpiGbl_FADT.ResetRegister);
+	status = AcpiReset();
 	if (ACPI_FAILURE(status)) {
 	    kprintf("ACPI reset failed - %s\n", AcpiFormatException(status));
 	} else {
@@ -2606,8 +2598,8 @@ acpi_wake_prep_walk(int sstate)
     ACPI_HANDLE sb_handle;
 
     if (ACPI_SUCCESS(AcpiGetHandle(ACPI_ROOT_OBJECT, "\\_SB_", &sb_handle))) {
-	AcpiWalkNamespace(ACPI_TYPE_DEVICE, sb_handle, 100, NULL,
-	    acpi_wake_prep, &sstate, NULL);
+	AcpiWalkNamespace(ACPI_TYPE_DEVICE, sb_handle, 100,
+	    acpi_wake_prep, NULL, &sstate, NULL);
     }
     return (0);
 }
