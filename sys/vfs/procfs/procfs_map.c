@@ -143,7 +143,6 @@ procfs_domap(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 				type = "swap";
 				vp = NULL;
 				break;
-			case OBJT_DRM:
 			case OBJT_DEVICE:
 				type = "device";
 				vp = NULL;

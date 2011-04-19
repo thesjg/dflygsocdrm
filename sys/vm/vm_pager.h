@@ -102,7 +102,6 @@ extern struct pagerops *pagertab[];
 
 vm_object_t default_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t dev_pager_alloc(void *, off_t, vm_prot_t, off_t);
-vm_object_t drm_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t phys_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t swap_pager_alloc(void *, off_t, vm_prot_t, off_t);
 vm_object_t vnode_pager_alloc (void *, off_t, vm_prot_t, off_t, int, int);
@@ -134,10 +133,6 @@ static __inline int
 vm_pager_get_page(vm_object_t object, vm_page_t *m, int seqaccess, off_t foff)
 {
 	int r;
-
-/* For drm but can be generalized */
-	if (object->private_data && object->pgo_getpage)
-		object->pgo_getpage(object, m, seqaccess, foff);
 
 	r = (*pagertab[object->type]->pgo_getpage)(object, m, seqaccess, foff);
 	if (r == VM_PAGER_OK && (*m)->valid != VM_PAGE_BITS_ALL) {
