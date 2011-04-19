@@ -105,7 +105,6 @@ void vm_init_limits(struct proc *);
 
 int vm_mmap (vm_map_t, vm_offset_t *, vm_size_t, vm_prot_t, vm_prot_t, int, objtype_t, void *, vm_ooffset_t);
 int drm_vm_mmap (vm_map_t, vm_offset_t *, vm_size_t, vm_prot_t, vm_prot_t, int, objtype_t, void *, vm_ooffset_t, vm_object_t *);
-int drm_vm_mmap_alloc(vm_size_t size, vm_object_t *pobject);
 vm_offset_t vm_page_alloc_contig (vm_offset_t, vm_paddr_t, vm_paddr_t, vm_offset_t);
 void vm_set_page_size (void);
 struct vmspace *vmspace_alloc (vm_offset_t, vm_offset_t);
