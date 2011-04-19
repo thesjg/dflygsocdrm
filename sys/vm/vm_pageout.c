@@ -509,10 +509,6 @@ vm_pageout_object_deactivate_pages(vm_map_t map, vm_object_t object,
 			vm_object_drop(object);
 			return;
 		}
-		if (object->type == OBJT_DRM) {
-			vm_object_drop(object);
-			return;
-		}
 		if (object->paging_in_progress) {
 			vm_object_drop(object);
 			return;

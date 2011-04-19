@@ -104,7 +104,6 @@ enum obj_type {
 	OBJT_DEVICE, 	/* object backed by device pages */
 	OBJT_PHYS,  	/* object backed by physical pages */
 	OBJT_DEAD,   	/* dead object */
-	OBJT_DRM, 	/* object backed by drm pages */
 	OBJT_MARKER	/* marker object */
 };
 typedef u_char objtype_t;
