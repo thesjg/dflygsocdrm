@@ -41,9 +41,7 @@
 #include "acpi.h"
 #include <dev/acpica5/acpivar.h>
 #include <dev/acpica5/acpi_pcibvar.h>
-#if 0
 #include <dev/acpica5/acpi_sci_var.h>
-#endif
 
 #include <bus/pci/i386/pci_cfgreg.h>
 #include <bus/pci/pcireg.h>
@@ -1030,11 +1028,8 @@ acpi_pci_link_choose_irq(device_t dev, struct link *link)
 	/*
 	 * Check SCI as the last resort.
 	 */
-#if 0
 	if (!PCI_INTERRUPT_VALID(best_irq) && link->l_isa_irq &&
 	    acpi_sci_pci_shariable()) {
-#endif
-	if (link->l_isa_irq && !PCI_INTERRUPT_VALID(best_irq)) {
 		pos_irq = AcpiGbl_FADT.SciInterrupt;
 		pos_weight = pci_link_interrupt_weights[pos_irq];
 		if (pos_weight < best_weight) {
