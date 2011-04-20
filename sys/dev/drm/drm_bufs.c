@@ -101,6 +101,14 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 						  struct drm_local_map *map)
 {
 	struct drm_map_list *entry;
+#ifndef __linux__
+	const char *typestr;
+
+	if (map->type < 0 || map->type > 5)
+		typestr = "??";
+	else
+		typestr = types[map->type];
+#endif
 	list_for_each_entry(entry, &dev->maplist, head) {
 		/*
 		 * Because the kernel-userspace ABI is fixed at a 32-bit offset
@@ -118,6 +126,19 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 		if (!entry->map ||
 		    map->type != entry->map->type)
 			continue;
+		if (entry->master != dev->primary->master) {
+			if ((map->type == _DRM_REGISTERS) || (map->type == _DRM_FRAME_BUFFER)
+				|| (entry->map->offset == map->offset)) {
+				DRM_ERROR("mismatched master: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%d), entry (%p) != dev (%p)\n",
+					typestr,
+					(uint64_t)map->offset,
+					(uint64_t)map->handle,
+					DRM_CURRENTPID,
+					DRM_CURRENTUID,
+					entry->master,
+					dev->primary->master);
+			}
+		}
 		if ((map->type != _DRM_REGISTERS) && (map->type != _DRM_FRAME_BUFFER) &&
 			(entry->master != dev->primary->master))
 			continue;
@@ -135,9 +156,14 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 		if (entry->map->offset == map->offset)
 			return entry;
 	}
-
-	DRM_ERROR("map not found, map->type(%d), offset (%016lx), handle (%016lx)\n",
-		map->type, map->offset, (unsigned long)map->handle);
+#ifndef __linux__
+	DRM_INFO("map not found: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%d)\n",
+		typestr,
+		(uint64_t)map->offset,
+		(uint64_t)map->handle,
+		DRM_CURRENTPID,
+		DRM_CURRENTUID);
+#endif
 
 	return NULL;
 }
@@ -512,6 +538,20 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	if (!(map->flags & _DRM_DRIVER))
 		list->master = dev->primary->master;
 	*maplist = list;
+#ifndef __linux__
+	const char *typestr;
+	if (list->map->type < 0 || list->map->type > 5)
+		typestr = "??";
+	else
+		typestr = types[list->map->type];
+	DRM_INFO("drm_addmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), master (%p), pid (%d), uid (%d)\n",
+		typestr,
+		(uint64_t)map->offset,
+		(uint64_t)map->handle,
+		list->master,
+		DRM_CURRENTPID,
+		DRM_CURRENTUID);
+#endif
 	return 0;
 
 done:
