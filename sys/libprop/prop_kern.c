@@ -411,7 +411,6 @@ _prop_object_copyout_ioctl(struct plistref *pref, const u_long cmd,
 			 VM_PROT_READ|VM_PROT_WRITE,
 			 VM_PROT_READ|VM_PROT_WRITE,
 			 MAP_PRIVATE|MAP_ANON,
-			 OBJT_VNODE,
 			 NULL, 0);
 	if (error == 0) {
 		error = copyout(buf, (char *)uaddr, len);

@@ -160,7 +160,6 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	vm_size_t size, pageoff;
 	vm_prot_t prot, maxprot;
 	void *handle;
-	objtype_t handle_type;
 	int flags, error;
 	off_t pos;
 	vm_object_t obj;
@@ -256,7 +255,6 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 		 * Mapping blank space is trivial.
 		 */
 		handle = NULL;
-		handle_type = OBJT_DEFAULT;
 		maxprot = VM_PROT_ALL;
 	} else {
 		/*
@@ -320,7 +318,6 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 		 */
 		if (vp->v_type == VCHR && iszerodev(vp->v_rdev)) {
 			handle = NULL;
-			handle_type = OBJT_DEFAULT;
 			maxprot = VM_PROT_ALL;
 			flags |= MAP_ANON;
 			pos = 0;
@@ -379,7 +376,6 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 				maxprot |= VM_PROT_WRITE;
 			}
 			handle = (void *)vp;
-			handle_type = OBJT_VNODE;
 		}
 	}
 
@@ -399,7 +395,7 @@ kern_mmap(struct vmspace *vms, caddr_t uaddr, size_t ulen,
 	}
 
 	error = vm_mmap(&vms->vm_map, &addr, size, prot, maxprot,
-			flags, handle_type, handle, pos);
+			flags, handle, pos);
 	if (error == 0)
 		*res = (void *)(addr + pageoff);
 
@@ -1178,9 +1174,7 @@ sys_munlock(struct munlock_args *uap)
  */
 int
 vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
-	vm_prot_t maxprot, int flags,
-	objtype_t handle_type,
-	void *handle, vm_ooffset_t foff)
+	vm_prot_t maxprot, int flags, void *handle, vm_ooffset_t foff)
 {
 	boolean_t fitit;
 	vm_object_t object;
@@ -1288,24 +1282,6 @@ vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
 			 * Force them to be shared.
 			 */
 			handle = (void *)(intptr_t)vp->v_rdev;
-
-/* Equivalent of dev_dmmap() from kern_device.c */
-			cdev_t dev = handle;
-			if (dev->si_ops->d_mmap_single == NULL)
-				goto normal_alloc;
-			struct dev_mmap_single_args ap;
-			ap.a_head.a_desc = &dev_mmap_single_desc;
-			ap.a_head.a_dev = dev;
-			ap.a_offset = foff;
-			ap.a_size = objsize;
-			ap.a_nprot = prot;
-			if (!dev->si_ops->d_mmap_single(&ap)) {
-				object = ap.a_object;
-				docow = MAP_PREFAULT_PARTIAL;
-				goto after_alloc;
-			}
-
-normal_alloc:
 			object = dev_pager_alloc(handle, objsize, prot, foff);
 			if (object == NULL) {
 				lwkt_reltoken(&vm_token);
@@ -1347,7 +1323,6 @@ normal_alloc:
 		}
 	}
 
-after_alloc:
 	/*
 	 * Deal with the adjusted flags
 	 */
@@ -1426,202 +1401,6 @@ after_alloc:
 out:
 	lwkt_reltoken(&vm_token);
 	
-	switch (rv) {
-	case KERN_SUCCESS:
-		return (0);
-	case KERN_INVALID_ADDRESS:
-	case KERN_NO_SPACE:
-		return (ENOMEM);
-	case KERN_PROTECTION_FAILURE:
-		return (EACCES);
-	default:
-		return (EINVAL);
-	}
-}
-
-/*
- * Internal version of mmap for a vm_object_t without a vnode.
- * Currently used by drm.
- * Handle is either a vnode pointer or NULL for MAP_ANON.
- *
- * No requirements; kern_mmap path holds the vm_token
- */
-int
-drm_vm_mmap(vm_map_t map, vm_offset_t *addr, vm_size_t size, vm_prot_t prot,
-	vm_prot_t maxprot, int flags,
-	objtype_t handle_type,
-	void *handle, vm_ooffset_t foff,
-	vm_object_t *pobject)
-{
-	boolean_t fitit;
-	vm_object_t object;
-	vm_offset_t eaddr;
-	vm_size_t   esize;
-#if 0
-	struct vnode *vp;
-	struct thread *td = curthread;
-#endif
-	struct proc *p;
-	int rv = KERN_SUCCESS;
-	off_t objsize;
-	int docow;
-
-	if (size == 0)
-		return (0);
-
-	objsize = round_page(size);
-	if (objsize < size)
-		return (EINVAL);
-	size = objsize;
-
-	lwkt_gettoken(&vm_token);
-
-	/*
-	 * XXX messy code, fixme
-	 *
-	 * NOTE: Overflow checks require discrete statements or GCC4
-	 * will optimize it out.
-	 */
-	if ((p = curproc) != NULL && map == &p->p_vmspace->vm_map) {
-		esize = map->size + size;	/* workaround gcc4 opt */
-		if (esize < map->size ||
-		    esize > p->p_rlimit[RLIMIT_VMEM].rlim_cur) {
-			lwkt_reltoken(&vm_token);
-			return(ENOMEM);
-		}
-	}
-
-	/*
-	 * We currently can only deal with page aligned file offsets.
-	 * The check is here rather than in the syscall because the
-	 * kernel calls this function internally for other mmaping
-	 * operations (such as in exec) and non-aligned offsets will
-	 * cause pmap inconsistencies...so we want to be sure to
-	 * disallow this in all cases.
-	 *
-	 * NOTE: Overflow checks require discrete statements or GCC4
-	 * will optimize it out.
-	 */
-	if (foff & PAGE_MASK) {
-		lwkt_reltoken(&vm_token);
-		return (EINVAL);
-	}
-
-	if ((flags & (MAP_FIXED | MAP_TRYFIXED)) == 0) {
-		fitit = TRUE;
-		*addr = round_page(*addr);
-	} else {
-		if (*addr != trunc_page(*addr)) {
-			lwkt_reltoken(&vm_token);
-			return (EINVAL);
-		}
-		eaddr = *addr + size;
-		if (eaddr < *addr) {
-			lwkt_reltoken(&vm_token);
-			return (EINVAL);
-		}
-		fitit = FALSE;
-		if ((flags & MAP_TRYFIXED) == 0)
-			vm_map_remove(map, *addr, *addr + size);
-	}
-
-	/*
-	 * No need to lookup/allocate object.
-	 */
-			/*
-			 * Mapping without a regular or any file.
-			 */
-			object = *pobject;
-			if (object == NULL) {
-				lwkt_reltoken(&vm_token);
-				return(EINVAL);
-			}
-	/*
-	 * Add an object reference.
-	 */
-			vm_object_reference(object);
-			docow = MAP_PREFAULT_PARTIAL;
-
-	/*
-	 * Deal with the adjusted flags
-	 */
-	if ((flags & (MAP_ANON|MAP_SHARED)) == 0)
-		docow |= MAP_COPY_ON_WRITE;
-	if (flags & MAP_NOSYNC)
-		docow |= MAP_DISABLE_SYNCER;
-	if (flags & MAP_NOCORE)
-		docow |= MAP_DISABLE_COREDUMP;
-
-#if defined(VM_PROT_READ_IS_EXEC)
-	if (prot & VM_PROT_READ)
-		prot |= VM_PROT_EXECUTE;
-
-	if (maxprot & VM_PROT_READ)
-		maxprot |= VM_PROT_EXECUTE;
-#endif
-
-	/*
-	 * This may place the area in its own page directory if (size) is
-	 * large enough, otherwise it typically returns its argument.
-	 */
-	if (fitit) {
-		*addr = pmap_addr_hint(object, *addr, size);
-	}
-
-	/*
-	 * Stack mappings need special attention.
-	 *
-	 * Mappings that use virtual page tables will default to storing
-	 * the page table at offset 0.
-	 */
-	if (flags & MAP_STACK) {
-		rv = vm_map_stack(map, *addr, size, flags,
-				  prot, maxprot, docow);
-	} else if (flags & MAP_VPAGETABLE) {
-		rv = vm_map_find(map, object, foff, addr, size, PAGE_SIZE,
-				 fitit, VM_MAPTYPE_VPAGETABLE,
-				 prot, maxprot, docow);
-	} else {
-		rv = vm_map_find(map, object, foff, addr, size, PAGE_SIZE,
-				 fitit, VM_MAPTYPE_NORMAL,
-				 prot, maxprot, docow);
-	}
-
-	if (rv != KERN_SUCCESS) {
-		/*
-		 * Lose the object reference. Will destroy the
-		 * object if it's an unnamed anonymous mapping
-		 * or named anonymous without other references.
-		 */
-		vm_object_deallocate(object);
-		goto out;
-	}
-
-	/*
-	 * Shared memory is also shared with children.
-	 */
-	if (flags & (MAP_SHARED|MAP_INHERIT)) {
-		rv = vm_map_inherit(map, *addr, *addr + size, VM_INHERIT_SHARE);
-		if (rv != KERN_SUCCESS) {
-			vm_map_remove(map, *addr, *addr + size);
-			goto out;
-		}
-	}
-
-	/* If a process has marked all future mappings for wiring, do so */
-	if ((rv == KERN_SUCCESS) && (map->flags & MAP_WIREFUTURE))
-		vm_map_unwire(map, *addr, *addr + size, FALSE);
-
-#if 0
-	/*
-	 * Set the access time on the vnode
-	 */
-	if (vp != NULL)
-		vn_mark_atime(vp, td);
-#endif
-out:
-	lwkt_reltoken(&vm_token);
-
 	switch (rv) {
 	case KERN_SUCCESS:
 		return (0);

@@ -350,7 +350,7 @@ sys_linux_uselib(struct linux_uselib_args *args)
 
 	/* Pull in executable header into kernel_map */
 	error = vm_mmap(&kernel_map, (vm_offset_t *)&a_out, PAGE_SIZE,
-	    VM_PROT_READ, VM_PROT_READ, 0, OBJT_VNODE, (caddr_t)vp, 0);
+	    VM_PROT_READ, VM_PROT_READ, 0, (caddr_t)vp, 0);
 	if (error)
 		goto cleanup;
 
@@ -432,7 +432,7 @@ sys_linux_uselib(struct linux_uselib_args *args)
 		/* map file into kernel_map */
 		error = vm_mmap(&kernel_map, &buffer,
 		    round_page(a_out->a_text + a_out->a_data + file_offset),
-		    VM_PROT_READ, VM_PROT_READ, 0, OBJT_VNODE, (caddr_t)vp,
+		    VM_PROT_READ, VM_PROT_READ, 0, (caddr_t)vp,
 		    trunc_page(file_offset));
 		if (error)
 			goto cleanup;
@@ -463,7 +463,7 @@ sys_linux_uselib(struct linux_uselib_args *args)
 		 */
 		error = vm_mmap(&p->p_vmspace->vm_map, &vmaddr,
 		    a_out->a_text + a_out->a_data, VM_PROT_ALL, VM_PROT_ALL,
-		    MAP_PRIVATE | MAP_FIXED, OBJT_VNODE, (caddr_t)vp, file_offset);
+		    MAP_PRIVATE | MAP_FIXED, (caddr_t)vp, file_offset);
 		if (error)
 			goto cleanup;
 	}

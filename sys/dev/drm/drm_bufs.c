@@ -2007,7 +2007,7 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 
 #if defined(__DragonFly__)
 	retcode = vm_mmap(&vms->vm_map, &vaddr, size, PROT_READ | PROT_WRITE,
-	    VM_PROT_ALL, MAP_SHARED | MAP_NOSYNC, OBJT_DEVICE,
+	    VM_PROT_ALL, MAP_SHARED | MAP_NOSYNC,
 	    SLIST_FIRST(&dev->devnode->si_hlist), foff);
 #elif __FreeBSD_version >= 600023
 	retcode = vm_mmap(&vms->vm_map, &vaddr, size, PROT_READ | PROT_WRITE,

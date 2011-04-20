@@ -550,7 +550,7 @@ fp_mmap(void *addr_arg, size_t size, int prot, int flags, struct file *fp,
 	handle = (void *)vp;
     }
     error = vm_mmap(&vms->vm_map, &addr, size, prot, 
-		    maxprot, flags, OBJT_VNODE, handle, pos);
+		    maxprot, flags, handle, pos);
     if (error == 0 && addr_arg)
 	*resp = (void *)addr;
 done:

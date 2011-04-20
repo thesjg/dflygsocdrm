@@ -96,18 +96,6 @@ typedef u_char vm_maptype_t;	/* type of vm_map_entry */
 #define VM_MAPTYPE_VPAGETABLE	2
 #define VM_MAPTYPE_SUBMAP	3
 
-
-enum obj_type {
-	OBJT_DEFAULT,
-	OBJT_SWAP,   	/* object backed by swap blocks */
-	OBJT_VNODE, 	/* object backed by file pages (vnode) */
-	OBJT_DEVICE, 	/* object backed by device pages */
-	OBJT_PHYS,  	/* object backed by physical pages */
-	OBJT_DEAD,   	/* dead object */
-	OBJT_MARKER	/* marker object */
-};
-typedef u_char objtype_t;
-
 union vm_map_object;
 typedef union vm_map_object vm_map_object_t;
 

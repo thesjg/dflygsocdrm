@@ -1322,11 +1322,14 @@ i915_gem_mmap_ioctl(struct drm_device *dev, void *data,
 		       args->offset);
 	up_write(&current->mm->mmap_sem);
 #else
+	retcode = 0;
+#if 0 /* UNIMPLEMENTED */
 	retcode = drm_vm_mmap(&vms->vm_map, &vaddr, args->size, PROT_READ | PROT_WRITE,
 		VM_PROT_ALL, MAP_SHARED | MAP_NOSYNC,
 		OBJT_DEVICE, obj, (vm_ooffset_t)args->offset,
 		&obj->object);
 	addr = (unsigned long)vaddr;
+#endif
 #endif
 	drm_gem_object_unreference_unlocked(obj);
 #ifdef __linux__
