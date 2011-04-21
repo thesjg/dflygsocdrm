@@ -129,7 +129,7 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 		if (entry->master != dev->primary->master) {
 			if ((map->type == _DRM_REGISTERS) || (map->type == _DRM_FRAME_BUFFER)
 				|| (entry->map->offset == map->offset)) {
-				DRM_ERROR("mismatched master: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%ud), entry (%p) != dev (%p)\n",
+				DRM_ERROR("mismatched master: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%u), entry (%p) != dev (%p)\n",
 					typestr,
 					(uint64_t)map->offset,
 					(uint64_t)map->handle,
@@ -157,7 +157,7 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 			return entry;
 	}
 #ifndef __linux__
-	DRM_INFO("map not found: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%ud)\n",
+	DRM_INFO("map not found: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%u)\n",
 		typestr,
 		(uint64_t)map->offset,
 		(uint64_t)map->handle,
@@ -540,7 +540,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		typestr = "??";
 	else
 		typestr = types[list->map->type];
-	DRM_INFO("drm_addmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), master (%p), pid (%d), uid (%d)\n",
+	DRM_INFO("drm_addmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), master (%p), pid (%d), uid (%u)\n",
 		typestr,
 		(uint64_t)map->offset,
 		(uint64_t)map->handle,
@@ -714,7 +714,7 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		typestr = "??";
 	else
 		typestr = types[map->type];
-	DRM_INFO("drm_rmmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%ud)\n",
+	DRM_INFO("drm_rmmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%u)\n",
 		typestr,
 		(uint64_t)map->offset,
 		(uint64_t)map->handle,

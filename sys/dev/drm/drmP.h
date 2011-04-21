@@ -1841,7 +1841,7 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 							 unsigned long token)
 #endif
 static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
-							 unsigned int token)
+							 unsigned long token)
 {
 	struct drm_map_list *_entry;
 	list_for_each_entry(_entry, &dev->maplist, head)

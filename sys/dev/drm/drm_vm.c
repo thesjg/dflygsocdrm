@@ -70,6 +70,7 @@
 
 #ifndef __linux__
 	static off_t previous_foff = (off_t)(-2);
+	static int changed_foff = 0;
 #endif
 
 /**
@@ -103,9 +104,10 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 #ifndef __linux__
 	if ((off_t)ap->a_foff != previous_foff) {
 		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx)\n",
-			ap->a_foff,
+			(unsigned long)ap->a_foff,
 			offset);
 		previous_foff = ap->a_foff;
+		changed_foff = 1;
 	}
 #endif
 
@@ -123,6 +125,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
                 return EACCES;
 
 #ifdef DRM_NEWER_USER_TOKEN
+#if 0
 	/* We check for "dma". On Apple's UniNorth, it's valid to have
 	 * the AGP mapped at physical address 0
 	 * --BenH.
@@ -136,6 +139,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 		)
 #endif
 	    ) {
+#endif
 	if (dev->dma && offset < ptoa(dev->dma->page_count)) {
 		struct drm_device_dma *dma = dev->dma;
 
@@ -148,7 +152,9 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 			return -1;
 		}
 	}
+#if 0
 	}
+#endif
 
 #endif /* DRM_NEWER_USER_TOKEN */
 
@@ -193,19 +199,27 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 /*		return -1; */
 		if (drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
-			DRM_ERROR("Could not find map for foff = 0x%lx\n", foff);
+			DRM_ERROR("Could not find map for foff = 0x%016lx\n", (unsigned long)foff);
 			return -1;
 		}
 		map = drm_hash_entry(hash, struct drm_map_list, hash)->map;
 	}
 
 	if (foff && drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
-		DRM_ERROR("Could not find map for foff = 0x%lx\n", foff);
+		DRM_ERROR("Could not find map for foff = 0x%016lx\n", (unsigned long)foff);
 	}
 	else if (foff && !drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
 		map_foff = drm_hash_entry(hash, struct drm_map_list, hash)->map;
 		if (map != map_foff) {
-			DRM_ERROR("map != map_foff for foff = 0x%lx, user_token = %lx", foff, map->offset);
+			DRM_ERROR("map != map_foff for foff = 0x%016lx, offset = 0x%016lx\n",
+				(unsigned long)foff,
+				(unsigned long)map->offset);
+		}
+		else if (changed_foff) {
+			DRM_INFO("MAP FOUND: foff (0x%016lx), hash key (%016lx), offset (0x%016lx)\n",
+				(unsigned long)foff,
+				(unsigned long)hash->key,
+				(unsigned long)map->offset);
 		}
 	}
 
