@@ -70,7 +70,6 @@
 
 #ifndef __linux__
 	static off_t previous_foff = (off_t)(-2);
-	static int changed_foff = 0;
 #endif
 
 /**
@@ -107,7 +106,14 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 			(unsigned long)ap->a_foff,
 			offset);
 		previous_foff = ap->a_foff;
-		changed_foff = 1;
+		if (foff && !drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
+			map_foff = drm_hash_entry(hash, struct drm_map_list, hash)->map;
+			DRM_INFO("MAP FOUND: foff (0x%016lx), hash key (%016lx), offset (0x%016lx), handle (0x%016lx)\n",
+				(unsigned long)foff,
+				(unsigned long)hash->key,
+				(unsigned long)map_foff->offset,
+				(unsigned long)map_foff->handle);
+		}
 	}
 #endif
 
@@ -213,12 +219,6 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 		if (map != map_foff) {
 			DRM_ERROR("map != map_foff for foff = 0x%016lx, offset = 0x%016lx\n",
 				(unsigned long)foff,
-				(unsigned long)map->offset);
-		}
-		else if (changed_foff) {
-			DRM_INFO("MAP FOUND: foff (0x%016lx), hash key (%016lx), offset (0x%016lx)\n",
-				(unsigned long)foff,
-				(unsigned long)hash->key,
 				(unsigned long)map->offset);
 		}
 	}
