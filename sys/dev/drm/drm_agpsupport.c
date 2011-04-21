@@ -296,6 +296,10 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 
 	struct agp_memory_info info;
 
+#ifndef __linux__
+	DRM_INFO("drm_agp_alloc TRIED: size (%016lx), type (%016lx)\n",
+		request->size, request->type);
+#endif
 	if (!dev->agp || !dev->agp->acquired)
 		return -EINVAL;
 
@@ -332,6 +336,10 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
         request->physical = info.ami_physical;
 #endif
 
+#ifndef __linux__
+	DRM_INFO("drm_agp_alloc SUCCESS: handle (%016lx), physical (%016lx)\n",
+		request->handle, request->physical);
+#endif
 	return 0;
 }
 EXPORT_SYMBOL(drm_agp_alloc);
