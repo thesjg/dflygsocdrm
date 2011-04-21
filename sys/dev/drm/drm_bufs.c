@@ -129,7 +129,7 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 		if (entry->master != dev->primary->master) {
 			if ((map->type == _DRM_REGISTERS) || (map->type == _DRM_FRAME_BUFFER)
 				|| (entry->map->offset == map->offset)) {
-				DRM_ERROR("mismatched master: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%d), entry (%p) != dev (%p)\n",
+				DRM_ERROR("mismatched master: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%ud), entry (%p) != dev (%p)\n",
 					typestr,
 					(uint64_t)map->offset,
 					(uint64_t)map->handle,
@@ -157,7 +157,7 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 			return entry;
 	}
 #ifndef __linux__
-	DRM_INFO("map not found: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%d)\n",
+	DRM_INFO("map not found: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%ud)\n",
 		typestr,
 		(uint64_t)map->offset,
 		(uint64_t)map->handle,
@@ -456,9 +456,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			return -EINVAL;
 		}
 		map->offset += (unsigned long)dev->sg->virtual;
-#if 0
-		map->offset += dev->sg->handle;
-#endif /* __linux__ */
 
 		break;
 	case _DRM_CONSISTENT:
@@ -537,7 +534,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 
 	if (!(map->flags & _DRM_DRIVER))
 		list->master = dev->primary->master;
-	*maplist = list;
 #ifndef __linux__
 	const char *typestr;
 	if (list->map->type < 0 || list->map->type > 5)
@@ -552,24 +548,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		DRM_CURRENTPID,
 		DRM_CURRENTUID);
 #endif
-	return 0;
-
-done:
-
-	if ((list->map->type == _DRM_SHM) &&
-		(list->user_token != (unsigned long)list->map->handle)) {
-		DRM_ERROR("drm_addmap(): _DRM_SHM "
-			"user_token (%016lx) != handle (%016lx)\n",
-			list->user_token, (unsigned long)list->map->handle);
-	}
-	if ((list->map->type == _DRM_REGISTERS || list->map->type == _DRM_FRAME_BUFFER) &&
-		(list->user_token != (unsigned long)list->map->offset)) {
-		DRM_ERROR("drm_addmap(): map type (%d) "
-			"user_token (%016lx) != handle (%016lx)\n",
-			list->map->type,
-			list->user_token, (unsigned long)list->map->offset);
-	}
-
 	*maplist = list;
 	return 0;
 }
@@ -652,13 +630,6 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 
 	if (!DRM_SUSER(DRM_CURPROC) && request->type != _DRM_AGP && map->type != _DRM_SHM)
 		return -EPERM;
-#if 0
-	if (!(dev->flags & (FREAD|FWRITE)))
-		return EACCES; /* Require read/write */
-
-	if (!DRM_SUSER(DRM_CURPROC) && request->type != _DRM_AGP)
-		return EACCES;
-#endif
 
 	err = drm_addmap(dev, request->offset, request->size, request->type,
 	    request->flags, &map);
@@ -738,15 +709,17 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 	}
 
 #ifndef __linux__
-	const char *type;
+	const char *typestr;
 	if (map->type < 0 || map->type > 5)
-		type = "??";
+		typestr = "??";
 	else
-		type = types[map->type];
-	DRM_INFO("drm_rmmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx)\n",
-		type,
+		typestr = types[map->type];
+	DRM_INFO("drm_rmmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%ud)\n",
+		typestr,
 		(uint64_t)map->offset,
-		(uint64_t)map->handle);
+		(uint64_t)map->handle,
+		DRM_CURRENTPID,
+		DRM_CURRENTUID);
 #endif
 
 	switch (map->type) {

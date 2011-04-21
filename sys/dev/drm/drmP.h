@@ -1836,8 +1836,12 @@ int	drm_dma(struct drm_device *dev, void *data, struct drm_file *file_priv);
 
 #ifdef DRM_NEWER_USER_TOKEN
 
+#if 0
 static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 							 unsigned long token)
+#endif
+static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
+							 unsigned int token)
 {
 	struct drm_map_list *_entry;
 	list_for_each_entry(_entry, &dev->maplist, head)
@@ -1846,7 +1850,7 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 	return NULL;
 }
 
-#else /* DRM_NEWER_USER_TOKEN */
+#else /* !DRM_NEWER_USER_TOKEN */
 
 static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 							 unsigned long offset)
@@ -1858,7 +1862,7 @@ static __inline__ struct drm_local_map *drm_core_findmap(struct drm_device *dev,
 	return NULL;
 }
 
-#endif /* DRM_NEWER_USER_TOKEN */
+#endif /* !DRM_NEWER_USER_TOKEN */
 
 #ifdef __linux__
 static __inline__ int drm_device_is_agp(struct drm_device *dev)
