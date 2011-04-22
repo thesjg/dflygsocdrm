@@ -103,11 +103,9 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 #ifndef __linux__
 	if ((off_t)ap->a_foff != previous_foff) {
-		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx), pid (%d), uid (%u)\n",
+		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx)\n",
 			(unsigned long)ap->a_foff,
-			offset,
-			DRM_CURRENTPID,
-			DRM_CURRENTUID);
+			offset);
 		previous_foff = ap->a_foff;
 		if (foff && !drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
 			map_foff = drm_hash_entry(hash, struct drm_map_list, hash)->map;
