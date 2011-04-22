@@ -2012,12 +2012,10 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 	vaddr = round_page((vm_offset_t)vms->vm_daddr + MAXDSIZ);
 
 #ifndef __linux__
-	DRM_INFO("vm_mmap() before: vaddr (%016lx), size (%016lx), foff (%016lx), pid (%d), uid (%u)\n",
+	DRM_INFO("vm_mmap() before: vaddr (%016lx), size (%016lx), foff (%016lx)\n",
 		(unsigned long)vaddr,
 		(unsigned long)size,
-		foff,
-		DRM_CURRENTPID,
-		DRM_CURRENTUID);
+		foff);
 #endif
 
 #if defined(__DragonFly__)
