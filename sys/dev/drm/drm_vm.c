@@ -69,6 +69,7 @@
 #endif /* __linux__ */
 
 #ifndef __linux__
+	static const char *types[] = { "FB", "REG", "SHM", "AGP", "SG", "CON" };
 	static off_t previous_foff = (off_t)(-2);
 #endif
 
@@ -102,13 +103,21 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 
 #ifndef __linux__
 	if ((off_t)ap->a_foff != previous_foff) {
-		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx)\n",
+		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx), pid (%d), uid (%u)\n",
 			(unsigned long)ap->a_foff,
-			offset);
+			offset,
+			DRM_CURRENTPID,
+			DRM_CURRENTUID);
 		previous_foff = ap->a_foff;
 		if (foff && !drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
 			map_foff = drm_hash_entry(hash, struct drm_map_list, hash)->map;
-			DRM_INFO("MAP FOUND: foff (0x%016lx), hash key (%016lx), offset (0x%016lx), handle (0x%016lx)\n",
+			const char *typestr;
+			if (map->type < 0 || map->type > 5)
+				typestr = "??";
+			else
+				typestr = types[map->type];
+			DRM_INFO("MAP FOUND: type (%4.4s), foff (0x%016lx), hash key (%016lx), offset (0x%016lx), handle (0x%016lx)\n",
+				typestr,
 				(unsigned long)foff,
 				(unsigned long)hash->key,
 				(unsigned long)map_foff->offset,
