@@ -68,7 +68,7 @@
 #endif
 #endif /* __linux__ */
 
-#ifndef __linux__
+#ifdef DRM_NEWER_FOFF
 	static const char *types[] = { "FB", "REG", "SHM", "AGP", "SG", "CON" };
 	static off_t previous_foff = (off_t)(-2);
 #endif
@@ -89,7 +89,9 @@
 static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 {
 	struct cdev *kdev = ap->a_head.a_dev;
+#ifdef DRM_NEWER_FOFF
 	unsigned long foff = (unsigned long)ap->a_foff;
+#endif
 	vm_offset_t offset = ap->a_offset;
 	struct drm_device *dev = drm_get_device_from_kdev(kdev);
 	struct drm_file *file_priv = NULL;
@@ -98,10 +100,10 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	struct drm_map_list *r_list_found = NULL;
 	enum drm_map_type type;
 	vm_paddr_t phys;
+#ifdef DRM_NEWER_FOFF
 	struct drm_local_map *map_foff = NULL;
 	struct drm_hash_item *hash;
 
-#ifndef __linux__
 	if ((off_t)ap->a_foff != previous_foff) {
 		DRM_INFO("drm_mmap_legacy(): foff (%016lx) offset (%016lx), pid (%d), uid (%d)\n",
 			(unsigned long)ap->a_foff,
@@ -211,15 +213,18 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	if (map == NULL) {
 		DRM_ERROR("Can't find map, requested offset = %016lx\n",
 			(unsigned long)offset);
-
-/*		return -1; */
+#ifdef DRM_NEWER_FOFF
 		if (drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
 			DRM_ERROR("Could not find map for foff = 0x%016lx\n", (unsigned long)foff);
 			return -1;
 		}
 		map = drm_hash_entry(hash, struct drm_map_list, hash)->map;
+#else
+		return -1;
+#endif
 	}
 
+#ifdef DRM_NEWER_FOFF
 	if (foff && drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
 		DRM_ERROR("Could not find map for foff = 0x%016lx\n", (unsigned long)foff);
 	}
@@ -231,6 +236,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 				(unsigned long)map->offset);
 		}
 	}
+#endif
 
 	if (((map->flags&_DRM_RESTRICTED) && !DRM_SUSER(DRM_CURPROC))) {
 		DRM_DEBUG("restricted map\n");
