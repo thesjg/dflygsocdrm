@@ -47,8 +47,6 @@
 #include <sys/syslink_rpc.h>
 #endif
 
-#include <vm/vm.h>
-
 struct cdev;
 struct ucred;
 struct devfs_bitmap;
@@ -119,20 +117,6 @@ struct dev_ioctl_args {
 struct dev_mmap_args {
 	struct dev_generic_args a_head;
 	vm_offset_t	a_offset;
-	int		a_nprot;
-	int		a_result;	/* page number */
-	off_t		a_foff;		/* original file offset */
-	int		a_is_getpage;	/* alloc or getpage? */
-};
-
-/*
- * int d_mmap_single(cdev_t dev, vm_offset_t offset, int nprot)
- */
-struct dev_mmap_single_args {
-	struct dev_generic_args a_head;
-	vm_offset_t	a_offset;
-	vm_size_t	a_size;
-	vm_object_t	a_object;
 	int		a_nprot;
 	int		a_result;	/* page number */
 };
@@ -212,7 +196,6 @@ typedef int d_dump_t (struct dev_dump_args *ap);
 typedef int d_psize_t (struct dev_psize_args *ap);
 typedef int d_kqfilter_t (struct dev_kqfilter_args *ap);
 typedef int d_clone_t (struct dev_clone_args *ap);
-typedef int d_mmap_single_t (struct dev_mmap_single_args *ap);
 typedef int d_revoke_t (struct dev_revoke_args *ap);
 
 /*
@@ -243,7 +226,6 @@ struct dev_ops {
 	d_psize_t	*d_psize;
 	d_kqfilter_t	*d_kqfilter;
 	d_clone_t	*d_clone;	/* clone from base dev_ops */
-	d_mmap_single_t	*d_mmap_single;
 	d_revoke_t	*d_revoke;
 #define dev_ops_last_field	d_revoke
 };
@@ -286,7 +268,6 @@ union dev_args_union {
 	struct dev_psize_args	du_psize;
 	struct dev_kqfilter_args du_kqfilter;
 	struct dev_clone_args	du_clone;
-	struct dev_mmap_single_args du_mmap_single;
 };
 
 /*
@@ -327,8 +308,7 @@ int64_t dev_dpsize(cdev_t dev);
 int dev_dread(cdev_t dev, struct uio *uio, int ioflag);
 int dev_dwrite(cdev_t dev, struct uio *uio, int ioflag);
 int dev_dkqfilter(cdev_t dev, struct knote *kn);
-int dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot, off_t foff, int is_getpage);
-int dev_dmmap_single(cdev_t dev, vm_offset_t offset, vm_size_t size, vm_object_t *object, int nprot);
+int dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot);
 int dev_dclone(cdev_t dev);
 int dev_drevoke(cdev_t dev);
 
@@ -346,7 +326,6 @@ d_read_t	noread;
 d_write_t	nowrite;
 d_ioctl_t	noioctl;
 d_mmap_t	nommap;
-d_mmap_single_t	nommap_single;
 d_strategy_t	nostrategy;
 d_dump_t	nodump;
 d_psize_t	nopsize;
@@ -369,7 +348,6 @@ extern struct syslink_desc dev_mmap_desc;
 extern struct syslink_desc dev_strategu_desc;
 extern struct syslink_desc dev_kqfilter_desc;
 extern struct syslink_desc dev_clone_desc;
-extern struct syslink_desc dev_mmap_single_desc;
 
 void compile_dev_ops(struct dev_ops *);
 int dev_ops_remove_all(struct dev_ops *ops);

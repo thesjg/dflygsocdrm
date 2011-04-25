@@ -93,7 +93,6 @@ DEVOP_DESC_INIT(ioctl);
 DEVOP_DESC_INIT(dump);
 DEVOP_DESC_INIT(psize);
 DEVOP_DESC_INIT(mmap);
-DEVOP_DESC_INIT(mmap_single);
 DEVOP_DESC_INIT(strategy);
 DEVOP_DESC_INIT(kqfilter);
 DEVOP_DESC_INIT(revoke);
@@ -251,7 +250,7 @@ dev_dioctl(cdev_t dev, u_long cmd, caddr_t data, int fflag, struct ucred *cred,
 }
 
 int
-dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot, off_t foff, int is_getpage)
+dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot)
 {
 	struct dev_mmap_args ap;
 	int needmplock = dev_needmplock(dev);
@@ -261,8 +260,6 @@ dev_dmmap(cdev_t dev, vm_offset_t offset, int nprot, off_t foff, int is_getpage)
 	ap.a_head.a_dev = dev;
 	ap.a_offset = offset;
 	ap.a_nprot = nprot;
-	ap.a_foff = foff;
-	ap.a_is_getpage = is_getpage;
 
 	if (needmplock)
 		get_mplock();
@@ -720,12 +717,6 @@ nopsize(struct dev_psize_args *ap)
 
 int
 nodump(struct dev_dump_args *ap)
-{
-	return (ENODEV);
-}
-
-int
-nommap_single(struct dev_mmap_single_args *ap)
 {
 	return (ENODEV);
 }

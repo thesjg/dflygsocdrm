@@ -103,7 +103,7 @@ extern struct pagerops physpagerops;
 
 int cluster_pbuf_freecnt = -1;	/* unlimited to begin with */
 
-static int dead_pager_getpage (vm_object_t, vm_page_t *, int, off_t);
+static int dead_pager_getpage (vm_object_t, vm_page_t *, int);
 static void dead_pager_putpages (vm_object_t, vm_page_t *, int, int, int *);
 static boolean_t dead_pager_haspage (vm_object_t, vm_pindex_t);
 static void dead_pager_dealloc (vm_object_t);
@@ -112,7 +112,7 @@ static void dead_pager_dealloc (vm_object_t);
  * No requirements.
  */
 static int
-dead_pager_getpage(vm_object_t obj, vm_page_t *mpp, int seqaccess, off_t foff)
+dead_pager_getpage(vm_object_t obj, vm_page_t *mpp, int seqaccess)
 {
 	return VM_PAGER_FAIL;
 }

@@ -1251,7 +1251,7 @@ skip:
 			 * operation filling in any gaps whether there is
 			 * backing store or not.
 			 */
-			rv = vm_pager_get_page(fs->object, &fs->m, seqaccess, fs->entry->offset);
+			rv = vm_pager_get_page(fs->object, &fs->m, seqaccess);
 
 			if (rv == VM_PAGER_OK) {
 				/*

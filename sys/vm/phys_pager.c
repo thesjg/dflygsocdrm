@@ -77,7 +77,7 @@ phys_pager_dealloc(vm_object_t object)
  * No requirements.
  */
 static int
-phys_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess, off_t foff)
+phys_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
 {
 	vm_page_t m = *mpp;
 

@@ -236,7 +236,7 @@ rb_swblock_condcmp(struct swblock *swb, void *data)
  */
 
 static void	swap_pager_dealloc (vm_object_t object);
-static int	swap_pager_getpage (vm_object_t, vm_page_t *, int, off_t);
+static int	swap_pager_getpage (vm_object_t, vm_page_t *, int);
 static void	swap_chain_iodone(struct bio *biox);
 
 struct pagerops swappagerops = {
@@ -1200,7 +1200,7 @@ swap_chain_iodone(struct bio *biox)
  * No requirements.
  */
 static int
-swap_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess, off_t foff)
+swap_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
 {
 	struct buf *bp;
 	struct bio *bio;

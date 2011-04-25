@@ -51,7 +51,7 @@
 #include <vm/swap_pager.h>
 
 static void default_pager_dealloc (vm_object_t);
-static int default_pager_getpage (vm_object_t, vm_page_t *, int, off_t);
+static int default_pager_getpage (vm_object_t, vm_page_t *, int);
 static void default_pager_putpages (vm_object_t, vm_page_t *, int, 
 		boolean_t, int *);
 static boolean_t default_pager_haspage (vm_object_t, vm_pindex_t);
@@ -103,7 +103,7 @@ default_pager_dealloc(vm_object_t object)
  * see a vm_page with assigned swap here.
  */
 static int
-default_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess, off_t foff)
+default_pager_getpage(vm_object_t object, vm_page_t *mpp, int seqaccess)
 {
 	return VM_PAGER_FAIL;
 }
