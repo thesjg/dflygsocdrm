@@ -2360,17 +2360,23 @@ iounmap(void *virtual) {
 	;
 }
 
+/* nouveau_drv.h */
+#define ioread8(reg) (readb(reg))
+
+/* nouveau_drv.h */
+#define ioread16(reg) (readw(reg))
+
 /* file vmwgfx_fifo.c, function vmw_fifo_is_full() */
-static __inline__ uint32_t
-ioread32(uint32_t *location) {
-	return 0;
-}
+#define ioread32(reg) (readl(reg))
+
+/* nouveau_drv.h */
+#define iowrite8(value, reg) writeb(reg, value)
+
+/* nouveau_drv.h */
+#define iowrite16(value, reg) writew(reg, value)
 
 /* file ttm/ttm_bo_util.c, function ttm_copy_io_page() */
-static __inline__ void
-iowrite32(uint32_t src, uint32_t *dstP) {
-	;
-}
+#define iowrite32(value, reg) writel(reg, value)
 
 /* file drm_vm.c, function drm_mmap_locked() */
 static __inline__ pgprot_t
