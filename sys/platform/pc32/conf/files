@@ -110,7 +110,9 @@ dev/video/fb/fb.c			optional	fb
 dev/video/fb/fb.c			optional	vga
 dev/video/fb/splash.c			optional	splash
 dev/video/fb/vga.c			optional	vga
+dev/netif/fe/if_fe.c			optional	fe
 dev/netif/fe/if_fe_isa.c		optional	fe isa
+dev/netif/fe/if_fe_pccard.c		optional	fe pccard
 dev/misc/kbd/atkbd.c			optional	atkbd
 dev/misc/kbd/atkbdc.c			optional	atkbdc
 dev/misc/kbd/kbd.c			optional	atkbd
@@ -127,6 +129,7 @@ dev/raid/pst/pst-raid.c			optional	pst
 dev/misc/puc/puc.c			optional	puc
 dev/misc/puc/pucdata.c			optional	puc
 dev/netif/sbni/if_sbni.c		optional	sbni
+dev/netif/sbni/if_sbni_pci.c		optional	sbni pci
 dev/misc/syscons/schistory.c		optional	sc
 dev/misc/syscons/scmouse.c		optional	sc
 dev/misc/syscons/scterm.c		optional	sc
@@ -227,6 +230,7 @@ platform/pc32/isa/asc.c			optional	asc
 platform/pc32/isa/clock.c		standard nowerror
 dev/video/ctx/ctx.c			optional	ctx
 dev/serial/cy/cy.c			optional	cy
+dev/serial/cy/cy_pci.c			optional	cy pci
 dev/netif/elink_layer/elink.c		optional	ep
 dev/netif/elink_layer/elink.c		optional	ie
 dev/disk/fd/fd.c			optional	fd

@@ -346,8 +346,6 @@ dev/netif/et/if_et.c		optional et
 dev/netif/ex/if_ex.c		optional ex
 dev/netif/ex/if_ex_isa.c	optional ex isa
 dev/netif/ex/if_ex_pccard.c	optional ex pccard
-dev/netif/fe/if_fe.c		optional fe
-dev/netif/fe/if_fe_pccard.c	optional fe pccard
 bus/firewire/firewire.c		optional firewire
 bus/firewire/fwcrom.c		optional firewire
 bus/firewire/fwdev.c		optional firewire
@@ -693,7 +691,6 @@ dev/crypto/rndtest/rndtest.c	optional rndtest
 dev/serial/rp/rp.c		optional nrp
 dev/serial/rp/rp_isa.c		optional nrp isa
 dev/serial/rp/rp_pci.c		optional nrp pci
-dev/netif/sbni/if_sbni_pci.c	optional sbni pci
 dev/netif/sbsh/if_sbsh.c	optional sbsh
 dev/disk/sdhci/sdhci.c		optional sdhci pci
 bus/smbus/smbus_if.m		optional smbus
@@ -1608,7 +1605,6 @@ dev/video/cxm/cxm_ir.c		optional cxm pci
 dev/video/cxm/cxm_msp34xxx.c	optional cxm pci
 dev/video/cxm/cxm_saa7115.c	optional cxm pci
 dev/video/cxm/cxm_tuner.c	optional cxm pci
-dev/serial/cy/cy_pci.c		optional cy pci
 dev/netif/dc/if_dc.c		optional dc
 dev/netif/de/if_de.c		optional de
 dev/netif/en_pci/if_en_pci.c	optional en pci
