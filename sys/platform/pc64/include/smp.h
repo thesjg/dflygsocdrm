@@ -23,6 +23,12 @@ void	initializecpu(void);
 
 #endif	/* LOCORE */
 
+/*
+ * Size of APIC ID list.
+ * Also used a MAX size of various other arrays.
+ */
+#define NAPICID		256
+
 #if defined(SMP)
 
 #ifndef LOCORE
@@ -60,15 +66,10 @@ extern volatile cpumask_t	started_cpus;
 extern volatile u_int		checkstate_probed_cpus;
 extern void (*cpustop_restartfunc) (void);
 
-/* functions in apic_ipl.s */
-u_int	ioapic_read		(volatile void *, int);
-void	ioapic_write		(volatile void *, int, u_int);
-
 /* global data in mp_machdep.c */
 extern int			imcr_present;
 extern int			apic_io_enable;
 extern int			mp_naps;
-extern u_int32_t		cpu_apic_versions[];
 extern int			cpu_num_to_apic_id[];
 extern int			apic_id_to_logical[];
 
@@ -108,67 +109,11 @@ void	forward_signal		(struct proc *);
 int	mptable_pci_int_route(int, int, int, int);
 void	mptable_pci_int_dump(void);
 
-#ifndef _SYS_QUEUE_H_
-#include <sys/queue.h>
-#endif
-
-struct lapic_enumerator {
-	int	lapic_prio;
-	TAILQ_ENTRY(lapic_enumerator) lapic_link;
-	int	(*lapic_probe)(struct lapic_enumerator *);
-	void	(*lapic_enumerate)(struct lapic_enumerator *);
-};
-
-#define LAPIC_ENUM_PRIO_MPTABLE		20
-#define LAPIC_ENUM_PRIO_MADT		40
-
-struct ioapic_enumerator {
-	int	ioapic_prio;
-	TAILQ_ENTRY(ioapic_enumerator) ioapic_link;
-	int	(*ioapic_probe)(struct ioapic_enumerator *);
-	void	(*ioapic_enumerate)(struct ioapic_enumerator *);
-};
-
-#define IOAPIC_ENUM_PRIO_MPTABLE	20
-#define IOAPIC_ENUM_PRIO_MADT		40
-
-/* global data in mpapic.c */
-extern volatile lapic_t		*lapic;
-
-#ifndef _SYS_BUS_H_
-#include <sys/bus.h>
-#endif
-
-/* functions in mpapic.c */
-void	apic_dump		(char*);
-void	lapic_init		(boolean_t);
-int	apic_ipi		(int, int, int);
-void	selected_apic_ipi	(cpumask_t, int, int);
-void	single_apic_ipi(int cpu, int vector, int delivery_mode);
-int	single_apic_ipi_passive(int cpu, int vector, int delivery_mode);
-void	lapic_config(void);
-void	lapic_enumerator_register(struct lapic_enumerator *);
-void	ioapic_config(void);
-void	ioapic_enumerator_register(struct ioapic_enumerator *);
-void	ioapic_add(void *, int, int);
-void	ioapic_intsrc(int, int, enum intr_trigger, enum intr_polarity);
-void	*ioapic_gsi_ioaddr(int);
-int	ioapic_gsi_pin(int);
-void	ioapic_pin_setup(void *, int, int,
-	    enum intr_trigger, enum intr_polarity);
-void	ioapic_extpin_setup(void *, int, int);
-int	ioapic_extpin_gsi(void);
-int	ioapic_gsi(int, int);
-
 #if defined(READY)
 void	clr_io_apic_mask24	(int, u_int32_t);
 void	set_io_apic_mask24	(int, u_int32_t);
 #endif /* READY */
 
-void	set_apic_timer		(int);
-int	get_apic_timer_frequency(void);
-int	read_apic_timer		(void);
-void	u_sleep			(int);
 void	cpu_send_ipiq		(int);
 int	cpu_send_ipiq_passive	(int);
 

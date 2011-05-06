@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 1996, by Steve Passe
+ * Copyright (c) 2008 The DragonFly Project.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,35 +24,13 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/include/mpapic.h,v 1.14.2.2 2000/09/30 02:49:34 ps Exp $
- * $DragonFly: src/sys/platform/pc32/apic/mpapic.h,v 1.12 2008/06/07 11:37:23 mneumann Exp $
+ * $DragonFly: src/sys/platform/pc64/apic/mpapic.h,v 1.1 2008/08/29 17:07:12 dillon Exp $
  */
 
-#ifndef _MACHINE_MPAPIC_H_
-#define _MACHINE_MPAPIC_H_
+#ifndef _ARCH_APIC_LAPIC_H_
+#define _ARCH_APIC_LAPIC_H_
 
-#include "apicreg.h"
-
-#include <machine_base/icu/icu.h>
-
-/*
- * Size of APIC ID list.
- * Also used a MAX size of various other arrays.
- */
-#define NAPICID		256
-
-/* these don't really belong in here... */
-enum busTypes {
-    CBUS = 1,
-    CBUSII = 2,
-    EISA = 3,
-    MCA = 4,
-    ISA = 6,
-    PCI = 13,
-    XPRESS = 18,
-    MAX_BUSTYPE = 18,
-    UNKNOWN_BUSTYPE = 0xff
-};
-
+#include <machine_base/apic/apicreg.h>
 
 /*
  * the physical/logical APIC ID management macros
@@ -59,10 +38,39 @@ enum busTypes {
 #define CPU_TO_ID(CPU)	(cpu_num_to_apic_id[CPU])
 #define ID_TO_CPU(ID)	(apic_id_to_logical[ID])
 
+#ifndef _SYS_QUEUE_H_
+#include <sys/queue.h>
+#endif
+
+struct lapic_enumerator {
+	int	lapic_prio;
+	TAILQ_ENTRY(lapic_enumerator) lapic_link;
+	int	(*lapic_probe)(struct lapic_enumerator *);
+	void	(*lapic_enumerate)(struct lapic_enumerator *);
+};
+
+#define LAPIC_ENUM_PRIO_MPTABLE		20
+#define LAPIC_ENUM_PRIO_MADT		40
+
 #ifdef SMP
 
+extern volatile lapic_t		*lapic;
+
+void	apic_dump(char*);
+void	lapic_init(boolean_t);
+int	apic_ipi(int, int, int);
+void	selected_apic_ipi(cpumask_t, int, int);
+void	single_apic_ipi(int, int, int);
+int	single_apic_ipi_passive(int, int, int);
+void	lapic_config(void);
+void	lapic_enumerator_register(struct lapic_enumerator *);
+void	set_apic_timer(int);
+int	get_apic_timer_frequency(void);
+int	read_apic_timer(void);
+void	u_sleep(int);
+
 /*
- * send an IPI INTerrupt containing 'vector' to all CPUs EXCEPT myself
+ * Send an IPI INTerrupt containing 'vector' to all CPUs EXCEPT myself
  */
 static __inline int
 all_but_self_ipi(int vector)
@@ -75,5 +83,6 @@ all_but_self_ipi(int vector)
 #endif
 
 void	lapic_map(vm_offset_t /* XXX should be vm_paddr_t */);
+int	lapic_unused_apic_id(int);
 
-#endif /* _MACHINE_MPAPIC_H */
+#endif /* _ARCH_APIC_LAPIC_H_ */

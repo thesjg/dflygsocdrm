@@ -41,7 +41,8 @@
 #include <machine/smp.h>
 #include <machine/md_var.h>
 #include <machine/specialreg.h>
-#include <machine_base/apic/mpapic.h>
+#include <machine_base/apic/lapic.h>
+#include <machine_base/apic/ioapic.h>
 
 #include "acpi_sdt.h"
 #include "acpi_sdt_var.h"
