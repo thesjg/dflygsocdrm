@@ -196,7 +196,7 @@ initializecpu(void)
 }
 
 void
-initializecpucache()
+initializecpucache(void)
 {
 
 	/*
