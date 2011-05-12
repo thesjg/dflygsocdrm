@@ -115,7 +115,7 @@ static int drm_minor_get_id(struct drm_device *dev, int type)
 #ifdef __linux__
 	int base = 0, limit = 63;
 #else /* unit == 0 most common case */
-	int base = dev->unit - 1, limit = 63;
+	int base = dev->unit, limit = 63;
 #endif
 
 	if (type == DRM_MINOR_CONTROL) {

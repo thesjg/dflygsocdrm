@@ -109,7 +109,7 @@ idr_get_new_above(struct idr *pidr, void *data, int floor, int *id) {
 	struct drm_rb_info find;
 	struct drm_rb_info *sofar;
 	struct drm_rb_info *info;
-	int candidate = floor + 1;
+	int candidate = floor;
 	if (candidate < pidr->filled_below) {
 		candidate = pidr->filled_below;
 	}
@@ -131,15 +131,15 @@ idr_get_new_above(struct idr *pidr, void *data, int floor, int *id) {
 	info->data = data;
 	RB_INSERT(drm_rb_tree, &pidr->tree, info);
 	*id = info->handle;
-	if (floor < pidr->filled_below) {
-		pidr->filled_below = info->handle - 1;
+	if (floor <= pidr->filled_below) {
+		pidr->filled_below = info->handle + 1;
 	}
 	return 0;
 }
 
 int
 idr_get_new(struct idr *pidr, void *data, int *id) {
-	return idr_get_new_above(pidr, data, -1, id);
+	return idr_get_new_above(pidr, data, 0, id);
 }
 
 /* drm.gem.c drm_gem_handle_delete()
@@ -179,11 +179,12 @@ idr_remove_all(struct idr *pidr) {
 	if (var != NULL) {
 		free(var, DRM_MEM_IDR);
 	}
+	pidr->filled_below = 0;
 }
 
 /* from drm_info.c function drm_gem_name_info */
 void
-idr_for_each(struct idr *pidr, int (*func)(int id, void *ptr, void *data), void * data) {
+idr_for_each(struct idr *pidr, int (*func)(int id, void *ptr, void *data), void *data) {
 	struct drm_rb_info *var;
         struct drm_rb_info *nxt;
 	for (var = RB_MIN(drm_rb_tree, &pidr->tree); var != NULL; var = nxt) {
