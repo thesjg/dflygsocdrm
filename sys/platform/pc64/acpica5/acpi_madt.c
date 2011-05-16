@@ -339,10 +339,10 @@ madt_lapic_pass2_callback(void *xarg, const struct acpi_madt_ent *ent)
 		MADT_VPRINTF("cpu id %d, apic id %d\n",
 			     lapic_ent->ml_cpu_id, lapic_ent->ml_apic_id);
 		if (lapic_ent->ml_apic_id == arg->bsp_apic_id) {
-			mp_set_cpuids(0, lapic_ent->ml_apic_id);
+			lapic_set_cpuid(0, lapic_ent->ml_apic_id);
 			arg->bsp_found = 1;
 		} else {
-			mp_set_cpuids(arg->cpu, lapic_ent->ml_apic_id);
+			lapic_set_cpuid(arg->cpu, lapic_ent->ml_apic_id);
 			arg->cpu++;
 		}
 	}
@@ -372,7 +372,6 @@ madt_lapic_pass2(int bsp_apic_id)
 		panic("madt_iterate_entries(pass2) failed\n");
 
 	KKASSERT(arg.bsp_found);
-	KKASSERT(arg.cpu > 1);
 	mp_naps = arg.cpu - 1; /* exclude BSP */
 
 	sdt_sdth_unmap(&madt->madt_hdr);
@@ -430,9 +429,8 @@ madt_lapic_probe(struct lapic_enumerator *e)
 
 	error = madt_iterate_entries(madt, madt_lapic_probe_callback, &arg);
 	if (!error) {
-		if (arg.cpu_count <= 1) {
-			kprintf("madt_lapic_probe: "
-				"less than 2 CPUs is found\n");
+		if (arg.cpu_count == 0) {
+			kprintf("madt_lapic_probe: no CPU is found\n");
 			error = EOPNOTSUPP;
 		}
 		if (arg.lapic_addr == 0) {

@@ -84,6 +84,12 @@ static const uint32_t	lapic_timer_divisors[] = {
 };
 #define APIC_TIMER_NDIVISORS (int)(NELEM(lapic_timer_divisors))
 
+/*
+ * APIC ID <-> CPU ID mapping structures.
+ */
+int	cpu_id_to_apic_id[NAPICID];
+int	apic_id_to_cpu_id[NAPICID];
+
 void
 lapic_eoi(void)
 {
@@ -189,22 +195,10 @@ lapic_init(boolean_t bsp)
 	/*
 	 * Set the Task Priority Register as needed.   At the moment allow
 	 * interrupts on all cpus (the APs will remain CLId until they are
-	 * ready to deal).  We could disable all but IPIs by setting
-	 * temp |= TPR_IPI for cpu != 0.
+	 * ready to deal).
 	 */
 	temp = lapic->tpr;
 	temp &= ~APIC_TPR_PRIO;		/* clear priority field */
-#ifdef SMP /* APIC-IO */
-if (!apic_io_enable) {
-#endif
-	/*
- 	 * If we are NOT running the IO APICs, the LAPIC will only be used
-	 * for IPIs.  Set the TPR to prevent any unintentional interrupts.
- 	 */
-	temp |= TPR_IPI;
-#ifdef SMP /* APIC-IO */
-}
-#endif
 	lapic->tpr = temp;
 
 	/* 
@@ -559,7 +553,7 @@ single_apic_ipi(int cpu, int vector, int delivery_mode)
 	    write_rflags(rflags);
 	}
 	icr_hi = lapic->icr_hi & ~APIC_ID_MASK;
-	icr_hi |= (CPU_TO_ID(cpu) << 24);
+	icr_hi |= (CPUID_TO_APICID(cpu) << 24);
 	lapic->icr_hi = icr_hi;
 
 	/* build ICR_LOW */
@@ -591,7 +585,7 @@ single_apic_ipi_passive(int cpu, int vector, int delivery_mode)
 	    return(0);
 	}
 	icr_hi = lapic->icr_hi & ~APIC_ID_MASK;
-	icr_hi |= (CPU_TO_ID(cpu) << 24);
+	icr_hi |= (CPUID_TO_APICID(cpu) << 24);
 	lapic->icr_hi = icr_hi;
 
 	/* build IRC_LOW */
@@ -690,7 +684,7 @@ lapic_unused_apic_id(int start)
 	int i;
 
 	for (i = start; i < NAPICID; ++i) {
-		if (ID_TO_CPU(i) == -1)
+		if (APICID_TO_CPUID(i) == -1)
 			return i;
 	}
 	return NAPICID;
@@ -707,24 +701,47 @@ lapic_map(vm_offset_t lapic_addr)
 static TAILQ_HEAD(, lapic_enumerator) lapic_enumerators =
 	TAILQ_HEAD_INITIALIZER(lapic_enumerators);
 
-void
+int
 lapic_config(void)
 {
 	struct lapic_enumerator *e;
-	int error, i;
+	int error, i, enable, ap_max;
 
 	for (i = 0; i < NAPICID; ++i)
-		ID_TO_CPU(i) = -1;
+		APICID_TO_CPUID(i) = -1;
+
+	enable = 1;
+	TUNABLE_INT_FETCH("hw.lapic_enable", &enable);
+	if (!enable) {
+		kprintf("LAPIC: Warning LAPIC is disabled\n");
+		return ENXIO;
+	}
 
 	TAILQ_FOREACH(e, &lapic_enumerators, lapic_link) {
 		error = e->lapic_probe(e);
 		if (!error)
 			break;
 	}
-	if (e == NULL)
-		panic("can't config lapic\n");
+	if (e == NULL) {
+		kprintf("LAPIC: Can't find LAPIC\n");
+		return ENXIO;
+	}
 
 	e->lapic_enumerate(e);
+
+	ap_max = MAXCPU - 1;
+	TUNABLE_INT_FETCH("hw.ap_max", &ap_max);
+	if (ap_max > MAXCPU - 1)
+		ap_max = MAXCPU - 1;
+
+	if (mp_naps > ap_max) {
+		kprintf("LAPIC: Warning use only %d out of %d "
+			"available APs\n",
+			ap_max, mp_naps);
+		mp_naps = ap_max;
+	}
+
+	return 0;
 }
 
 void
@@ -739,4 +756,29 @@ lapic_enumerator_register(struct lapic_enumerator *ne)
 		}
 	}
 	TAILQ_INSERT_TAIL(&lapic_enumerators, ne, lapic_link);
+}
+
+void
+lapic_set_cpuid(int cpu_id, int apic_id)
+{
+	CPUID_TO_APICID(cpu_id) = apic_id;
+	APICID_TO_CPUID(apic_id) = cpu_id;
+}
+
+void
+lapic_fixup_noioapic(void)
+{
+	u_int   temp;
+
+	/* Only allowed on BSP */
+	KKASSERT(mycpuid == 0);
+	KKASSERT(!apic_io_enable);
+
+	temp = lapic->lvt_lint0;
+	temp &= ~APIC_LVT_MASKED;
+	lapic->lvt_lint0 = temp;
+
+	temp = lapic->lvt_lint1;
+	temp |= APIC_LVT_MASKED;
+	lapic->lvt_lint1 = temp;
 }

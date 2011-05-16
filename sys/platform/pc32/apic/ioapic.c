@@ -30,6 +30,7 @@
 #include <sys/kernel.h>
 #include <sys/bus.h>
 #include <sys/machintr.h>
+#include <vm/pmap.h>
 #include <machine/globaldata.h>
 #include <machine/smp.h>
 #include <machine/cputypes.h>
@@ -85,13 +86,13 @@ static struct ioapic_conf	ioapic_conf;
 static TAILQ_HEAD(, ioapic_enumerator) ioapic_enumerators =
 	TAILQ_HEAD_INITIALIZER(ioapic_enumerators);
 
-void
+int
 ioapic_config(void)
 {
 	struct ioapic_info *info;
 	int start_apic_id = 0;
 	struct ioapic_enumerator *e;
-	int error, i;
+	int error, i, probe;
 	u_long ef = 0;
 
 	TAILQ_INIT(&ioapic_conf.ioc_list);
@@ -99,18 +100,21 @@ ioapic_config(void)
 	for (i = 0; i < 16; ++i)
 		ioapic_conf.ioc_intsrc[i].int_gsi = -1;
 
+	probe = 1;
+	TUNABLE_INT_FETCH("hw.ioapic_probe", &probe);
+	if (!probe) {
+		kprintf("IOAPIC: warning I/O APIC will not be probed\n");
+		return ENXIO;
+	}
+
 	TAILQ_FOREACH(e, &ioapic_enumerators, ioapic_link) {
 		error = e->ioapic_probe(e);
 		if (!error)
 			break;
 	}
 	if (e == NULL) {
-#ifdef notyet
-		panic("can't config I/O APIC\n");
-#else
-		kprintf("no I/O APIC\n");
-		return;
-#endif
+		kprintf("IOAPIC: can't find I/O APIC\n");
+		return ENXIO;
 	}
 
 	crit_enter();
@@ -207,6 +211,8 @@ ioapic_config(void)
 	MachIntrABI.cleanup();
 
 	crit_exit();
+
+	return 0;
 }
 
 void
@@ -513,7 +519,7 @@ ioapic_pin_prog(void *addr, int pin, int vec,
 	}
 
 	target = ioapic_read(addr, select + 1) & IOART_HI_DEST_RESV;
-	target |= (CPU_TO_ID(0) << IOART_HI_DEST_SHIFT) &
+	target |= (CPUID_TO_APICID(0) << IOART_HI_DEST_SHIFT) &
 		  IOART_HI_DEST_MASK;
 
 	ioapic_write(addr, select, flags | vec);
@@ -570,4 +576,11 @@ ioapic_alloc_apic_id(int start)
 		start = apic_id + 1;
 	}
 	panic("ioapic_unused_apic_id: never reached\n");
+}
+
+void *
+ioapic_map(vm_paddr_t pa)
+{
+	KKASSERT(pa < 0x100000000LL);
+	return pmap_mapdev_uncacheable(pa, PAGE_SIZE);
 }

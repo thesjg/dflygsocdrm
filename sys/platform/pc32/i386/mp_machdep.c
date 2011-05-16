@@ -56,6 +56,7 @@
 #include <machine/atomic.h>
 #include <machine/cpufunc.h>
 #include <machine/cputypes.h>
+#include <machine_base/icu/icu_var.h>
 #include <machine_base/apic/ioapic_abi.h>
 #include <machine_base/apic/lapic.h>
 #include <machine_base/apic/ioapic.h>
@@ -147,13 +148,6 @@ extern int64_t tsc_offsets[];
 struct apic_intmapinfo	int_to_apicintpin[APIC_INTMAPSIZE];
 #endif
 
-/*
- * APIC ID logical/physical mapping structures.
- * We oversize these to simplify boot-time config.
- */
-int     cpu_num_to_apic_id[NAPICID];
-int     apic_id_to_logical[NAPICID];
-
 /* AP uses this during bootstrap.  Do not staticize.  */
 char *bootSTK;
 static int bootAP;
@@ -184,6 +178,7 @@ static int	start_all_aps(u_int boot_addr);
 static void	install_ap_tramp(u_int boot_addr);
 static int	start_ap(struct mdglobaldata *gd, u_int boot_addr, int smibest);
 static int	smitest(void);
+static void	cpu_simple_setup(void);
 
 static cpumask_t smp_startup_mask = 1;	/* which cpus have been started */
 static cpumask_t smp_lapic_mask = 1;	/* which cpus have lapic been inited */
@@ -232,9 +227,9 @@ mp_announce(void)
 	POSTCODE(MP_ANNOUNCE_POST);
 
 	kprintf("DragonFly/MP: Multiprocessor motherboard\n");
-	kprintf(" cpu0 (BSP): apic id: %2d\n", CPU_TO_ID(0));
+	kprintf(" cpu0 (BSP): apic id: %2d\n", CPUID_TO_APICID(0));
 	for (x = 1; x <= mp_naps; ++x)
-		kprintf(" cpu%d (AP):  apic id: %2d\n", x, CPU_TO_ID(x));
+		kprintf(" cpu%d (AP):  apic id: %2d\n", x, CPUID_TO_APICID(x));
 
 	if (!apic_io_enable)
 		kprintf(" Warning: APIC I/O disabled\n");
@@ -320,9 +315,19 @@ init_secondary(void)
 static void
 mp_enable(u_int boot_addr)
 {
+	int error;
+
 	POSTCODE(MP_ENABLE_POST);
 
-	lapic_config();
+	error = lapic_config();
+	if (error) {
+		if (apic_io_enable) {
+			apic_io_enable = 0;
+			icu_reinit_noioapic();
+		}
+		cpu_simple_setup();
+		return;
+	}
 
 	/* Initialize BSP's local APIC */
 	lapic_init(TRUE);
@@ -330,25 +335,14 @@ mp_enable(u_int boot_addr)
 	/* start each Application Processor */
 	start_all_aps(boot_addr);
 
-	if (apic_io_enable)
-		ioapic_config();
-
-	/* Finalize PIC */
-	MachIntrABI.finalize();
-}
-
-void
-mp_set_cpuids(int cpu_id, int apic_id)
-{
-	CPU_TO_ID(cpu_id) = apic_id;
-	ID_TO_CPU(apic_id) = cpu_id;
-}
-
-void *
-ioapic_map(vm_paddr_t pa)
-{
-	KKASSERT(pa < 0x100000000LL);
-	return pmap_mapdev_uncacheable(pa, PAGE_SIZE);
+	if (apic_io_enable) {
+		error = ioapic_config();
+		if (error) {
+			apic_io_enable = 0;
+			icu_reinit_noioapic();
+			lapic_fixup_noioapic();
+		}
+	}
 }
 
 /*
@@ -487,7 +481,8 @@ start_all_aps(u_int boot_addr)
 		/* attempt to start the Application Processor */
 		CHECK_INIT(99);	/* setup checkpoints */
 		if (!start_ap(gd, boot_addr, smibest)) {
-			kprintf("AP #%d (PHY# %d) failed!\n", x, CPU_TO_ID(x));
+			kprintf("AP #%d (PHY# %d) failed!\n", x,
+			    CPUID_TO_APICID(x));
 			CHECK_PRINT("trace");	/* show checkpoints */
 			/* better panic as the AP may be running loose */
 			kprintf("panic y/n? [y] ");
@@ -634,7 +629,7 @@ start_ap(struct mdglobaldata *gd, u_int boot_addr, int smibest)
 	POSTCODE(START_AP_POST);
 
 	/* get the PHYSICAL APIC ID# */
-	physical_cpu = CPU_TO_ID(gd->mi.gd_cpuid);
+	physical_cpu = CPUID_TO_APICID(gd->mi.gd_cpuid);
 
 	/* calculate the vector */
 	vector = (boot_addr >> 12) & 0xff;
@@ -963,7 +958,7 @@ restart_cpus(cpumask_t map)
 void
 ap_init(void)
 {
-	u_int	apic_id;
+	int	cpu_id;
 
 	/*
 	 * Adjust smp_startup_mask to signal the BSP that we have started
@@ -1013,10 +1008,10 @@ ap_init(void)
 	mycpu->gd_other_cpus = smp_startup_mask & ~CPUMASK(mycpu->gd_cpuid);
 
 	/* A quick check from sanity claus */
-	apic_id = (apic_id_to_logical[(lapic->id & 0xff000000) >> 24]);
-	if (mycpu->gd_cpuid != apic_id) {
-		kprintf("SMP: cpuid = %d\n", mycpu->gd_cpuid);
-		kprintf("SMP: apic_id = %d\n", apic_id);
+	cpu_id = APICID_TO_CPUID((lapic->id & 0xff000000) >> 24);
+	if (mycpu->gd_cpuid != cpu_id) {
+		kprintf("SMP: assigned cpuid = %d\n", mycpu->gd_cpuid);
+		kprintf("SMP: actual cpuid = %d\n", cpu_id);
 		kprintf("PTD[MPPTDI] = %p\n", (void *)PTD[MPPTDI]);
 		panic("cpuid mismatch! boom!!");
 	}
@@ -1133,3 +1128,17 @@ cpu_send_ipiq_passive(int dcpu)
 	return(r);
 }
 #endif
+
+static void
+cpu_simple_setup(void)
+{
+	/* build our map of 'other' CPUs */
+	mycpu->gd_other_cpus = smp_startup_mask & ~CPUMASK(mycpu->gd_cpuid);
+	mycpu->gd_ipiq = (void *)kmem_alloc(&kernel_map, sizeof(lwkt_ipiq) * ncpus);
+	bzero(mycpu->gd_ipiq, sizeof(lwkt_ipiq) * ncpus);
+
+	pmap_set_opt();
+
+	if (cpu_feature & CPUID_TSC)
+		tsc0_offset = rdtsc();
+}

@@ -60,8 +60,6 @@ extern void (*cpustop_restartfunc) (void);
 /* global data in mp_machdep.c */
 extern int			imcr_present;
 extern int			mp_naps;
-extern int			cpu_num_to_apic_id[];
-extern int			apic_id_to_logical[];
 
 #define APIC_INTMAPSIZE 192
 /*
@@ -86,11 +84,9 @@ extern struct apic_intmapinfo	int_to_apicintpin[];
 extern struct pcb		stoppcbs[];
 
 /* functions in mp_machdep.c */
-void	*ioapic_map(vm_paddr_t);
 u_int	mp_bootaddress		(u_int);
 void	mp_start		(void);
 void	mp_announce		(void);
-void	mp_set_cpuids		(int, int);
 void	init_secondary		(void);
 int	stop_cpus		(cpumask_t);
 void	ap_init			(void);

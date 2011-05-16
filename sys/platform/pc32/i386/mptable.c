@@ -561,13 +561,13 @@ processor_entry(const struct PROCENTRY *entry, int cpu)
 
 	/* check for BSP flag */
 	if (entry->cpu_flags & PROCENTRY_FLAG_BP) {
-		mp_set_cpuids(0, entry->apic_id);
+		lapic_set_cpuid(0, entry->apic_id);
 		return 0;	/* its already been counted */
 	}
 
 	/* add another AP to list, if less than max number of CPUs */
 	else if (cpu < MAXCPU) {
-		mp_set_cpuids(cpu, entry->apic_id);
+		lapic_set_cpuid(cpu, entry->apic_id);
 		return 1;
 	}
 
@@ -723,16 +723,15 @@ mptable_lapic_default(void)
 	ap_apicid = (bsp_apicid == 0) ? 1 : 0;
 
 	/* BSP */
-	mp_set_cpuids(0, bsp_apicid);
+	lapic_set_cpuid(0, bsp_apicid);
 	/* one and only AP */
-	mp_set_cpuids(1, ap_apicid);
+	lapic_set_cpuid(1, ap_apicid);
 }
 
 /*
  * Configure:
  *     mp_naps
- *     ID_TO_CPU(N), APIC ID to logical CPU table
- *     CPU_TO_ID(N), logical CPU to APIC ID table
+ *     APIC ID <-> CPU ID mappings
  */
 static void
 mptable_lapic_enumerate(struct lapic_enumerator *e)
@@ -779,16 +778,7 @@ mptable_lapic_enumerate(struct lapic_enumerator *e)
 		if (logical_cpus != 0)
 			arg1.cpu_count *= logical_cpus;
 	}
-	mp_naps = arg1.cpu_count;
-
-	/* Qualify the numbers again, after possible HT fixup */
-	if (mp_naps > MAXCPU) {
-		kprintf("Warning: only using %d of %d available CPUs!\n",
-			MAXCPU, mp_naps);
-		mp_naps = MAXCPU;
-	}
-
-	--mp_naps;	/* subtract the BSP */
+	mp_naps = arg1.cpu_count - 1;	/* subtract the BSP */
 
 	/*
 	 * Link logical CPU id to local apic id
