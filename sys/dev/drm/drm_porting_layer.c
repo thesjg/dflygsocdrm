@@ -223,6 +223,121 @@ idr_destroy(struct idr *pidr) {
 }
 
 /**********************************************************
+ * ida                                                    *
+ **********************************************************/
+
+/* Brute force implementation of ida API
+ * using current red-black tree backing
+ *
+ * Adapted from FreeBSD port of drm_drawable.c
+ */
+
+int
+drm_ida_compare(struct drm_ida_info *a, struct drm_ida_info *b) {
+	if (a->handle > b->handle)
+		return 1;
+	if (a->handle < b->handle)
+		return -1;
+	return 0;
+}
+
+RB_GENERATE(drm_ida_tree, drm_ida_info, tree, drm_ida_compare);
+
+void
+ida_init(struct ida *pida) {
+	RB_INIT(&pida->tree);
+	spin_lock_init(&pida->ida_lock);
+	pida->filled_below = 0;
+}
+
+int
+ida_pre_get(struct ida *pida, unsigned int flags) {
+	struct drm_ida_info *allocate;
+	int already = 0;
+	allocate = malloc(sizeof(struct drm_ida_info), DRM_MEM_IDR, M_WAITOK);
+	if (allocate == NULL) {
+		return 0;
+	}
+	spin_lock(&pida->ida_lock);
+	if (pida->available != NULL) {
+		already = 1;
+	}
+	else {
+		pida->available = allocate;
+	}
+	spin_unlock(&pida->ida_lock);
+	if (already) {
+		free(allocate, DRM_MEM_IDR);
+	}
+	return 1;
+}
+
+/* Brute force implementation */
+int
+ida_get_new_above(struct ida *pida, int floor, int *id) {
+	struct drm_ida_info find;
+	struct drm_ida_info *sofar;
+	struct drm_ida_info *info;
+	int candidate = floor;
+	if (candidate < pida->filled_below) {
+		candidate = pida->filled_below;
+	}
+	find.handle = candidate;
+	sofar = RB_FIND(drm_ida_tree, &pida->tree, &find);
+        while ((sofar != NULL) && (candidate == sofar->handle)) {
+		candidate = sofar->handle + 1;
+		sofar = RB_NEXT(drm_ida_tree, &pida->tree, sofar);
+        }
+	spin_lock(&pida->ida_lock);
+	info = pida->available;
+	if (info == NULL) {
+		spin_unlock(&pida->ida_lock);
+		return -EAGAIN;
+	}
+	pida->available = NULL;
+	spin_unlock(&pida->ida_lock);
+	info->handle = candidate;
+	RB_INSERT(drm_ida_tree, &pida->tree, info);
+	*id = info->handle;
+	if (floor <= pida->filled_below) {
+		pida->filled_below = info->handle + 1;
+	}
+	return 0;
+}
+
+int
+ida_get_new(struct ida *pida, int *id) {
+	return ida_get_new_above(pida, 0, id);
+}
+
+void
+ida_remove(struct ida *pida, int id) {
+	struct drm_ida_info find;
+	struct drm_ida_info *info;
+	find.handle = id;
+	info = RB_FIND(drm_ida_tree, &pida->tree, &find);
+	if (info != NULL) {
+		RB_REMOVE(drm_ida_tree, &pida->tree, info);
+		free(info, DRM_MEM_IDR);
+        }
+	if (id < pida->filled_below) {
+		pida->filled_below = id;
+	}
+}
+
+void
+ida_destroy(struct ida *pida) {
+	struct drm_ida_info *var = NULL;
+	spin_lock(&pida->ida_lock);
+	var = pida->available;
+	pida->available = NULL;
+	spin_unlock(&pida->ida_lock);
+	if (var != NULL) {
+		free(var, DRM_MEM_IDR);
+	}
+}
+
+/**********************************************************
  * FRAMEBUFFER                                            *
  **********************************************************/
 

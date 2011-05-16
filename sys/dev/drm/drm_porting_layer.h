@@ -937,6 +937,52 @@ void
 idr_destroy(struct idr *pidr);
 
 /**********************************************************
+ * ida                                                    *
+ **********************************************************/
+
+/* Brute force implementation of ida API
+ * using current red-black tree backing
+ *
+ * Adapted from FreeBSD port of drm_drawable.c
+ */
+
+struct drm_ida_info {
+	int handle;
+	RB_ENTRY(drm_ida_info) tree;
+};
+
+int
+drm_ida_compare(struct drm_ida_info *a, struct drm_ida_info *b);
+
+RB_HEAD(drm_ida_tree, drm_ida_info);
+
+RB_PROTOTYPE(drm_ida_tree, drm_ida_info, tree, drm_ida_compare);
+
+struct ida {
+	struct drm_ida_tree tree;
+	spinlock_t ida_lock;
+	struct drm_ida_info *available;
+	int filled_below;
+};
+
+void ida_init(struct ida *pida);
+
+int
+ida_pre_get(struct ida *pida, unsigned int flags);
+
+int
+ida_get_new_above(struct ida * pida, int floor, int *id);
+
+int
+ida_get_new(struct ida *pida, int *id);
+
+void
+ida_remove(struct ida *pida, int id);
+
+void
+ida_destroy(struct ida *pida);
+
+/**********************************************************
  * kref reference counting                                *
  **********************************************************/
 
