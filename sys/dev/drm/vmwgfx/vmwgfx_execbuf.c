@@ -34,7 +34,11 @@ static int vmw_cmd_invalid(struct vmw_private *dev_priv,
 			   struct vmw_sw_context *sw_context,
 			   SVGA3dCmdHeader *header)
 {
+#ifdef __linux__
 	return capable(CAP_SYS_ADMIN) ? : -EINVAL;
+#else
+	return DRM_SUSER(DRM_CURPROC) ? : -EINVAL;
+#endif
 }
 
 static int vmw_cmd_ok(struct vmw_private *dev_priv,
