@@ -26,7 +26,6 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/i386/linux/linux_sysvec.c,v 1.55.2.9 2002/01/12 11:03:30 bde Exp $
- * $DragonFly: src/sys/emulation/linux/i386/linux_sysvec.c,v 1.31 2008/04/21 15:47:53 dillon Exp $
  */
 
 /* XXX we use functions that might not exist. */
@@ -98,6 +97,7 @@ static void	linux_prepsyscall (struct trapframe *tf, int *args,
 				       u_int *code, caddr_t *params);
 static void     linux_sendsig (sig_t catcher, int sig, sigset_t *mask,
 				   u_long code);
+static boolean_t linux_trans_osrel(const Elf_Note *note, int32_t *osrel);
 
 static eventhandler_tag linux_exec_tag;
 static eventhandler_tag linux_exit_tag;
@@ -830,21 +830,47 @@ struct sysentvec elf_linux_sysvec = {
 
 static const char GNU_ABI_VENDOR[] = "GNU";
 static const char SUSE_ABI_VENDOR[] = "SuSE";
+static int        GNULINUX_ABI_DESC = 0;
+
+static boolean_t
+linux_trans_osrel(const Elf_Note *note, int32_t *osrel)
+{
+	const Elf32_Word *desc;
+	uintptr_t p;
+
+	p = (uintptr_t)(note + 1);
+	p += roundup2(note->n_namesz, sizeof(Elf32_Addr));
+
+	desc = (const Elf32_Word *)p;
+	if (desc[0] != GNULINUX_ABI_DESC)
+		return (FALSE);
+	/*
+	 * For Linux we encode osrel as follows:
+	 * VVVMMMIII (version, major, minor)
+	 */
+	*osrel = desc[1] * 1000000 +
+		 desc[2] * 1000 +
+		 desc[3];
+
+	return (TRUE);
+}
 
 static Elf_Brandnote linux32_generic_brandnote = {
-        .hdr.n_namesz	= sizeof(GNU_ABI_VENDOR),
-        .hdr.n_descsz	= sizeof(int32_t),
-        .hdr.n_type	= 1,
-        .vendor		= GNU_ABI_VENDOR,
-        .flags		= 0,
+	.hdr.n_namesz	= sizeof(GNU_ABI_VENDOR),
+	.hdr.n_descsz	= 16,
+	.hdr.n_type	= 1,
+	.vendor		= GNU_ABI_VENDOR,
+	.flags		= BN_TRANSLATE_OSREL,
+	.trans_osrel	= linux_trans_osrel,
 };
 
 static Elf_Brandnote linux32_suse_brandnote = {
-        .hdr.n_namesz	= sizeof(SUSE_ABI_VENDOR),
-        .hdr.n_descsz	= sizeof(int32_t),
-        .hdr.n_type	= 1,
-        .vendor		= SUSE_ABI_VENDOR,
-        .flags		= 0,
+	.hdr.n_namesz	= sizeof(SUSE_ABI_VENDOR),
+	.hdr.n_descsz	= 16,
+	.hdr.n_type	= 1,
+	.vendor		= SUSE_ABI_VENDOR,
+	.flags		= BN_TRANSLATE_OSREL,
+	.trans_osrel	= linux_trans_osrel,
 };
 
 static Elf32_Brandinfo linux32_brand = {
@@ -855,7 +881,7 @@ static Elf32_Brandinfo linux32_brand = {
         .interp_path	= "/lib/ld-linux.so.1",
         .sysvec		= &elf_linux_sysvec,
         .interp_newpath	= NULL,
-        .flags		= BI_CAN_EXEC_DYN,
+        .flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE,
         .brand_note	= &linux32_generic_brandnote,
 };
 
@@ -867,7 +893,7 @@ static Elf32_Brandinfo linux32_glibc2_brand = {
         .interp_path	= "/lib/ld-linux.so.2",
         .sysvec		= &elf_linux_sysvec,
         .interp_newpath	= NULL,
-        .flags		= BI_CAN_EXEC_DYN,
+        .flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE,
         .brand_note	= &linux32_generic_brandnote,
 };
 
@@ -879,7 +905,7 @@ static Elf32_Brandinfo linux32_suse_brand = {
         .interp_path	= "/lib/ld-linux.so.2",
         .sysvec		= &elf_linux_sysvec,
         .interp_newpath	= NULL,
-        .flags		= BI_CAN_EXEC_DYN,
+        .flags		= BI_CAN_EXEC_DYN | BI_BRAND_NOTE,
         .brand_note	= &linux32_suse_brandnote,
 };
 
@@ -887,6 +913,7 @@ Elf32_Brandinfo *linux_brandlist[] = {
         &linux32_brand,
         &linux32_glibc2_brand,
         &linux32_suse_brand,
+        NULL
 };
 
 static int

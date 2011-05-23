@@ -83,8 +83,14 @@ static int __elfN(load_section)(struct proc *p,
     vm_offset_t offset, caddr_t vmaddr, size_t memsz, size_t filsz,
     vm_prot_t prot);
 static int __CONCAT(exec_, __elfN(imgact))(struct image_params *imgp);
+static boolean_t __elfN(bsd_trans_osrel)(const Elf_Note *note,
+    int32_t *osrel);
 static boolean_t __elfN(check_note)(struct image_params *imgp,
     Elf_Brandnote *checknote, int32_t *osrel);
+static boolean_t check_PT_NOTE(struct image_params *imgp,
+    Elf_Brandnote *checknote, int32_t *osrel, const Elf_Phdr * pnote);
+static boolean_t extract_interpreter(struct image_params *imgp,
+    const Elf_Phdr *pinterpreter, char *data);
 
 static int elf_legacy_coredump = 0;
 static int __elfN(fallback_brand) = -1;
@@ -107,13 +113,24 @@ TUNABLE_INT("kern.elf32.fallback_brand", &elf32_fallback_brand);
 static Elf_Brandinfo *elf_brand_list[MAX_BRANDS];
 
 static const char DRAGONFLY_ABI_VENDOR[] = "DragonFly";
+static const char FREEBSD_ABI_VENDOR[]   = "FreeBSD";
 
 Elf_Brandnote __elfN(dragonfly_brandnote) = {
 	.hdr.n_namesz	= sizeof(DRAGONFLY_ABI_VENDOR),
 	.hdr.n_descsz	= sizeof(int32_t),
 	.hdr.n_type	= 1,
 	.vendor		= DRAGONFLY_ABI_VENDOR,
-	.flags		= BN_CAN_FETCH_OSREL,
+	.flags		= BN_TRANSLATE_OSREL,
+	.trans_osrel	= __elfN(bsd_trans_osrel),
+};
+
+Elf_Brandnote __elfN(freebsd_brandnote) = {
+	.hdr.n_namesz	= sizeof(FREEBSD_ABI_VENDOR),
+	.hdr.n_descsz	= sizeof(int32_t),
+	.hdr.n_type	= 1,
+	.vendor		= FREEBSD_ABI_VENDOR,
+	.flags		= BN_TRANSLATE_OSREL,
+	.trans_osrel	= __elfN(bsd_trans_osrel),
 };
 
 int
@@ -576,7 +593,9 @@ __CONCAT(exec_,__elfN(imgact))(struct image_params *imgp)
 	u_long addr, baddr, et_dyn_addr, entry = 0, proghdr = 0;
 	int32_t osrel = 0;
 	int error = 0, i, n;
-	const char *interp = NULL, *newinterp = NULL;
+	boolean_t failure;
+	char *interp = NULL;
+	const char *newinterp = NULL;
 	Elf_Brandinfo *brand_info;
 	char *path;
 
@@ -613,11 +632,25 @@ __CONCAT(exec_,__elfN(imgact))(struct image_params *imgp)
 			continue;
 		}
 		if (phdr[i].p_type == PT_INTERP) {
-			/* Path to interpreter */
-			if (phdr[i].p_filesz > MAXPATHLEN ||
-			    phdr[i].p_offset + phdr[i].p_filesz > PAGE_SIZE)
+			/*
+			 * If interp is already defined there are more than
+			 * one PT_INTERP program headers present.  Take only
+			 * the first one and ignore the rest.
+			 */
+			if (interp != NULL)
+				continue;
+
+			if (phdr[i].p_filesz == 0 ||
+			    phdr[i].p_filesz > PAGE_SIZE ||
+			    phdr[i].p_filesz > MAXPATHLEN)
 				return (ENOEXEC);
-			interp = imgp->image_header + phdr[i].p_offset;
+
+			interp = kmalloc(phdr[i].p_filesz, M_TEMP, M_WAITOK);
+			failure = extract_interpreter(imgp, &phdr[i], interp);
+			if (failure) {
+				kfree(interp, M_TEMP);
+				return (ENOEXEC);
+			}
 			continue;
 		}
 	}
@@ -626,11 +659,16 @@ __CONCAT(exec_,__elfN(imgact))(struct image_params *imgp)
 	if (brand_info == NULL) {
 		uprintf("ELF binary type \"%u\" not known.\n",
 		    hdr->e_ident[EI_OSABI]);
+		if (interp != NULL)
+		        kfree(interp, M_TEMP);
 		return (ENOEXEC);
 	}
 	if (hdr->e_type == ET_DYN) {
-		if ((brand_info->flags & BI_CAN_EXEC_DYN) == 0)
+		if ((brand_info->flags & BI_CAN_EXEC_DYN) == 0) {
+		        if (interp != NULL)
+		                kfree(interp, M_TEMP);
 			return (ENOEXEC);
+                }
 		/*
 		 * Honour the base load address from the dso if it is
 		 * non-zero for some reason.
@@ -679,8 +717,11 @@ __CONCAT(exec_,__elfN(imgact))(struct image_params *imgp)
 					(caddr_t)phdr[i].p_vaddr + et_dyn_addr,
 					phdr[i].p_memsz,
 					phdr[i].p_filesz,
-					prot)) != 0)
+					prot)) != 0) {
+                                if (interp != NULL)
+                                        kfree (interp, M_TEMP);
 				return (error);
+                        }
 
 			/*
 			 * If this segment contains the program headers,
@@ -735,8 +776,10 @@ __CONCAT(exec_,__elfN(imgact))(struct image_params *imgp)
 			    text_size > maxtsiz ||
 			    total_size >
 			    imgp->proc->p_rlimit[RLIMIT_VMEM].rlim_cur) {
+				if (interp != NULL)
+					kfree(interp, M_TEMP);
 				error = ENOMEM;
-                                return (error);
+				return (error);
 			}
 			break;
 		case PT_PHDR: 	/* Program header table info */
@@ -784,8 +827,10 @@ __CONCAT(exec_,__elfN(imgact))(struct image_params *imgp)
 		}
 		if (error != 0) {
 			uprintf("ELF interpreter %s not found\n", interp);
+			kfree(interp, M_TEMP);
 			return (error);
 		}
+		kfree(interp, M_TEMP);
 	} else
 		addr = et_dyn_addr;
 
@@ -830,6 +875,7 @@ __elfN(dragonfly_fixup)(register_t **stack_base, struct image_params *imgp)
 	AUXARGS_ENTRY(pos, AT_BASE, args->base);
 	if (imgp->execpathp != 0)
 		AUXARGS_ENTRY(pos, AT_EXECPATH, imgp->execpathp);
+	AUXARGS_ENTRY(pos, AT_OSRELDATE, osreldate);
 	AUXARGS_ENTRY(pos, AT_NULL, 0);
 
 	kfree(imgp->auxargs, M_TEMP);
@@ -1590,67 +1636,180 @@ elf_puttextvp(struct proc *p, elf_buf_t target)
 
 /*
  * Try to find the appropriate ABI-note section for checknote,
- * fetch the osreldate for binary from the ELF OSABI-note. Only the
- * first page of the image is searched, the same as for headers.
+ * The entire image is searched if necessary, not only the first page.
  */
 static boolean_t
 __elfN(check_note)(struct image_params *imgp, Elf_Brandnote *checknote,
     int32_t *osrel)
 {
-	const Elf_Note *note, *note0, *note_end;
+	boolean_t valid_note_found;
 	const Elf_Phdr *phdr, *pnote;
 	const Elf_Ehdr *hdr;
-	const char *note_name;
 	int i;
 
-	pnote = NULL;
+	valid_note_found = FALSE;
 	hdr = (const Elf_Ehdr *)imgp->image_header;
 	phdr = (const Elf_Phdr *)(imgp->image_header + hdr->e_phoff);
 
 	for (i = 0; i < hdr->e_phnum; i++) {
 		if (phdr[i].p_type == PT_NOTE) {
 			pnote = &phdr[i];
-			break;
+			valid_note_found = check_PT_NOTE (imgp, checknote,
+				osrel, pnote);
+			if (valid_note_found)
+				break;
+		}
+	}
+	return valid_note_found;
+}
+
+static boolean_t
+check_PT_NOTE(struct image_params *imgp, Elf_Brandnote *checknote,
+    int32_t *osrel, const Elf_Phdr * pnote)
+{
+	boolean_t limited_to_first_page;
+	boolean_t found = FALSE;
+	const Elf_Note *note, *note0, *note_end;
+	const char *note_name;
+	__ElfN(Off) noteloc, firstloc;
+	__ElfN(Size) notesz, firstlen, endbyte;
+	struct lwbuf *lwb;
+	struct lwbuf lwb_cache;
+	const char *page;
+	char *data = NULL;
+	int n;
+
+	notesz = pnote->p_filesz;
+	noteloc = pnote->p_offset;
+	endbyte = noteloc + notesz;
+	limited_to_first_page = noteloc < PAGE_SIZE && endbyte < PAGE_SIZE;
+
+	if (limited_to_first_page) {
+		note = (const Elf_Note *)(imgp->image_header + noteloc);
+		note_end = (const Elf_Note *)(imgp->image_header + endbyte);
+		note0 = note;
+	} else {
+		firstloc = noteloc & PAGE_MASK;
+		firstlen = PAGE_SIZE - firstloc;
+		if (notesz < sizeof(Elf_Note) || notesz > PAGE_SIZE)
+			return (FALSE);
+
+		lwb = &lwb_cache;
+		if (exec_map_page(imgp, noteloc >> PAGE_SHIFT, &lwb, &page))
+			return (FALSE);
+		if (firstlen < notesz) {         /* crosses page boundary */
+			data = kmalloc(notesz, M_TEMP, M_WAITOK);
+			bcopy(page + firstloc, data, firstlen);
+
+			exec_unmap_page(lwb);
+			lwb = &lwb_cache;
+			if (exec_map_page(imgp, (noteloc >> PAGE_SHIFT) + 1,
+				&lwb, &page)) {
+				kfree(data, M_TEMP);
+				return (FALSE);
+			}
+			bcopy(page, data + firstlen, notesz - firstlen);
+			note = note0 = (const Elf_Note *)(data);
+			note_end = (const Elf_Note *)(data + notesz);
+		} else {
+			note = note0 = (const Elf_Note *)(page + firstloc);
+			note_end = (const Elf_Note *)(page + firstloc +
+				firstlen);
 		}
 	}
 
-	if (pnote == NULL || pnote->p_offset >= PAGE_SIZE ||
-	    pnote->p_offset + pnote->p_filesz >= PAGE_SIZE)
-		return (FALSE);
-
-	note = note0 = (const Elf_Note *)(imgp->image_header + pnote->p_offset);
-	note_end = (const Elf_Note *)(imgp->image_header +
-	    pnote->p_offset + pnote->p_filesz);
-	for (i = 0; i < 100 && note >= note0 && note < note_end; i++) {
+	for (n = 0; n < 100 && note >= note0 && note < note_end; n++) {
 		if (!aligned(note, Elf32_Addr))
-			return (FALSE);
-		if (note->n_namesz != checknote->hdr.n_namesz ||
-		    note->n_descsz != checknote->hdr.n_descsz ||
-		    note->n_type != checknote->hdr.n_type)
-			goto nextnote;
+			break;
 		note_name = (const char *)(note + 1);
-		if (strncmp(checknote->vendor, note_name,
-		    checknote->hdr.n_namesz) != 0)
-			goto nextnote;
 
-		/*
-		 * Fetch the osreldate for binary
-		 * from the ELF OSABI-note if necessary.
-		 */
-		if ((checknote->flags & BN_CAN_FETCH_OSREL) != 0 &&
-		    osrel != NULL)
-			*osrel = *(const int32_t *) (note_name +
-			    roundup2(checknote->hdr.n_namesz,
-			    sizeof(Elf32_Addr)));
-		return (TRUE);
-
-nextnote:
+		if (note->n_namesz == checknote->hdr.n_namesz
+		    && note->n_descsz == checknote->hdr.n_descsz
+		    && note->n_type == checknote->hdr.n_type
+		    && (strncmp(checknote->vendor, note_name,
+			checknote->hdr.n_namesz) == 0)) {
+			/* Fetch osreldata from ABI.note-tag */
+			if ((checknote->flags & BN_TRANSLATE_OSREL) != 0 &&
+			    checknote->trans_osrel != NULL)
+				checknote->trans_osrel(note, osrel);
+			found = TRUE;
+			break;
+		}
 		note = (const Elf_Note *)((const char *)(note + 1) +
 		    roundup2(note->n_namesz, sizeof(Elf32_Addr)) +
 		    roundup2(note->n_descsz, sizeof(Elf32_Addr)));
 	}
 
-	return (FALSE);
+	if (!limited_to_first_page) {
+		if (data != NULL)
+			kfree(data, M_TEMP);
+		exec_unmap_page(lwb);
+	}
+	return (found);
+}
+
+/*
+ * The interpreter program header may be located beyond the first page, so
+ * regardless of its location, a copy of the interpreter path is created so
+ * that it may be safely referenced by the calling function in all case.  The
+ * memory is allocated by calling function, and the copying is done here.
+ */
+static boolean_t
+extract_interpreter(struct image_params *imgp, const Elf_Phdr *pinterpreter,
+    char *data)
+{
+	boolean_t limited_to_first_page;
+	const boolean_t result_success = FALSE;
+	const boolean_t result_failure = TRUE;
+	__ElfN(Off) pathloc, firstloc;
+	__ElfN(Size) pathsz, firstlen, endbyte;
+	struct lwbuf *lwb;
+	struct lwbuf lwb_cache;
+	const char *page;
+
+	pathsz  = pinterpreter->p_filesz;
+	pathloc = pinterpreter->p_offset;
+	endbyte = pathloc + pathsz;
+
+	limited_to_first_page = pathloc < PAGE_SIZE && endbyte < PAGE_SIZE;
+	if (limited_to_first_page) {
+	        bcopy(imgp->image_header + pathloc, data, pathsz);
+	        return (result_success);
+	}
+
+	firstloc = pathloc & PAGE_MASK;
+	firstlen = PAGE_SIZE - firstloc;
+
+	lwb = &lwb_cache;
+	if (exec_map_page(imgp, pathloc >> PAGE_SHIFT, &lwb, &page))
+		return (result_failure);
+
+	if (firstlen < pathsz) {         /* crosses page boundary */
+		bcopy(page + firstloc, data, firstlen);
+
+		exec_unmap_page(lwb);
+		lwb = &lwb_cache;
+		if (exec_map_page(imgp, (pathloc >> PAGE_SHIFT) + 1, &lwb,
+			&page))
+			return (result_failure);
+		bcopy(page, data + firstlen, pathsz - firstlen);
+	} else
+		bcopy(page + firstloc, data, pathsz);
+
+	exec_unmap_page(lwb);
+	return (result_success);
+}
+
+static boolean_t
+__elfN(bsd_trans_osrel)(const Elf_Note *note, int32_t *osrel)
+{
+	uintptr_t p;
+
+	p = (uintptr_t)(note + 1);
+	p += roundup2(note->n_namesz, sizeof(Elf32_Addr));
+	*osrel = *(const int32_t *)(p);
+
+	return (TRUE);
 }
 
 /*

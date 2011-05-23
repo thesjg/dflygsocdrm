@@ -37,6 +37,7 @@
 #include <machine_base/apic/lapic.h>
 #include <machine_base/apic/ioapic_abi.h>
 #include <machine/segments.h>
+#include <machine/specialreg.h>
 #include <sys/thread2.h>
 
 #include <machine/intr_machdep.h>
@@ -152,7 +153,7 @@ lapic_init(boolean_t bsp)
 		  APIC_LVT_POLARITY_MASK | APIC_LVT_DM_MASK);
 	if (bsp) {
 		temp |= APIC_LVT_DM_EXTINT;
-		if (apic_io_enable)
+		if (ioapic_enable)
 			temp |= APIC_LVT_MASKED;
 	} else {
 		temp |= APIC_LVT_DM_FIXED | APIC_LVT_MASKED;
@@ -172,7 +173,7 @@ lapic_init(boolean_t bsp)
 	temp &= ~(APIC_LVT_MASKED | APIC_LVT_TRIG_MASK | 
 		  APIC_LVT_POLARITY_MASK | APIC_LVT_DM_MASK);
 	temp |= APIC_LVT_MASKED | APIC_LVT_DM_NMI;
-	if (bsp && apic_io_enable)
+	if (bsp && ioapic_enable)
 		temp &= ~APIC_LVT_MASKED;
 	lapic->lvt_lint1 = temp;
 
@@ -741,6 +742,18 @@ lapic_config(void)
 		mp_naps = ap_max;
 	}
 
+	if ((cpu_feature2 & CPUID2_VMM) && mp_naps == 0) {
+		/*
+		 * XXX
+		 * Special hack for vmware.  It looks like that
+		 * if only one CPU is configured (mp_naps == 0)
+		 * in vmware (cpu_feature2 & CPUID2_VMM),
+		 * then LAPIC will not work at all.
+		 */
+		kprintf("LAPIC: single CPU virtual machine detected, "
+			"disable LAPIC\n");
+		return ENXIO;
+	}
 	return 0;
 }
 
@@ -772,7 +785,7 @@ lapic_fixup_noioapic(void)
 
 	/* Only allowed on BSP */
 	KKASSERT(mycpuid == 0);
-	KKASSERT(!apic_io_enable);
+	KKASSERT(!ioapic_enable);
 
 	temp = lapic->lvt_lint0;
 	temp &= ~APIC_LVT_MASKED;
