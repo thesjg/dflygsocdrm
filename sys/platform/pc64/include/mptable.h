@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 1996, by Steve Passe
- * Copyright (c) 2008 The DragonFly Project.
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -23,47 +22,13 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/i386/include/mpapic.h,v 1.14.2.2 2000/09/30 02:49:34 ps Exp $
- * $DragonFly: src/sys/platform/pc64/apic/mpapic.h,v 1.1 2008/08/29 17:07:12 dillon Exp $
+ * $FreeBSD: src/sys/i386/i386/mp_machdep.c,v 1.115.2.15 2003/03/14 21:22:35 jhb Exp $
  */
 
-#ifndef _ARCH_APIC_IOAPIC_H_
-#define _ARCH_APIC_IOAPIC_H_
+#ifndef _MACHINE_MPTABLE_H_
+#define _MACHINE_MPTABLE_H_
 
-#ifndef _SYS_BUS_H_
-#include <sys/bus.h>
-#endif
+int	mptable_pci_int_route(int, int, int, int);
+void	mptable_pci_int_dump(void);
 
-#ifndef _SYS_QUEUE_H_
-#include <sys/queue.h>
-#endif
-
-u_int	ioapic_read(volatile void *, int);
-void	ioapic_write(volatile void *, int, u_int);
-
-struct ioapic_enumerator {
-	int	ioapic_prio;
-	TAILQ_ENTRY(ioapic_enumerator) ioapic_link;
-	int	(*ioapic_probe)(struct ioapic_enumerator *);
-	void	(*ioapic_enumerate)(struct ioapic_enumerator *);
-};
-
-#define IOAPIC_ENUM_PRIO_MPTABLE	20
-#define IOAPIC_ENUM_PRIO_MADT		40
-
-int	ioapic_config(void);
-void	ioapic_enumerator_register(struct ioapic_enumerator *);
-void	ioapic_add(void *, int, int);
-void	ioapic_intsrc(int, int, enum intr_trigger, enum intr_polarity);
-void	*ioapic_gsi_ioaddr(int);
-int	ioapic_gsi_pin(int);
-void	ioapic_pin_setup(void *, int, int,
-	    enum intr_trigger, enum intr_polarity);
-void	ioapic_extpin_setup(void *, int, int);
-int	ioapic_extpin_gsi(void);
-int	ioapic_gsi(int, int);
-void	*ioapic_map(vm_paddr_t);
-
-extern int	ioapic_enable;
-
-#endif	/* !_ARCH_APIC_IOAPIC_H_ */
+#endif	/* !_MACHINE_MPTABLE_H_ */

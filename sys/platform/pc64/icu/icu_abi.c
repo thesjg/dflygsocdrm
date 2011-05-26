@@ -58,6 +58,7 @@
 
 #include <machine_base/icu/icu.h>
 #include <machine_base/icu/icu_ipl.h>
+#include <machine_base/apic/ioapic.h>
 
 extern inthand_t
 	IDTVEC(icu_intr0),	IDTVEC(icu_intr1),
@@ -92,6 +93,8 @@ static struct icu_irqmap {
 
 extern void	ICU_INTREN(int);
 extern void	ICU_INTRDIS(int);
+
+extern int	imcr_present;
 
 static int	icu_vectorctl(int, int, int);
 static int	icu_setvar(int, const void *);

@@ -62,6 +62,7 @@
 #include <machine/specialreg.h>
 #include <machine/globaldata.h>
 #include <machine/pmap_inval.h>
+#include <machine/mptable.h>
 
 #include <machine/md_var.h>		/* setidt() */
 #include <machine_base/icu/icu.h>	/* IPIs */
@@ -70,6 +71,7 @@
 
 extern u_int	base_memory;
 extern u_long	ebda_addr;
+extern int	imcr_present;
 
 #define BIOS_BASE		(0xf0000)
 #define BIOS_BASE2		(0xe0000)

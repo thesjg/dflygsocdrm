@@ -51,7 +51,6 @@
 #include "opt_ipx.h"
 #include "opt_msgbuf.h"
 #include "opt_swap.h"
-#include "opt_apic.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -123,6 +122,7 @@
 #include <sys/machintr.h>
 #include <machine_base/icu/icu_abi.h>
 #include <machine_base/icu/elcr_var.h>
+#include <machine_base/apic/ioapic.h>
 #include <machine_base/apic/ioapic_abi.h>
 
 #define PHYSMAP_ENTRIES		10
@@ -173,6 +173,8 @@ SYSCTL_INT(_debug, OID_AUTO, tlb_flush_count,
 long physmem = 0;
 
 u_long ebda_addr = 0;
+
+int imcr_present = 0;
 
 static int
 sysctl_hw_physmem(SYSCTL_HANDLER_ARGS)
@@ -1432,11 +1434,11 @@ getmemsize(caddr_t kmdp, u_int64_t first)
 #ifdef SMP
 	/* make hole for AP bootstrap code */
 	physmap[1] = mp_bootaddress(physmap[1] / 1024);
+#endif
 
 	/* Save EBDA address, if any */
 	ebda_addr = (u_long)(*(u_short *)(KERNBASE + 0x40e));
 	ebda_addr <<= 4;
-#endif
 
 	/*
 	 * Maxmem isn't the "maximum memory", it's one larger than the
@@ -1673,14 +1675,6 @@ do_next:
 	}
 }
 
-#ifdef SMP
-#ifdef APIC_IO
-int ioapic_enable = 1; /* Enabled by default for kernels compiled w/APIC_IO */
-#else
-int ioapic_enable = 0; /* Disabled by default for kernels compiled without */
-#endif
-#endif
-
 struct machintr_abi MachIntrABI;
 
 /*
@@ -1768,7 +1762,8 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 	 */
 	MachIntrABI = MachIntrABI_ICU;
 #ifdef SMP
-	TUNABLE_INT_FETCH("hw.apic_io_enable", &ioapic_enable);
+	TUNABLE_INT_FETCH("hw.apic_io_enable", &ioapic_enable); /* for compat */
+	TUNABLE_INT_FETCH("hw.ioapic_enable", &ioapic_enable);
 #endif
 
 	/*

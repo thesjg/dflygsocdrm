@@ -52,7 +52,6 @@
 #include "opt_perfmon.h"
 #include "opt_swap.h"
 #include "opt_userconfig.h"
-#include "opt_apic.h"
 
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -121,6 +120,7 @@
 #include <sys/machintr.h>
 #include <machine_base/icu/icu_abi.h>
 #include <machine_base/icu/elcr_var.h>
+#include <machine_base/apic/ioapic.h>
 #include <machine_base/apic/ioapic_abi.h>
 
 #define PHYSMAP_ENTRIES		10
@@ -1874,14 +1874,6 @@ do_next:
 	avail_end = phys_avail[pa_indx];
 }
 
-#ifdef SMP
-#ifdef APIC_IO
-int ioapic_enable = 1; /* Enabled by default for kernels compiled w/APIC_IO */
-#else
-int ioapic_enable = 0; /* Disabled by default for kernels compiled without */
-#endif
-#endif
-
 struct machintr_abi MachIntrABI;
 
 /*
@@ -1945,7 +1937,8 @@ init386(int first)
 	 */
 	MachIntrABI = MachIntrABI_ICU;
 #ifdef SMP
-	TUNABLE_INT_FETCH("hw.apic_io_enable", &ioapic_enable);
+	TUNABLE_INT_FETCH("hw.apic_io_enable", &ioapic_enable); /* for compat */
+	TUNABLE_INT_FETCH("hw.ioapic_enable", &ioapic_enable);
 #endif
 
 	/*
