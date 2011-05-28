@@ -65,6 +65,7 @@
 #include <machine/specialreg.h>
 #include <machine/globaldata.h>
 #include <machine/pmap_inval.h>
+#include <machine/mptable.h>
 
 #include <machine/md_var.h>		/* setidt() */
 #include <machine_base/icu/icu.h>	/* IPIs */
@@ -72,6 +73,8 @@
 
 extern u_long	ebda_addr;
 extern u_int	base_memory;
+extern int	imcr_present;
+extern int	naps;
 
 #define BIOS_BASE		(0xf0000)
 #define BIOS_BASE2		(0xe0000)
@@ -714,7 +717,7 @@ mptable_lapic_default(void)
 {
 	int ap_apicid, bsp_apicid;
 
-	mp_naps = 1; /* exclude BSP */
+	naps = 1; /* exclude BSP */
 
 	/* Map local apic before the id field is accessed */
 	lapic_map(DEFAULT_APIC_BASE);
@@ -730,7 +733,7 @@ mptable_lapic_default(void)
 
 /*
  * Configure:
- *     mp_naps
+ *     naps
  *     APIC ID <-> CPU ID mappings
  */
 static void
@@ -778,7 +781,7 @@ mptable_lapic_enumerate(struct lapic_enumerator *e)
 		if (logical_cpus != 0)
 			arg1.cpu_count *= logical_cpus;
 	}
-	mp_naps = arg1.cpu_count - 1;	/* subtract the BSP */
+	naps = arg1.cpu_count - 1;	/* subtract the BSP */
 
 	/*
 	 * Link logical CPU id to local apic id

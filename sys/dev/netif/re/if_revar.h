@@ -105,6 +105,12 @@ struct re_hwrev {
 #define RE_MACVER_29		0x29
 #define RE_MACVER_2A		0x2a
 #define RE_MACVER_2B		0x2b
+#define RE_MACVER_2C		0x2c
+#define RE_MACVER_2D		0x2d
+#define RE_MACVER_2E		0x2e
+#define RE_MACVER_2F		0x2f
+#define RE_MACVER_30		0x30
+#define RE_MACVER_31		0x31
 
 struct re_softc;
 struct re_jbuf {

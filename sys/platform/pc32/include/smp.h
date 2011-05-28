@@ -57,10 +57,6 @@ extern volatile cpumask_t	started_cpus;
 extern volatile u_int		checkstate_probed_cpus;
 extern void (*cpustop_restartfunc) (void);
 
-/* global data in mp_machdep.c */
-extern int			imcr_present;
-extern int			mp_naps;
-
 #define APIC_INTMAPSIZE 192
 /*
  * NOTE:
@@ -92,8 +88,6 @@ int	stop_cpus		(cpumask_t);
 void	ap_init			(void);
 int	restart_cpus		(cpumask_t);
 void	forward_signal		(struct proc *);
-int	mptable_pci_int_route(int, int, int, int);
-void	mptable_pci_int_dump(void);
 
 #if defined(READY)
 void	clr_io_apic_mask24	(int, u_int32_t);

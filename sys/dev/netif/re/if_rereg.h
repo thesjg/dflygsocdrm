@@ -157,7 +157,9 @@
 #define RE_HWREV_8169SC1	0x18000000
 #define RE_HWREV_8102EL		0x24800000
 #define RE_HWREV_8168D		0x28000000
+#define RE_HWREV_8168DP		0x28800000
 #define RE_HWREV_8168E		0x2C000000
+#define RE_HWREV_8168F		0x2C800000
 #define RE_HWREV_8168B1		0x30000000
 #define RE_HWREV_8100E		0x30800000
 #define RE_HWREV_8101E1		0x34000000
@@ -325,7 +327,8 @@
 #define RE_EE_PCI_VID		0x01
 #define RE_EE_PCI_DID		0x02
 /* Location of station address inside EEPROM */
-#define RE_EE_EADDR		0x07
+#define RE_EE_EADDR0		0x07
+#define RE_EE_EADDR1		0x01
 
 /*
  * Config 0 register

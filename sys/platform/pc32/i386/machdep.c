@@ -165,6 +165,10 @@ long physmem = 0;
 
 u_long ebda_addr = 0;
 
+int imcr_present = 0;
+
+int naps = 0; /* # of Applications processors */
+
 static int
 sysctl_hw_physmem(SYSCTL_HANDLER_ARGS)
 {
@@ -1672,11 +1676,11 @@ physmap_done:
 #ifdef SMP
 	/* make hole for AP bootstrap code YYY */
 	physmap[1] = mp_bootaddress(physmap[1]);
+#endif
 
 	/* Save EBDA address, if any */
 	ebda_addr = (u_long)(*(u_short *)(KERNBASE + 0x40e));
 	ebda_addr <<= 4;
-#endif
 
 	/*
 	 * Maxmem isn't the "maximum memory", it's one larger than the

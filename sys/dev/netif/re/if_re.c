@@ -241,7 +241,15 @@ static const struct re_hwrev re_hwrevs[] = {
 	  RE_C_HWIM | RE_C_HWCSUM | RE_C_MAC2 | RE_C_PHYPMGT |
 	  RE_C_AUTOPAD | RE_C_CONTIGRX | RE_C_STOP_RXTX },
 
-	{ RE_HWREV_8168E,   RE_MACVER_25,       RE_MTU_6K,
+	{ RE_HWREV_8168DP,	RE_MACVER_2D,		RE_MTU_9K,
+	  RE_C_HWIM | RE_C_HWCSUM | RE_C_MAC2 | RE_C_PHYPMGT |
+	  RE_C_AUTOPAD | RE_C_CONTIGRX | RE_C_STOP_RXTX },
+
+	{ RE_HWREV_8168E,	RE_MACVER_UNKN,		RE_MTU_9K,
+	  RE_C_HWIM | RE_C_HWCSUM | RE_C_MAC2 | RE_C_PHYPMGT |
+	  RE_C_AUTOPAD | RE_C_CONTIGRX | RE_C_STOP_RXTX },
+
+	{ RE_HWREV_8168F,	RE_MACVER_UNKN,		RE_MTU_9K,
 	  RE_C_HWIM | RE_C_HWCSUM | RE_C_MAC2 | RE_C_PHYPMGT |
 	  RE_C_AUTOPAD | RE_C_CONTIGRX | RE_C_STOP_RXTX },
 
@@ -1018,6 +1026,24 @@ re_probe(device_t dev)
 					sc->re_macver = RE_MACVER_26;
 				else if (macmode == 0x100000)
 					sc->re_macver = RE_MACVER_28;
+				break;
+			case RE_HWREV_8168DP:
+				if (macmode == 0)
+					sc->re_macver = RE_MACVER_2B;
+				else if (macmode == 0x200000)
+					sc->re_macver = RE_MACVER_2C;
+				break;
+			case RE_HWREV_8168E:
+				if (macmode == 0x100000)
+					sc->re_macver = RE_MACVER_2E;
+				else if (macmode == 0x200000)
+					sc->re_macver = RE_MACVER_2F;
+				break;
+			case RE_HWREV_8168F:
+				if (macmode == 0x000000)
+					sc->re_macver = RE_MACVER_30;
+				else if (macmode == 0x100000)
+					sc->re_macver = RE_MACVER_31;
 				break;
 			}
 			if (pci_is_pcie(dev))
@@ -3177,18 +3203,28 @@ re_get_eaddr(struct re_softc *sc, uint8_t *eaddr)
 {
 	int i;
 
-	if (sc->re_macver == RE_MACVER_11 || sc->re_macver == RE_MACVER_12) {
+	if (sc->re_macver == RE_MACVER_11 ||
+	    sc->re_macver == RE_MACVER_12 ||
+	    sc->re_macver == RE_MACVER_30 ||
+	    sc->re_macver == RE_MACVER_31) {
 		uint16_t re_did;
 
 		re_get_eewidth(sc);
 		re_read_eeprom(sc, (caddr_t)&re_did, 0, 1);
 		if (re_did == 0x8128) {
 			uint16_t as[ETHER_ADDR_LEN / 2];
+			int eaddr_off;
+
+			if (sc->re_macver == RE_MACVER_30 ||
+			    sc->re_macver == RE_MACVER_31)
+				eaddr_off = RE_EE_EADDR1;
+			else
+				eaddr_off = RE_EE_EADDR0;
 
 			/*
 			 * Get station address from the EEPROM.
 			 */
-			re_read_eeprom(sc, (caddr_t)as, RE_EE_EADDR, 3);
+			re_read_eeprom(sc, (caddr_t)as, eaddr_off, 3);
 			for (i = 0; i < ETHER_ADDR_LEN / 2; i++)
 				as[i] = le16toh(as[i]);
 			bcopy(as, eaddr, sizeof(eaddr));
