@@ -92,6 +92,7 @@ LIST_HEAD(acpi_pst_domlist, acpi_pst_domain);
 
 #define ACPI_PSTDOM_FLAG_STUB	0x1	/* stub domain, no _PSD */
 #define ACPI_PSTDOM_FLAG_DEAD	0x2	/* domain can't be started */
+#define ACPI_PSTDOM_FLAG_INT	0x4	/* domain created from Integer _PSD */
 
 struct acpi_pst_softc {
 	device_t		pst_dev;
@@ -114,7 +115,9 @@ static int	acpi_pst_attach(device_t dev);
 
 static void	acpi_pst_postattach(void *);
 static struct acpi_pst_domain *
-		acpi_pst_domain_create(device_t, ACPI_OBJECT *);
+		acpi_pst_domain_create_int(device_t, uint32_t);
+static struct acpi_pst_domain *
+		acpi_pst_domain_create_pkg(device_t, ACPI_OBJECT *);
 static struct acpi_pst_domain *
 		acpi_pst_domain_find(uint32_t);
 static struct acpi_pst_domain *
@@ -292,23 +295,49 @@ acpi_pst_attach(device_t dev)
 	buf.Length = ACPI_ALLOCATE_BUFFER;
 	status = AcpiEvaluateObject(sc->pst_handle, "_PSD", NULL, &buf);
 	if (!ACPI_FAILURE(status)) {
+		if (acpi_pst_domain_id > 0) {
+			device_printf(dev, "Missing _PSD for certain CPUs\n");
+			AcpiOsFree(obj);
+			return ENXIO;
+		}
+		acpi_pst_domain_id = -1;
+
 		obj = (ACPI_OBJECT *)buf.Pointer;
 		if (ACPI_PKG_VALID_EQ(obj, 1)) {
-			dom = acpi_pst_domain_create(dev,
+			dom = acpi_pst_domain_create_pkg(dev,
 				&obj->Package.Elements[0]);
 			if (dom == NULL) {
 				AcpiOsFree(obj);
 				return ENXIO;
 			}
 		} else {
-			device_printf(dev, "Invalid _PSD package\n");
-			AcpiOsFree(obj);
-			return ENXIO;
+			if (obj->Type != ACPI_TYPE_INTEGER) {
+				device_printf(dev,
+				    "Invalid _PSD package, Type 0x%x\n",
+				    obj->Type);
+				AcpiOsFree(obj);
+				return ENXIO;
+			} else {
+				device_printf(dev, "Integer _PSD %ju\n",
+				    (uintmax_t)obj->Integer.Value);
+				dom = acpi_pst_domain_create_int(dev,
+				    obj->Integer.Value);
+				if (dom == NULL) {
+					AcpiOsFree(obj);
+					return ENXIO;
+				}
+			}
 		}
 
 		/* Free _PSD */
 		AcpiOsFree(buf.Pointer);
 	} else {
+		if (acpi_pst_domain_id < 0) {
+			device_printf(dev, "Missing _PSD for cpu%d\n",
+			    sc->pst_cpuid);
+			return ENXIO;
+		}
+
 		/*
 		 * Create a stub one processor domain for each processor
 		 */
@@ -532,7 +561,7 @@ acpi_pst_attach(device_t dev)
 }
 
 static struct acpi_pst_domain *
-acpi_pst_domain_create(device_t dev, ACPI_OBJECT *obj)
+acpi_pst_domain_create_pkg(device_t dev, ACPI_OBJECT *obj)
 {
 	struct acpi_pst_domain *dom;
 	uint32_t val, domain, coord, nproc;
@@ -587,6 +616,11 @@ acpi_pst_domain_create(device_t dev, ACPI_OBJECT *obj)
 
 	dom = acpi_pst_domain_find(domain);
 	if (dom != NULL) {
+		if (dom->pd_flags & ACPI_PSTDOM_FLAG_INT) {
+			device_printf(dev, "Mixed Integer _PSD and "
+			    "Package _PSD\n");
+			return NULL;
+		}
 		if (dom->pd_coord != coord || dom->pd_nproc != nproc) {
 			device_printf(dev, "Inconsistent _PSD information "
 				      "cross Processor objects\n");
@@ -597,7 +631,34 @@ acpi_pst_domain_create(device_t dev, ACPI_OBJECT *obj)
 
 	dom = acpi_pst_domain_alloc(domain, coord, nproc);
 	if (bootverbose)
-		device_printf(dev, "create domain%u\n", dom->pd_dom);
+		device_printf(dev, "create pkg domain%u\n", dom->pd_dom);
+
+	return dom;
+}
+
+static struct acpi_pst_domain *
+acpi_pst_domain_create_int(device_t dev, uint32_t domain)
+{
+	struct acpi_pst_domain *dom;
+
+	dom = acpi_pst_domain_find(domain);
+	if (dom != NULL) {
+		if ((dom->pd_flags & ACPI_PSTDOM_FLAG_INT) == 0) {
+			device_printf(dev, "Mixed Package _PSD and "
+			    "Integer _PSD\n");
+			return NULL;
+		}
+		KKASSERT(dom->pd_coord == ACPI_PSD_COORD_SWALL);
+
+		dom->pd_nproc++;
+		return dom;
+	}
+
+	dom = acpi_pst_domain_alloc(domain, ACPI_PSD_COORD_SWALL, 1);
+	dom->pd_flags |= ACPI_PSTDOM_FLAG_INT;
+
+	if (bootverbose)
+		device_printf(dev, "create int domain%u\n", dom->pd_dom);
 
 	return dom;
 }
