@@ -384,7 +384,7 @@ static int vmw_fb_create_bo(struct vmw_private *vmw_priv,
 	if (unlikely(ret != 0))
 		return ret;
 
-	vmw_bo = kmalloc(sizeof(*vmw_bo), GFP_KERNEL);
+	vmw_bo = malloc(sizeof(*vmw_bo), DRM_MEM_DRIVER, M_WAITOK);
 	if (!vmw_bo)
 		goto err_unlock;
 
@@ -478,7 +478,11 @@ int vmw_fb_init(struct vmw_private *vmw_priv)
 	/*
 	 * Create buffers and alloc memory
 	 */
+#ifdef __linux__
 	par->vmalloc = vmalloc(fb_size);
+#else
+	par->vmalloc = malloc(fb_size, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	if (unlikely(par->vmalloc == NULL)) {
 		ret = -ENOMEM;
 		goto err_free;

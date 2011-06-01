@@ -3408,6 +3408,45 @@ static __inline__ void
 fb_dealloc_cmap(struct fb_cmap *cmap) {
 }
 
+/* vmwgfx_fb.c, vmw_fb_fillrect() */
+struct fb_fillrect {
+	unsigned dx;
+	unsigned dy;
+	unsigned width;
+	unsigned height;
+};
+
+/* vmwgfx_fb.c, vmw_fb_copyarea() */
+struct fb_copyarea {
+	unsigned dx;
+	unsigned dy;
+	unsigned width;
+	unsigned height;
+};
+
+/* vmwgfx_fb.c, vmw_fb_imageblit() */
+struct fb_image {
+	unsigned dx;
+	unsigned dy;
+	unsigned width;
+	unsigned height;
+};
+
+static __inline__ void
+cfb_fillrect(struct fb_info *info, const struct fb_fillrect *rect) {
+	;
+}
+
+static __inline__ void
+cfb_copyarea(struct fb_info *info, const struct fb_copyarea *region) {
+	;
+}
+
+static __inline__ void
+cfb_imageblit(struct fb_info *info, const struct fb_image *image) {
+	;
+}
+
 /* file intel_fb.c, struct intelfb_ops */
 struct fb_ops {
 	struct module *owner;
@@ -3415,14 +3454,19 @@ struct fb_ops {
 	int (*fb_set_par)(struct fb_info *info);
 	int (*fb_setcolreg)(unsigned regno, unsigned red, unsigned green,
 		unsigned blue, unsigned transp, struct fb_info *info);
-#ifdef __linux__
-	.fb_fillrect = cfb_fillrect,
-	.fb_copyarea = cfb_copyarea,
-	.fb_imageblit = cfb_imageblit,
-#endif
+	void (*fb_fillrect)(struct fb_info *info, const struct fb_fillrect *rect);
+	void (*fb_copyarea)(struct fb_info *info, const struct fb_copyarea *region);
+	void (*fb_imageblit)(struct fb_info *info, const struct fb_image *image);
 	int (*fb_pan_display)(struct fb_var_screeninfo *var, struct fb_info *info);
 	int (*fb_blank)(int blank, struct fb_info *info);
 	int (*fb_setcmap)(struct fb_cmap *cmap, struct fb_info *info);
+};
+
+
+/* vmwgfx_fb.c */
+struct fb_deferred_io {
+	unsigned long delay;
+	void (*deferred_io)(struct fb_info *info, struct list_head *pagelist);
 };
 
 /*
