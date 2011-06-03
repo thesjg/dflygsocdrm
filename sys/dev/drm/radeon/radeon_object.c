@@ -56,7 +56,7 @@ static void radeon_ttm_bo_destroy(struct ttm_buffer_object *tbo)
 	list_del_init(&bo->list);
 	mutex_unlock(&bo->rdev->gem.mutex);
 	radeon_bo_clear_surface_reg(bo);
-	free(bo, DRM_MEM_TTM);
+	free(bo, DRM_MEM_DRIVER);
 }
 
 bool radeon_ttm_bo_is_radeon_bo(struct ttm_buffer_object *bo)
@@ -104,7 +104,11 @@ int radeon_bo_create(struct radeon_device *rdev, struct drm_gem_object *gobj,
 		type = ttm_bo_type_device;
 	}
 	*bo_ptr = NULL;
-	bo = malloc(sizeof(struct radeon_bo), DRM_MEM_TTM, M_WAITOK | M_ZERO);
+#ifdef __linux__
+	bo = kzalloc(sizeof(struct radeon_bo), GFP_KERNEL);
+#else
+	bo = malloc(sizeof(struct radeon_bo), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	if (bo == NULL)
 		return -ENOMEM;
 	bo->rdev = rdev;

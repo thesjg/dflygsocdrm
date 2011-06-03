@@ -294,7 +294,7 @@ static void ttm_transfered_destroy(struct ttm_buffer_object *bo)
 #ifdef __linux__
 	kfree(bo);
 #else
-	free(bo, DRM_MEM_TTM);
+	free(bo, DRM_MEM_DRIVER);
 #endif
 }
 
@@ -323,7 +323,7 @@ static int ttm_buffer_object_transfer(struct ttm_buffer_object *bo,
 #ifdef __linux__
 	fbo = kzalloc(sizeof(*fbo), GFP_KERNEL);
 #else
-	fbo = malloc(sizeof(*fbo), DRM_MEM_TTM, M_WAITOK | M_ZERO);
+	fbo = malloc(sizeof(*fbo), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 	if (!fbo)
 		return -ENOMEM;

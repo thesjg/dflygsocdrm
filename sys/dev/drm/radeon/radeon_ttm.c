@@ -699,7 +699,7 @@ static void radeon_ttm_backend_destroy(struct ttm_backend *backend)
 	if (gtt->bound) {
 		radeon_ttm_backend_unbind(backend);
 	}
-	free(gtt, DRM_MEM_TTM);
+	free(gtt, DRM_MEM_DRIVER);
 }
 
 static struct ttm_backend_func radeon_backend_func = {
@@ -714,7 +714,11 @@ struct ttm_backend *radeon_ttm_backend_create(struct radeon_device *rdev)
 {
 	struct radeon_ttm_backend *gtt;
 
-	gtt = malloc(sizeof(struct radeon_ttm_backend), DRM_MEM_TTM, M_WAITOK | M_ZERO);
+#ifdef __linux__
+	gtt = kzalloc(sizeof(struct radeon_ttm_backend), GFP_KERNEL);
+#else
+	gtt = malloc(sizeof(struct radeon_ttm_backend), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	if (gtt == NULL) {
 		return NULL;
 	}

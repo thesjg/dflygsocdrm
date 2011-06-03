@@ -73,7 +73,6 @@ MALLOC_DEFINE(DRM_MEM_HASHTAB, "drm_hashtab", "DRM HASHTABLE Data Structures");
 MALLOC_DEFINE(DRM_MEM_DEFAULT, "drm_default", "DRM DEFAULT Data Structures");
 MALLOC_DEFINE(DRM_MEM_STUB, "drm_stub", "DRM STUB Data Structures");
 MALLOC_DEFINE(DRM_MEM_IDR, "drm_idr", "DRM idr Data Structures");
-MALLOC_DEFINE(DRM_MEM_TTM, "drm_ttm", "DRM TTM Data Structures");
 MALLOC_DEFINE(DRM_MEM_FENCE, "drm_fence", "DRM fence Data Structures");
 
 /**

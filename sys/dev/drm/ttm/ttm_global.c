@@ -78,7 +78,7 @@ int ttm_global_item_ref(struct ttm_global_reference *ref)
 #ifdef __linux__
 		item->object = kzalloc(ref->size, GFP_KERNEL);
 #else
-		item->object = malloc(ref->size, DRM_MEM_TTM, M_WAITOK | M_ZERO);
+		item->object = malloc(ref->size, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 #endif
 		if (unlikely(item->object == NULL)) {
 			ret = -ENOMEM;
