@@ -171,10 +171,10 @@
 #define	CPUID_FAMILY		0x00000f00
 #define	CPUID_EXT_MODEL		0x000f0000
 #define	CPUID_EXT_FAMILY	0x0ff00000
-#define	X86_64_CPU_MODEL(id) \
+#define	CPUID_TO_MODEL(id) \
     ((((id) & CPUID_MODEL) >> 4) | \
     (((id) & CPUID_EXT_MODEL) >> 12))
-#define	X86_64_CPU_FAMILY(id) \
+#define	CPUID_TO_FAMILY(id) \
     ((((id) & CPUID_FAMILY) >> 8) + \
     (((id) & CPUID_EXT_FAMILY) >> 20))
 
@@ -238,6 +238,7 @@
 #define	MSR_THERM_INTERRUPT	0x19b
 #define	MSR_THERM_STATUS	0x19c
 #define	MSR_IA32_MISC_ENABLE	0x1a0
+#define	MSR_IA32_TEMPERATURE_TARGET	0x1a2
 #define	MSR_DEBUGCTLMSR		0x1d9
 #define	MSR_LASTBRANCHFROMIP	0x1db
 #define	MSR_LASTBRANCHTOIP	0x1dc

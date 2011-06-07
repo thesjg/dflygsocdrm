@@ -122,6 +122,7 @@
 #include <sys/machintr.h>
 #include <machine_base/icu/icu_abi.h>
 #include <machine_base/icu/elcr_var.h>
+#include <machine_base/apic/lapic.h>
 #include <machine_base/apic/ioapic.h>
 #include <machine_base/apic/ioapic_abi.h>
 
@@ -137,6 +138,9 @@ extern void finishidentcpu(void);
 extern void panicifcpuunsupported(void);
 
 static void cpu_startup(void *);
+static void pic_finish(void *);
+static void cpu_finish(void *);
+
 #ifndef CPU_DISABLE_SSE
 static void set_fpregs_xmm(struct save87 *, struct savexmm *);
 static void fill_fpregs_xmm(struct savexmm *, struct save87 *);
@@ -146,7 +150,9 @@ extern void ffs_rawread_setup(void);
 #endif /* DIRECTIO */
 static void init_locks(void);
 
-SYSINIT(cpu, SI_BOOT2_SMP, SI_ORDER_FIRST, cpu_startup, NULL)
+SYSINIT(cpu, SI_BOOT2_START_CPU, SI_ORDER_FIRST, cpu_startup, NULL)
+SYSINIT(pic_finish, SI_BOOT2_FINISH_PIC, SI_ORDER_FIRST, pic_finish, NULL)
+SYSINIT(cpu_finish, SI_BOOT2_FINISH_CPU, SI_ORDER_FIRST, cpu_finish, NULL)
 
 #ifdef DDB
 extern vm_offset_t ksym_start, ksym_end;
@@ -177,6 +183,8 @@ u_long ebda_addr = 0;
 int imcr_present = 0;
 
 int naps = 0; /* # of Applications processors */
+
+u_int base_memory;
 
 static int
 sysctl_hw_physmem(SYSCTL_HANDLER_ARGS)
@@ -381,22 +389,22 @@ again:
 	 */
 	bufinit();
 	vm_pager_bufferinit();
+}
 
+static void
+cpu_finish(void *dummy __unused)
+{
+	cpu_setregs();
+}
+
+static void
+pic_finish(void *dummy __unused)
+{
 	/* Log ELCR information */
 	elcr_dump();
 
-#ifdef SMP
-	/*
-	 * OK, enough kmem_alloc/malloc state should be up, lets get on with it!
-	 */
-	mp_start();			/* fire up the APs and APICs */
-	mp_announce();
-#endif  /* SMP */
-
 	/* Finalize PCI */
 	MachIntrABI.finalize();
-
-	cpu_setregs();
 }
 
 /*
@@ -1433,9 +1441,10 @@ getmemsize(caddr_t kmdp, u_int64_t first)
 		physmap[physmap_idx + 1] = smap->base + smap->length;
 	}
 
+	base_memory = physmap[1] / 1024;
 #ifdef SMP
 	/* make hole for AP bootstrap code */
-	physmap[1] = mp_bootaddress(physmap[1] / 1024);
+	physmap[1] = mp_bootaddress(base_memory);
 #endif
 
 	/* Save EBDA address, if any */
@@ -1763,10 +1772,10 @@ hammer_time(u_int64_t modulep, u_int64_t physfree)
 	 * Default MachIntrABI to ICU
 	 */
 	MachIntrABI = MachIntrABI_ICU;
-#ifdef SMP
+
 	TUNABLE_INT_FETCH("hw.apic_io_enable", &ioapic_enable); /* for compat */
 	TUNABLE_INT_FETCH("hw.ioapic_enable", &ioapic_enable);
-#endif
+	TUNABLE_INT_FETCH("hw.lapic_enable", &lapic_enable);
 
 	/*
 	 * start with one cpu.  Note: with one cpu, ncpus2_shift, ncpus2_mask,

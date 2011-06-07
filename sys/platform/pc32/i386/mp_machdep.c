@@ -168,20 +168,16 @@ static u_int	boot_address;
 static int	mp_finish;
 static int	mp_finish_lapic;
 
-static void	mp_enable(u_int boot_addr);
-
 static int	start_all_aps(u_int boot_addr);
 static void	install_ap_tramp(u_int boot_addr);
 static int	start_ap(struct mdglobaldata *gd, u_int boot_addr, int smibest);
 static int	smitest(void);
-static void	cpu_simple_setup(void);
+static void	mp_bsp_simple_setup(void);
 
 static cpumask_t smp_startup_mask = 1;	/* which cpus have been started */
 static cpumask_t smp_lapic_mask = 1;	/* which cpus have lapic been inited */
 cpumask_t smp_active_mask = 1;	/* which cpus are ready for IPIs etc? */
 SYSCTL_INT(_machdep, OID_AUTO, smp_active, CTLFLAG_RD, &smp_active_mask, 0, "");
-
-u_int			base_memory;
 
 /*
  * Calculate usable address in base memory for AP trampoline code.
@@ -191,25 +187,12 @@ mp_bootaddress(u_int basemem)
 {
 	POSTCODE(MP_BOOTADDRESS_POST);
 
-	base_memory = basemem;
-
-	boot_address = base_memory & ~0xfff;	/* round down to 4k boundary */
-	if ((base_memory - boot_address) < bootMP_size)
+	boot_address = basemem & ~0xfff;	/* round down to 4k boundary */
+	if ((basemem - boot_address) < bootMP_size)
 		boot_address -= 4096;	/* not enough, lower by 4k */
 
 	return boot_address;
 }
-
-/*
- * Startup the SMP processors.
- */
-void
-mp_start(void)
-{
-	POSTCODE(MP_START_POST);
-	mp_enable(boot_address);
-}
-
 
 /*
  * Print various information about the SMP system hardware and setup.
@@ -305,40 +288,19 @@ init_secondary(void)
  */
 
 /*
- * start the SMP system
+ * Start the SMP system
  */
 static void
-mp_enable(u_int boot_addr)
+mp_start_aps(void *dummy __unused)
 {
-	int error;
-
-	POSTCODE(MP_ENABLE_POST);
-
-	error = lapic_config();
-	if (error) {
-		if (ioapic_enable) {
-			ioapic_enable = 0;
-			icu_reinit_noioapic();
-		}
-		cpu_simple_setup();
-		return;
-	}
-
-	/* Initialize BSP's local APIC */
-	lapic_init(TRUE);
-
-	/* start each Application Processor */
-	start_all_aps(boot_addr);
-
-	if (ioapic_enable) {
-		error = ioapic_config();
-		if (error) {
-			ioapic_enable = 0;
-			icu_reinit_noioapic();
-			lapic_fixup_noioapic();
-		}
+	if (lapic_enable) {
+		/* start each Application Processor */
+		start_all_aps(boot_address);
+	} else {
+		mp_bsp_simple_setup();
 	}
 }
+SYSINIT(startaps, SI_BOOT2_START_APS, SI_ORDER_FIRST, mp_start_aps, NULL)
 
 /*
  * start each AP in our list
@@ -795,7 +757,6 @@ static cpumask_t smp_invltlb_req;
 void
 smp_invltlb(void)
 {
-#ifdef SMP
 	struct mdglobaldata *md = mdcpu;
 #ifdef SMP_INVLTLB_DEBUG
 	long count = 0;
@@ -855,10 +816,7 @@ again:
 	}
 	atomic_clear_cpumask(&smp_invltlb_req, md->mi.gd_cpumask);
 	crit_exit_gd(&md->mi);
-#endif
 }
-
-#ifdef SMP
 
 /*
  * Called from Xinvltlb assembly with interrupts disabled.  We didn't
@@ -883,8 +841,6 @@ smp_invltlb_intr(void)
 		atomic_set_cpumask(&omd->gd_invltlb_ret, md->mi.gd_cpumask);
 	}
 }
-
-#endif
 
 /*
  * When called the executing CPU will send an IPI to all other CPUs
@@ -1125,7 +1081,7 @@ cpu_send_ipiq_passive(int dcpu)
 #endif
 
 static void
-cpu_simple_setup(void)
+mp_bsp_simple_setup(void)
 {
 	/* build our map of 'other' CPUs */
 	mycpu->gd_other_cpus = smp_startup_mask & ~CPUMASK(mycpu->gd_cpuid);

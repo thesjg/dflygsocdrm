@@ -37,9 +37,11 @@
 #include <machine_base/apic/lapic.h>
 #include <machine_base/apic/ioapic.h>
 #include <machine_base/apic/ioapic_abi.h>
+#include <machine_base/icu/icu_var.h>
 #include <machine/segments.h>
 #include <sys/thread2.h>
 
+#include <machine/cputypes.h>
 #include <machine/intr_machdep.h>
 
 #include "apicvar.h"
@@ -92,6 +94,7 @@ static const uint32_t	lapic_timer_divisors[] = {
  */
 int	cpu_id_to_apic_id[NAPICID];
 int	apic_id_to_cpu_id[NAPICID];
+int	lapic_enable = 1;
 
 void
 lapic_eoi(void)
@@ -120,6 +123,11 @@ lapic_init(boolean_t bsp)
 		setidt(XSPURIOUSINT_OFFSET, Xspuriousint,
 		    SDT_SYSIGT, SEL_KPL, 0);
 
+		/* Install a timer vector */
+		setidt(XTIMER_OFFSET, Xtimer,
+		    SDT_SYSIGT, SEL_KPL, 0);
+
+#ifdef SMP
 		/* Install an inter-CPU IPI for TLB invalidation */
 		setidt(XINVLTLB_OFFSET, Xinvltlb,
 		    SDT_SYSIGT, SEL_KPL, 0);
@@ -128,13 +136,10 @@ lapic_init(boolean_t bsp)
 		setidt(XIPIQ_OFFSET, Xipiq,
 		    SDT_SYSIGT, SEL_KPL, 0);
 
-		/* Install a timer vector */
-		setidt(XTIMER_OFFSET, Xtimer,
-		    SDT_SYSIGT, SEL_KPL, 0);
-
 		/* Install an inter-CPU IPI for CPU stop/restart */
 		setidt(XCPUSTOP_OFFSET, Xcpustop,
 		    SDT_SYSIGT, SEL_KPL, 0);
+#endif
 	}
 
 	/*
@@ -412,7 +417,7 @@ lapic_timer_fixup_handler(void *arg)
 	if (started != NULL)
 		*started = 0;
 
-	if (strcmp(cpu_vendor, "AuthenticAMD") == 0) {
+	if (cpu_vendor_id == CPU_VENDOR_AMD) {
 		/*
 		 * Detect the presence of C1E capability mostly on latest
 		 * dual-cores (or future) k8 family.  This feature renders
@@ -474,14 +479,22 @@ lapic_timer_restart_handler(void *dummy __unused)
 static void
 lapic_timer_intr_pmfixup(struct cputimer_intr *cti __unused)
 {
+#ifdef SMP
 	lwkt_send_ipiq_mask(smp_active_mask,
 			    lapic_timer_fixup_handler, NULL);
+#else
+	lapic_timer_fixup_handler(NULL);
+#endif
 }
 
 static void
 lapic_timer_intr_restart(struct cputimer_intr *cti __unused)
 {
+#ifdef SMP
 	lwkt_send_ipiq_mask(smp_active_mask, lapic_timer_restart_handler, NULL);
+#else
+	lapic_timer_restart_handler(NULL);
+#endif
 }
 
 
@@ -495,6 +508,8 @@ apic_dump(char* str)
 	kprintf("     lint0: 0x%08x lint1: 0x%08x TPR: 0x%08x SVR: 0x%08x\n",
 		lapic->lvt_lint0, lapic->lvt_lint1, lapic->tpr, lapic->svr);
 }
+
+#ifdef SMP
 
 /*
  * Inter Processor Interrupt functions.
@@ -622,6 +637,8 @@ selected_apic_ipi(cpumask_t target, int vector, int delivery_mode)
 	crit_exit();
 }
 
+#endif	/* SMP */
+
 /*
  * Timer code, in development...
  *  - suggested by rgrimes@gndrsh.aac.dev.com
@@ -708,17 +725,12 @@ int
 lapic_config(void)
 {
 	struct lapic_enumerator *e;
-	int error, i, enable, ap_max;
+	int error, i, ap_max;
+
+	KKASSERT(lapic_enable);
 
 	for (i = 0; i < NAPICID; ++i)
 		APICID_TO_CPUID(i) = -1;
-
-	enable = 1;
-	TUNABLE_INT_FETCH("hw.lapic_enable", &enable);
-	if (!enable) {
-		kprintf("LAPIC: Warning LAPIC is disabled\n");
-		return ENXIO;
-	}
 
 	TAILQ_FOREACH(e, &lapic_enumerators, lapic_link) {
 		error = e->lapic_probe(e);
@@ -785,3 +797,24 @@ lapic_fixup_noioapic(void)
 	temp |= APIC_LVT_MASKED;
 	lapic->lvt_lint1 = temp;
 }
+
+static void
+lapic_sysinit(void *dummy __unused)
+{
+	if (lapic_enable) {
+		int error;
+
+		error = lapic_config();
+		if (error)
+			lapic_enable = 0;
+	}
+
+	if (lapic_enable) {
+		/* Initialize BSP's local APIC */
+		lapic_init(TRUE);
+	} else if (ioapic_enable) {
+		ioapic_enable = 0;
+		icu_reinit_noioapic();
+	}
+}
+SYSINIT(lapic, SI_BOOT2_LAPIC, SI_ORDER_FIRST, lapic_sysinit, NULL)

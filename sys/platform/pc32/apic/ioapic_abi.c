@@ -60,8 +60,7 @@
 #include <machine_base/apic/ioapic.h>
 #include <machine_base/apic/ioapic_abi.h>
 #include <machine_base/apic/ioapic_ipl.h>
-
-#ifdef SMP /* APIC-IO */
+#include <machine_base/apic/apicreg.h>
 
 extern inthand_t
 	IDTVEC(ioapic_intr0),
@@ -925,5 +924,3 @@ ioapic_abi_extint_irqmap(int irq)
 
 	return 0;
 }
-
-#endif	/* SMP */
