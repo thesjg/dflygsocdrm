@@ -25,11 +25,16 @@
  *
  **************************************************************************/
 
+#ifndef __linux__
+#include "drmP.h"
+#endif
 #include "vmwgfx_drv.h"
 #include "vmwgfx_drm.h"
 #include "ttm/ttm_object.h"
 #include "ttm/ttm_placement.h"
+#ifdef __linux__
 #include "drmP.h"
+#endif
 
 #define VMW_RES_CONTEXT ttm_driver_type0
 #define VMW_RES_SURFACE ttm_driver_type1
