@@ -2711,6 +2711,7 @@ again:
 		 */
 		lwkt_gettoken(&vm_token);
 		lwkt_gettoken(&vmobj_token);
+		vm_object_hold(object);
 
 		if (object == &kernel_object) {
 			vm_object_page_remove(object, offidxstart,
@@ -2738,6 +2739,8 @@ again:
 				}
 			}
 		}
+
+		vm_object_drop(object);
 		lwkt_reltoken(&vmobj_token);
 		lwkt_reltoken(&vm_token);
 
@@ -2992,19 +2995,28 @@ vm_map_copy_entry(vm_map_t src_map, vm_map_t dst_map,
 
 		/*
 		 * Make a copy of the object.
+		 *
+		 * The object must be locked prior to checking the object type
+		 * and for the call to vm_object_collapse() and vm_map_split().
+		 * We cannot use *_hold() here because the split code will
+		 * probably try to destroy the object.  The lock is a pool
+		 * token and doesn't care.
 		 */
 		if ((src_object = src_entry->object.vm_object) != NULL) {
+			vm_object_lock(src_object);
 			if ((src_object->handle == NULL) &&
 				(src_object->type == OBJT_DEFAULT ||
 				 src_object->type == OBJT_SWAP)) {
 				vm_object_collapse(src_object);
 				if ((src_object->flags & (OBJ_NOSPLIT|OBJ_ONEMAPPING)) == OBJ_ONEMAPPING) {
 					vm_map_split(src_entry);
+					vm_object_unlock(src_object);
 					src_object = src_entry->object.vm_object;
+					vm_object_lock(src_object);
 				}
 			}
-
 			vm_object_reference_locked(src_object);
+			vm_object_unlock(src_object);
 			vm_object_clear_flag(src_object, OBJ_ONEMAPPING);
 			dst_entry->object.vm_object = src_object;
 			src_entry->eflags |= (MAP_ENTRY_COW|MAP_ENTRY_NEEDS_COPY);

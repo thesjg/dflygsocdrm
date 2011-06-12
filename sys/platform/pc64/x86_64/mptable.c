@@ -744,7 +744,7 @@ mptable_lapic_enumerate(struct lapic_enumerator *e)
 	struct mptable_lapic_cbarg2 arg2;
 	mpcth_t cth;
 	int error, logical_cpus = 0;
-	vm_offset_t lapic_addr;
+	vm_paddr_t lapic_addr;
 
 	if (mptable_use_default) {
 		mptable_lapic_default();
@@ -759,7 +759,7 @@ mptable_lapic_enumerate(struct lapic_enumerator *e)
 	cth = mpt.mp_cth;
  
 	/* Save local apic address */
-	lapic_addr = (vm_offset_t)cth->apic_address;
+	lapic_addr = cth->apic_address;
 	KKASSERT(lapic_addr != 0);
  
 	/*
@@ -1388,6 +1388,9 @@ void
 mptable_pci_int_dump(void)
 {
 	const struct mptable_pci_int *pci_int;
+
+	if (!bootverbose)
+		return;
 
 	TAILQ_FOREACH(pci_int, &mptable_pci_int_list, mpci_link) {
 		kprintf("MPTABLE: %d:%d INT%c -> IOAPIC %d.%d\n",

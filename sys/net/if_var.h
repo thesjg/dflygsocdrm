@@ -44,6 +44,9 @@
 #ifndef _NET_IF_H_
 #include <net/if.h>
 #endif
+#ifndef _SYS_MUTEX_H_
+#include <sys/mutex.h>
+#endif
 
 /*
  * Structures defining a network interface, providing a packet
@@ -145,6 +148,8 @@ enum ifnet_serialize {
 #define IFNET_SERIALIZE_TX	IFNET_SERIALIZE_TX_BASE
 #define IFNET_SERIALIZE_RX(i)	(IFNET_SERIALIZE_RX_BASE + (i))
 
+#if defined(_KERNEL) || defined(_KERNEL_STRUCTURES)
+
 /*
  * Structure defining a network interface.
  *
@@ -234,7 +239,6 @@ struct ifnet {
 	int	(*if_start_cpuid)	/* cpuid to run if_start */
 		(struct ifnet *);
 	TAILQ_HEAD(, ifg_list) if_groups; /* linked list of groups per if */
-					/* protected by if_addr_mtx */
 #ifdef DEVICE_POLLING
 	void	(*if_poll)		/* IFF_POLLING support */
 		(struct ifnet *, enum poll_cmd, int);
@@ -272,6 +276,7 @@ struct ifnet {
 	struct ifaddr	*if_lladdr;
 	struct lwkt_serialize *if_serializer;	/* serializer or MP lock */
 	struct lwkt_serialize if_default_serializer; /* if not supplied */
+	struct mtx	if_ioctl_mtx;	/* high-level ioctl serializing mutex */
 	int	if_cpuid;
 	struct netmsg_base *if_start_nmsg; /* percpu msgs to sched if_start */
 	void	*if_pf_kif; /* pf interface abstraction */
@@ -312,6 +317,7 @@ typedef void if_init_f_t (void *);
 /* for compatibility with other BSDs */
 #define	if_list		if_link
 
+#endif
 
 /*
  * Output queues (ifp->if_snd) and slow device input queues (*ifp->if_slowq)
@@ -323,6 +329,7 @@ typedef void if_init_f_t (void *);
 #define	IF_DROP(ifq)		((ifq)->ifq_drops++)
 #define	IF_QLEN(ifq)		((ifq)->ifq_len)
 #define	IF_QEMPTY(ifq)		(IF_QLEN(ifq) == 0)
+
 #define	IF_ENQUEUE(ifq, m) do {						\
 	(m)->m_nextpkt = 0;						\
 	if ((ifq)->ifq_tail == 0)					\
@@ -332,6 +339,7 @@ typedef void if_init_f_t (void *);
 	(ifq)->ifq_tail = m;						\
 	(ifq)->ifq_len++;						\
 } while (0)
+
 #define	IF_PREPEND(ifq, m) do {						\
 	(m)->m_nextpkt = (ifq)->ifq_head;				\
 	if ((ifq)->ifq_tail == 0)					\
@@ -339,6 +347,7 @@ typedef void if_init_f_t (void *);
 	(ifq)->ifq_head = (m);						\
 	(ifq)->ifq_len++;						\
 } while (0)
+
 #define	IF_DEQUEUE(ifq, m) do {						\
 	(m) = (ifq)->ifq_head;						\
 	if (m) {							\
