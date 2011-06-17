@@ -37,14 +37,13 @@
 #include <machine_base/apic/lapic.h>
 #include <machine_base/apic/ioapic.h>
 #include <machine_base/apic/ioapic_abi.h>
+#include <machine_base/apic/apicvar.h>
 #include <machine_base/icu/icu_var.h>
 #include <machine/segments.h>
 #include <sys/thread2.h>
 
 #include <machine/cputypes.h>
 #include <machine/intr_machdep.h>
-
-#include "apicvar.h"
 
 extern int naps;
 
@@ -95,13 +94,6 @@ static const uint32_t	lapic_timer_divisors[] = {
 int	cpu_id_to_apic_id[NAPICID];
 int	apic_id_to_cpu_id[NAPICID];
 int	lapic_enable = 1;
-
-void
-lapic_eoi(void)
-{
-
-	lapic->eoi = 0;
-}
 
 /*
  * Enable LAPIC, configure interrupts.
@@ -231,9 +223,9 @@ lapic_init(boolean_t bsp)
 	 * Pump out a few EOIs to clean out interrupts that got through
 	 * before we were able to set the TPR.
 	 */
-	lapic_eoi();
-	lapic_eoi();
-	lapic_eoi();
+	lapic->eoi = 0;
+	lapic->eoi = 0;
+	lapic->eoi = 0;
 
 	if (bsp) {
 		lapic_timer_calibrate();
