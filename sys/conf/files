@@ -1922,9 +1922,6 @@ opencrypto/rmd160.c			optional crypto
 opencrypto/skipjack.c			optional crypto
 opencrypto/xform.c			optional crypto
 dev/crypto/hifn/hifn7751.c		optional hifn
-dev/crypto/padlock/padlock.c		optional padlock
-dev/crypto/padlock/padlock_cipher.c	optional padlock
-dev/crypto/padlock/padlock_hash.c	optional padlock
 dev/crypto/ubsec/ubsec.c		optional ubsec
 #dev/drm/drmtest/drmtest_drv.c		optional drmtest drm
 dev/drm/drm_porting_layer.c		optional drm
