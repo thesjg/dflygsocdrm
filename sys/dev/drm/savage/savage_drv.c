@@ -190,7 +190,7 @@ static int savage_handler(module_t mod, int what, void *arg) {
 	return (err);
 }
 
-DRIVER_MODULE(savage, vgapci, savage_driver, drm_devclass, savage_handler, 0);
+DRIVER_MODULE(savage, vgapci, savage_driver, drm_devclass, savage_handler, NULL);
 MODULE_DEPEND(savage, drm, 1, 1, 1);
 #ifdef __linux__
 module_init(savage_init);

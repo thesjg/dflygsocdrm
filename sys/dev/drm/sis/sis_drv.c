@@ -238,7 +238,7 @@ static int sis_handler(module_t mod, int what, void *arg) {
 	return (err);
 }
 
-DRIVER_MODULE(sisdrm, vgapci, sis_driver, drm_devclass, sis_handler, 0);
+DRIVER_MODULE(sisdrm, vgapci, sis_driver, drm_devclass, sis_handler, NULL);
 MODULE_DEPEND(sisdrm, drm, 1, 1, 1);
 #ifdef __linux__
 module_init(sis_init);

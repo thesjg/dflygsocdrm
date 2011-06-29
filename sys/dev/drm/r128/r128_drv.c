@@ -224,7 +224,7 @@ static int r128_handler(module_t mod, int what, void *arg) {
 	return (err);
 }
 
-DRIVER_MODULE(r128, vgapci, r128_driver, drm_devclass, r128_handler, 0);
+DRIVER_MODULE(r128, vgapci, r128_driver, drm_devclass, r128_handler, NULL);
 MODULE_DEPEND(r128, drm, 1, 1, 1);
 #ifdef __linux__
 module_init(r128_init);

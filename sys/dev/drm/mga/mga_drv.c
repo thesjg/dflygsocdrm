@@ -220,7 +220,7 @@ static int mga_handler(module_t mod, int what, void *arg) {
 	return (err);
 }
 
-DRIVER_MODULE(mga, vgapci, mga_driver, drm_devclass, mga_handler, 0);
+DRIVER_MODULE(mga, vgapci, mga_driver, drm_devclass, mga_handler, NULL);
 MODULE_DEPEND(mga, drm, 1, 1, 1);
 
 #ifdef __linux__

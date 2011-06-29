@@ -217,5 +217,5 @@ static int mach64_handler(module_t mod, int what, void *arg) {
 	return (err);
 }
 
-DRIVER_MODULE(mach64, vgapci, mach64_driver, drm_devclass, mach64_handler, 0);
+DRIVER_MODULE(mach64, vgapci, mach64_driver, drm_devclass, mach64_handler, NULL);
 MODULE_DEPEND(mach64, drm, 1, 1, 1);

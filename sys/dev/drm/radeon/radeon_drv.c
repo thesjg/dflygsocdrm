@@ -511,7 +511,7 @@ static int radeon_handler(module_t mod, int what, void *arg) {
 	return (err);
 }
 
-DRIVER_MODULE(radeon, vgapci, radeon_driver, drm_devclass, radeon_handler, 0);
+DRIVER_MODULE(radeon, vgapci, radeon_driver, drm_devclass, radeon_handler, NULL);
 MODULE_DEPEND(radeon, drm, 1, 1, 1);
 #ifdef __linux__
 module_init(radeon_init);
