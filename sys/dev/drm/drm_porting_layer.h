@@ -803,44 +803,50 @@ preempt_enable(void) {
 /* file drm_gem.c, function drm_gem_object_free() */
 #define mutex_is_locked(l) lockstatus(l, NULL)
 
+/*
+ * Reader Writer Spinlocks
+ */
+
 /* file ttm/ttm_object.c,
  * function ttm_object_file() */
 typedef struct lock rwlock_t;
 
 /* file ttm/ttm_object.c,
  * function ttm_object_file_init() */
-#define rwlock_init(l)  mutex_init(l)
-
-/* file ttm/ttm_object.c, function ttm_base_object_init() */
-#define write_lock(l)   mutex_lock(l)
-#define write_unlock(l) mutex_unlock(l)
+#define rwlock_init(l)   lockinit(l, "lrwspi", 0, LK_CANRECURSE)
 
 /* file ttm/ttm_object.c, function ttm_base_object_lookup() */
-#define read_lock(l)    mutex_lock(l)
-#define read_unlock(l)  mutex_unlock(l)
+#define read_lock(l)     lockmgr(l, LK_SHARED | LK_RETRY)
+#define read_unlock(l)   lockmgr(l, LK_RELEASE)
+
+/* file ttm/ttm_object.c, function ttm_base_object_init() */
+#define write_lock(l)    lockmgr(l, LK_EXCLUSIVE | LK_RETRY)
+#define write_unlock(l)  lockmgr(l, LK_RELEASE)
 
 /* file radeon_pm.c, function radeon_dynpm_idle_work_handler() */
 static __inline__ void
 read_lock_irqsave(rwlock_t *lock, unsigned long flags) {
-	;
+	lockmgr(lock, LK_SHARED | LK_RETRY);
+	(void)flags;
 }
 
 /* file radeon_pm.c, function radeon_dynpm_idle_work_handler() */
 static __inline__ void
-read_lock_irqrestore(rwlock_t *lock, unsigned long flags) {
-	;
+read_unlock_irqrestore(rwlock_t *lock, unsigned long flags) {
+	lockmgr(lock, LK_RELEASE);
 }
 
 /* file radeon_fence.c, function radeon_fence_emit() */
 static __inline__ void
 write_lock_irqsave(rwlock_t *lock, unsigned long flags) {
-	;
+	lockmgr(lock, LK_EXCLUSIVE | LK_RETRY);
+	(void)flags;
 }
 
 /* file radeon_fence.c, function radeon_fence_emit() */
 static __inline__ void
-write_lock_irqrestore(rwlock_t *lock, unsigned long flags) {
-	;
+write_unlock_irqrestore(rwlock_t *lock, unsigned long flags) {
+	lockmgr(lock, LK_RELEASE);
 }
 
 /*
@@ -852,28 +858,34 @@ write_lock_irqrestore(rwlock_t *lock, unsigned long flags) {
 /* but all downs seem to be matched with ups */
 typedef struct lock DRM_RWSEMAPHORE;
 
+/* file vmwgfx/vmwgfx_fifo.c */
+static __inline__ void
+init_rwsem(DRM_RWSEMAPHORE *rwlock) {
+	lockinit(rwlock, "lrwsem", 0, LK_CANRECURSE);
+}
+
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 static __inline__ void
 down_read(DRM_RWSEMAPHORE *rwlock) {
-	mutex_lock(rwlock);
+	lockmgr(rwlock, LK_SHARED | LK_RETRY);
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 static __inline__ void
 up_read(DRM_RWSEMAPHORE *rwlock) {
-	mutex_unlock(rwlock);
+	lockmgr(rwlock, LK_RELEASE);
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 static __inline__ void
 down_write(DRM_RWSEMAPHORE *rwlock) {
-	mutex_lock(rwlock);
+	lockmgr(rwlock, LK_EXCLUSIVE | LK_RETRY);
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 static __inline__ void
 up_write(DRM_RWSEMAPHORE *rwlock) {
-	mutex_unlock(rwlock);
+	lockmgr(rwlock, LK_RELEASE);
 }
 
 /**********************************************************
@@ -1125,18 +1137,39 @@ waitqueue_active(wait_queue_head_t *wqh) {
 
 /* file ttm/ttm_lock.c, function ttm_read_lock() */
 /* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
+#if 0
 static __inline__ int
 wait_event(wait_queue_head_t wqh, int condition) {
 	return 0;
 }
+#endif
+
+/* GCC extension for statement expression */
+#define wait_event(wqh, condition)                       \
+({                                                       \
+	while (!(condition)) {                           \
+		tsleep(&wqh, 0, "wtev", 0);              \
+	}                                                \
+})
 
 /* file ttm/ttm_lock.c, function ttm_read_lock() */
 /* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
 /* file drm_fops.c, function drm_read() */
+#if 0
 static __inline__ int
 wait_event_interruptible(wait_queue_head_t wqh, int condition) {
 	return 0;
 }
+#endif
+/* GCC extension for statement expression */
+#define wait_event_interruptible(wqh, condition)         \
+({                                                       \
+	int retval = 0;                                  \
+	while (!retval && !(condition)) {                \
+		retval = tsleep(&wqh, PCATCH, "wei", 0); \
+	}                                                \
+	retval;                                          \
+})
 
 /* file drm_context.c, function drm_context_switch_complete() */
 static __inline__ void
@@ -1846,6 +1879,10 @@ unlock_kernel(void) {
 #endif
 #ifndef mb
 #define mb()   cpu_mfence()
+#endif
+
+#ifndef wmb
+#define wmb()  cpu_sfence()
 #endif
 
 #if 0
