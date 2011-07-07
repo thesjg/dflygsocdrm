@@ -102,7 +102,17 @@
 #define AES_XTS_IV_LEN		8
 #define AESCTR_IV_LEN		8
 #define AESCTR_BLOCK_LEN	16
+#define AESGCM_IV_LEN		8
+#define AESGCM_BLOCK_LEN	1
+#define AESGMAC_IV_LEN		8
+#define AESGMAC_BLOCK_LEN	1
 #define CAMELLIA_BLOCK_LEN	16
+#define TWOFISH_BLOCK_LEN	16
+#define SERPENT_BLOCK_LEN	16
+#define TWOFISH_XTS_BLOCK_LEN	16
+#define TWOFISH_XTS_IV_LEN	8
+#define SERPENT_XTS_BLOCK_LEN	16
+#define SERPENT_XTS_IV_LEN	8
 #define EALG_MAX_BLOCK_LEN	AES_BLOCK_LEN /* Keep this updated */
 
 #define	CRYPTO_ALGORITHM_MIN	1
@@ -130,7 +140,16 @@
 #define CRYPTO_CAMELLIA_CBC	21
 #define CRYPTO_AES_XTS		22
 #define CRYPTO_AES_CTR          23
-#define	CRYPTO_ALGORITHM_MAX	23 /* Keep updated - see below */
+#define CRYPTO_AES_GCM_16	24
+#define CRYPTO_AES_128_GMAC	25
+#define CRYPTO_AES_192_GMAC	26
+#define CRYPTO_AES_256_GMAC	27
+#define CRYPTO_AES_GMAC		28
+#define CRYPTO_TWOFISH_CBC	29
+#define CRYPTO_SERPENT_CBC	30
+#define CRYPTO_TWOFISH_XTS	31
+#define CRYPTO_SERPENT_XTS	32
+#define	CRYPTO_ALGORITHM_MAX	32 /* Keep updated - see below */
 
 /* Algorithm flags */
 #define	CRYPTO_ALG_FLAG_SUPPORTED	0x01 /* Algorithm is supported */
@@ -345,6 +364,8 @@ struct cryptop {
 	int (*crp_callback)(struct cryptop *); /* Callback function */
 
 	struct timespec	crp_tstamp;	/* performance time stamp */
+
+	caddr_t		crp_mac;
 };
 
 #define CRYPTO_BUF_CONTIG	0x0

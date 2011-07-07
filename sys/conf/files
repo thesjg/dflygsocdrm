@@ -1897,7 +1897,7 @@ libprop/prop_object.c			standard
 libprop/prop_stack.c			standard
 libprop/prop_string.c			standard
 libprop/prop_rb.c			standard
-crypto/blowfish/bf_ecb.c		optional ipsec
+crypto/blowfish/bf_ecb.c		optional ipsec ipsec_esp
 crypto/blowfish/bf_skey.c		optional crypto
 crypto/camellia/camellia.c		optional crypto
 crypto/camellia/camellia-api.c		optional crypto
@@ -1909,6 +1909,8 @@ crypto/rijndael/rijndael-api-fst.c	optional crypto
 crypto/rijndael/rijndael-api.c		optional crypto
 crypto/sha1.c      			optional crypto
 crypto/sha2/sha2.c     			optional crypto
+crypto/twofish/twofish.c		optional crypto
+crypto/serpent/serpent.c		optional crypto
 net/zlib.c				optional crypto
 opencrypto/cast.c			optional crypto
 opencrypto/criov.c			optional crypto
@@ -1917,6 +1919,7 @@ opencrypto/cryptodev.c			optional cryptodev
 opencrypto/cryptodev_if.m		optional crypto
 opencrypto/cryptosoft.c			optional crypto
 opencrypto/deflate.c			optional crypto
+opencrypto/gmac.c			optional crypto
 opencrypto/rmd160.c			optional crypto
 opencrypto/skipjack.c			optional crypto
 opencrypto/xform.c			optional crypto

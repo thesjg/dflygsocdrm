@@ -7,6 +7,8 @@
 .PATH:	${.CURDIR}/../crypto/rijndael
 .PATH:	${.CURDIR}/../crypto/sha2
 .PATH:	${.CURDIR}/../crypto/camellia
+.PATH:	${.CURDIR}/../crypto/twofish
+.PATH:	${.CURDIR}/../crypto/serpent
 
 KMOD	= crypto
 SRCS	= crypto.c cryptodev_if.c
@@ -18,6 +20,8 @@ SRCS	+= sha1.c sha2.c
 SRCS	+= opt_param.h cryptodev_if.h bus_if.h device_if.h
 SRCS	+= opt_ddb.h
 SRCS	+= camellia.c camellia-api.c
+SRCS	+= twofish.c
+SRCS	+= serpent.c
 
 SUBDIR	= rc4
 

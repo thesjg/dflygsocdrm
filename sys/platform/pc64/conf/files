@@ -95,6 +95,7 @@ dev/crypto/padlock/rng_harvest_x86_64.S	optional	padlock
 dev/video/fb/fb.c			optional	vga
 dev/video/fb/splash.c			optional	splash
 dev/video/fb/vga.c			optional	vga
+dev/powermng/est/est.c			optional	cpu_enable_est
 dev/misc/kbd/atkbd.c			optional	atkbd
 dev/misc/kbd/atkbdc.c			optional	atkbdc
 dev/misc/kbd/kbd.c			optional	atkbd

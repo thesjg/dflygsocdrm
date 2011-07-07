@@ -32,6 +32,7 @@
 #include <sys/module.h>
 #include <sys/sysctl.h>
 #include <sys/errno.h>
+#include <sys/endian.h>
 #include <sys/random.h>
 #include <sys/kernel.h>
 #include <sys/uio.h>
@@ -64,6 +65,7 @@ u_int8_t hmac_opad_buffer[HMAC_MAX_BLOCK_LEN];
 
 static	int swcr_encdec(struct cryptodesc *, struct swcr_data *, caddr_t, int);
 static	int swcr_authcompute(struct cryptodesc *, struct swcr_data *, caddr_t, int);
+static	int swcr_combined(struct cryptop *);
 static	int swcr_compdec(struct cryptodesc *, struct swcr_data *, caddr_t, int);
 static	int swcr_freesession(device_t dev, u_int64_t tid);
 static	int swcr_freesession_slot(struct swcr_data **swdp, u_int32_t sid);
@@ -76,7 +78,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
     int flags)
 {
 	unsigned char iv[EALG_MAX_BLOCK_LEN], blk[EALG_MAX_BLOCK_LEN], *idat;
-	unsigned char *ivp, piv[EALG_MAX_BLOCK_LEN];
+	unsigned char *ivp, *nivp, iv2[EALG_MAX_BLOCK_LEN];
 	u_int8_t *kschedule;
 	u_int8_t *okschedule;
 	struct enc_xform *exf;
@@ -189,10 +191,8 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block for XOR'ing
 					 * with next block
 					 */
-					if (ivp == iv)
-						bcopy(blk, piv, blks);
-					else
-						bcopy(blk, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(blk, nivp, blks);
 
 					exf->decrypt(kschedule, blk, iv);
 
@@ -200,10 +200,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					for (j = 0; j < blks; j++)
 						blk[j] ^= ivp[j];
 
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				/* Copy back decrypted block */
@@ -265,10 +262,8 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block to be used
 					 * in next block's processing.
 					 */
-					if (ivp == iv)
-						bcopy(idat, piv, blks);
-					else
-						bcopy(idat, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(idat, nivp, blks);
 
 					exf->decrypt(kschedule, idat, iv);
 
@@ -276,10 +271,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					for (j = 0; j < blks; j++)
 						idat[j] ^= ivp[j];
 
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				idat += blks;
@@ -336,10 +328,8 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block for XOR'ing
 					 * with next block
 					 */
-					if (ivp == iv)
-						bcopy(blk, piv, blks);
-					else
-						bcopy(blk, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(blk, nivp, blks);
 
 					exf->decrypt(kschedule, blk, iv);
 
@@ -347,10 +337,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					for (j = 0; j < blks; j++)
 						blk[j] ^= ivp[j];
 
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				/* Copy back decrypted block */
@@ -398,10 +385,8 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					 * Keep encrypted block to be used
 					 * in next block's processing.
 					 */
-					if (ivp == iv)
-						bcopy(idat, piv, blks);
-					else
-						bcopy(idat, iv, blks);
+					nivp = (ivp == iv) ? iv2 : iv;
+					bcopy(idat, nivp, blks);
 
 					exf->decrypt(kschedule, idat, iv);
 
@@ -409,10 +394,7 @@ swcr_encdec(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 					for (j = 0; j < blks; j++)
 						idat[j] ^= ivp[j];
 
-					if (ivp == iv)
-						bcopy(piv, iv, blks);
-					else
-						ivp = iv;
+					ivp = nivp;
 				}
 
 				idat += blks;
@@ -610,6 +592,163 @@ swcr_authcompute(struct cryptodesc *crd, struct swcr_data *sw, caddr_t buf,
 }
 
 /*
+ * Apply a combined encryption-authentication transformation
+ */
+static int
+swcr_combined(struct cryptop *crp)
+{
+	uint32_t blkbuf[howmany(EALG_MAX_BLOCK_LEN, sizeof(uint32_t))];
+	u_char *blk = (u_char *)blkbuf;
+	u_char aalg[HASH_MAX_LEN];
+	u_char iv[EALG_MAX_BLOCK_LEN];
+	uint8_t *kschedule;
+	union authctx ctx;
+	struct cryptodesc *crd, *crda = NULL, *crde = NULL;
+	struct swcr_data *sw, *swa, *swe;
+	struct auth_hash *axf = NULL;
+	struct enc_xform *exf = NULL;
+	struct mbuf *m = NULL;
+	struct uio *uio = NULL;
+	caddr_t buf = (caddr_t)crp->crp_buf;
+	uint32_t *blkp;
+	int i, blksz, ivlen, outtype, len;
+
+	blksz = 0;
+	ivlen = 0;
+
+	for (crd = crp->crp_desc; crd; crd = crd->crd_next) {
+		for (sw = swcr_sessions[crp->crp_sid & 0xffffffff];
+		     sw && sw->sw_alg != crd->crd_alg;
+		     sw = sw->sw_next)
+			;
+		if (sw == NULL)
+			return (EINVAL);
+
+		switch (sw->sw_alg) {
+		case CRYPTO_AES_GCM_16:
+		case CRYPTO_AES_GMAC:
+			swe = sw;
+			crde = crd;
+			exf = swe->sw_exf;
+			ivlen = exf->ivsize;
+			break;
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
+			swa = sw;
+			crda = crd;
+			axf = swa->sw_axf;
+			if (swa->sw_ictx == 0)
+				return (EINVAL);
+			bcopy(swa->sw_ictx, &ctx, axf->ctxsize);
+			blksz = axf->blocksize;
+			break;
+		default:
+			return (EINVAL);
+		}
+	}
+	if (crde == NULL || crda == NULL)
+		return (EINVAL);
+
+	if (crp->crp_flags & CRYPTO_F_IMBUF) {
+		outtype = CRYPTO_BUF_MBUF;
+		m = (struct mbuf *)buf;
+	} else {
+		outtype = CRYPTO_BUF_IOV;
+		uio = (struct uio *)buf;
+	}
+
+	/* Initialize the IV */
+	if (crde->crd_flags & CRD_F_ENCRYPT) {
+		/* IV explicitly provided ? */
+		if (crde->crd_flags & CRD_F_IV_EXPLICIT)
+			bcopy(crde->crd_iv, iv, ivlen);
+		else
+			karc4rand(iv, ivlen);
+
+		/* Do we need to write the IV */
+		if (!(crde->crd_flags & CRD_F_IV_PRESENT))
+			crypto_copyback(crde->crd_flags, buf, crde->crd_inject,
+			    ivlen, iv);
+
+	} else {	/* Decryption */
+			/* IV explicitly provided ? */
+		if (crde->crd_flags & CRD_F_IV_EXPLICIT)
+			bcopy(crde->crd_iv, iv, ivlen);
+		else
+			/* Get IV off buf */
+			crypto_copydata(crde->crd_flags, buf, crde->crd_inject,
+			    ivlen, iv);
+	}
+
+	/* Supply MAC with IV */
+	if (axf->Reinit)
+		axf->Reinit(&ctx, iv, ivlen);
+
+	/* Supply MAC with AAD */
+	for (i = 0; i < crda->crd_len; i += blksz) {
+		len = MIN(crda->crd_len - i, blksz);
+		crypto_copydata(crde->crd_flags, buf, crda->crd_skip + i, len,
+		    blk);
+		axf->Update(&ctx, blk, len);
+	}
+
+	spin_lock(&swcr_spin);
+	kschedule = sw->sw_kschedule;
+	++sw->sw_kschedule_refs;
+	spin_unlock(&swcr_spin);
+
+	if (exf->reinit)
+		exf->reinit(kschedule, iv);
+
+	/* Do encryption/decryption with MAC */
+	for (i = 0; i < crde->crd_len; i += blksz) {
+		len = MIN(crde->crd_len - i, blksz);
+		if (len < blksz)
+			bzero(blk, blksz);
+		crypto_copydata(crde->crd_flags, buf, crde->crd_skip + i, len,
+		    blk);
+		if (crde->crd_flags & CRD_F_ENCRYPT) {
+			exf->encrypt(kschedule, blk, iv);
+			axf->Update(&ctx, blk, len);
+		} else {
+			axf->Update(&ctx, blk, len);
+			exf->decrypt(kschedule, blk, iv);
+		}
+		crypto_copyback(crde->crd_flags, buf, crde->crd_skip + i, len,
+		    blk);
+	}
+
+	/* Do any required special finalization */
+	switch (crda->crd_alg) {
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
+			/* length block */
+			bzero(blk, blksz);
+			blkp = (uint32_t *)blk + 1;
+			*blkp = htobe32(crda->crd_len * 8);
+			blkp = (uint32_t *)blk + 3;
+			*blkp = htobe32(crde->crd_len * 8);
+			axf->Update(&ctx, blk, blksz);
+			break;
+	}
+
+	/* Finalize MAC */
+	axf->Final(aalg, &ctx);
+
+	/* Inject the authentication data */
+	crypto_copyback(crda->crd_flags, crp->crp_buf, crda->crd_inject,
+	    axf->blocksize, aalg);
+
+	spin_lock(&swcr_spin);
+	--sw->sw_kschedule_refs;
+	spin_unlock(&swcr_spin);
+
+	return (0);
+}
+
+/*
  * Apply a compression/decompression algorithm
  */
 static int
@@ -736,8 +875,27 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
 		case CRYPTO_AES_CTR:
 			txf = &enc_xform_aes_ctr;
 			goto enccommon;
+		case CRYPTO_AES_GCM_16:
+			txf = &enc_xform_aes_gcm;
+			goto enccommon;
+		case CRYPTO_AES_GMAC:
+			txf = &enc_xform_aes_gmac;
+			(*swd)->sw_exf = txf;
+			break;
 		case CRYPTO_CAMELLIA_CBC:
 			txf = &enc_xform_camellia;
+			goto enccommon;
+		case CRYPTO_TWOFISH_CBC:
+			txf = &enc_xform_twofish;
+			goto enccommon;
+		case CRYPTO_SERPENT_CBC:
+			txf = &enc_xform_serpent;
+			goto enccommon;
+		case CRYPTO_TWOFISH_XTS:
+			txf = &enc_xform_twofish_xts;
+			goto enccommon;
+		case CRYPTO_SERPENT_XTS:
+			txf = &enc_xform_serpent_xts;
 			goto enccommon;
 		case CRYPTO_NULL_CBC:
 			txf = &enc_xform_null;
@@ -849,6 +1007,30 @@ swcr_newsession(device_t dev, u_int32_t *sid, struct cryptoini *cri)
 			(*swd)->sw_axf = axf;
 			break;
 #endif
+		case CRYPTO_AES_128_GMAC:
+			axf = &auth_hash_gmac_aes_128;
+			goto auth4common;
+
+		case CRYPTO_AES_192_GMAC:
+			axf = &auth_hash_gmac_aes_192;
+			goto auth4common;
+
+		case CRYPTO_AES_256_GMAC:
+			axf = &auth_hash_gmac_aes_256;
+		auth4common:
+			(*swd)->sw_ictx = kmalloc(axf->ctxsize, M_CRYPTO_DATA,
+			    M_NOWAIT);
+			if ((*swd)->sw_ictx == NULL) {
+				swcr_freesession_slot(&swd_base, 0);
+				return ENOBUFS;
+			}
+
+			axf->Init((*swd)->sw_ictx);
+			axf->Setkey((*swd)->sw_ictx, cri->cri_key,
+			    cri->cri_klen / 8);
+			(*swd)->sw_axf = axf;
+			break;
+
 		case CRYPTO_DEFLATE_COMP:
 			cxf = &comp_algo_deflate;
 			(*swd)->sw_cxf = cxf;
@@ -972,7 +1154,13 @@ swcr_freesession_slot(struct swcr_data **swdp, u_int32_t sid)
 		case CRYPTO_RIJNDAEL128_CBC:
 		case CRYPTO_AES_XTS:
 		case CRYPTO_AES_CTR:
+		case CRYPTO_AES_GCM_16:
+		case CRYPTO_AES_GMAC:
 		case CRYPTO_CAMELLIA_CBC:
+		case CRYPTO_TWOFISH_CBC:
+		case CRYPTO_SERPENT_CBC:
+		case CRYPTO_TWOFISH_XTS:
+		case CRYPTO_SERPENT_XTS:
 		case CRYPTO_NULL_CBC:
 			txf = swd->sw_exf;
 
@@ -1013,6 +1201,9 @@ swcr_freesession_slot(struct swcr_data **swdp, u_int32_t sid)
 			}
 			break;
 
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
 		case CRYPTO_MD5:
 		case CRYPTO_SHA1:
 			axf = swd->sw_axf;
@@ -1091,6 +1282,10 @@ swcr_process(device_t dev, struct cryptop *crp, int hint)
 		case CRYPTO_AES_XTS:
 		case CRYPTO_AES_CTR:
 		case CRYPTO_CAMELLIA_CBC:
+		case CRYPTO_TWOFISH_CBC:
+		case CRYPTO_SERPENT_CBC:
+		case CRYPTO_TWOFISH_XTS:
+		case CRYPTO_SERPENT_XTS:
 			if ((crp->crp_etype = swcr_encdec(crd, sw,
 			    crp->crp_buf, crp->crp_flags)) != 0)
 				goto done;
@@ -1113,6 +1308,14 @@ swcr_process(device_t dev, struct cryptop *crp, int hint)
 			    crp->crp_buf, crp->crp_flags)) != 0)
 				goto done;
 			break;
+
+		case CRYPTO_AES_GCM_16:
+		case CRYPTO_AES_GMAC:
+		case CRYPTO_AES_128_GMAC:
+		case CRYPTO_AES_192_GMAC:
+		case CRYPTO_AES_256_GMAC:
+			crp->crp_etype = swcr_combined(crp);
+			goto done;
 
 		case CRYPTO_DEFLATE_COMP:
 			if ((crp->crp_etype = swcr_compdec(crd, sw, 
@@ -1187,7 +1390,16 @@ swcr_attach(device_t dev)
 	REGISTER(CRYPTO_RIJNDAEL128_CBC);
 	REGISTER(CRYPTO_AES_XTS);
 	REGISTER(CRYPTO_AES_CTR);
+	REGISTER(CRYPTO_AES_GCM_16);
+	REGISTER(CRYPTO_AES_GMAC);
+	REGISTER(CRYPTO_AES_128_GMAC);
+	REGISTER(CRYPTO_AES_192_GMAC);
+	REGISTER(CRYPTO_AES_256_GMAC);
 	REGISTER(CRYPTO_CAMELLIA_CBC);
+	REGISTER(CRYPTO_TWOFISH_CBC);
+	REGISTER(CRYPTO_SERPENT_CBC);
+	REGISTER(CRYPTO_TWOFISH_XTS);
+	REGISTER(CRYPTO_SERPENT_XTS);
 	REGISTER(CRYPTO_DEFLATE_COMP);
 #undef REGISTER
 

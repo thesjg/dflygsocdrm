@@ -351,6 +351,8 @@ static void	bce_breakpoint(struct bce_softc *);
 /****************************************************************************/
 static uint32_t	bce_reg_rd_ind(struct bce_softc *, uint32_t);
 static void	bce_reg_wr_ind(struct bce_softc *, uint32_t, uint32_t);
+static void	bce_shmem_wr(struct bce_softc *, uint32_t, uint32_t);
+static uint32_t	bce_shmem_rd(struct bce_softc *, u32);
 static void	bce_ctx_wr(struct bce_softc *, uint32_t, uint32_t, uint32_t);
 static int	bce_miibus_read_reg(device_t, int, int);
 static int	bce_miibus_write_reg(device_t, int, int, int);
@@ -385,6 +387,9 @@ static void	bce_load_rv2p_fw(struct bce_softc *, uint32_t *,
 				 uint32_t, uint32_t);
 static void	bce_load_cpu_fw(struct bce_softc *, struct cpu_reg *,
 				struct fw_info *);
+static void	bce_start_cpu(struct bce_softc *, struct cpu_reg *);
+static void	bce_halt_cpu(struct bce_softc *, struct cpu_reg *);
+static void	bce_start_rxp_cpu(struct bce_softc *);
 static void	bce_init_rxp_cpu(struct bce_softc *);
 static void	bce_init_txp_cpu(struct bce_softc *);
 static void	bce_init_tpat_cpu(struct bce_softc *);
@@ -419,7 +424,7 @@ static void	bce_ifmedia_sts(struct ifnet *, struct ifmediareq *);
 static void	bce_init(void *);
 static void	bce_mgmt_init(struct bce_softc *);
 
-static void	bce_init_ctx(struct bce_softc *);
+static int	bce_init_ctx(struct bce_softc *);
 static void	bce_get_mac_addr(struct bce_softc *);
 static void	bce_set_mac_addr(struct bce_softc *);
 static void	bce_phy_intr(struct bce_softc *);
@@ -597,13 +602,13 @@ bce_print_adapter_info(struct bce_softc *sc)
 	}
 
 	/* Firmware version and device features. */
-	kprintf("B/C (0x%08X)", sc->bce_bc_ver);
+	kprintf("B/C (%s)", sc->bce_bc_ver);
 
 	if ((sc->bce_flags & BCE_MFW_ENABLE_FLAG) ||
 	    (sc->bce_phy_flags & BCE_PHY_2_5G_CAPABLE_FLAG)) {
 		kprintf("; Flags(");
 		if (sc->bce_flags & BCE_MFW_ENABLE_FLAG)
-			kprintf("MFW");
+			kprintf("MFW[%s]", sc->bce_mfw_ver);
 		if (sc->bce_phy_flags & BCE_PHY_2_5G_CAPABLE_FLAG)
 			kprintf(" 2.5G");
 		kprintf(")");
@@ -659,6 +664,7 @@ bce_attach(device_t dev)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	uint32_t val;
 	int rid, rc = 0;
+	int i, j;
 #ifdef notyet
 	int count;
 #endif
@@ -712,7 +718,7 @@ bce_attach(device_t dev)
 	sc->bce_chipid =  REG_RD(sc, BCE_MISC_ID);
 
 	/* Weed out any non-production controller revisions. */
-	switch(BCE_CHIP_ID(sc)) {
+	switch (BCE_CHIP_ID(sc)) {
 	case BCE_CHIP_ID_5706_A0:
 	case BCE_CHIP_ID_5706_A1:
 	case BCE_CHIP_ID_5708_A0:
@@ -747,13 +753,50 @@ bce_attach(device_t dev)
 	DBPRINT(sc, BCE_INFO, "bce_shmem_base = 0x%08X\n", sc->bce_shmem_base);
 
 	/* Fetch the bootcode revision. */
-	sc->bce_bc_ver = REG_RD_IND(sc, sc->bce_shmem_base +
-		BCE_DEV_INFO_BC_REV);
+	val = bce_shmem_rd(sc, BCE_DEV_INFO_BC_REV);
+	for (i = 0, j = 0; i < 3; i++) {
+		uint8_t num;
+		int k, skip0;
 
-	/* Check if any management firmware is running. */
-	val = REG_RD_IND(sc, sc->bce_shmem_base + BCE_PORT_FEATURE);
-	if (val & (BCE_PORT_FEATURE_ASF_ENABLED | BCE_PORT_FEATURE_IMD_ENABLED))
+		num = (uint8_t)(val >> (24 - (i * 8)));
+		for (k = 100, skip0 = 1; k >= 1; num %= k, k /= 10) {
+			if (num >= k || !skip0 || k == 1) {
+				sc->bce_bc_ver[j++] = (num / k) + '0';
+				skip0 = 0;
+			}
+		}
+		if (i != 2)
+			sc->bce_bc_ver[j++] = '.';
+	}
+
+	/* Check if any management firwmare is running. */
+	val = bce_shmem_rd(sc, BCE_PORT_FEATURE);
+	if (val & BCE_PORT_FEATURE_ASF_ENABLED) {
 		sc->bce_flags |= BCE_MFW_ENABLE_FLAG;
+
+		/* Allow time for firmware to enter the running state. */
+		for (i = 0; i < 30; i++) {
+			val = bce_shmem_rd(sc, BCE_BC_STATE_CONDITION);
+			if (val & BCE_CONDITION_MFW_RUN_MASK)
+				break;
+			DELAY(10000);
+		}
+	}
+
+	/* Check the current bootcode state. */
+	val = bce_shmem_rd(sc, BCE_BC_STATE_CONDITION) &
+	    BCE_CONDITION_MFW_RUN_MASK;
+	if (val != BCE_CONDITION_MFW_RUN_UNKNOWN &&
+	    val != BCE_CONDITION_MFW_RUN_NONE) {
+		uint32_t addr = bce_shmem_rd(sc, BCE_MFW_VER_PTR);
+
+		for (i = 0, j = 0; j < 3; j++) {
+			val = bce_reg_rd_ind(sc, addr + j * 4);
+			val = bswap32(val);
+			memcpy(&sc->bce_mfw_ver[i], &val, 4);
+			i += 4;
+		}
+	}
 
 	/* Get PCI bus information (speed and type). */
 	val = REG_RD(sc, BCE_PCICFG_MISC_STATUS);
@@ -934,7 +977,8 @@ bce_attach(device_t dev)
 	/* Get the firmware running so IPMI still works */
 	bce_mgmt_init(sc);
 
-	bce_print_adapter_info(sc);
+	if (bootverbose)
+		bce_print_adapter_info(sc);
 
 	return 0;
 fail:
@@ -1082,6 +1126,36 @@ bce_reg_wr_ind(struct bce_softc *sc, uint32_t offset, uint32_t val)
 
 	pci_write_config(dev, BCE_PCICFG_REG_WINDOW_ADDRESS, offset, 4);
 	pci_write_config(dev, BCE_PCICFG_REG_WINDOW, val, 4);
+}
+
+
+/****************************************************************************/
+/* Shared memory write.                                                     */
+/*                                                                          */
+/* Writes NetXtreme II shared memory region.                                */
+/*                                                                          */
+/* Returns:                                                                 */
+/*   Nothing.                                                               */
+/****************************************************************************/
+static void
+bce_shmem_wr(struct bce_softc *sc, uint32_t offset, uint32_t val)
+{
+	bce_reg_wr_ind(sc, sc->bce_shmem_base + offset, val);
+}
+
+
+/****************************************************************************/
+/* Shared memory read.                                                      */
+/*                                                                          */
+/* Reads NetXtreme II shared memory region.                                 */
+/*                                                                          */
+/* Returns:                                                                 */
+/*   The 32 bit value read.                                                 */
+/****************************************************************************/
+static u32
+bce_shmem_rd(struct bce_softc *sc, uint32_t offset)
+{
+	return bce_reg_rd_ind(sc, sc->bce_shmem_base + offset);
 }
 
 
@@ -1647,13 +1721,13 @@ bce_init_nvram(struct bce_softc *sc)
 	if (j == entry_count) {
 		sc->bce_flash_info = NULL;
 		if_printf(&sc->arpcom.ac_if, "Unknown Flash NVRAM found!\n");
-		rc = ENODEV;
+		return ENODEV;
 	}
 
 bce_init_nvram_get_flash_size:
 	/* Write the flash config data to the shared memory interface. */
-	val = REG_RD_IND(sc, sc->bce_shmem_base + BCE_SHARED_HW_CFG_CONFIG2) &
-	      BCE_SHARED_HW_CFG2_NVM_SIZE_MASK;
+	val = bce_shmem_rd(sc, BCE_SHARED_HW_CFG_CONFIG2) &
+	    BCE_SHARED_HW_CFG2_NVM_SIZE_MASK;
 	if (val)
 		sc->bce_flash_size = val;
 	else
@@ -1912,8 +1986,7 @@ bce_get_media(struct bce_softc *sc)
 		sc->bce_flags |= BCE_NO_WOL_FLAG;
 		if (BCE_CHIP_NUM(sc) != BCE_CHIP_NUM_5706) {
 			sc->bce_phy_addr = 2;
-			val = REG_RD_IND(sc, sc->bce_shmem_base +
-			    BCE_SHARED_HW_CFG_CONFIG);
+			val = bce_shmem_rd(sc, BCE_SHARED_HW_CFG_CONFIG);
 			if (val & BCE_SHARED_HW_CFG_PHY_2_5G)
 				sc->bce_phy_flags |= BCE_PHY_2_5G_CAPABLE_FLAG;
 		}
@@ -2422,12 +2495,12 @@ bce_fw_sync(struct bce_softc *sc, uint32_t msg_data)
  	DBPRINT(sc, BCE_VERBOSE, "bce_fw_sync(): msg_data = 0x%08X\n", msg_data);
 
 	/* Send the message to the bootcode driver mailbox. */
-	REG_WR_IND(sc, sc->bce_shmem_base + BCE_DRV_MB, msg_data);
+	bce_shmem_wr(sc, BCE_DRV_MB, msg_data);
 
 	/* Wait for the bootcode to acknowledge the message. */
 	for (i = 0; i < FW_ACK_TIME_OUT_MS; i++) {
 		/* Check for a response in the bootcode firmware mailbox. */
-		val = REG_RD_IND(sc, sc->bce_shmem_base + BCE_FW_MB);
+		val = bce_shmem_rd(sc, BCE_FW_MB);
 		if ((val & BCE_FW_MSG_ACK) == (msg_data & BCE_DRV_MSG_SEQ))
 			break;
 		DELAY(1000);
@@ -2443,7 +2516,7 @@ bce_fw_sync(struct bce_softc *sc, uint32_t msg_data)
 		msg_data &= ~BCE_DRV_MSG_CODE;
 		msg_data |= BCE_DRV_MSG_CODE_FW_TIMEOUT;
 
-		REG_WR_IND(sc, sc->bce_shmem_base + BCE_DRV_MB, msg_data);
+		bce_shmem_wr(sc, BCE_DRV_MB, msg_data);
 
 		sc->bce_fw_timed_out = 1;
 		rc = EBUSY;
@@ -2501,14 +2574,10 @@ static void
 bce_load_cpu_fw(struct bce_softc *sc, struct cpu_reg *cpu_reg,
 		struct fw_info *fw)
 {
-	uint32_t offset, val;
+	uint32_t offset;
 	int j;
 
-	/* Halt the CPU. */
-	val = REG_RD_IND(sc, cpu_reg->mode);
-	val |= cpu_reg->mode_value_halt;
-	REG_WR_IND(sc, cpu_reg->mode, val);
-	REG_WR_IND(sc, cpu_reg->state, cpu_reg->state_value_clear);
+	bce_halt_cpu(sc, cpu_reg);
 
 	/* Load the Text area. */
 	offset = cpu_reg->spad_base + (fw->text_addr - cpu_reg->mips_view_base);
@@ -2546,15 +2615,77 @@ bce_load_cpu_fw(struct bce_softc *sc, struct cpu_reg *cpu_reg,
 			REG_WR_IND(sc, offset, fw->rodata[j]);
 	}
 
-	/* Clear the pre-fetch instruction. */
+	/* Clear the pre-fetch instruction and set the FW start address. */
 	REG_WR_IND(sc, cpu_reg->inst, 0);
 	REG_WR_IND(sc, cpu_reg->pc, fw->start_addr);
+}
+
+
+/****************************************************************************/
+/* Starts the RISC processor.                                               */
+/*                                                                          */
+/* Assumes the CPU starting address has already been set.                   */
+/*                                                                          */
+/* Returns:                                                                 */
+/*   Nothing.                                                               */
+/****************************************************************************/
+static void
+bce_start_cpu(struct bce_softc *sc, struct cpu_reg *cpu_reg)
+{
+	uint32_t val;
 
 	/* Start the CPU. */
 	val = REG_RD_IND(sc, cpu_reg->mode);
 	val &= ~cpu_reg->mode_value_halt;
 	REG_WR_IND(sc, cpu_reg->state, cpu_reg->state_value_clear);
 	REG_WR_IND(sc, cpu_reg->mode, val);
+}
+
+
+/****************************************************************************/
+/* Halts the RISC processor.                                                */
+/*                                                                          */
+/* Returns:                                                                 */
+/*   Nothing.                                                               */
+/****************************************************************************/
+static void
+bce_halt_cpu(struct bce_softc *sc, struct cpu_reg *cpu_reg)
+{
+	uint32_t val;
+
+	/* Halt the CPU. */
+	val = REG_RD_IND(sc, cpu_reg->mode);
+	val |= cpu_reg->mode_value_halt;
+	REG_WR_IND(sc, cpu_reg->mode, val);
+	REG_WR_IND(sc, cpu_reg->state, cpu_reg->state_value_clear);
+}
+
+
+/****************************************************************************/
+/* Start the RX CPU.                                                        */
+/*                                                                          */
+/* Returns:                                                                 */
+/*   Nothing.                                                               */
+/****************************************************************************/
+static void
+bce_start_rxp_cpu(struct bce_softc *sc)
+{
+	struct cpu_reg cpu_reg;
+
+	cpu_reg.mode = BCE_RXP_CPU_MODE;
+	cpu_reg.mode_value_halt = BCE_RXP_CPU_MODE_SOFT_HALT;
+	cpu_reg.mode_value_sstep = BCE_RXP_CPU_MODE_STEP_ENA;
+	cpu_reg.state = BCE_RXP_CPU_STATE;
+	cpu_reg.state_value_clear = 0xffffff;
+	cpu_reg.gpr0 = BCE_RXP_CPU_REG_FILE;
+	cpu_reg.evmask = BCE_RXP_CPU_EVENT_MASK;
+	cpu_reg.pc = BCE_RXP_CPU_PROGRAM_COUNTER;
+	cpu_reg.inst = BCE_RXP_CPU_INSTRUCTION;
+	cpu_reg.bp = BCE_RXP_CPU_HW_BREAKPOINT;
+	cpu_reg.spad_base = BCE_RXP_SCRATCH;
+	cpu_reg.mips_view_base = 0x8000000;
+
+	bce_start_cpu(sc, &cpu_reg);
 }
 
 
@@ -2648,6 +2779,7 @@ bce_init_rxp_cpu(struct bce_softc *sc)
 
 	DBPRINT(sc, BCE_INFO_RESET, "Loading RX firmware.\n");
 	bce_load_cpu_fw(sc, &cpu_reg, &fw);
+	/* Delay RXP start until initialization is complete. */
 }
 
 
@@ -2741,6 +2873,7 @@ bce_init_txp_cpu(struct bce_softc *sc)
 
 	DBPRINT(sc, BCE_INFO_RESET, "Loading TX firmware.\n");
 	bce_load_cpu_fw(sc, &cpu_reg, &fw);
+	bce_start_cpu(sc, &cpu_reg);
 }
 
 
@@ -2834,6 +2967,7 @@ bce_init_tpat_cpu(struct bce_softc *sc)
 
 	DBPRINT(sc, BCE_INFO_RESET, "Loading TPAT firmware.\n");
 	bce_load_cpu_fw(sc, &cpu_reg, &fw);
+	bce_start_cpu(sc, &cpu_reg);
 }
 
 
@@ -2927,6 +3061,7 @@ bce_init_cp_cpu(struct bce_softc *sc)
 
 	DBPRINT(sc, BCE_INFO_RESET, "Loading CP firmware.\n");
 	bce_load_cpu_fw(sc, &cpu_reg, &fw);
+	bce_start_cpu(sc, &cpu_reg);
 }
 
 
@@ -3020,6 +3155,7 @@ bce_init_com_cpu(struct bce_softc *sc)
 
 	DBPRINT(sc, BCE_INFO_RESET, "Loading COM firmware.\n");
 	bce_load_cpu_fw(sc, &cpu_reg, &fw);
+	bce_start_cpu(sc, &cpu_reg);
 }
 
 
@@ -3070,7 +3206,7 @@ bce_init_cpus(struct bce_softc *sc)
 /* Returns:                                                                 */
 /*   Nothing.                                                               */
 /****************************************************************************/
-static void
+static int
 bce_init_ctx(struct bce_softc *sc)
 {
 	if (BCE_CHIP_NUM(sc) == BCE_CHIP_NUM_5709 ||
@@ -3095,6 +3231,11 @@ bce_init_ctx(struct bce_softc *sc)
 			if (!(val & BCE_CTX_COMMAND_MEM_INIT))
 				break;
 			DELAY(2);
+		}
+		if (i == retry_cnt) {
+			device_printf(sc->bce_dev,
+			    "Context memory initialization failed!\n");
+			return ETIMEDOUT;
 		}
 
 		for (i = 0; i < sc->ctx_pages; i++) {
@@ -3122,6 +3263,11 @@ bce_init_ctx(struct bce_softc *sc)
 					break;
 				DELAY(5);
 			}
+			if (j == retry_cnt) {
+				device_printf(sc->bce_dev,
+				    "Failed to initialize context page!\n");
+				return ETIMEDOUT;
+			}
 		}
 	} else {
 		uint32_t vcid_addr, offset;
@@ -3146,6 +3292,7 @@ bce_init_ctx(struct bce_softc *sc)
 			REG_WR(sc, BCE_CTX_PAGE_TBL, vcid_addr);
 		}
 	}
+	return 0;
 }
 
 
@@ -3169,8 +3316,8 @@ bce_get_mac_addr(struct bce_softc *sc)
 	 * shared memory for speed.
 	 */
 
-	mac_hi = REG_RD_IND(sc, sc->bce_shmem_base + BCE_PORT_HW_CFG_MAC_UPPER);
-	mac_lo = REG_RD_IND(sc, sc->bce_shmem_base + BCE_PORT_HW_CFG_MAC_LOWER);
+	mac_hi = bce_shmem_rd(sc,  BCE_PORT_HW_CFG_MAC_UPPER);
+	mac_lo = bce_shmem_rd(sc, BCE_PORT_HW_CFG_MAC_LOWER);
 
 	if (mac_lo == 0 && mac_hi == 0) {
 		if_printf(&sc->arpcom.ac_if, "Invalid Ethernet address!\n");
@@ -3223,9 +3370,6 @@ static void
 bce_stop(struct bce_softc *sc)
 {
 	struct ifnet *ifp = &sc->arpcom.ac_if;
-	struct mii_data *mii = device_get_softc(sc->bce_miibus);
-	struct ifmedia_entry *ifm;
-	int mtmp, itmp;
 
 	ASSERT_SERIALIZED(ifp->if_serializer);
 
@@ -3243,24 +3387,6 @@ bce_stop(struct bce_softc *sc)
 
 	/* Free TX buffers. */
 	bce_free_tx_chain(sc);
-
-	/*
-	 * Isolate/power down the PHY, but leave the media selection
-	 * unchanged so that things will be put back to normal when
-	 * we bring the interface back up.
-	 *
-	 * 'mii' may be NULL if bce_stop() is called by bce_detach().
-	 */
-	if (mii != NULL) {
-		itmp = ifp->if_flags;
-		ifp->if_flags |= IFF_UP;
-		ifm = mii->mii_media.ifm_cur;
-		mtmp = ifm->ifm_media;
-		ifm->ifm_media = IFM_ETHER | IFM_NONE;
-		mii_mediachg(mii);
-		ifm->ifm_media = mtmp;
-		ifp->if_flags = itmp;
-	}
 
 	sc->bce_link = 0;
 	sc->bce_coalchg_mask = 0;
@@ -3295,6 +3421,7 @@ bce_reset(struct bce_softc *sc, uint32_t reset_code)
 
 	/* Assume bootcode is running. */
 	sc->bce_fw_timed_out = 0;
+	sc->bce_drv_cardiac_arrest = 0;
 
 	/* Give the firmware a chance to prepare for the reset. */
 	rc = bce_fw_sync(sc, BCE_DRV_MSG_DATA_WAIT0 | reset_code);
@@ -3305,8 +3432,8 @@ bce_reset(struct bce_softc *sc, uint32_t reset_code)
 	}
 
 	/* Set a firmware reminder that this is a soft reset. */
-	REG_WR_IND(sc, sc->bce_shmem_base + BCE_DRV_RESET_SIGNATURE,
-		   BCE_DRV_RESET_SIGNATURE_MAGIC);
+	bce_shmem_wr(sc, BCE_DRV_RESET_SIGNATURE,
+	    BCE_DRV_RESET_SIGNATURE_MAGIC);
 
 	/* Dummy read to force the chip to complete all current transactions. */
 	val = REG_RD(sc, BCE_MISC_ID);
@@ -3354,6 +3481,7 @@ bce_reset(struct bce_softc *sc, uint32_t reset_code)
 
 	/* Just completed a reset, assume that firmware is running again. */
 	sc->bce_fw_timed_out = 0;
+	sc->bce_drv_cardiac_arrest = 0;
 
 	/* Wait for the firmware to finish its initialization. */
 	rc = bce_fw_sync(sc, BCE_DRV_MSG_DATA_WAIT1 | reset_code);
@@ -3412,10 +3540,19 @@ bce_chipinit(struct bce_softc *sc)
 	       BCE_MISC_ENABLE_STATUS_BITS_CONTEXT_ENABLE);
 
 	/* Initialize context mapping and zero out the quick contexts. */
-	bce_init_ctx(sc);
+	rc = bce_init_ctx(sc);
+	if (rc != 0)
+		return rc;
 
 	/* Initialize the on-boards CPUs */
 	bce_init_cpus(sc);
+
+	/* Enable management frames (NC-SI) to flow to the MCP. */
+	if (sc->bce_flags & BCE_MFW_ENABLE_FLAG) {
+		val = REG_RD(sc, BCE_RPM_MGMT_PKT_CTRL) |
+		    BCE_RPM_MGMT_PKT_CTRL_MGMT_EN;
+		REG_WR(sc, BCE_RPM_MGMT_PKT_CTRL, val);
+	}
 
 	/* Prepare NVRAM for access. */
 	rc = bce_init_nvram(sc);
@@ -3521,7 +3658,7 @@ bce_blockinit(struct bce_softc *sc)
 	REG_WR(sc, BCE_HC_COMMAND, BCE_HC_COMMAND_CLR_STAT_NOW);
 
 	/* Verify that bootcode is running. */
-	reg = REG_RD_IND(sc, sc->bce_shmem_base + BCE_DEV_INFO_SIGNATURE);
+	reg = bce_shmem_rd(sc, BCE_DEV_INFO_SIGNATURE);
 
 	DBRUNIF(DB_RANDOMTRUE(bce_debug_bootcode_running_failure),
 		if_printf(&sc->arpcom.ac_if,
@@ -3552,6 +3689,16 @@ bce_blockinit(struct bce_softc *sc)
 
 	/* Enable link state change interrupt generation. */
 	REG_WR(sc, BCE_HC_ATTN_BITS_ENABLE, STATUS_ATTN_BITS_LINK_STATE);
+
+	/* Enable the RXP. */
+	bce_start_rxp_cpu(sc);
+
+	/* Disable management frames (NC-SI) from flowing to the MCP. */
+	if (sc->bce_flags & BCE_MFW_ENABLE_FLAG) {
+		val = REG_RD(sc, BCE_RPM_MGMT_PKT_CTRL) &
+		    ~BCE_RPM_MGMT_PKT_CTRL_MGMT_EN;
+		REG_WR(sc, BCE_RPM_MGMT_PKT_CTRL, val);
+	}
 
 	/* Enable all remaining blocks in the MAC. */
 	if (BCE_CHIP_NUM(sc) == BCE_CHIP_NUM_5709 ||
@@ -4013,6 +4160,7 @@ bce_ifmedia_upd(struct ifnet *ifp)
 {
 	struct bce_softc *sc = ifp->if_softc;
 	struct mii_data *mii = device_get_softc(sc->bce_miibus);
+	int error = 0;
 
 	/*
 	 * 'mii' will be NULL, when this function is called on following
@@ -4027,9 +4175,9 @@ bce_ifmedia_upd(struct ifnet *ifp)
 			LIST_FOREACH(miisc, &mii->mii_phys, mii_list)
 				mii_phy_reset(miisc);
 		}
-		mii_mediachg(mii);
+		error = mii_mediachg(mii);
 	}
-	return 0;
+	return error;
 }
 
 
@@ -5666,7 +5814,31 @@ bce_pulse(void *xsc)
 
 	/* Tell the firmware that the driver is still running. */
 	msg = (uint32_t)++sc->bce_fw_drv_pulse_wr_seq;
-	REG_WR_IND(sc, sc->bce_shmem_base + BCE_DRV_PULSE_MB, msg);
+	bce_shmem_wr(sc, BCE_DRV_PULSE_MB, msg);
+
+	/* Update the bootcode condition. */
+	sc->bc_state = bce_shmem_rd(sc, BCE_BC_STATE_CONDITION);
+
+	/* Report whether the bootcode still knows the driver is running. */
+	if (!sc->bce_drv_cardiac_arrest) {
+		if (!(sc->bc_state & BCE_CONDITION_DRV_PRESENT)) {
+			sc->bce_drv_cardiac_arrest = 1;
+			if_printf(ifp, "Bootcode lost the driver pulse! "
+			    "(bc_state = 0x%08X)\n", sc->bc_state);
+		}
+	} else {
+ 		/*
+ 		 * Not supported by all bootcode versions.
+ 		 * (v5.0.11+ and v5.2.1+)  Older bootcode
+ 		 * will require the driver to reset the
+ 		 * controller to clear this condition.
+		 */
+		if (sc->bc_state & BCE_CONDITION_DRV_PRESENT) {
+			sc->bce_drv_cardiac_arrest = 0;
+			if_printf(ifp, "Bootcode found the driver pulse! "
+			    "(bc_state = 0x%08X)\n", sc->bc_state);
+		}
+	}
 
 	/* Schedule the next pulse. */
 	callout_reset(&sc->bce_pulse_callout, hz, bce_pulse, sc);
@@ -7352,7 +7524,7 @@ bce_dump_hw_state(struct bce_softc *sc)
 	" Hardware State "
 	"----------------------------\n");
 
-	if_printf(ifp, "0x%08X - bootcode version\n", sc->bce_fw_ver);
+	if_printf(ifp, "%s - bootcode version\n", sc->bce_bc_ver);
 
 	val1 = REG_RD(sc, BCE_MISC_ENABLE_STATUS_BITS);
 	if_printf(ifp, "0x%08X - (0x%06X) misc_enable_status_bits\n",

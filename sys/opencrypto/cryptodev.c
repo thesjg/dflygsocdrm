@@ -200,6 +200,18 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data,
 		case CRYPTO_CAMELLIA_CBC:
 			txform = &enc_xform_camellia;
 			break;
+		case CRYPTO_TWOFISH_CBC:
+			txform = &enc_xform_twofish;
+			break;
+		case CRYPTO_SERPENT_CBC:
+			txform = &enc_xform_serpent;
+			break;
+		case CRYPTO_TWOFISH_XTS:
+			txform = &enc_xform_twofish_xts;
+			break;
+		case CRYPTO_SERPENT_XTS:
+			txform = &enc_xform_serpent_xts;
+			break;
 		default:
 			return (EINVAL);
 		}
@@ -309,10 +321,14 @@ cryptof_ioctl(struct file *fp, u_long cmd, caddr_t data,
 		}
 bail:
 		if (error) {
-			if (crie.cri_key)
+			if (crie.cri_key) {
+				bzero(crie.cri_key, crie.cri_klen / 8);
 				kfree(crie.cri_key, M_XDATA);
-			if (cria.cri_key)
+			}
+			if (cria.cri_key) {
+				bzero(crie.cri_key, crie.cri_klen / 8);
 				kfree(cria.cri_key, M_XDATA);
+			}
 		}
 		break;
 	case CIOCFSESSION:
@@ -649,8 +665,11 @@ fail:
 	if (krp) {
 		kop->crk_status = krp->krp_status;
 		for (i = 0; i < CRK_MAXPARAM; i++) {
-			if (krp->krp_param[i].crp_p)
+			if (krp->krp_param[i].crp_p) {
+				bzero(krp->krp_param[i].crp_p,
+				    (krp->krp_param[i].crp_nbits + 7) / 8);
 				kfree(krp->krp_param[i].crp_p, M_XDATA);
+			}
 		}
 		kfree(krp, M_XDATA);
 	}
