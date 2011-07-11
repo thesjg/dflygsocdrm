@@ -109,7 +109,9 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 	int ret;
 	unsigned long end_jiffies = jiffies + timeout;
 	bool (*wait_condition)(struct vmw_private *, uint32_t);
+#ifdef __linux__
 	DEFINE_WAIT(__wait);
+#endif
 
 	wait_condition = (fifo_idle) ? &vmw_fifo_idle :
 		&vmw_fence_signaled;
@@ -124,9 +126,11 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 	ret = 0;
 
 	for (;;) {
+#ifdef __linux__
 		prepare_to_wait(&dev_priv->fence_queue, &__wait,
 				(interruptible) ?
 				TASK_INTERRUPTIBLE : TASK_UNINTERRUPTIBLE);
+#endif
 		if (wait_condition(dev_priv, sequence))
 			break;
 		if (time_after_eq(jiffies, end_jiffies)) {
@@ -141,18 +145,31 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 			 * newer kernels and lower CPU utilization.
 			 */
 
+#ifdef __linux__
 			__set_current_state(TASK_RUNNING);
 			schedule();
 			__set_current_state((interruptible) ?
 					    TASK_INTERRUPTIBLE :
 					    TASK_UNINTERRUPTIBLE);
+#else
+			ret = -tsleep(&dev_priv->fence_queue,
+				(interruptible) ? PCATCH : 0, "vmfall", 0);
+#endif
 		}
+#ifdef __linux__
 		if (interruptible && signal_pending(current)) {
 			ret = -ERESTARTSYS;
 			break;
 		}
+#else
+		if (ret) {
+			break;
+		}
+#endif
 	}
+#ifdef __linux__
 	finish_wait(&dev_priv->fence_queue, &__wait);
+#endif
 	if (ret == 0 && fifo_idle) {
 		__le32 __iomem *fifo_mem = dev_priv->mmio_virt;
 		iowrite32(signal_seq, fifo_mem + SVGA_FIFO_FENCE);

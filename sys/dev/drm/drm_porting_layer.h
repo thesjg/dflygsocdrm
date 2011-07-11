@@ -1171,6 +1171,42 @@ wait_event_interruptible(wait_queue_head_t wqh, int condition) {
 	retval;                                          \
 })
 
+/* vmwgfx_irq.c */
+/* file radeon_pm.c, function radeon_sync_with_vblank() */
+/* file radeon_fence.c, function radeon_fence_wait() */
+#define wait_event_timeout(wqh, condition, timeout)          \
+({                                                           \
+	long retval = 0;                                     \
+	long left = (timeout <= 0) ? 1 : timeout;            \
+	for (;;)) {                                          \
+		retval = tsleep(&wqh, 0, "wetime", 1);       \
+		left--;                                      \
+		if ((condition) || (left <= 0)) {            \
+			retval = left;                       \
+			break;                               \
+		}                                            \
+	}                                                    \
+	retval;                                              \
+})
+
+/* vmwgfx_irq.c */
+/* file radeon_pm.c, function radeon_pm_set_clocks() */
+/* file radeon_fence.c, function radeon_fence_wait() */
+#define wait_event_interruptible_timeout(wqh, condition, timeout) \
+({                                                                \
+	long retval = 0;                                          \
+	long left = (timeout <= 0) ? 1 : timeout;                 \
+	for (;;)) {                                               \
+		retval = tsleep(&wqh, PCATCH, "wetime", 1);       \
+		left--;                                           \
+		if ((condition) || (left <= 0) || (retval)) {     \
+			retval = left;                            \
+			break;                                    \
+		}                                                 \
+	}                                                         \
+	retval;                                                   \
+})
+
 /* file drm_context.c, function drm_context_switch_complete() */
 static __inline__ void
 wake_up(wait_queue_head_t *wqh) {
@@ -1799,6 +1835,15 @@ static __inline__ void
 schedule(void) {
 	;
 }
+
+/* file vmwgfx_irq.c, function  vmw_fallback_wait() */
+static __inline__ void
+schedule_timeout(signed long timo) {
+	if (curproc != NULL) {
+		tsleep(curproc, 0, "schtim", timo);
+	}
+}
+
 
 /* file drm_fops.c, function drm_reclaim_locked_buffers() */
 /* file intel_crt.c, function intel_crt_detect_hotplug() */
@@ -3748,28 +3793,6 @@ struct firmware {
 static __inline__ int
 power_supply_is_system_supplied(void) {
 	return 0;
-}
-
-/* file radeon_pm.c, function radeon_sync_with_vblank() */
-/* file radeon_fence.c, function radeon_fence_wait() */
-static __inline__ void
-wait_event_timeout(
-	wait_queue_head_t vblank_queue,
-	bool vblank_sync,
-	unsigned long jiffies
-) {
-	;
-}
-
-/* file radeon_pm.c, function radeon_pm_set_clocks() */
-/* file radeon_fence.c, function radeon_fence_wait() */
-static __inline__ void
-wait_event_interruptible_timeout(
-	wait_queue_head_t idle_queue,
-	bool gui_idle,
-	unsigned long jiffies
-) {
-	;
 }
 
 /**********************************************************
