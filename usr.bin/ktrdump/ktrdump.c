@@ -1036,6 +1036,11 @@ kvmfprintf(FILE *fp, const char *ctl, va_list va)
 					++n;
 					is_done = 1;
 					break;
+				case 'c':
+				        fprintf(fp, "%c", va_arg(va, int));
+					++n;
+					is_done = 1;
+					break;
 				case 's':
 					/*
 					 * String
@@ -1054,6 +1059,9 @@ kvmfprintf(FILE *fp, const char *ctl, va_list va)
 					++n;
 					break;
 				case 'j':
+					is_long = 2;
+					break;
+				case 'z':
 					is_long = 3;
 					break;
 				case 'l':

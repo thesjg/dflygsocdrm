@@ -384,7 +384,9 @@ static int		rows_offset = 1;
 static void map_mode_table(u_char **, u_char *);
 static int map_mode_num(int);
 #endif
+#ifndef VGA_NO_BIOS
 static int map_bios_mode_num(int);
+#endif
 static u_char *get_mode_param(int);
 static int verify_adapter(video_adapter_t *);
 static void update_adapter_info(video_adapter_t *, video_info_t *);
@@ -504,6 +506,7 @@ map_mode_num(int mode)
 }
 #endif /* !VGA_NO_BIOS && !VGA_NO_MODE_CHANGE */
 
+#ifndef VGA_NO_BIOS
 /* turn the BIOS video number into our video mode number */
 static int
 map_bios_mode_num(int bios_mode)
@@ -528,6 +531,7 @@ map_bios_mode_num(int bios_mode)
 
     return M_VGA_C80x25;
 }
+#endif
 
 /* look up a parameter table entry */
 static u_char *
@@ -633,24 +637,6 @@ probe_adapters(void)
     if (vga_init_done)
 	return 1;
     vga_init_done = TRUE;
-
-    /*
-     * Check BIOS data area.
-     * The VGA BIOS has more sophisticated mechanism and has this 
-     * information in BIOSDATA_DCCINDEX (40:8a), but it also maintains 
-     * compatibility with the EGA BIOS by updating BIOSDATA_VIDEOSWITCH.
-     */
-
-    /* 
-     * XXX: we don't use BIOSDATA_EQUIPMENT, since it is not a dead
-     * copy of RTC_EQUIPMENT.  Bits 4 and 5 of ETC_EQUIPMENT are
-     * zeros for VGA.  However, VGA BIOS sets these bits in
-     * BIOSDATA_EQUIPMENT according to the monitor type detected.
-     */
-#ifndef VGA_NO_BIOS
-    if ((readb(BIOS_PADDRTOVADDR(0x488)) & 0x0f) != 0x09)
-	    return 0;
-#endif /* VGA_NO_BIOS */
 
     if (verify_adapter(&biosadapter) != 0)
 	return 0;
