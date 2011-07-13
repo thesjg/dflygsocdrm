@@ -4029,12 +4029,16 @@ i915_gem_wait_for_pending_flip(struct drm_device *dev,
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	struct drm_i915_gem_object *obj_priv;
+#ifdef __linux__
 	DEFINE_WAIT(wait);
+#endif
 	int i, ret = 0;
 
 	for (;;) {
+#ifdef __linux__
 		prepare_to_wait(&dev_priv->pending_flip_queue,
 				&wait, TASK_INTERRUPTIBLE);
+#endif
 		for (i = 0; i < count; i++) {
 			obj_priv = to_intel_bo(object_list[i]);
 			if (atomic_read(&obj_priv->pending_flip) > 0)
@@ -4043,6 +4047,7 @@ i915_gem_wait_for_pending_flip(struct drm_device *dev,
 		if (i == count)
 			break;
 
+#ifdef __linux__
 		if (!signal_pending(DRM_GET_CURRENT())) {
 			mutex_unlock(&dev->struct_mutex);
 			schedule();
@@ -4050,9 +4055,22 @@ i915_gem_wait_for_pending_flip(struct drm_device *dev,
 			continue;
 		}
 		ret = -ERESTARTSYS;
+#else
+		tsleep_interlock(&dev_priv->pending_flip_queue, PCATCH);
+		mutex_unlock(&dev->struct_mutex);
+		ret = -tsleep(&dev_priv->pending_flip_queue,
+			PCATCH | PINTERLOCKED, "gwfp", 1);
+		mutex_lock(&dev->struct_mutex);
+		if ((ret == 0) || (ret == -EWOULDBLOCK)) {
+			continue;
+		}
+		ret = -ERESTART;
+#endif
 		break;
 	}
+#ifdef __linux__
 	finish_wait(&dev_priv->pending_flip_queue, &wait);
+#endif
 
 	return ret;
 }

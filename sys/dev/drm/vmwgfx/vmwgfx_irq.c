@@ -153,7 +153,7 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 					    TASK_UNINTERRUPTIBLE);
 #else
 			ret = -tsleep(&dev_priv->fence_queue,
-				(interruptible) ? PCATCH : 0, "vmfall", 0);
+				(interruptible) ? PCATCH : 0, "vmfall", 3);
 #endif
 		}
 #ifdef __linux__
@@ -162,7 +162,7 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 			break;
 		}
 #else
-		if (ret) {
+		if ((ret) && (ret != -EWOULDBLOCK)) {
 			break;
 		}
 #endif

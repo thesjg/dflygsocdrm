@@ -865,15 +865,17 @@ init_rwsem(DRM_RWSEMAPHORE *rwlock) {
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
+/* file vmwgfx/vmwgfx_irq.c, function vmw_fallback_wait() */
 static __inline__ void
-down_read(DRM_RWSEMAPHORE *rwlock) {
-	lockmgr(rwlock, LK_SHARED | LK_RETRY);
+down_read(DRM_RWSEMAPHORE *sem) {
+	lockmgr(sem, LK_SHARED | LK_RETRY);
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
+/* file vmwgfx/vmwgfx_irq.c, function vmw_fallback_wait() */
 static __inline__ void
-up_read(DRM_RWSEMAPHORE *rwlock) {
-	lockmgr(rwlock, LK_RELEASE);
+up_read(DRM_RWSEMAPHORE *sem) {
+	lockmgr(sem, LK_RELEASE);
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
@@ -1831,10 +1833,12 @@ usecs_to_jiffies(unsigned long usecs) {
 typedef unsigned long cycles_t;
 
 /* file drm_fops.c, function drm_reclaim_locked_buffers() */
+#if 0
 static __inline__ void
 schedule(void) {
 	;
 }
+#endif
 
 /* file vmwgfx_irq.c, function  vmw_fallback_wait() */
 static __inline__ void
@@ -2494,6 +2498,7 @@ iounmap(void *virtual) {
 #define ioread16(reg) (readw(reg))
 
 /* file vmwgfx_fifo.c, function vmw_fifo_is_full() */
+/* file vmwgfx_irq.c, function vmw_fence_signaled() */
 #define ioread32(reg) (readl(reg))
 
 /* nouveau_drv.h */
