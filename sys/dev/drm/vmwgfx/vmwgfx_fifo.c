@@ -174,6 +174,9 @@ void vmw_fifo_release(struct vmw_private *dev_priv, struct vmw_fifo_state *fifo)
 		vfree(fifo->dynamic_buffer);
 		fifo->dynamic_buffer = NULL;
 	}
+#ifndef __linux__ /* for now rwsem implemented using lockmgr */
+	lockuninit(&fifo->rwsem);
+#endif
 }
 
 static bool vmw_fifo_is_full(struct vmw_private *dev_priv, uint32_t bytes)
@@ -193,14 +196,18 @@ static int vmw_fifo_wait_noirq(struct vmw_private *dev_priv,
 {
 	int ret = 0;
 	unsigned long end_jiffies = jiffies + timeout;
+#ifdef __linux__
 	DEFINE_WAIT(__wait);
+#endif
 
 	DRM_INFO("Fifo wait noirq.\n");
 
 	for (;;) {
+#ifdef __linux__
 		prepare_to_wait(&dev_priv->fifo_queue, &__wait,
 				(interruptible) ?
 				TASK_INTERRUPTIBLE : TASK_UNINTERRUPTIBLE);
+#endif
 		if (!vmw_fifo_is_full(dev_priv, bytes))
 			break;
 		if (time_after_eq(jiffies, end_jiffies)) {
@@ -208,13 +215,24 @@ static int vmw_fifo_wait_noirq(struct vmw_private *dev_priv,
 			DRM_ERROR("SVGA device lockup.\n");
 			break;
 		}
+#ifdef __linux__
 		schedule_timeout(1);
 		if (interruptible && signal_pending(current)) {
 			ret = -ERESTARTSYS;
 			break;
 		}
+#else
+		ret = tsleep(&dev_priv->fifo_queue,
+			(interruptible) ? PCATCH : 0, "vfwnoi", 1);
+		if ((ret == EINTR) || (ret == ERESTART)) {
+			ret = -ERESTART;
+			break;
+		}
+#endif
 	}
+#ifdef __linux__
 	finish_wait(&dev_priv->fifo_queue, &__wait);
+#endif
 	wake_up_all(&dev_priv->fifo_queue);
 	DRM_INFO("Fifo noirq exit.\n");
 	return ret;

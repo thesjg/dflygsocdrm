@@ -1553,6 +1553,7 @@ SetPageDirty(struct page *page) {
 
 /* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
 /* file ttm/ttm_bo.c, function ttm_bo_global_kobj_release() */
+/* file vmwgfx_gmr.c, function vmw_gmr_free_descriptors() */
 static __inline__ void
 __free_page(struct page *page) {
 	;
@@ -1560,6 +1561,7 @@ __free_page(struct page *page) {
 
 /* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
 /* file ttm/ttm_bo.c, function ttm_bo_global_init() */
+/* file vmwgfx_gmr.c, function vmw_gmr_build_descriptors() */
 static __inline__ struct page *
 alloc_page(int gfp_flags) {
 	return NULL;
@@ -2289,15 +2291,19 @@ memset_io(void * handle, uint32_t value, int size) {
 	memset(handle, value, size);
 }
 
+/* vmwgfx_fifo.c, function vmw_fifo_res_copy() */
+/* QUESTION: is dst src guaranteed non-overlapping for memcpy? */
 static __inline__ void
 memcpy_fromio(void *dst, void *src, unsigned long size) {
-	;
+	memcpy(dst, src, size);
 }
 
 /* file ttm/ttm_bo_util.c, function ttm_copy_io_page() */
+/* vmwgfx_fifo.c, function vmw_fifo_res_copy() */
+/* QUESTION: is dst src guaranteed non-overlapping for memcpy? */
 static __inline__ void
-memcpy_toio(void *dst, void *src, unsigned long value) {
-	;
+memcpy_toio(void *dst, void *src, unsigned long size) {
+	memcpy(dst, src, size);
 }
 
 /*
