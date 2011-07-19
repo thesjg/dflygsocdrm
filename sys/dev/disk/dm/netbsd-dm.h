@@ -202,15 +202,19 @@
 #define DM_DEV_NEWNAME        "newname"
 #define DM_DEV_NAME           "name"
 #define DM_DEV_DEV            "dev"
+#define DM_DEV_UID            "uid"
+#define DM_DEV_GID            "gid"
+#define DM_DEV_MODE           "mode"
 
 #define DM_TABLE_TYPE         "type"
 #define DM_TABLE_START        "start"
 #define DM_TABLE_STAT         "status"
 #define DM_TABLE_LENGTH       "length"
 #define DM_TABLE_PARAMS       "params"
-//#ifndef __LIB_DEVMAPPER__
-//#define DM_TABLE_DEPS         "deps"
-//#endif
+
+#define DM_MESSAGE_SECTOR     "sector"
+#define DM_MESSAGE_STR        "message"
+
 
 /* Status bits */
 /* IO mode of device */
@@ -261,5 +265,16 @@
  * is set before using the data returned.
  */
 #define DM_QUERY_INACTIVE_TABLE_FLAG    (1 << 12) /* In */
+
+/*
+ * If set, a rename affects the UUID instead of the name. Only valid
+ * if the UUID was empty before.
+ */
+#define DM_UUID_FLAG		(1 << 14) /* In */
+
+/*
+ * Set this flag for the ioctl buffers to be wiped.
+ */
+#define DM_SECURE_DATA_FLAG	(1 << 15) /* In */
 
 #endif /* __NETBSD_DM_H__ */

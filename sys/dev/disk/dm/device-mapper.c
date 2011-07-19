@@ -1,6 +1,7 @@
 /*        $NetBSD: device-mapper.c,v 1.22 2010/03/26 15:46:04 jakllsch Exp $ */
 
 /*
+ * Copyright (c) 2010-2011 Alex Hornung <alex@alexhornung.com>
  * Copyright (c) 2010 The NetBSD Foundation, Inc.
  * All rights reserved.
  *
@@ -128,6 +129,7 @@ static struct cmd_function cmd_fn[] = {
 		{ .cmd = "reload",  .fn = dm_table_load_ioctl},
 		{ .cmd = "status",  .fn = dm_table_status_ioctl},
 		{ .cmd = "table",   .fn = dm_table_status_ioctl},
+		{ .cmd = "message", .fn = dm_message_ioctl},
 		{NULL, NULL}
 };
 
@@ -349,10 +351,9 @@ disk_ioctl_switch(cdev_t dev, u_long cmd, void *data)
 		dpart = (void *)data;
 		bzero(dpart, sizeof(*dpart));
 
-		if ((dmv = dm_dev_lookup(NULL, NULL, minor(dev))) == NULL)
+		if ((dmv = dev->si_drv1) == NULL)
 			return ENODEV;
 		if (dmv->diskp->d_info.d_media_blksize == 0) {
-			dm_dev_unbusy(dmv);
 			return ENOTSUP;
 		} else {
 			size = dm_table_size(&dmv->table_head);
@@ -362,7 +363,6 @@ disk_ioctl_switch(cdev_t dev, u_long cmd, void *data)
 			dpart->media_blksize = DEV_BSIZE;
 			dpart->fstype = FS_BSDFFS;
 		}
-		dm_dev_unbusy(dmv);
 		break;
 	}
 
@@ -406,12 +406,7 @@ dmstrategy(struct dev_strategy_args *ap)
 	dev_type = 0;
 	issued_len = 0;
 
-	if ((dmv = dm_dev_lookup(NULL, NULL, minor(dev))) == NULL) {
-		bp->b_error = EIO;
-		bp->b_resid = bp->b_bcount;
-		biodone(bio);
-		return 0;
-	}
+	dmv = dev->si_drv1;
 
 	switch(bp->b_cmd) {
 	case BUF_CMD_READ:
@@ -424,7 +419,6 @@ dmstrategy(struct dev_strategy_args *ap)
 		KKASSERT(buf_len == 0);
 		break;
 	default:
-		dm_dev_unbusy(dmv);
 		bp->b_error = EIO;
 		bp->b_resid = bp->b_bcount;
 		biodone(bio);
@@ -434,7 +428,6 @@ dmstrategy(struct dev_strategy_args *ap)
 	if (bypass == 0 &&
 	    bounds_check_with_mediasize(bio, DEV_BSIZE,
 					dm_table_size(&dmv->table_head)) <= 0) {
-		dm_dev_unbusy(dmv);
 		bp->b_resid = bp->b_bcount;
 		biodone(bio);
 		return 0;
@@ -498,7 +491,6 @@ dmstrategy(struct dev_strategy_args *ap)
 		nestiobuf_error(bio, EINVAL);
 	nestiobuf_start(bio);
 	dm_table_release(&dmv->table_head, DM_TABLE_ACTIVE);
-	dm_dev_unbusy(dmv);
 
 	return 0;
 }
@@ -527,9 +519,7 @@ dmdump(struct dev_dump_args *ap)
 	dev_type = 0;
 	issued_len = 0;
 
-	if ((dmv = dm_dev_lookup(NULL, NULL, minor(dev))) == NULL) {
-		return EIO;
-	}
+	dmv = dev->si_drv1;
 
 	/* Select active table */
 	tbl = dm_table_get_entry(&dmv->table_head, DM_TABLE_ACTIVE);
@@ -581,7 +571,6 @@ dmdump(struct dev_dump_args *ap)
 
 out:
 	dm_table_release(&dmv->table_head, DM_TABLE_ACTIVE);
-	dm_dev_unbusy(dmv);
 
 	return error;
 }
@@ -595,12 +584,10 @@ dmsize(struct dev_psize_args *ap)
 
 	size = 0;
 
-	if ((dmv = dm_dev_lookup(NULL, NULL, minor(dev))) == NULL)
-			return ENOENT;
+	if ((dmv = dev->si_drv1) == NULL)
+		return ENXIO;
 
 	size = dm_table_size(&dmv->table_head);
-	dm_dev_unbusy(dmv);
-
 	ap->a_result = (int64_t)size;
 
 	return 0;

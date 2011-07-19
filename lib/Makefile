@@ -46,6 +46,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	libdevattr \
 	libdevinfo \
 	libdevstat \
+	libdm \
 	libedit \
 	libevtr \
 	libexpat \
@@ -79,6 +80,7 @@ SUBDIR=	${SUBDIR_ORDERED} \
 	${_libsmdb} \
 	${_libsmutil} \
 	libstand \
+	libtcplay \
 	libtelnet \
 	libusbhid \
 	libvgl \

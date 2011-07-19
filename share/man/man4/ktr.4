@@ -23,9 +23,8 @@
 .\" SUCH DAMAGE.
 .\"
 .\" $FreeBSD: src/share/man/man4/ktr.4,v 1.9 2003/09/08 19:57:19 ru Exp $
-.\" $DragonFly: src/share/man/man4/ktr.4,v 1.11 2008/10/01 10:53:48 swildner Exp $
 .\"
-.Dd October 1, 2008
+.Dd July 17, 2011
 .Dt KTR 4
 .Os
 .Sh NAME
@@ -36,9 +35,13 @@
 .Cd options KTR_ENTRIES=8192
 .Cd options KTR_VERBOSE=1
 .Cd options KTR_ALL
+.Cd options KTR_CTXSW
+.Cd options KTR_DMCRYPT
 .Cd options KTR_ETHERNET
+.\".Cd options KTR_HAMMER
 .Cd options KTR_IF_BGE
 .Cd options KTR_IF_EM
+.Cd options KTR_IF_EMX
 .Cd options KTR_IF_START
 .Cd options KTR_IFQ
 .Cd options KTR_IPIQ
@@ -52,7 +55,6 @@
 .Cd options KTR_TOKENS
 .\".Cd options KTR_TSLEEP
 .Cd options KTR_USB_MEMORY
-.Cd options KTR_CTXSW
 .Sh DESCRIPTION
 The
 .Nm
@@ -66,7 +68,7 @@ is
 The
 .Dv KTR_ENTRIES
 option sets the size of the buffer of events.
-It should be a power of two.
+It must be a power of two.
 The size of the buffer in the currently running kernel can be found via the
 read-only sysctl
 .Va debug.ktr.entries .
@@ -78,6 +80,13 @@ related kernel options exist:
 .Bl -tag -width ".Dv KTR_SPIN_CONTENTION"
 .It Dv KTR_ALL
 turns on all options
+.It Dv KTR_CTXSW
+context switches
+.It Dv KTR_DMCRYPT
+read and write strategy paths of
+.Xr dm 4 Ap s
+.Pa crypt
+target
 .It Dv KTR_ETHERNET
 cost of
 .Fn ether_input_chain
@@ -88,7 +97,10 @@ and
 interrupts and sent/received packets
 .It Dv KTR_IF_EM
 .Xr em 4
-interrupts, polling and sent/received packets
+interrupts and sent/received packets
+.It Dv KTR_IF_EMX
+.Xr emx 4
+interrupts and sent/received packets
 .It Dv KTR_IFQ
 classic ifq dequeue/enqueue operation
 .It Dv KTR_IF_START
@@ -117,8 +129,6 @@ IPI performance testing
 LWKT token related events
 .It Dv KTR_USB_MEMORY
 USB memory allocation
-.It Dv KTR_CTXSW
-context switches
 .El
 .Ss Verbose Mode
 By default, events are only logged to the internal buffer for examination
@@ -162,6 +172,29 @@ modifier is specified, then they are displayed in addition to the normal
 output.
 Note that the events are displayed in reverse chronological order.
 That is, the most recent events are displayed first.
+.Sh SYSCTL VARIABLES
+.Bl -tag -width ".Va debug.ktr.resynchronize"
+.It Va debug.ktr.*_enable
+A 32 bit mask used to control event logging.
+Each bit corresponds to one or more events depending on the values of the
+.Fa maskbit
+parameters that were passed to the
+.Xr KTR_INFO 9
+calls which declared the events.
+.Pp
+Unless
+.Dv KTR_ALL
+is specified in the kernel configuration, the default is to turn on logging
+for all corresponding events (i.e.\& setting the sysctl to -1).
+.It Va debug.ktr.*_mask
+Read only sysctls (one per event) that show the
+.Va debug.ktr.*_enable
+values corresponding to the events.
+.It Va debug.ktr.resynchronize
+Resynchronize the TSC across all CPUs 10 times per second in an attempt to
+reduce drift errors.
+Note that this is very expensive and therefore the default is 0.
+.El
 .Sh SEE ALSO
 .Xr gdb 1 ,
 .Xr ddb 4 ,

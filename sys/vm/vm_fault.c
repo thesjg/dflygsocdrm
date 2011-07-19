@@ -152,7 +152,22 @@ release_page(struct faultstate *fs)
 
 /*
  * The caller must hold vm_token.
+ *
+ * NOTE: Once unlocked any cached fs->entry becomes invalid, any reuse
+ *	 requires relocking and then checking the timestamp.
+ *
+ * NOTE: vm_map_lock_read() does not bump fs->map->timestamp so we do
+ *	 not have to update fs->map_generation here.
  */
+static __inline void
+relock_map(struct faultstate *fs)
+{
+	if (fs->lookup_still_valid == FALSE && fs->map) {
+		vm_map_lock_read(fs->map);
+		fs->lookup_still_valid = TRUE;
+	}
+}
+
 static __inline void
 unlock_map(struct faultstate *fs)
 {
@@ -1236,6 +1251,13 @@ skip:
 			/*
 			 * Avoid deadlocking against the map when doing I/O.
 			 * fs.object and the page is PG_BUSY'd.
+			 *
+			 * NOTE: Once unlocked, fs->entry can become stale
+			 *	 so this will NULL it out.
+			 *
+			 * NOTE: fs->entry is invalid until we relock the
+			 *	 map and verify that the timestamp has not
+			 *	 changed.
 			 */
 			unlock_map(fs);
 
@@ -1507,19 +1529,21 @@ skip:
 	}
 
 	/*
-	 * We may have had to unlock a map to do I/O.  If we did then
-	 * lookup_still_valid will be FALSE.  If the map generation count
-	 * also changed then all sorts of things could have happened while
-	 * we were doing the I/O and we need to retry.
+	 * Relock the map if necessary, then check the generation count.
+	 * relock_map() will update fs->timestamp to account for the
+	 * relocking if necessary.
+	 *
+	 * If the count has changed after relocking then all sorts of
+	 * crap may have happened and we have to retry.
 	 */
-
-	if (!fs->lookup_still_valid &&
-	    fs->map != NULL &&
-	    (fs->map->timestamp != fs->map_generation)) {
-		release_page(fs);
-		lwkt_reltoken(&vm_token);
-		unlock_and_deallocate(fs);
-		return (KERN_TRY_AGAIN);
+	if (fs->lookup_still_valid == FALSE && fs->map) {
+		relock_map(fs);
+		if (fs->map->timestamp != fs->map_generation) {
+			release_page(fs);
+			lwkt_reltoken(&vm_token);
+			unlock_and_deallocate(fs);
+			return (KERN_TRY_AGAIN);
+		}
 	}
 
 	/*
@@ -1597,8 +1621,8 @@ vm_fault_wire(vm_map_t map, vm_map_entry_t entry, boolean_t user_wire)
 	if (entry->eflags & MAP_ENTRY_KSTACK)
 		start += PAGE_SIZE;
 	lwkt_gettoken(&vm_token);
-	vm_map_unlock(map);
 	map->timestamp++;
+	vm_map_unlock(map);
 
 	/*
 	 * We simulate a fault to get the page and enter it in the physical
@@ -2012,7 +2036,11 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 	if (lp == NULL || (pmap != vmspace_pmap(lp->lwp_vmspace)))
 		return;
 
+	lwkt_gettoken(&vm_token);
+
 	object = entry->object.vm_object;
+	KKASSERT(object != NULL);
+	vm_object_hold(object);
 
 	starta = addra - PFBAK * PAGE_SIZE;
 	if (starta < entry->start)
@@ -2020,9 +2048,10 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 	else if (starta > addra)
 		starta = 0;
 
-	lwkt_gettoken(&vm_token);
+	KKASSERT(object == entry->object.vm_object);
 	for (i = 0; i < PAGEORDER_SIZE; i++) {
 		vm_object_t lobject;
+		vm_object_t nobject;
 		int allocated = 0;
 
 		addr = addra + vm_prefault_pageorder[i];
@@ -2047,11 +2076,17 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 		 * In order to not have to check the pager via *haspage*()
 		 * we stop if any non-default object is encountered.  e.g.
 		 * a vnode or swap object would stop the loop.
+		 *
+		 * XXX It is unclear whether hold chaining is sufficient
+		 *     to maintain the validity of the backing object chain.
 		 */
 		index = ((addr - entry->start) + entry->offset) >> PAGE_SHIFT;
 		lobject = object;
 		pindex = index;
 		pprot = prot;
+
+		KKASSERT(lobject == entry->object.vm_object);
+		vm_object_hold(lobject);
 
 		while ((m = vm_page_lookup(lobject, pindex)) == NULL) {
 			if (lobject->type != OBJT_DEFAULT)
@@ -2064,7 +2099,8 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 				    vm_page_count_min(0)) {
 					break;
 				}
-				/* note: allocate from base object */
+
+				/* NOTE: allocated from base object */
 				m = vm_page_alloc(object, index,
 					      VM_ALLOC_NORMAL | VM_ALLOC_ZERO);
 
@@ -2072,7 +2108,8 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 					vm_page_zero_fill(m);
 				} else {
 #ifdef PMAP_DEBUG
-					pmap_page_assertzero(VM_PAGE_TO_PHYS(m));
+					pmap_page_assertzero(
+							VM_PAGE_TO_PHYS(m));
 #endif
 					vm_page_flag_clear(m, PG_ZERO);
 					mycpu->gd_cnt.v_ozfod++;
@@ -2086,10 +2123,29 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 			}
 			if (lobject->backing_object_offset & PAGE_MASK)
 				break;
-			pindex += lobject->backing_object_offset >> PAGE_SHIFT;
-			lobject = lobject->backing_object;
+			while ((nobject = lobject->backing_object) != NULL) {
+				vm_object_hold(nobject);
+				if (nobject == lobject->backing_object) {
+					pindex +=
+					    lobject->backing_object_offset >>
+					    PAGE_SHIFT;
+					vm_object_lock_swap();
+					vm_object_drop(lobject);
+					lobject = nobject;
+					break;
+				}
+				vm_object_drop(nobject);
+			}
+			if (nobject == NULL) {
+				kprintf("vm_prefault: Warning, backing object "
+					"race averted lobject %p\n",
+					lobject);
+				continue;
+			}
 			pprot &= ~VM_PROT_WRITE;
 		}
+		vm_object_drop(lobject);
+
 		/*
 		 * NOTE: lobject now invalid (if we did a zero-fill we didn't
 		 *	 bother assigning lobject = object).
@@ -2127,10 +2183,14 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 			pmap_enter(pmap, addr, m, pprot, 0);
 			vm_page_deactivate(m);
 			vm_page_wakeup(m);
-		} else if (((m->valid & VM_PAGE_BITS_ALL) == VM_PAGE_BITS_ALL) &&
+		} else if (
+		    ((m->valid & VM_PAGE_BITS_ALL) == VM_PAGE_BITS_ALL) &&
 		    (m->busy == 0) &&
 		    (m->flags & (PG_BUSY | PG_FICTITIOUS)) == 0) {
-
+			/*
+			 * A fully valid page not undergoing soft I/O can
+			 * be immediately entered into the pmap.
+			 */
 			vm_page_busy(m);
 			if ((m->queue - m->pc) == PQ_CACHE) {
 				vm_page_deactivate(m);
@@ -2141,5 +2201,6 @@ vm_prefault(pmap_t pmap, vm_offset_t addra, vm_map_entry_t entry, int prot)
 			vm_page_wakeup(m);
 		}
 	}
+	vm_object_drop(object);
 	lwkt_reltoken(&vm_token);
 }

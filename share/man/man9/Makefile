@@ -567,6 +567,7 @@ MLINKS+=ksignal.9 gsignal.9 \
 	ksignal.9 pgsignal.9
 MLINKS+=ktr.9 KTR_INFO.9 \
 	ktr.9 KTR_INFO_MASTER.9 \
+	ktr.9 KTR_INFO_MASTER_EXTERN.9 \
 	ktr.9 KTR_LOG.9
 MLINKS+=lock.9 lockcount.9 \
 	lock.9 lockcountnb.9 \
@@ -712,9 +713,11 @@ MLINKS+=posix4.9 p1003_1b.9
 MLINKS+=priv.9 priv_check.9 \
 	priv.9 priv_check_cred.9
 MLINKS+=prop_copyin_ioctl.9 prop_array_copyin.9 \
+	prop_copyin_ioctl.9 prop_array_copyout.9 \
 	prop_copyin_ioctl.9 prop_array_copyin_ioctl.9 \
 	prop_copyin_ioctl.9 prop_array_copyout_ioctl.9 \
 	prop_copyin_ioctl.9 prop_dictionary_copyin.9 \
+	prop_copyin_ioctl.9 prop_dictionary_copyout.9 \
 	prop_copyin_ioctl.9 prop_dictionary_copyin_ioctl.9 \
 	prop_copyin_ioctl.9 prop_dictionary_copyout_ioctl.9
 MLINKS+=rman.9 rman_activate_resource.9 \

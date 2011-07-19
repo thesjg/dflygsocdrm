@@ -1,4 +1,4 @@
-.\"	$NetBSD: prop_send_ioctl.3,v 1.5 2008/04/30 13:10:46 martin Exp $
+.\"	$NetBSD: prop_send_ioctl.3,v 1.6 2011/01/20 10:44:42 wiz Exp $
 .\"
 .\" Copyright (c) 2006 The NetBSD Foundation, Inc.
 .\" All rights reserved.
@@ -37,8 +37,6 @@
 .Nm prop_dictionary_recv_ioctl ,
 .Nm prop_dictionary_sendrecv_ioctl
 .Nd Send and receive propertly lists to and from the kernel using ioctl
-.Sh LIBRARY
-.Lb libprop
 .Sh SYNOPSIS
 .In libprop/proplib.h
 .Ft int
@@ -65,33 +63,8 @@ functions implement the user space side of a protocol for sending property
 lists to and from the kernel using
 .Xr ioctl 2 .
 .Sh RETURN VALUES
-If successful, functions return zero. Otherwise, an error number is returned to indicate the error.
-.Sh ERRORS
-.Fn prop_array_send_ioctl
-and
-.Fn prop_dictionary_send_ioctl
-will fail if:
-.Bl -tag -width Er
-.It Bq Er ENOMEM
-Cannot allocate memory
-.It Bq Er ENOTSUP
-Not supported
-.El
-.Pp
-.Fn prop_array_recv_ioctl
-and
-.Fn prop_dictionary_recv_ioctl
-will fail if:
-.Bl -tag -width Er
-.It Bq Er EIO
-Input/output error
-.It Bq Er ENOTSUP
-Not supported
-.El
-.Pp
-In addition to these,
-.Xr ioctl 2
-errors may be returned.
+If successful, functions return zero.
+Otherwise, an error number is returned to indicate the error.
 .Sh EXAMPLES
 The following
 .Pq simplified
@@ -139,6 +112,32 @@ The
 function combines the send and receive functionality, allowing for
 ioctls that require two-way communication
 .Pq for example to specify arguments for the ioctl operation .
+.Sh ERRORS
+.Fn prop_array_send_ioctl
+and
+.Fn prop_dictionary_send_ioctl
+will fail if:
+.Bl -tag -width Er
+.It Bq Er ENOMEM
+Cannot allocate memory
+.It Bq Er ENOTSUP
+Not supported
+.El
+.Pp
+.Fn prop_array_recv_ioctl
+and
+.Fn prop_dictionary_recv_ioctl
+will fail if:
+.Bl -tag -width Er
+.It Bq Er EIO
+Input/output error
+.It Bq Er ENOTSUP
+Not supported
+.El
+.Pp
+In addition to these,
+.Xr ioctl 2
+errors may be returned.
 .Sh SEE ALSO
 .Xr prop_array 3 ,
 .Xr prop_dictionary 3 ,

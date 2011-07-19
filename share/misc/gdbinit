@@ -133,6 +133,27 @@ define lstok
 	_infotok &vmobj_token
 end
 
+define dmesg
+	set $bufp = msgbufp->msg_ptr
+	set $size = msgbufp->msg_size
+	set $rseq = msgbufp->msg_bufr % $size
+	set $wseq = msgbufp->msg_bufx % $size
+	if ( $bufp != 0 && $size != 0 && $rseq != $wseq )
+		while ( $rseq < $wseq )
+			set $c = $bufp + $rseq
+			printf "%c", *$c
+			set $rseq = $rseq + 1
+			if ( $rseq == msgbufp->msg_size )
+				set $rseq = 0
+			end
+		end
+		if ( *$c == '\n' )
+			printf "\n"
+		end
+		printf "\n"
+	end
+end
+
 # Documentation, usable within GDB using the 'help' command.
 document lsvfs
 Output list of loaded file systems, refcount, similar to the
@@ -158,7 +179,7 @@ Print command name of the given thread pointer (first argument).
 end
 
 document psx
-Output a list of processes with wait-channel (wchan) informaiton.
+Output a list of processes with wait-channel (wchan) information.
 end
 
 document running_threads
@@ -176,4 +197,8 @@ end
 document infotok
 Takes one argument, a struct lwkt_token * (pointer) and prints some
 information about that token.
+end
+
+document dmesg
+Shows the unread portion of the kernel message buffer.
 end
