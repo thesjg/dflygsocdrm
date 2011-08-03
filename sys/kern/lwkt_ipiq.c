@@ -179,6 +179,10 @@ lwkt_send_ipiq3(globaldata_t target, ipifunc3_t func, void *arg1, int arg2)
     /*
      * Do not allow the FIFO to become full.  Interrupts must be physically
      * enabled while we liveloop to avoid deadlocking the APIC.
+     *
+     * The target ipiq may have gotten filled up due to passive IPIs and thus
+     * not be aware that its queue is too full, so be sure to issue an
+     * ipiq interrupt to the target cpu.
      */
     if (ip->ip_windex - ip->ip_rindex > MAXCPUFIFO / 2) {
 #if defined(__i386__)
@@ -187,16 +191,17 @@ lwkt_send_ipiq3(globaldata_t target, ipifunc3_t func, void *arg1, int arg2)
 	unsigned long rflags = read_rflags();
 #endif
 
-	if (atomic_poll_acquire_int(&ip->ip_npoll) || ipiq_optimized == 0) {
-	    logipiq(cpu_send, func, arg1, arg2, gd, target);
-	    cpu_send_ipiq(target->gd_cpuid);
-	}
 	cpu_enable_intr();
 	++ipiq_fifofull;
 	DEBUG_PUSH_INFO("send_ipiq3");
 	while (ip->ip_windex - ip->ip_rindex > MAXCPUFIFO / 4) {
+	    if (atomic_poll_acquire_int(&ip->ip_npoll) || ipiq_optimized == 0) {
+		logipiq(cpu_send, func, arg1, arg2, gd, target);
+		cpu_send_ipiq(target->gd_cpuid);
+	    }
 	    KKASSERT(ip->ip_windex - ip->ip_rindex != MAXCPUFIFO - 1);
 	    lwkt_process_ipiq();
+	    cpu_pause();
 	}
 	DEBUG_POP_INFO();
 #if defined(__i386__)
@@ -215,25 +220,20 @@ lwkt_send_ipiq3(globaldata_t target, ipifunc3_t func, void *arg1, int arg2)
     ip->ip_arg2[windex] = arg2;
     cpu_sfence();
     ++ip->ip_windex;
-    --gd->gd_intr_nesting_level;
 
     /*
      * signal the target cpu that there is work pending.
      */
-    if (atomic_poll_acquire_int(&ip->ip_npoll)) {
+    if (atomic_poll_acquire_int(&ip->ip_npoll) || ipiq_optimized == 0) {
 	logipiq(cpu_send, func, arg1, arg2, gd, target);
 	cpu_send_ipiq(target->gd_cpuid);
     } else {
-	if (ipiq_optimized == 0) {
-	    logipiq(cpu_send, func, arg1, arg2, gd, target);
-	    cpu_send_ipiq(target->gd_cpuid);
-	} else {
-	    ++ipiq_avoided;
-	}
+	++ipiq_avoided;
     }
+    --gd->gd_intr_nesting_level;
     crit_exit();
-
     logipiq(send_end, func, arg1, arg2, gd, target);
+
     return(ip->ip_windex);
 }
 
@@ -258,8 +258,8 @@ lwkt_send_ipiq3_passive(globaldata_t target, ipifunc3_t func,
 
     KKASSERT(target != gd);
     crit_enter();
-    logipiq(send_pasv, func, arg1, arg2, gd, target);
     ++gd->gd_intr_nesting_level;
+    logipiq(send_pasv, func, arg1, arg2, gd, target);
 #ifdef INVARIANTS
     if (gd->gd_intr_nesting_level > 20)
 	panic("lwkt_send_ipiq: TOO HEAVILY NESTED!");
@@ -280,16 +280,17 @@ lwkt_send_ipiq3_passive(globaldata_t target, ipifunc3_t func,
 	unsigned long rflags = read_rflags();
 #endif
 
-	if (atomic_poll_acquire_int(&ip->ip_npoll) || ipiq_optimized == 0) {
-	    logipiq(cpu_send, func, arg1, arg2, gd, target);
-	    cpu_send_ipiq(target->gd_cpuid);
-	}
 	cpu_enable_intr();
 	++ipiq_fifofull;
 	DEBUG_PUSH_INFO("send_ipiq3_passive");
 	while (ip->ip_windex - ip->ip_rindex > MAXCPUFIFO / 4) {
+	    if (atomic_poll_acquire_int(&ip->ip_npoll) || ipiq_optimized == 0) {
+		logipiq(cpu_send, func, arg1, arg2, gd, target);
+		cpu_send_ipiq(target->gd_cpuid);
+	    }
 	    KKASSERT(ip->ip_windex - ip->ip_rindex != MAXCPUFIFO - 1);
 	    lwkt_process_ipiq();
+	    cpu_pause();
 	}
 	DEBUG_POP_INFO();
 #if defined(__i386__)
@@ -315,8 +316,8 @@ lwkt_send_ipiq3_passive(globaldata_t target, ipifunc3_t func,
      * polls (typically on the next tick).
      */
     crit_exit();
-
     logipiq(send_end, func, arg1, arg2, gd, target);
+
     return(ip->ip_windex);
 }
 
@@ -341,11 +342,15 @@ lwkt_send_ipiq3_nowait(globaldata_t target, ipifunc3_t func,
 	logipiq(send_end, func, arg1, arg2, gd, target);
 	return(0);
     } 
+    crit_enter();
+    ++gd->gd_intr_nesting_level;
     ++ipiq_count;
     ip = &gd->gd_ipiq[target->gd_cpuid];
 
     if (ip->ip_windex - ip->ip_rindex >= MAXCPUFIFO * 2 / 3) {
 	logipiq(send_fail, func, arg1, arg2, gd, target);
+	--gd->gd_intr_nesting_level;
+	crit_exit();
 	return(ENOENT);
     }
     windex = ip->ip_windex & MAXCPUFIFO_MASK;
@@ -358,17 +363,14 @@ lwkt_send_ipiq3_nowait(globaldata_t target, ipifunc3_t func,
     /*
      * This isn't a passive IPI, we still have to signal the target cpu.
      */
-    if (atomic_poll_acquire_int(&ip->ip_npoll)) {
+    if (atomic_poll_acquire_int(&ip->ip_npoll) || ipiq_optimized == 0) {
 	logipiq(cpu_send, func, arg1, arg2, gd, target);
 	cpu_send_ipiq(target->gd_cpuid);
     } else {
-	if (ipiq_optimized == 0) {
-	    logipiq(cpu_send, func, arg1, arg2, gd, target);
-	    cpu_send_ipiq(target->gd_cpuid);
-	} else {
-	    ++ipiq_avoided;
-    	}
+	++ipiq_avoided;
     }
+    --gd->gd_intr_nesting_level;
+    crit_exit();
 
     logipiq(send_end, func, arg1, arg2, gd, target);
     return(0);
@@ -487,6 +489,7 @@ lwkt_process_ipiq(void)
     lwkt_ipiq_t ip;
     int n;
 
+    ++gd->gd_processing_ipiq;
 again:
     for (n = 0; n < ncpus; ++n) {
 	if (n != gd->gd_cpuid) {
@@ -498,12 +501,12 @@ again:
 	    }
 	}
     }
-    if (gd->gd_cpusyncq.ip_rindex != gd->gd_cpusyncq.ip_windex) {
-	if (lwkt_process_ipiq_core(gd, &gd->gd_cpusyncq, NULL)) {
-	    if (gd->gd_curthread->td_cscount == 0)
-		goto again;
-	}
+    if (lwkt_process_ipiq_core(gd, &gd->gd_cpusyncq, NULL)) {
+	if (gd->gd_curthread->td_cscount == 0)
+	    goto again;
+	/* need_ipiq(); do not reflag */
     }
+    --gd->gd_processing_ipiq;
 }
 
 void
@@ -529,6 +532,7 @@ again:
 	if (lwkt_process_ipiq_core(gd, &gd->gd_cpusyncq, frame)) {
 	    if (gd->gd_curthread->td_cscount == 0)
 		goto again;
+	    /* need_ipiq(); do not reflag */
 	}
     }
 }
@@ -647,13 +651,18 @@ lwkt_process_ipiq_core(globaldata_t sgd, lwkt_ipiq_t ip,
     --mygd->gd_intr_nesting_level;
 
     /*
-     * Return non-zero if there are more IPI messages pending on this
-     * ipiq.  ip_npoll is left set as long as possible to reduce the
-     * number of IPIs queued by the originating cpu, but must be cleared
-     * *BEFORE* checking windex.
+     * If the queue is empty release ip_npoll to enable the other cpu to
+     * send us an IPI interrupt again.
+     *
+     * Return non-zero if there is still more in the queue.  Note that we
+     * must re-check the indexes after potentially releasing ip_npoll.  The
+     * caller must loop or otherwise ensure that a loop will occur prior to
+     * blocking.
      */
-    atomic_poll_release_int(&ip->ip_npoll);
-    return(wi != ip->ip_windex);
+    if (ip->ip_rindex == ip->ip_windex);
+	    atomic_poll_release_int(&ip->ip_npoll);
+    cpu_lfence();
+    return (ip->ip_rindex != ip->ip_windex);
 }
 
 static void

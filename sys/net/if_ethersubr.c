@@ -127,6 +127,7 @@ static int ether_output(struct ifnet *, struct mbuf *, struct sockaddr *,
 			struct rtentry *);
 static void ether_restore_header(struct mbuf **, const struct ether_header *,
 				 const struct ether_header *);
+static int ether_characterize(struct mbuf **);
 
 /*
  * if_bridge support
@@ -151,39 +152,45 @@ static boolean_t ether_ipfw_chk(struct mbuf **m0, struct ifnet *dst,
 				const struct ether_header *eh);
 
 static int ether_ipfw;
-static u_int ether_restore_hdr;
-static u_int ether_prepend_hdr;
+static u_long ether_restore_hdr;
+static u_long ether_prepend_hdr;
+static u_long ether_input_wronghash;
 static int ether_debug;
 
 #ifdef RSS_DEBUG
-static u_int ether_pktinfo_try;
-static u_int ether_pktinfo_hit;
-static u_int ether_rss_nopi;
-static u_int ether_rss_nohash;
+static u_long ether_pktinfo_try;
+static u_long ether_pktinfo_hit;
+static u_long ether_rss_nopi;
+static u_long ether_rss_nohash;
+static u_long ether_input_requeue;
 #endif
 
 SYSCTL_DECL(_net_link);
 SYSCTL_NODE(_net_link, IFT_ETHER, ether, CTLFLAG_RW, 0, "Ethernet");
 SYSCTL_INT(_net_link_ether, OID_AUTO, debug, CTLFLAG_RW,
-	   &ether_debug, 0, "Ether debug");
+    &ether_debug, 0, "Ether debug");
 SYSCTL_INT(_net_link_ether, OID_AUTO, ipfw, CTLFLAG_RW,
-	   &ether_ipfw, 0, "Pass ether pkts through firewall");
-SYSCTL_UINT(_net_link_ether, OID_AUTO, restore_hdr, CTLFLAG_RW,
-	    &ether_restore_hdr, 0, "# of ether header restoration");
-SYSCTL_UINT(_net_link_ether, OID_AUTO, prepend_hdr, CTLFLAG_RW,
-	    &ether_prepend_hdr, 0,
-	    "# of ether header restoration which prepends mbuf");
+    &ether_ipfw, 0, "Pass ether pkts through firewall");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, restore_hdr, CTLFLAG_RW,
+    &ether_restore_hdr, 0, "# of ether header restoration");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, prepend_hdr, CTLFLAG_RW,
+    &ether_prepend_hdr, 0,
+    "# of ether header restoration which prepends mbuf");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, input_wronghash, CTLFLAG_RW,
+    &ether_input_wronghash, 0, "# of input packets with wrong hash");
 #ifdef RSS_DEBUG
-SYSCTL_UINT(_net_link_ether, OID_AUTO, rss_nopi, CTLFLAG_RW,
-	    &ether_rss_nopi, 0, "# of packets do not have pktinfo");
-SYSCTL_UINT(_net_link_ether, OID_AUTO, rss_nohash, CTLFLAG_RW,
-	    &ether_rss_nohash, 0, "# of packets do not have hash");
-SYSCTL_UINT(_net_link_ether, OID_AUTO, pktinfo_try, CTLFLAG_RW,
-	    &ether_pktinfo_try, 0,
-	    "# of tries to find packets' msgport using pktinfo");
-SYSCTL_UINT(_net_link_ether, OID_AUTO, pktinfo_hit, CTLFLAG_RW,
-	    &ether_pktinfo_hit, 0,
-	    "# of packets whose msgport are found using pktinfo");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, rss_nopi, CTLFLAG_RW,
+    &ether_rss_nopi, 0, "# of packets do not have pktinfo");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, rss_nohash, CTLFLAG_RW,
+    &ether_rss_nohash, 0, "# of packets do not have hash");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, pktinfo_try, CTLFLAG_RW,
+    &ether_pktinfo_try, 0,
+    "# of tries to find packets' msgport using pktinfo");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, pktinfo_hit, CTLFLAG_RW,
+    &ether_pktinfo_hit, 0,
+    "# of packets whose msgport are found using pktinfo");
+SYSCTL_ULONG(_net_link_ether, OID_AUTO, input_requeue, CTLFLAG_RW,
+    &ether_input_requeue, 0, "# of input packets gets requeued");
 #endif
 
 #define ETHER_KTR_STR		"ifp=%p"
@@ -1248,8 +1255,9 @@ post_stats:
 	default:
 		/*
 		 * The accurate msgport is not determined before
-		 * we reach here, so redo the dispatching
+		 * we reach here, so recharacterize packet.
 		 */
+		m->m_flags &= ~M_HASH;
 #ifdef IPX
 		if (ef_inputp) {
 			/*
@@ -1303,6 +1311,22 @@ dropanyway:
 		return;
 	}
 
+	if (m->m_flags & M_HASH) {
+		if (&curthread->td_msgport == cpu_portfn(m->m_pkthdr.hash)) {
+			netisr_handle(isr, m);
+			return;
+		} else {
+			/*
+			 * XXX Something is wrong,
+			 * we probably should panic here!
+			 */
+			m->m_flags &= ~M_HASH;
+			ether_input_wronghash++;
+		}
+	}
+#ifdef RSS_DEBUG
+	ether_input_requeue++;
+#endif
 	netisr_queue(isr, m);
 }
 
@@ -1538,8 +1562,6 @@ void
 ether_input_chain(struct ifnet *ifp, struct mbuf *m, const struct pktinfo *pi,
 		  struct mbuf_chain *chain)
 {
-	struct ether_header *eh;
-	uint16_t ether_type;
 	int isr;
 
 	M_ASSERTPKTHDR(m);
@@ -1565,6 +1587,8 @@ ether_input_chain(struct ifnet *ifp, struct mbuf *m, const struct pktinfo *pi,
 	ifp->if_ibytes += m->m_pkthdr.len;
 
 	if (ifp->if_flags & IFF_MONITOR) {
+		struct ether_header *eh;
+
 		eh = mtod(m, struct ether_header *);
 		if (ETHER_IS_MULTICAST(eh->ether_dhost))
 			ifp->if_imcasts++;
@@ -1618,6 +1642,29 @@ ether_input_chain(struct ifnet *ifp, struct mbuf *m, const struct pktinfo *pi,
 		logether(chain_end, ifp);
 		return;
 	}
+
+	isr = ether_characterize(&m);
+	if (m == NULL) {
+		logether(chain_end, ifp);
+		return;
+	}
+
+	/*
+	 * Finally dispatch it
+	 */
+	ether_dispatch(isr, m, chain);
+
+	logether(chain_end, ifp);
+}
+
+static int
+ether_characterize(struct mbuf **m0)
+{
+	struct mbuf *m = *m0;
+	struct ether_header *eh;
+	uint16_t ether_type;
+	int isr;
+
 	eh = mtod(m, struct ether_header *);
 	ether_type = ntohs(eh->ether_type);
 
@@ -1667,6 +1714,8 @@ ether_input_chain(struct ifnet *ifp, struct mbuf *m, const struct pktinfo *pi,
 	default:
 		/*
 		 * NETISR_MAX is an invalid value; it is chosen to let
+		 * netisr_characterize() know that we have no clear
+		 * idea where this packet should go.
 		 */
 		isr = NETISR_MAX;
 		break;
@@ -1678,17 +1727,43 @@ ether_input_chain(struct ifnet *ifp, struct mbuf *m, const struct pktinfo *pi,
 	 * thread.
 	 */
 	netisr_characterize(isr, &m, sizeof(struct ether_header));
-	if (m == NULL) {
-		logether(chain_end, ifp);
+
+	*m0 = m;
+	return isr;
+}
+
+static void
+ether_demux_handler(netmsg_t nmsg)
+{
+	struct netmsg_packet *nmp = &nmsg->packet;	/* actual size */
+	struct ifnet *ifp;
+	struct mbuf *m;
+
+	m = nmp->nm_packet;
+	M_ASSERTPKTHDR(m);
+	ifp = m->m_pkthdr.rcvif;
+
+	ether_demux_oncpu(ifp, m);
+}
+
+void
+ether_demux(struct mbuf *m)
+{
+	struct netmsg_packet *pmsg;
+	int isr;
+
+	isr = ether_characterize(&m);
+	if (m == NULL)
 		return;
-	}
 
-	/*
-	 * Finally dispatch it
-	 */
-	ether_dispatch(isr, m, chain);
+	KKASSERT(m->m_flags & M_HASH);
+	pmsg = &m->m_hdr.mh_netmsg;
+	netmsg_init(&pmsg->base, NULL, &netisr_apanic_rport,
+	    0, ether_demux_handler);
+	pmsg->nm_packet = m;
+	pmsg->base.lmsg.u.ms_result = isr;
 
-	logether(chain_end, ifp);
+	lwkt_sendmsg(cpu_portfn(m->m_pkthdr.hash), &pmsg->base.lmsg);
 }
 
 MODULE_VERSION(ether, 1);

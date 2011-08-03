@@ -45,6 +45,7 @@
 .Sh LIBRARY
 .Lb libtcplay
 .Sh SYNOPSIS
+.In sys/types.h
 .In tcplay_api.h
 .Ft int
 .Fn tc_api_init "int verbose"
@@ -67,7 +68,7 @@
 .Sh DESCRIPTION
 The
 .Nm tcplay
-library provides an interface to create, query and map 
+library provides an interface to create, query and map
 TrueCrypt-compatible
 volumes.
 .Pp
@@ -99,7 +100,7 @@ typedef struct tc_api_opts {
 	char		*tc_prf_hash;
 	char		*tc_cipher_hidden;
 	char		*tc_prf_hash_hidden;
-	size_t		tc_size_hidden_in_blocks;
+	size_t		tc_size_hidden_in_bytes;
 	char		*tc_passphrase_hidden;
 	const char	**tc_keyfiles_hidden;
 } tc_api_opts;
@@ -145,7 +146,7 @@ and
 .Fa tc_keyfiles
 respectively.
 If
-.Fa tc_size_hidden_in_blocks
+.Fa tc_size_hidden_in_bytes
 is not zero, a hidden volume of the given size will be created, using
 the cipher specified by
 .Fa tc_cipher_hidden
@@ -218,7 +219,7 @@ The
 function should be called whenver another API function returns
 .Dv TC_ERR .
 It returns a string containing a description of the error that
-occured.
+occurred.
 .Pp
 The
 .Fn tc_api_get_summary
@@ -240,7 +241,7 @@ return either
 .Dv TC_OK
 to signal that the operation completed successfully, or
 .Dv TC_ERR
-to signal that an error occured.
+to signal that an error occurred.
 .Pp
 The
 .Fn tc_api_get_error_msg
@@ -250,7 +251,7 @@ always return a valid, but possibly empty, string.
 .Sh COMPATIBILITY
 The
 .Nm tcplay
-library offers full compatibility with TrueCrypt volumes including 
+library offers full compatibility with TrueCrypt volumes including
 hidden
 volumes, system encryption (map-only), keyfiles and cipher cascading.
 .Sh SEE ALSO
