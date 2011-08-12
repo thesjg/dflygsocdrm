@@ -48,8 +48,38 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
+ */
+/*-
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
  *
- * $FreeBSD: src/sys/dev/mfi/mfireg.h,v 1.14 2010/10/21 10:38:52 pluknet Exp $
+ *            Copyright 1994-2009 The FreeBSD Project.
+ *            All rights reserved.
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ *    THIS SOFTWARE IS PROVIDED BY THE FREEBSD PROJECT``AS IS'' AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO,
+ * THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE FREEBSD PROJECT OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY,OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION)HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING
+ * NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ *
+ * The views and conclusions contained in the software and documentation
+ * are those of the authors and should not be interpreted as representing
+ * official policies,either expressed or implied, of the FreeBSD Project.
+ *
+ * $FreeBSD: src/sys/dev/mfi/mfireg.h,v 1.16 2011/07/14 20:20:33 jhb Exp $
  */
 
 #ifndef _MFIREG_H
@@ -98,6 +128,20 @@
 #define MFI_GEN2_EIM	0x00000005	/* GEN2 enable interrupt mask */
 #define MFI_GEN2_RM	0x00000001	/* reply GEN2 message interrupt */
 
+/*
+ * gen2 specific changes
+ */
+#define MFI_GEN2_EIM	0x00000005	/* gen2 enable interrupt mask */
+#define MFI_GEN2_RM	0x00000001	/* reply gen2 message interrupt */
+
+/*
+ * skinny specific changes
+ */
+#define MFI_SKINNY_IDB	0x00	/* Inbound doorbell is at 0x00 for skinny */
+#define MFI_IQPL	0x000000c0
+#define MFI_IQPH	0x000000c4
+#define MFI_SKINNY_RM	0x00000001	/* reply skinny message interrupt */
+
 /* Bits for MFI_OSTS */
 #define MFI_OSTS_INTR_VALID	0x00000002
 
@@ -111,12 +155,15 @@
 #define MFI_FWSTATE_WAIT_HANDSHAKE	0x60000000
 #define MFI_FWSTATE_FW_INIT_2		0x70000000
 #define MFI_FWSTATE_DEVICE_SCAN		0x80000000
+#define MFI_FWSTATE_BOOT_MESSAGE_PENDING	0x90000000
 #define MFI_FWSTATE_FLUSH_CACHE		0xa0000000
 #define MFI_FWSTATE_READY		0xb0000000
 #define MFI_FWSTATE_OPERATIONAL		0xc0000000
 #define MFI_FWSTATE_FAULT		0xf0000000
 #define MFI_FWSTATE_MAXSGL_MASK		0x00ff0000
 #define MFI_FWSTATE_MAXCMD_MASK		0x0000ffff
+#define MFI_FWSTATE_HOSTMEMREQD_MASK	0x08000000
+#define MFI_FWSTATE_BOOT_MESSAGE_PENDING	0x90000000
 
 /*
  * Control bits to drive the card to ready state.  These go into the IDB
@@ -126,6 +173,7 @@
 #define MFI_FWINIT_READY	0x00000002 /* Move from operational to ready */
 #define MFI_FWINIT_MFIMODE	0x00000004 /* unknown */
 #define MFI_FWINIT_CLEAR_HANDSHAKE 0x00000008 /* Respond to WAIT_HANDSHAKE */
+#define MFI_FWINIT_HOTPLUG	0x00000010
 
 /* MFI Commands */
 typedef enum {
@@ -142,6 +190,7 @@ typedef enum {
 
 /* Direct commands */
 typedef enum {
+	MFI_DCMD_CTRL_MFI_HOST_MEM_ALLOC = 0x0100e100,
 	MFI_DCMD_CTRL_GETINFO =		0x01010000,
 	MFI_DCMD_CTRL_MFC_DEFAULTS_GET =0x010e0201,
 	MFI_DCMD_CTRL_MFC_DEFAULTS_SET =0x010e0202,
@@ -161,6 +210,7 @@ typedef enum {
 	MFI_DCMD_FLASH_FW_FLASH =	0x010f0300,
 	MFI_DCMD_FLASH_FW_CLOSE =	0x010f0400,
 	MFI_DCMD_PD_GET_LIST =		0x02010000,
+	MFI_DCMD_PD_LIST_QUERY =	0x02010100,
 	MFI_DCMD_PD_GET_INFO = 		0x02020000,
 	MFI_DCMD_PD_STATE_SET =		0x02030100,
 	MFI_DCMD_PD_REBUILD_START =	0x02040100,
@@ -210,6 +260,7 @@ typedef enum {
 #define MFI_FRAME_DIR_WRITE			0x0008
 #define MFI_FRAME_DIR_READ			0x0010
 #define MFI_FRAME_DIR_BOTH			0x0018
+#define MFI_FRAME_IEEE_SGL			0x0020
 
 /* MFI Status codes */
 typedef enum {
@@ -349,6 +400,15 @@ typedef enum {
 	MR_PD_CACHE_DISABLE =		2
 } mfi_pd_cache;
 
+typedef enum {
+	MR_PD_QUERY_TYPE_ALL =		0,
+	MR_PD_QUERY_TYPE_STATE =	1,
+	MR_PD_QUERY_TYPE_POWER_STATE =	2,
+	MR_PD_QUERY_TYPE_MEDIA_TYPE =	3,
+	MR_PD_QUERY_TYPE_SPEED =	4,
+	MR_PD_QUERY_TYPE_EXPOSED_TO_HOST =	5, /*query for system drives */
+} mfi_pd_query_type;
+
 /*
  * Other propertities and definitions
  */
@@ -381,9 +441,16 @@ struct mfi_sg64 {
 	uint32_t	len;
 } __packed;
 
+struct mfi_sg_skinny {
+	uint64_t	addr;
+	uint32_t	len;
+	uint32_t	flag;
+} __packed;
+
 union mfi_sgl {
 	struct mfi_sg32	sg32[1];
 	struct mfi_sg64	sg64[1];
+	struct mfi_sg_skinny sg_skinny[1];
 } __packed;
 
 /* Message frames.  All messages have a common header */
@@ -397,6 +464,10 @@ struct mfi_frame_header {
 	uint8_t		cdb_len;
 	uint8_t		sg_count;
 	uint32_t	context;
+	/*
+	 * pad0 is MSI Specific. Not used by Driver. Zero the value before
+	 * sending the command to f/w
+	 */
 	uint32_t	pad0;
 	uint16_t	flags;
 #define MFI_FRAME_DATAOUT	0x08
@@ -444,10 +515,10 @@ struct mfi_dcmd_frame {
 struct mfi_abort_frame {
 	struct mfi_frame_header header;
 	uint32_t	abort_context;
-	uint32_t	pad;
+	uint32_t	reserved0;
 	uint32_t	abort_mfi_addr_lo;
 	uint32_t	abort_mfi_addr_hi;
-	uint32_t	reserved[6];
+	uint32_t	reserved1[6];
 } __packed;
 
 struct mfi_smp_frame {
@@ -718,7 +789,7 @@ union mfi_evt {
 	struct {
 		uint16_t	locale;
 		uint8_t		reserved;
-		int8_t		class;
+		int8_t		evt_class;
 	} members;
 	uint32_t		word;
 } __packed;
@@ -754,7 +825,7 @@ struct mfi_evt_detail {
 	uint32_t		seq;
 	uint32_t		time;
 	uint32_t		code;
-	union mfi_evt		class;
+	union mfi_evt		evt_class;
 	uint8_t			arg_type;
 	uint8_t			reserved1[15];
 
@@ -961,10 +1032,11 @@ struct mfi_pd_address {
 	uint64_t		sas_addr[2];
 } __packed;
 
+#define MAX_SYS_PDS 240
 struct mfi_pd_list {
 	uint32_t		size;
 	uint32_t		count;
-	struct mfi_pd_address	addr[0];
+	struct mfi_pd_address	addr[MAX_SYS_PDS];
 } __packed;
 
 enum mfi_pd_state {
@@ -1037,7 +1109,9 @@ struct mfi_ld_params {
 #define	MFI_LD_PARAMS_INIT_QUICK	1
 #define	MFI_LD_PARAMS_INIT_FULL		2
 	uint8_t			is_consistent;
-	uint8_t			reserved[23];
+	uint8_t			reserved1[6];
+	uint8_t			isSSCD;
+	uint8_t			reserved2[16];
 } __packed;
 
 struct mfi_ld_progress {
@@ -1115,9 +1189,9 @@ struct mfi_config_data {
 	uint16_t		spares_count;
 	uint16_t		spares_size;
 	uint8_t			reserved[16];
-	struct mfi_array	array[0];
-	struct mfi_ld_config	ld[0];
-	struct mfi_spare	spare[0];
+	struct mfi_array	array[1];
+	struct mfi_ld_config	ld[1];
+	struct mfi_spare	spare[1];
 } __packed;
 
 struct mfi_bbu_capacity_info {
