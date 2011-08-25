@@ -24,8 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/mly/mlyvar.h,v 1.1.2.2 2001/03/05 20:17:24 msmith Exp $
- *	$DragonFly: src/sys/dev/raid/mly/mlyvar.h,v 1.9 2008/01/21 02:27:37 pavalos Exp $
+ *	$FreeBSD: src/sys/dev/mly/mlyvar.h,v 1.7 2005/08/08 12:23:27 scottl Exp $
  */
 
 #include <sys/thread2.h>
@@ -80,7 +79,7 @@
  */
 #ifdef MLY_DEBUG
 # define debug(level, fmt, args...)	do { if (level <= MLY_DEBUG) kprintf("%s: " fmt "\n", __func__ , ##args); } while(0)
-# define debug_called(level)		do { if (level <= MLY_DEBUG) kprintf(__func__ ": called\n"); } while(0)
+# define debug_called(level)		do { if (level <= MLY_DEBUG) kprintf("%s: called\n", __func__); } while(0)
 # define debug_struct(s)		kprintf("  SIZE %s: %d\n", #s, sizeof(struct s))
 # define debug_union(s)			kprintf("  SIZE %s: %d\n", #s, sizeof(union s))
 # define debug_field(s, f)		kprintf("  OFFSET %s.%s: %d\n", #s, #f, ((int)&(((struct s *)0)->f)))
@@ -227,7 +226,6 @@ struct mly_softc {
     /* CAM connection */
     struct cam_devq		*mly_cam_devq;			/* CAM device queue */
     struct cam_sim		*mly_cam_sim[MLY_MAX_CHANNELS];	/* CAM SIMs */
-    struct cam_path		*mly_cam_path;			/* rescan path */
     int				mly_cam_channels;		/* total channel count */
 
     /* command-completion task */

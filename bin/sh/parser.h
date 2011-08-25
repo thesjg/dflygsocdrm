@@ -34,20 +34,20 @@
  * SUCH DAMAGE.
  *
  *	@(#)parser.h	8.3 (Berkeley) 5/4/95
- * $FreeBSD: src/bin/sh/parser.h,v 1.15 2010/10/29 13:42:18 jilles Exp $
+ * $FreeBSD: src/bin/sh/parser.h,v 1.18 2011/06/09 23:12:23 jilles Exp $
  */
 
 /* control characters in argument strings */
-#define CTLESC '\201'
-#define CTLVAR '\202'
-#define CTLENDVAR '\203'
-#define CTLBACKQ '\204'
+#define CTLESC '\300'
+#define CTLVAR '\301'
+#define CTLENDVAR '\371'
+#define CTLBACKQ '\372'
 #define CTLQUOTE 01		/* ored with CTLBACKQ code if in quotes */
 /*	CTLBACKQ | CTLQUOTE == '\205' */
-#define	CTLARI	'\206'
-#define	CTLENDARI '\207'
-#define	CTLQUOTEMARK '\210'
-#define	CTLQUOTEEND '\211' /* only for ${v+-...} */
+#define	CTLARI	'\374'
+#define	CTLENDARI '\375'
+#define	CTLQUOTEMARK '\376'
+#define	CTLQUOTEEND '\377' /* only for ${v+-...} */
 
 /* variable substitution byte (follows CTLVAR) */
 #define VSTYPE		0x0f	/* type of variable substitution */
@@ -84,4 +84,6 @@ extern const char *const parsekwd[];
 union node *parsecmd(int);
 void fixredir(union node *, const char *, int);
 int goodname(const char *);
+int isassignment(const char *);
 const char *getprompt(void *);
+const char *expandstr(char *);

@@ -208,6 +208,8 @@ mfi_enable_intr_ppc(struct mfi_softc *sc)
 		MFI_WRITE4(sc, MFI_OMSK, ~MFI_GEN2_EIM);
 	} else if (sc->mfi_flags & MFI_FLAGS_SKINNY) {
 		MFI_WRITE4(sc, MFI_OMSK, ~0x00000001);
+	} else {
+		panic("unknown adapter type");
 	}
 }
 
@@ -389,8 +391,7 @@ mfi_attach(struct mfi_softc *sc)
 		sc->mfi_read_fw_status = mfi_read_fw_status_xscale;
 		sc->mfi_check_clear_intr = mfi_check_clear_intr_xscale;
 		sc->mfi_issue_cmd = mfi_issue_cmd_xscale;
-	}
-	else {
+	} else {
 		sc->mfi_enable_intr =  mfi_enable_intr_ppc;
 		sc->mfi_read_fw_status = mfi_read_fw_status_ppc;
 		sc->mfi_check_clear_intr = mfi_check_clear_intr_ppc;

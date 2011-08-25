@@ -31,16 +31,17 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/bin/sh/arith_yacc.c,v 1.3 2011/03/05 13:27:13 jilles Exp $
+ * $FreeBSD: src/bin/sh/arith_yacc.c,v 1.6 2011/06/26 20:12:05 jilles Exp $
  */
 
-#include <sys/limits.h>
+#include <limits.h>
 #include <errno.h>
 #include <inttypes.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include "arith.h"
 #include "arith_yacc.h"
+#include "builtins.h"
 #include "expand.h"
 #include "shell.h"
 #include "error.h"
@@ -98,6 +99,8 @@ arith_lookupvarint(char *varname)
 	arith_t result;
 
 	str = lookupvar(varname);
+	if (uflag && str == NULL)
+		yyerror("variable not set");
 	if (str == NULL || *str == '\0')
 		str = "0";
 	errno = 0;
@@ -354,7 +357,7 @@ arith(const char *s)
  *  The exp(1) builtin.
  */
 int
-expcmd(int argc, char **argv)
+letcmd(int argc, char **argv)
 {
 	const char *p;
 	char *concat;

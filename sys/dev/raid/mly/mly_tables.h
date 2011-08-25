@@ -24,8 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/mly/mly_tables.h,v 1.1.2.1 2000/10/27 10:06:56 msmith Exp $
- *	$DragonFly: src/sys/dev/raid/mly/mly_tables.h,v 1.3 2008/01/21 02:27:37 pavalos Exp $
+ *	$FreeBSD: src/sys/dev/mly/mly_tables.h,v 1.3 2002/02/27 23:57:18 peter Exp $
  */
 
 /*
@@ -272,21 +271,21 @@ static struct mly_code_lookup mly_table_device_state[] = {
  * the 'vendor' field in the SCSI inquiry data.
  */
 static struct mly_code_lookup mly_table_device_type[] = {
-    {"RAID 0",		MLY_DEVICE_TYPE_RAID0},
-    {"RAID 1",		MLY_DEVICE_TYPE_RAID1},
-    {"RAID 3",		MLY_DEVICE_TYPE_RAID3},		/* right asymmetric parity */
-    {"RAID 5",		MLY_DEVICE_TYPE_RAID5},		/* right asymmetric parity */
-    {"RAID 6",		MLY_DEVICE_TYPE_RAID6},		/* Mylex RAID 6 */
-    {"RAID 7",		MLY_DEVICE_TYPE_RAID7},		/* JBOD */
-    {"SPAN",		MLY_DEVICE_TYPE_NEWSPAN},	/* New Mylex SPAN */
-    {"RAID 3",		MLY_DEVICE_TYPE_RAID3F},	/* fixed parity */
-    {"RAID 3",		MLY_DEVICE_TYPE_RAID3L},	/* left symmetric parity */
-    {"SPAN",		MLY_DEVICE_TYPE_SPAN},		/* current spanning implementation */
-    {"RAID 5",		MLY_DEVICE_TYPE_RAID5L},	/* left symmetric parity */
-    {"RAID E",		MLY_DEVICE_TYPE_RAIDE},		/* concatenation */
-    {"PHYSICAL",	MLY_DEVICE_TYPE_PHYSICAL},	/* physical device */
+    {"MLYRAID0",	MLY_DEVICE_TYPE_RAID0},
+    {"MLYRAID1",	MLY_DEVICE_TYPE_RAID1},
+    {"MLYRAID3",	MLY_DEVICE_TYPE_RAID3},		/* right asymmetric parity */
+    {"MLYRAID5",	MLY_DEVICE_TYPE_RAID5},		/* right asymmetric parity */
+    {"MLYRAID6",	MLY_DEVICE_TYPE_RAID6},		/* Mylex RAID 6 */
+    {"MLYRAID7",	MLY_DEVICE_TYPE_RAID7},		/* JBOD */
+    {"MLY SPAN",	MLY_DEVICE_TYPE_NEWSPAN},	/* New Mylex SPAN */
+    {"MLYRAID3",	MLY_DEVICE_TYPE_RAID3F},	/* fixed parity */
+    {"MLYRAID3",	MLY_DEVICE_TYPE_RAID3L},	/* left symmetric parity */
+    {"MLY SPAN",	MLY_DEVICE_TYPE_SPAN},		/* current spanning implementation */
+    {"MLYRAID5",	MLY_DEVICE_TYPE_RAID5L},	/* left symmetric parity */
+    {"MLYRAIDE",	MLY_DEVICE_TYPE_RAIDE},		/* concatenation */
+    {"MLY PHYS",	MLY_DEVICE_TYPE_PHYSICAL},	/* physical device */
     {NULL, 0},
-    {"UNKNOWN",		0}
+    {"MLY UNKN",	0}
 };
 
 #if 0

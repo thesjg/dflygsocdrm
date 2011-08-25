@@ -35,7 +35,7 @@
  *
  * @(#) Copyright (c) 1991, 1993 The Regents of the University of California.  All rights reserved.
  * @(#)main.c	8.6 (Berkeley) 5/28/95
- * $FreeBSD: src/bin/sh/main.c,v 1.44 2011/02/04 22:47:55 jilles Exp $
+ * $FreeBSD: src/bin/sh/main.c,v 1.52 2011/06/13 21:03:27 jilles Exp $
  */
 
 #include <stdio.h>
@@ -66,10 +66,12 @@
 #include "mystring.h"
 #include "exec.h"
 #include "cd.h"
+#include "builtins.h"
 
 int rootpid;
 int rootshell;
 struct jmploc main_handler;
+int localeisutf8, initial_localeisutf8;
 
 static void read_profile(const char *);
 static const char *find_dot_file(const char *);
@@ -85,11 +87,12 @@ static const char *find_dot_file(const char *);
 int
 main(int argc, char *argv[])
 {
-	struct stackmark smark;
+	struct stackmark smark, smark2;
 	volatile int state;
 	char *shinit;
 
 	setlocale(LC_ALL, "");
+	initcharset();
 	state = 0;
 	if (setjmp(main_handler.loc)) {
 		switch (exception) {
@@ -105,7 +108,8 @@ main(int argc, char *argv[])
 			break;
 		}
 
-		if (state == 0 || iflag == 0 || ! rootshell)
+		if (state == 0 || iflag == 0 || ! rootshell ||
+		    exception == EXEXIT)
 			exitshell(exitstatus);
 		reset();
 		if (exception == EXINT)
@@ -130,6 +134,7 @@ main(int argc, char *argv[])
 	rootshell = 1;
 	init();
 	setstackmark(&smark);
+	setstackmark(&smark2);
 	procargs(argc, argv);
 	pwd_init(iflag);
 	if (iflag)
@@ -140,7 +145,7 @@ main(int argc, char *argv[])
 state1:
 		state = 2;
 		if (privileged == 0)
-			read_profile(".profile");
+			read_profile("${HOME-}/.profile");
 		else
 			read_profile("/etc/suid_profile");
 	}
@@ -154,6 +159,7 @@ state2:
 	}
 state3:
 	state = 4;
+	popstackmark(&smark2);
 	if (minusc) {
 		evalstring(minusc, sflag ? 0 : EV_EXIT);
 	}
@@ -229,9 +235,13 @@ static void
 read_profile(const char *name)
 {
 	int fd;
+	const char *expandedname;
 
+	expandedname = expandstr(__DECONST(char *, name));
+	if (expandedname == NULL)
+		return;
 	INTOFF;
-	if ((fd = open(name, O_RDONLY)) >= 0)
+	if ((fd = open(expandedname, O_RDONLY)) >= 0)
 		setinputfd(fd, 1);
 	INTON;
 	if (fd < 0)
@@ -255,7 +265,7 @@ readcmdfile(const char *name)
 	if ((fd = open(name, O_RDONLY)) >= 0)
 		setinputfd(fd, 1);
 	else
-		error("Can't open %s: %s", name, strerror(errno));
+		error("cannot open %s: %s", name, strerror(errno));
 	INTON;
 	cmdloop(0);
 	popfile();
@@ -272,7 +282,6 @@ readcmdfile(const char *name)
 static const char *
 find_dot_file(const char *basename)
 {
-	static char localname[FILENAME_MAX+1];
 	char *fullname;
 	const char *path = pathval();
 	struct stat statb;
@@ -282,10 +291,14 @@ find_dot_file(const char *basename)
 		return basename;
 
 	while ((fullname = padvance(&path, basename)) != NULL) {
-		strcpy(localname, fullname);
+		if ((stat(fullname, &statb) == 0) && S_ISREG(statb.st_mode)) {
+			/*
+			 * Don't bother freeing here, since it will
+			 * be freed by the caller.
+			 */
+			return fullname;
+		}
 		stunalloc(fullname);
-		if ((stat(fullname, &statb) == 0) && S_ISREG(statb.st_mode))
-			return localname;
 	}
 	return basename;
 }

@@ -34,7 +34,7 @@
  * SUCH DAMAGE.
  *
  * @(#)options.c	8.2 (Berkeley) 5/4/95
- * $FreeBSD: src/bin/sh/options.c,v 1.33 2011/02/04 22:47:55 jilles Exp $
+ * $FreeBSD: src/bin/sh/options.c,v 1.37 2011/06/13 21:03:27 jilles Exp $
  */
 
 #include <signal.h>
@@ -55,6 +55,7 @@
 #include "memalloc.h"
 #include "error.h"
 #include "mystring.h"
+#include "builtins.h"
 #ifndef NO_HISTORY
 #include "myhistedit.h"
 #endif
@@ -82,6 +83,7 @@ void
 procargs(int argc, char **argv)
 {
 	int i;
+	char *scriptname;
 
 	argptr = argv;
 	if (argc > 0)
@@ -106,8 +108,9 @@ procargs(int argc, char **argv)
 			optlist[i].val = 0;
 	arg0 = argv[0];
 	if (sflag == 0 && minusc == NULL) {
-		commandname = arg0 = *argptr++;
-		setinputfile(commandname, 0);
+		scriptname = *argptr++;
+		setinputfile(scriptname, 0);
+		commandname = arg0 = scriptname;
 	}
 	/* POSIX 1003.2: first arg after -c cmd is $0, remainder $1... */
 	if (argptr && minusc && *argptr)
@@ -199,13 +202,8 @@ options(int cmdline)
 				minus_o(*argptr, val);
 				if (*argptr)
 					argptr++;
-			} else {
-				if (c == 'p' && !val && privileged) {
-					setuid(getuid());
-					setgid(getgid());
-				}
+			} else
 				setoption(c, val);
-			}
 		}
 	}
 	return;
@@ -272,10 +270,6 @@ minus_o(char *name, int val)
 	} else {
 		for (i = 0; i < NOPTS; i++)
 			if (equal(name, optlist[i].name)) {
-				if (!val && privileged && equal(name, "privileged")) {
-					setuid(getuid());
-					setgid(getgid());
-				}
 				setoption(optlist[i].letter, val);
 				return;
 			}
@@ -289,6 +283,12 @@ setoption(int flag, int val)
 {
 	int i;
 
+	if (flag == 'p' && !val && privileged) {
+		if (setgid(getgid()) == -1)
+			error("setgid");
+		if (setuid(getuid()) == -1)
+			error("setuid");
+	}
 	for (i = 0; i < NOPTS; i++)
 		if (optlist[i].letter == flag) {
 			optlist[i].val = val;

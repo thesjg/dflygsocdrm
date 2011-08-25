@@ -24,7 +24,7 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- *	$FreeBSD: src/sys/dev/mly/mly.c,v 1.3.2.3 2001/03/05 20:17:24 msmith Exp $
+ *	$FreeBSD: src/sys/dev/mly/mly.c,v 1.50 2010/01/28 08:41:30 mav Exp $
  */
 
 #include <sys/param.h>
@@ -43,6 +43,7 @@
 #include <bus/cam/cam_ccb.h>
 #include <bus/cam/cam_periph.h>
 #include <bus/cam/cam_sim.h>
+#include <bus/cam/cam_xpt_periph.h>
 #include <bus/cam/cam_xpt_sim.h>
 #include <bus/cam/scsi/scsi_all.h>
 #include <bus/cam/scsi/scsi_message.h>
@@ -50,10 +51,10 @@
 #include <bus/pci/pcireg.h>
 #include <bus/pci/pcivar.h>
 
-#include "mlyreg.h"
-#include "mlyio.h"
-#include "mlyvar.h"
-#include "mly_tables.h"
+#include <dev/raid/mly/mlyreg.h>
+#include <dev/raid/mly/mlyio.h>
+#include <dev/raid/mly/mlyvar.h>
+#include <dev/raid/mly/mly_tables.h>
 
 static int	mly_probe(device_t dev);
 static int	mly_attach(device_t dev);
@@ -145,6 +146,8 @@ static driver_t mly_pci_driver = {
 
 static devclass_t	mly_devclass;
 DRIVER_MODULE(mly, pci, mly_pci_driver, mly_devclass, NULL, NULL);
+MODULE_DEPEND(mly, pci, 1, 1, 1);
+MODULE_DEPEND(mly, cam, 1, 1, 1);
 
 static struct dev_ops mly_ops = {
     { "mly", 0, 0 },
@@ -2000,15 +2003,18 @@ mly_cam_rescan_btl(struct mly_softc *sc, int bus, int target)
 
     debug_called(1);
 
-    ccb = kmalloc(sizeof(union ccb), M_TEMP, M_WAITOK | M_ZERO);
-    
-    if (xpt_create_path(&sc->mly_cam_path, xpt_periph, 
-			cam_sim_path(sc->mly_cam_sim[bus]), target, 0) != CAM_REQ_CMP) {
-	mly_printf(sc, "rescan failed (can't create path)\n");
-	kfree(ccb, M_TEMP);
+    if ((ccb = xpt_alloc_ccb()) == NULL) {
+	mly_printf(sc, "rescan failed (can't allocate CCB)\n");
 	return;
     }
-    xpt_setup_ccb(&ccb->ccb_h, sc->mly_cam_path, 5/*priority (low)*/);
+    if (xpt_create_path(&ccb->ccb_h.path, xpt_periph,
+			cam_sim_path(sc->mly_cam_sim[bus]), target, 0) != CAM_REQ_CMP) {
+	mly_printf(sc, "rescan failed (can't create path)\n");
+	xpt_free_ccb(ccb);
+	return;
+    }
+
+    xpt_setup_ccb(&ccb->ccb_h, ccb->ccb_h.path, 5/*priority (low)*/);
     ccb->ccb_h.func_code = XPT_SCAN_LUN;
     ccb->ccb_h.cbfcnp = mly_cam_rescan_callback;
     ccb->crcn.flags = CAM_FLAG_NONE;
@@ -2339,7 +2345,7 @@ mly_cam_complete(struct mly_command *mc)
 		btl = &sc->mly_btl[bus][target];
 		padstr(inq->vendor, mly_describe_code(mly_table_device_type, btl->mb_type), 8);
 		padstr(inq->product, mly_describe_code(mly_table_device_state, btl->mb_state), 16);
-		padstr(inq->revision, "", 4);
+		padstr(inq->revision, "MYLX", 4);
 	    }
 	}
 
@@ -2506,7 +2512,7 @@ mly_describe_controller(struct mly_softc *sc)
 		   mly_describe_code(mly_table_memorytype, mi->memory_type),
 		   mi->memory_parity ? "+parity": "",mi->memory_ecc ? "+ECC": "",
 		   mi->cache_size);
-	mly_printf(sc, "CPU: %s @ %dMHZ\n", 
+	mly_printf(sc, "CPU: %s @ %dMHz\n",
 		   mly_describe_code(mly_table_cputype, mi->cpu[0].type), mi->cpu[0].speed);
 	if (mi->l2cache_size != 0)
 	    mly_printf(sc, "%dKB L2 cache\n", mi->l2cache_size);
@@ -2812,7 +2818,7 @@ mly_print_controller(int controller)
 static int
 mly_user_open(struct dev_open_args *ap)
 {
-    cdev_t dev = ap->a_head.a_dev;
+    cdev_t		dev = ap->a_head.a_dev;
     int			unit = minor(dev);
     struct mly_softc	*sc = devclass_get_softc(devclass_find("mly"), unit);
 
@@ -2826,7 +2832,7 @@ mly_user_open(struct dev_open_args *ap)
 static int
 mly_user_close(struct dev_close_args *ap)
 {
-    cdev_t dev = ap->a_head.a_dev;
+    cdev_t		dev = ap->a_head.a_dev;
     int			unit = minor(dev);
     struct mly_softc	*sc = devclass_get_softc(devclass_find("mly"), unit);
 
@@ -2840,12 +2846,14 @@ mly_user_close(struct dev_close_args *ap)
 static int
 mly_user_ioctl(struct dev_ioctl_args *ap)
 {
-    cdev_t dev = ap->a_head.a_dev;
+    cdev_t			dev = ap->a_head.a_dev;
+    caddr_t			addr = ap->a_data;
+    u_long			cmd = ap->a_cmd;
     struct mly_softc		*sc = (struct mly_softc *)dev->si_drv1;
-    struct mly_user_command	*uc = (struct mly_user_command *)ap->a_data;
-    struct mly_user_health	*uh = (struct mly_user_health *)ap->a_data;
+    struct mly_user_command	*uc = (struct mly_user_command *)addr;
+    struct mly_user_health	*uh = (struct mly_user_health *)addr;
     
-    switch(ap->a_cmd) {
+    switch(cmd) {
     case MLYIO_COMMAND:
 	return(mly_user_command(sc, uc));
     case MLYIO_HEALTH:
