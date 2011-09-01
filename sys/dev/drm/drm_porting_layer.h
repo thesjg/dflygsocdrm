@@ -1265,9 +1265,11 @@ finish_wait(
 }
 
 /* file ttm_memory.c, function ttm_mem_global_init() */
+/*
 struct work {
 	int placeholder;
 };
+*/
 
 struct DRM_DELAYED_WORK {
 	struct task task;
@@ -1276,19 +1278,38 @@ struct DRM_DELAYED_WORK {
 };
 
 struct work_struct {
-	void (*function)(void *data);
-	void *data;
 	struct task task;
+	void (*function)(void *data);
+	void (*task_fn)(void *context, int pending);
+	void *data;
+};
+
+/* file ttm_bo_c, function ttm_bo_cleanup_refs() */
+struct delayed_work {
+	struct work_struct work;
+	struct callout callout;
+	unsigned long delay;
+	int cancel;
 };
 
 /* file ttm_memory.c, function ttm_mem_global_init() */
 
-#if 0
-INIT_WORK(
-    struct *work_struct work,
-    void (*func)( struct work_struct *work)
-);
-#endif
+static __inline__ void
+DRM_INIT_WORK(
+    struct work_struct *work,
+    void (*task_fn)(void *context, int pending)
+) {
+	TASK_INIT(&work->task, 0, task_fn, work);
+}
+
+static __inline__ void
+DRM_INIT_DELAYED_WORK(
+    struct delayed_work *work,
+    void (*task_fn)(void *context, int pending)
+) {
+	TASK_INIT(&work->work.task, 0, task_fn, work);
+}
+
 /* file intel_display.c, function intel_crtc_page_flip() */
 #define INIT_WORK(a, b) /* UNIMPLEMENTED */
 
@@ -1299,9 +1320,11 @@ schedule_work(struct work_struct *work) {
 	return 0;
 }
 
+#if 0
 struct workqueue {
 	int placeholder;
 };
+#endif
 
 /* file ttm_memory.c, function ttm_mem_global_reserve() */
 struct workqueue_struct {
@@ -1332,11 +1355,6 @@ static __inline__ int
 destroy_workqueue(struct workqueue_struct *swap_queue) {
 	return 0;
 }
-
-/* file ttm_bo_c, function ttm_bo_cleanup_refs() */
-struct delayed_work {
-	struct work_struct work;
-};
 
 /* file ttm_bo_c, function ttm_bo_cleanup_refs() */
 #if 0
