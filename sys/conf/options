@@ -575,12 +575,18 @@ HIFN_DEBUG		opt_hifn.h
 HIFN_RNDTEST		opt_hifn.h
 HIFN_NO_RNG		opt_hifn.h
 
+# options for safenet driver
+SAFE_DEBUG		opt_safe.h
+SAFE_NO_RNG		opt_safe.h
+SAFE_RNDTEST		opt_safe.h
+
 # KTR options
 KTR				opt_global.h
 KTR_ENTRIES			opt_global.h
 KTR_ALL				opt_ktr.h
 KTR_CTXSW			opt_ktr.h
 KTR_DMCRYPT			opt_ktr.h
+KTR_DSCHED_BFQ			opt_ktr.h
 KTR_ETHERNET			opt_ktr.h
 KTR_HAMMER			opt_ktr.h
 KTR_IFQ				opt_ktr.h
@@ -649,6 +655,7 @@ SYSLINK			opt_syslink.h
 
 # DSCHED stuff
 DSCHED_FQ		opt_dsched.h
+DSCHED_BFQ		opt_dsched.h
 
 # Receive Side Scaling (now basecode)
 RSS_DEBUG		opt_rss.h

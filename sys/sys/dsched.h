@@ -83,6 +83,8 @@
 #define	dsched_get_bio_priv(bio)	((bio)?((bio)->bio_caller_info2.ptr):NULL)
 #define	dsched_set_bio_stime(bio, x)	((bio)->bio_caller_info3.lvalue = (x))
 #define	dsched_get_bio_stime(bio)	((bio)?((bio)->bio_caller_info3.lvalue):0)
+#define	dsched_set_bio_tdio(bio, x)	((bio)->bio_caller_info3.ptr = (x))
+#define	dsched_get_bio_tdio(bio)	((bio)?((bio)->bio_caller_info3.ptr):0)
 
 
 struct dsched_thread_ctx {
@@ -107,10 +109,15 @@ struct dsched_disk_ctx {
 	int32_t		refcount;
 	int32_t		flags;
 
+	int		max_tag_queue_depth;		/* estimated max tag queue depth */
+	int		current_tag_queue_depth;	/* estimated current tag queue depth */
+
 	struct disk	*dp;		/* back pointer to disk struct */
 
 	struct sysctl_ctx_list sysctl_ctx;
 };
+
+struct dsched_policy;
 
 struct dsched_thread_io {
 	TAILQ_ENTRY(dsched_thread_io)	link;
@@ -128,6 +135,9 @@ struct dsched_thread_io {
 	struct dsched_disk_ctx	*diskctx;
 	struct dsched_thread_ctx	*tdctx;
 	struct proc		*p;
+	struct dsched_policy	*debug_policy;
+	int			debug_inited;
+	int			debug_priv;
 };
 
 typedef int	dsched_prepare_t(struct dsched_disk_ctx *diskctx);
@@ -135,12 +145,14 @@ typedef void	dsched_teardown_t(struct dsched_disk_ctx *diskctx);
 typedef void	dsched_cancel_t(struct dsched_disk_ctx *diskctx);
 typedef int	dsched_queue_t(struct dsched_disk_ctx *diskctx,
 		    struct dsched_thread_io *tdio, struct bio *bio);
+typedef void dsched_dequeue_t(struct dsched_disk_ctx *diskctx);
 
 typedef	void	dsched_new_tdio_t(struct dsched_thread_io *tdio);
 typedef	void	dsched_new_diskctx_t(struct dsched_disk_ctx *diskctx);
 typedef	void	dsched_destroy_tdio_t(struct dsched_thread_io *tdio);
 typedef	void	dsched_destroy_diskctx_t(struct dsched_disk_ctx *diskctx);
-
+typedef void	dsched_bio_done_t(struct bio *bio);
+typedef void	dsched_polling_func_t(struct dsched_disk_ctx *diskctx);
 
 struct dsched_policy {
 	char			name[DSCHED_POLICY_NAME_LENGTH];
@@ -158,6 +170,9 @@ struct dsched_policy {
 	dsched_new_diskctx_t	*new_diskctx;
 	dsched_destroy_tdio_t	*destroy_tdio;
 	dsched_destroy_diskctx_t	*destroy_diskctx;
+
+	dsched_bio_done_t	*bio_done;	/* call back when a bio dispatched by dsched_strategy_request_polling() is done */
+	dsched_polling_func_t	*polling_func; /* it gets called when the disk is idle or about to idle */
 };
 
 TAILQ_HEAD(dsched_policy_head, dsched_policy);
@@ -219,8 +234,8 @@ TAILQ_HEAD(dsched_policy_head, dsched_policy);
 #define	DSCHED_SYSCTL_CTX_INITED	0x01
 
 #define DSCHED_THREAD_CTX_MAX_SZ	sizeof(struct dsched_thread_ctx)
-#define DSCHED_THREAD_IO_MAX_SZ		256
-#define DSCHED_DISK_CTX_MAX_SZ		512
+#define DSCHED_THREAD_IO_MAX_SZ		384
+#define DSCHED_DISK_CTX_MAX_SZ		1024
 
 #define DSCHED_POLICY_MODULE(name, evh)					\
 static moduledata_t name##_mod = {					\
@@ -246,6 +261,7 @@ void	dsched_cancel_bio(struct bio *bp);
 void	dsched_strategy_raw(struct disk *dp, struct bio *bp);
 void	dsched_strategy_sync(struct disk *dp, struct bio *bp);
 void	dsched_strategy_async(struct disk *dp, struct bio *bp, biodone_t *done, void *priv);
+void	dsched_strategy_request_polling(struct disk *bp, struct bio *bio, struct dsched_disk_ctx *diskctx);
 int	dsched_debug(int level, char *fmt, ...) __printflike(2, 3);
 
 void	policy_new(struct disk *dp, struct dsched_policy *pol);

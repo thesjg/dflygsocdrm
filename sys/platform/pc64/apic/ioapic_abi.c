@@ -55,12 +55,15 @@
 
 #include <sys/thread2.h>
 
+#include <machine_base/isa/isa_intr.h>
 #include <machine_base/icu/icu.h>
 #include <machine_base/icu/icu_var.h>
 #include <machine_base/apic/ioapic.h>
 #include <machine_base/apic/ioapic_abi.h>
 #include <machine_base/apic/ioapic_ipl.h>
 #include <machine_base/apic/apicreg.h>
+
+#define IOAPIC_HWI_VECTORS	IDT_HWI_VECTORS
 
 extern inthand_t
 	IDTVEC(ioapic_intr0),
@@ -459,7 +462,7 @@ static struct ioapic_irqmap {
 	enum intr_polarity	im_pola;
 	int			im_gsi;
 	uint32_t		im_flags;	/* IOAPIC_IMF_ */
-} ioapic_irqmaps[MAX_HARDINTS];	/* XXX MAX_HARDINTS may not be correct */
+} ioapic_irqmaps[IOAPIC_HWI_VECTORS];
 
 #define IOAPIC_IMT_UNUSED	0
 #define IOAPIC_IMT_RESERVED	1
@@ -502,7 +505,7 @@ struct machintr_abi MachIntrABI_IOAPIC = {
 
 static int	ioapic_abi_extint_irq = -1;
 
-struct apic_intmapinfo	int_to_apicintpin[APIC_INTMAPSIZE];
+struct ioapic_irqinfo	ioapic_irqs[IOAPIC_HWI_VECTORS];
 
 static void
 ioapic_abi_intren(int irq)
@@ -583,6 +586,9 @@ ioapic_vectorctl(int op, int intr, int flags)
 	    intr == IOAPIC_HWI_SYSCALL)
 		return EINVAL;
 
+	if (ioapic_irqs[intr].io_addr == NULL)
+		return EINVAL;
+
 	ef = read_rflags();
 	cpu_disable_intr();
 	error = 0;
@@ -599,21 +605,18 @@ ioapic_vectorctl(int op, int intr, int flags)
 		 * first, then reprogrammed with the new vector.  This should
 		 * clear the IRR bit.
 		 */
-		if (int_to_apicintpin[intr].ioapic >= 0) {
-			imen_lock();
+		imen_lock();
 
-			select = int_to_apicintpin[intr].redirindex;
-			value = ioapic_read(int_to_apicintpin[intr].apic_address,
-					    select);
-			value |= IOART_INTMSET;
+		select = ioapic_irqs[intr].io_idx;
+		value = ioapic_read(ioapic_irqs[intr].io_addr, select);
+		value |= IOART_INTMSET;
 
-			ioapic_write(int_to_apicintpin[intr].apic_address,
-				     select, (value & ~APIC_TRIGMOD_MASK));
-			ioapic_write(int_to_apicintpin[intr].apic_address,
-				     select, (value & ~IOART_INTVEC) | vector);
+		ioapic_write(ioapic_irqs[intr].io_addr, select,
+		    (value & ~APIC_TRIGMOD_MASK));
+		ioapic_write(ioapic_irqs[intr].io_addr, select,
+		    (value & ~IOART_INTVEC) | vector);
 
-			imen_unlock();
-		}
+		imen_unlock();
 
 		machintr_intren(intr);
 		break;
@@ -634,20 +637,18 @@ ioapic_vectorctl(int op, int intr, int flags)
 		 * edge-triggering first, then reprogrammed with the new vector.
 		 * This should clear the IRR bit.
 		 */
-		if (int_to_apicintpin[intr].ioapic >= 0) {
-			imen_lock();
+		imen_lock();
 
-			select = int_to_apicintpin[intr].redirindex;
-			value = ioapic_read(int_to_apicintpin[intr].apic_address,
-					    select);
+		select = ioapic_irqs[intr].io_idx;
+		value = ioapic_read(ioapic_irqs[intr].io_addr, select);
 
-			ioapic_write(int_to_apicintpin[intr].apic_address,
-				     select, (value & ~APIC_TRIGMOD_MASK));
-			ioapic_write(int_to_apicintpin[intr].apic_address,
-				     select, (value & ~IOART_INTVEC) | vector);
+		ioapic_write(ioapic_irqs[intr].io_addr, select,
+		    (value & ~APIC_TRIGMOD_MASK));
+		ioapic_write(ioapic_irqs[intr].io_addr, select,
+		    (value & ~IOART_INTVEC) | vector);
 
-			imen_unlock();
-		}
+		imen_unlock();
+
 		break;
 
 	default:
@@ -686,7 +687,7 @@ void
 ioapic_abi_set_irqmap(int irq, int gsi, enum intr_trigger trig,
     enum intr_polarity pola)
 {
-	struct apic_intmapinfo *info;
+	struct ioapic_irqinfo *info;
 	struct ioapic_irqmap *map;
 	void *ioaddr;
 	int pin;
@@ -714,17 +715,15 @@ ioapic_abi_set_irqmap(int irq, int gsi, enum intr_trigger trig,
 	pin = ioapic_gsi_pin(map->im_gsi);
 	ioaddr = ioapic_gsi_ioaddr(map->im_gsi);
 
-	info = &int_to_apicintpin[irq];
+	info = &ioapic_irqs[irq];
 
 	imen_lock();
 
-	info->ioapic = 0; /* XXX unused */
-	info->int_pin = pin;
-	info->apic_address = ioaddr;
-	info->redirindex = IOAPIC_REDTBL + (2 * pin);
-	info->flags = IOAPIC_IM_FLAG_MASKED;
+	info->io_addr = ioaddr;
+	info->io_idx = IOAPIC_REDTBL + (2 * pin);
+	info->io_flags = IOAPIC_IRQI_FLAG_MASKED;
 	if (map->im_trig == INTR_TRIGGER_LEVEL)
-		info->flags |= IOAPIC_IM_FLAG_LEVEL;
+		info->io_flags |= IOAPIC_IRQI_FLAG_LEVEL;
 
 	ioapic_pin_setup(ioaddr, pin, IDT_OFFSET + irq,
 	    map->im_trig, map->im_pola);
@@ -737,7 +736,7 @@ ioapic_abi_fixup_irqmap(void)
 {
 	int i;
 
-	for (i = 0; i < 16; ++i) {
+	for (i = 0; i < ISA_IRQ_CNT; ++i) {
 		struct ioapic_irqmap *map = &ioapic_irqmaps[i];
 
 		if (map->im_type == IOAPIC_IMT_UNUSED) {
@@ -798,7 +797,7 @@ ioapic_abi_find_irq(int irq, enum intr_trigger trig, enum intr_polarity pola)
 static void
 ioapic_intr_config(int irq, enum intr_trigger trig, enum intr_polarity pola)
 {
-	struct apic_intmapinfo *info;
+	struct ioapic_irqinfo *info;
 	struct ioapic_irqmap *map;
 	void *ioaddr;
 	int pin;
@@ -845,13 +844,13 @@ ioapic_intr_config(int irq, enum intr_trigger trig, enum intr_polarity pola)
 	pin = ioapic_gsi_pin(map->im_gsi);
 	ioaddr = ioapic_gsi_ioaddr(map->im_gsi);
 
-	info = &int_to_apicintpin[irq];
+	info = &ioapic_irqs[irq];
 
 	imen_lock();
 
-	info->flags &= ~IOAPIC_IM_FLAG_LEVEL;
+	info->io_flags &= ~IOAPIC_IRQI_FLAG_LEVEL;
 	if (map->im_trig == INTR_TRIGGER_LEVEL)
-		info->flags |= IOAPIC_IM_FLAG_LEVEL;
+		info->io_flags |= IOAPIC_IRQI_FLAG_LEVEL;
 
 	ioapic_pin_setup(ioaddr, pin, IDT_OFFSET + irq,
 	    map->im_trig, map->im_pola);
@@ -862,7 +861,7 @@ ioapic_intr_config(int irq, enum intr_trigger trig, enum intr_polarity pola)
 int
 ioapic_abi_extint_irqmap(int irq)
 {
-	struct apic_intmapinfo *info;
+	struct ioapic_irqinfo *info;
 	struct ioapic_irqmap *map;
 	void *ioaddr;
 	int pin, error, vec;
@@ -906,15 +905,13 @@ ioapic_abi_extint_irqmap(int irq)
 	pin = ioapic_gsi_pin(map->im_gsi);
 	ioaddr = ioapic_gsi_ioaddr(map->im_gsi);
 
-	info = &int_to_apicintpin[irq];
+	info = &ioapic_irqs[irq];
 
 	imen_lock();
 
-	info->ioapic = 0; /* XXX unused */
-	info->int_pin = pin;
-	info->apic_address = ioaddr;
-	info->redirindex = IOAPIC_REDTBL + (2 * pin);
-	info->flags = IOAPIC_IM_FLAG_MASKED;
+	info->io_addr = ioaddr;
+	info->io_idx = IOAPIC_REDTBL + (2 * pin);
+	info->io_flags = IOAPIC_IRQI_FLAG_MASKED;
 
 	ioapic_extpin_setup(ioaddr, pin, vec);
 

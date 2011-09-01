@@ -165,6 +165,7 @@ typedef struct dm_dev {
 /* Set this device type only during dev remove ioctl. */
 #define DM_DELETING_DEV        (1 << 8) 
 #define DM_CRYPTO_DEV		(1 << 9)
+#define DM_RAID1_DEV		(1 << 10)
 
 /* for zero, error : dm_target->target_config == NULL */
 				
@@ -331,6 +332,7 @@ int dm_target_snapshot_orig_upcall(dm_table_entry_t *, struct buf *);
 
 int dm_table_destroy(dm_table_head_t *, uint8_t);
 uint64_t dm_table_size(dm_table_head_t *);
+uint64_t dm_inactive_table_size(dm_table_head_t *);
 dm_table_t * dm_table_get_entry(dm_table_head_t *, uint8_t);
 int dm_table_get_target_count(dm_table_head_t *, uint8_t);
 void dm_table_release(dm_table_head_t *, uint8_t s);
