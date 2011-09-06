@@ -130,14 +130,16 @@ kgdb_trgt_open(char *filename, int from_tty)
 	kt = kgdb_thr_init();
 	while (kt != NULL) {
 		if (!in_inferior_list(kt->pid)) {
-                     inf8 = add_inferior(kt->pid);
                      if (first_inferior) {
                        first_inferior = 0;
-                       set_current_inferior (inf8);
+                       inf8 = current_inferior();
+                       inf8->pid = kt->pid;
+                       inferior_appeared (inf8, kt->pid);
                        pspace = current_program_space;
                        pspace->ebfd = 0;
                        pspace->ebfd_mtime = 0;
                      } else {                    
+                       inf8 = add_inferior(kt->pid);
                        pspace = add_program_space(new_address_space());
                        pspace->symfile_object_file = symfile_objfile;
                        pspace->objfiles = object_files;
@@ -326,7 +328,7 @@ initialize_kgdb_target(void)
 	kgdb_trgt_ops.to_longname = "kernel core dump file";
 	kgdb_trgt_ops.to_doc = 
     "Use a vmcore file as a target.  Specify the filename of the vmcore file.";
-	kgdb_trgt_ops.to_stratum = core_stratum;
+	kgdb_trgt_ops.to_stratum = process_stratum;
 	kgdb_trgt_ops.to_has_registers = default_child_has_registers;
 	kgdb_trgt_ops.to_has_memory = default_child_has_memory;
 	kgdb_trgt_ops.to_has_stack = default_child_has_stack;
