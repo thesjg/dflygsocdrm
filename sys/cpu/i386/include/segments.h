@@ -36,7 +36,6 @@
  *
  *	from: @(#)segments.h	7.1 (Berkeley) 5/9/91
  * $FreeBSD: src/sys/i386/include/segments.h,v 1.24 1999/12/29 04:33:07 peter Exp $
- * $DragonFly: src/sys/cpu/i386/include/segments.h,v 1.13 2007/01/08 03:33:37 dillon Exp $
  */
 
 #ifndef _CPU_SEGMENTS_H_
@@ -228,12 +227,13 @@ struct region_descriptor {
 #define GBIOSARGS_SEL	14	/* BIOS interface (Arguments) */
 #define	GTLS_START	15	/* Thread TLS Descriptor */
 #define	GTLS_END	17	/* Thread TLS Descriptor */
+#define	GNDIS_SEL	18	/* For the NDIS layer */
 
 #define NGTLS		(GTLS_END - GTLS_START + 1)
 #ifdef BDE_DEBUGGER
 #define	NGDT		21	/* some of 11-17 are reserved for debugger */
 #else
-#define NGDT 		18
+#define NGDT 		19
 #endif
 
 /*
@@ -269,6 +269,7 @@ extern union descriptor gdt[];
 extern struct soft_segment_descriptor gdt_segs[];
 extern struct gate_descriptor *idt;
 extern union descriptor ldt[NLDT];
+extern struct mtx dt_lock;
 
 void	lgdt		(struct region_descriptor *rdp);
 void	lidt		(struct region_descriptor *rdp);

@@ -15,7 +15,7 @@ SRCS+=	__fpending.c _flock_stub.c \
 	fseek.c fsetpos.c ftell.c funopen.c fvwrite.c fwalk.c fwide.c \
 	fwprintf.c fwrite.c fwscanf.c getc.c getchar.c \
 	getdelim.c getline.c gets.c getw.c \
-	getwc.c getwchar.c makebuf.c mktemp.c perror.c \
+	getwc.c getwchar.c makebuf.c mktemp.c open_memstream.c perror.c \
 	printf-pos.c printf.c putc.c \
 	putchar.c puts.c putw.c putwc.c putwchar.c refill.c remove.c rewind.c \
 	rget.c scanf.c setbuf.c setbuffer.c setvbuf.c snprintf.c sprintf.c \
@@ -34,7 +34,7 @@ SRCS+=	__fpending.c _flock_stub.c \
 MAN+=	fclose.3 ferror.3 fflush.3 fgetln.3 fgets.3 fgetwln.3 fgetws.3 \
 	flockfile.3 fmemopen.3 fopen.3 fputs.3 fputws.3 fread.3 fseek.3 \
 	funopen.3 fwide.3 getc.3 getline.3 \
-	getwc.3 mktemp.3 printf.3 putc.3 putwc.3 remove.3 \
+	getwc.3 mktemp.3 open_memstream.3 printf.3 putc.3 putwc.3 remove.3 \
 	scanf.3 setbuf.3 stdio.3 tmpnam.3 ungetc.3 ungetwc.3 wprintf.3 wscanf.3
 
 MLINKS+=fclose.3 fcloseall.3

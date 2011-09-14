@@ -86,6 +86,7 @@
 
 #include <sys/thread2.h>
 #include <sys/mplock2.h>
+#include <sys/mutex2.h>
 
 #include <sys/user.h>
 #include <sys/exec.h>
@@ -174,6 +175,7 @@ u_long ebda_addr = 0;
 int imcr_present = 0;
 
 int naps = 0; /* # of Applications processors */
+struct mtx dt_lock;		/* lock for GDT and LDT */
 
 u_int base_memory;
 
@@ -1326,6 +1328,15 @@ struct soft_segment_descriptor gdt_segs[] = {
 	0,			/* default 32 vs 16 bit size */
 	0  			/* limit granularity (byte/page units)*/ },
 /* GTLS_END 17 TLS */
+{	0x0,			/* segment base address  */
+	0x0,			/* length */
+	0,			/* segment type */
+	0,			/* segment descriptor priority level */
+	0,			/* segment descriptor present */
+	0, 0,
+	0,			/* default 32 vs 16 bit size */
+	0  			/* limit granularity (byte/page units)*/ },
+/* GNDIS_SEL	18 NDIS Descriptor */
 {	0x0,			/* segment base address  */
 	0x0,			/* length */
 	0,			/* segment type */
