@@ -694,6 +694,12 @@ tcp_newtcpcb(struct inpcb *inp)
 	tp->tt_msg = &it->inp_tp_timermsg;
 	bzero(tp->tt_msg, sizeof(*tp->tt_msg));
 
+	tp->t_keepinit = tcp_keepinit;
+	tp->t_keepidle = tcp_keepidle;
+	tp->t_keepintvl = tcp_keepintvl;
+	tp->t_keepcnt = tcp_keepcnt;
+	tp->t_maxidle = tp->t_keepintvl * tp->t_keepcnt;
+
 	if (tcp_do_rfc1323)
 		tp->t_flags = (TF_REQ_SCALE | TF_REQ_TSTMP);
 	tp->t_inpcb = inp;	/* XXX */
