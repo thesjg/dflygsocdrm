@@ -1,13 +1,13 @@
 /*
  * Copyright (c) 2008 The DragonFly Project.  All rights reserved.
- * 
+ *
  * This code is derived from software contributed to The DragonFly Project
  * by Matthew Dillon <dillon@backplane.com>
- * 
+ *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
  * are met:
- * 
+ *
  * 1. Redistributions of source code must retain the above copyright
  *    notice, this list of conditions and the following disclaimer.
  * 2. Redistributions in binary form must reproduce the above copyright
@@ -17,7 +17,7 @@
  * 3. Neither the name of The DragonFly Project nor the names of its
  *    contributors may be used to endorse or promote products derived
  *    from this software without specific, prior written permission.
- * 
+ *
  * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
  * ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
  * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
@@ -30,7 +30,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT
  * OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- * 
+ *
  * $DragonFly: src/sbin/hammer/cmd_snapshot.c,v 1.7 2008/07/10 18:47:22 mneumann Exp $
  */
 
@@ -212,8 +212,15 @@ hammer_cmd_snaprm(char **av, int ac)
 	intmax_t tid;
 	int fsfd = -1;
 	int i;
+	int delete;
+	enum snaprm_mode { none_m, path_m, tid_m } mode = none_m;
 	char *dirpath;
-	char *ptr;
+	char *ptr, *ptr2;
+
+	if (ac == 0) {
+		snapshot_usage(1);
+		/* not reached */
+	}
 
 	for (i = 0; i < ac; ++i) {
 		if (lstat(av[i], &st) < 0) {
@@ -223,10 +230,19 @@ hammer_cmd_snaprm(char **av, int ac)
 				    av[i]);
 				/* not reached */
 			}
+			if (mode == path_m) {
+				snapshot_usage(1);
+				/* not reached */
+			}
+			mode = tid_m;
 			if (fsfd < 0)
 				fsfd = open(".", O_RDONLY);
 			snapshot_del(fsfd, tid);
 		} else if (S_ISDIR(st.st_mode)) {
+			if (i != 0 || ac < 2) {
+				snapshot_usage(1);
+				/* not reached */
+			}
 			if (fsfd >= 0)
 				close(fsfd);
 			fsfd = open(av[i], O_RDONLY);
@@ -235,6 +251,7 @@ hammer_cmd_snaprm(char **av, int ac)
 				    av[i]);
 				/* not reached */
 			}
+			mode = tid_m;
 		} else if (S_ISLNK(st.st_mode)) {
 			dirpath = dirpart(av[i]);
 			bzero(linkbuf, sizeof(linkbuf));
@@ -261,12 +278,31 @@ hammer_cmd_snaprm(char **av, int ac)
 				/* not reached */
 			}
 
-			if ((ptr = strrchr(linkbuf, '@')) &&
-			    ptr > linkbuf && ptr[-1] == '@') {
-				tid = strtoull(ptr + 1, NULL, 16);
-				snapshot_del(fsfd, tid);
+			delete = 1;
+			if (i == 0 && ac > 1) {
+				mode = path_m;
+				if (lstat(av[1], &st) < 0) {
+					tid = strtoull(av[1], &ptr, 16);
+					if (*ptr == '\0') {
+						delete = 0;
+						mode = tid_m;
+					}
+				}
+			} else {
+				if (mode == tid_m) {
+					snapshot_usage(1);
+					/* not reached */
+				}
+				mode = path_m;
 			}
-			remove(av[i]);
+			if (delete && (ptr = strrchr(linkbuf, '@')) &&
+			    ptr > linkbuf && ptr[-1] == '@' && ptr[1]) {
+				tid = strtoull(ptr + 1, &ptr2, 16);
+				if (*ptr2 == '\0') {
+					snapshot_del(fsfd, tid);
+					remove(av[i]);
+				}
+			}
 			free(dirpath);
 		} else {
 			err(2, "hammer snaprm: not directory or snapshot "
@@ -313,7 +349,7 @@ hammer_cmd_snapshot(char **av, int ac)
 	}
 
 	if (stat(softlink_dir, &st) == 0) {
-		if (!S_ISDIR(st.st_mode)) 
+		if (!S_ISDIR(st.st_mode))
 			err(2, "File %s already exists", softlink_dir);
 
 		if (filesystem == NULL) {
@@ -328,16 +364,16 @@ hammer_cmd_snapshot(char **av, int ac)
 		                      sizeof(DEFAULT_SNAPSHOT_NAME));
 		if (softlink_fmt == NULL)
 			err(2, "Failed to allocate string");
-	
+
 		strcpy(softlink_fmt, softlink_dir);
 		if (softlink_fmt[strlen(softlink_fmt)-1] != '/')
 			strcat(softlink_fmt, "/");
-		strcat(softlink_fmt, DEFAULT_SNAPSHOT_NAME); 
+		strcat(softlink_fmt, DEFAULT_SNAPSHOT_NAME);
 	} else {
 		softlink_fmt = strdup(softlink_dir);
 
 		if (filesystem == NULL) {
-			/* 
+			/*
 			 * strip-off last '/path' segment to get the softlink
 			 * directory, which we need to determine the filesystem
 			 * we are on.
@@ -362,9 +398,9 @@ hammer_cmd_snapshot(char **av, int ac)
 				*pos = '/';
 		}
 	}
-	
+
 	/*
-	 * Synctid 
+	 * Synctid
 	 */
 	bzero(&synctid, sizeof(synctid));
 	synctid.op = HAMMER_SYNCTID_SYNC2;
@@ -378,12 +414,12 @@ hammer_cmd_snapshot(char **av, int ac)
 	asprintf(&from, "%s/@@0x%016jx", filesystem, (uintmax_t)synctid.tid);
 	if (from == NULL)
 		err(2, "Couldn't generate string");
-	
+
 	int sz = strlen(softlink_fmt) + 50;
 	to = malloc(sz);
 	if (to == NULL)
 		err(2, "Failed to allocate string");
-	
+
 	time_t t = time(NULL);
 	if (strftime(to, sz, softlink_fmt, localtime(&t)) == 0)
 		err(2, "String buffer too small");
