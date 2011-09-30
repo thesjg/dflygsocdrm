@@ -172,7 +172,6 @@ vm_swapcached_thread(void)
 	EVENTHANDLER_REGISTER(shutdown_pre_sync, shutdown_swapcache,
 			      NULL, SHUTDOWN_PRI_SECOND);
 	lwkt_gettoken(&vm_token);
-	crit_enter();
 
 	/*
 	 * Initialize our marker for the inactive scan (SWAPC_WRITING)
@@ -266,7 +265,6 @@ vm_swapcached_thread(void)
 	 * Cleanup (NOT REACHED)
 	 */
 	TAILQ_REMOVE(INACTIVE_LIST, &page_marker, pageq);
-	crit_exit();
 	lwkt_reltoken(&vm_token);
 
 	lwkt_gettoken(&vmobj_token);
@@ -570,14 +568,19 @@ vm_swapcache_cleaning(vm_object_t marker)
 	while ((object = TAILQ_NEXT(object, object_list)) != NULL) {
 		if (--count <= 0)
 			break;
-		if (object->type != OBJT_VNODE)
+
+		vm_object_hold(object);
+
+		/* 
+		 * Only operate on live VNODE objects with regular/chardev types
+		 */
+		if ((object->type != OBJT_VNODE) ||
+		    ((object->flags & OBJ_DEAD) || object->swblock_count == 0) ||
+		    ((vp = object->handle) == NULL) ||
+		    (vp->v_type != VREG && vp->v_type != VCHR)) {
+			vm_object_drop(object);
 			continue;
-		if ((object->flags & OBJ_DEAD) || object->swblock_count == 0)
-			continue;
-		if ((vp = object->handle) == NULL)
-			continue;
-		if (vp->v_type != VREG && vp->v_type != VCHR)
-			continue;
+		}
 
 		/*
 		 * Adjust iterator.
@@ -606,8 +609,11 @@ vm_swapcache_cleaning(vm_object_t marker)
 		 * and we break and pick it back up on a future attempt.
 		 */
 		n = swap_pager_condfree(object, &marker->size, count);
+
+		vm_object_drop(object);
+	
 		count -= n;
-		if (count < 0)
+		if (count < 0) 
 			break;
 
 		/*
