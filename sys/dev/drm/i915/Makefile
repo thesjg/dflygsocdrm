@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD	= i915
-NO_MAN	= YES
 SRCS    = \
 	i915_dma.c \
 	i915_drv.c \

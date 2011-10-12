@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD	= mach64
-NO_MAN	= YES
 SRCS    = \
 	mach64_dma.c \
 	mach64_drv.c \

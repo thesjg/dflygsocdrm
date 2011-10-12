@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD= 	mga
-NO_MAN=	YES
 SRCS= \
 	mga_dma.c \
 	mga_drv.c \

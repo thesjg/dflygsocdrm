@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD=	tdfx
-NO_MAN=	YES
 SRCS= \
 	tdfx_drv.c
 

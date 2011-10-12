@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD	= radeon
-NO_MAN	= YES
 SRCS    = \
 	r300_cmdbuf.c \
 	r600_blit.c \

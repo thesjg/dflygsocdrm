@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD	= r128
-NO_MAN	= YES
 SRCS    = \
 	r128_cce.c \
 	r128_drv.c \

@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD= 	sis
-NO_MAN=	YES
 SRCS= \
 	sis_drv.c \
 	sis_ds.c \

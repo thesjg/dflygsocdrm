@@ -2,7 +2,6 @@
 
 .PATH:	${.CURDIR}
 KMOD	= savage
-NO_MAN	= YES
 SRCS    = \
 	savage_bci.c \
 	savage_drv.c \
