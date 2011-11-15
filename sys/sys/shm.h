@@ -54,10 +54,10 @@
 
 struct shmid_ds {
 	struct ipc_perm shm_perm;	/* operation permission structure */
-	int             shm_segsz;	/* size of segment in bytes */
+	size_t          shm_segsz;	/* size of segment in bytes */
 	pid_t           shm_lpid;   /* process ID of last shared memory op */
 	pid_t           shm_cpid;	/* process ID of creator */
-	short		shm_nattch;	/* number of current attaches */
+	int		shm_nattch;	/* number of current attaches */
 	time_t          shm_atime;	/* time of last shmat() */
 	time_t          shm_dtime;	/* time of last shmdt() */
 	time_t          shm_ctime;	/* time of last change by shmctl() */
@@ -71,7 +71,7 @@ struct shmid_ds {
  * might be of interest to user programs.  Do we really want/need this?
  */
 struct shminfo {
-	int	shmmax,		/* max shared memory segment size (bytes) */
+	long	shmmax,		/* max shared memory segment size (bytes) */
 		shmmin,		/* min shared memory segment size (bytes) */
 		shmmni,		/* max number of shared memory identifiers */
 		shmseg,		/* max shared memory segments per process */
@@ -97,7 +97,7 @@ void	shmfork (struct proc *, struct proc *);
 __BEGIN_DECLS
 int shmsys (int, ...);
 void *shmat  (int, void *, int);
-int shmget (key_t, int, int);
+int shmget (key_t, size_t, int);
 int shmctl (int, int, struct shmid_ds *);
 int shmdt  (void *);
 __END_DECLS
