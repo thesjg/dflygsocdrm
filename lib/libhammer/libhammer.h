@@ -101,6 +101,7 @@ typedef struct libhammer_volinfo {
 	uuid_t   vol_fsid;          /* Filesystem UUID */
 	int      version;           /* HAMMER version */
 	int      nvolumes;          /* Number of volumes */
+	int64_t  inodes;            /* no. of inodes */
 	int64_t  bigblocks;         /* Total big blocks */
 	int64_t  freebigblocks;     /* Free big blocks */
 	int64_t  rsvbigblocks;      /* Reserved big blocks */
@@ -140,8 +141,6 @@ libhammer_get_last_pfs(libhammer_volinfo_t volinfo)
 	return TAILQ_LAST(&volinfo->list_pseudo, pfslist);
 }
 
-#endif
-
 /*
  * MISC directive prototypes
  */
@@ -149,3 +148,5 @@ __BEGIN_DECLS
 char *libhammer_find_pfs_mount(int, uuid_t, int);
 void *_libhammer_malloc(size_t);
 __END_DECLS
+
+#endif
