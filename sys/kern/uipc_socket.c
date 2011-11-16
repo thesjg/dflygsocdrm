@@ -391,7 +391,6 @@ soclose(struct socket *so, int fflag)
 	if (so->so_pcb == NULL)
 		goto discard;
 	if (so->so_state & SS_ISCONNECTED) {
-		so_pru_sync(so);
 		if ((so->so_state & SS_ISDISCONNECTING) == 0) {
 			error = sodisconnect(so);
 			if (error)
@@ -943,17 +942,24 @@ restart:
 			++cnt;
 		    } while (space > 0 && cnt < tcp_sosnd_agglim);
 
+		    if (tcp_sosnd_async)
+			    async = 1;
+
 		    if (flags & MSG_OOB) {
 		    	    pru_flags = PRUS_OOB;
+			    async = 0;
+		    } else if ((flags & MSG_EOF) && resid == 0) {
+			    pru_flags = PRUS_EOF;
 		    } else if (resid > 0 && space > 0) {
 			    /* If there is more to send, set PRUS_MORETOCOME */
 		    	    pru_flags = PRUS_MORETOCOME;
 			    async = 1;
 		    } else {
 		    	    pru_flags = 0;
-			    if (tcp_sosnd_async)
-			    	async = 1;
 		    }
+
+		    if (flags & MSG_SYNC)
+			    async = 0;
 
 		    /*
 		     * XXX all the SS_CANTSENDMORE checks previously
@@ -1373,10 +1379,8 @@ soshutdown(struct socket *so, int how)
 		sorflush(so);
 		/*ssb_unlock(&so->so_rcv);*/
 	}
-	if (how != SHUT_RD) {
-		so_pru_sync(so);
+	if (how != SHUT_RD)
 		return (so_pru_shutdown(so));
-	}
 	return (0);
 }
 
