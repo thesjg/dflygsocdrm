@@ -510,6 +510,7 @@ struct machintr_abi MachIntrABI_IOAPIC = {
 };
 
 static int	ioapic_abi_extint_irq = -1;
+static int	ioapic_abi_line_irq_max;
 
 struct ioapic_irqinfo	ioapic_irqs[IOAPIC_HWI_VECTORS];
 
@@ -689,6 +690,9 @@ ioapic_abi_set_irqmap(int irq, int gsi, enum intr_trigger trig,
 	KKASSERT(pola == INTR_POLARITY_HIGH || pola == INTR_POLARITY_LOW);
 
 	KKASSERT(irq >= 0 && irq < IOAPIC_HWI_VECTORS);
+	if (irq > ioapic_abi_line_irq_max)
+		ioapic_abi_line_irq_max = irq;
+
 	map = &ioapic_irqmaps[irq];
 
 	KKASSERT(map->im_type == IOAPIC_IMT_UNUSED);
@@ -740,6 +744,9 @@ ioapic_abi_fixup_irqmap(void)
 				kprintf("IOAPIC: irq %d reserved\n", i);
 		}
 	}
+	ioapic_abi_line_irq_max += 1;
+	if (bootverbose)
+		kprintf("IOAPIC: line irq max %d\n", ioapic_abi_line_irq_max);
 }
 
 int
@@ -750,7 +757,7 @@ ioapic_abi_find_gsi(int gsi, enum intr_trigger trig, enum intr_polarity pola)
 	KKASSERT(trig == INTR_TRIGGER_EDGE || trig == INTR_TRIGGER_LEVEL);
 	KKASSERT(pola == INTR_POLARITY_HIGH || pola == INTR_POLARITY_LOW);
 
-	for (irq = 0; irq < IOAPIC_HWI_VECTORS; ++irq) {
+	for (irq = 0; irq < ioapic_abi_line_irq_max; ++irq) {
 		const struct ioapic_irqmap *map = &ioapic_irqmaps[irq];
 
 		if (map->im_gsi == gsi) {
@@ -949,14 +956,18 @@ ioapic_abi_gsi_cpuid(int irq, int gsi)
 	KKASSERT(gsi >= 0);
 
 	if (irq == 0 || gsi == 0) {
-		if (bootverbose)
-			kprintf("GSI %d -> CPU 0 (0)\n", gsi);
+		if (bootverbose) {
+			kprintf("IOAPIC: irq %d, gsi %d -> cpu0 (0)\n",
+			    irq, gsi);
+		}
 		return 0;
 	}
 
 	if (irq == acpi_sci_irqno()) {
-		if (bootverbose)
-			kprintf("GSI %d -> CPU 0 (sci)\n", gsi);
+		if (bootverbose) {
+			kprintf("IOAPIC: irq %d, gsi %d -> cpu0 (sci)\n",
+			    irq, gsi);
+		}
 		return 0;
 	}
 
@@ -965,15 +976,21 @@ ioapic_abi_gsi_cpuid(int irq, int gsi)
 
 	if (cpuid < 0) {
 		cpuid = gsi % ncpus;
-		if (bootverbose)
-			kprintf("GSI %d -> CPU %d (auto)\n", gsi, cpuid);
+		if (bootverbose) {
+			kprintf("IOAPIC: irq %d, gsi %d -> cpu%d (auto)\n",
+			    irq, gsi, cpuid);
+		}
 	} else if (cpuid >= ncpus) {
 		cpuid = ncpus - 1;
-		if (bootverbose)
-			kprintf("GSI %d -> CPU %d (fixup)\n", gsi, cpuid);
+		if (bootverbose) {
+			kprintf("IOAPIC: irq %d, gsi %d -> cpu%d (fixup)\n",
+			    irq, gsi, cpuid);
+		}
 	} else {
-		if (bootverbose)
-			kprintf("GSI %d -> CPU %d (user)\n", gsi, cpuid);
+		if (bootverbose) {
+			kprintf("IOAPIC: irq %d, gsi %d -> cpu%d (user)\n",
+			    irq, gsi, cpuid);
+		}
 	}
 	return cpuid;
 }
