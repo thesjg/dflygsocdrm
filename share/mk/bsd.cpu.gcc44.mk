@@ -108,6 +108,8 @@ MACHINE_CPU = mmx k6 k5 i586 i486 i386
 MACHINE_CPU = 3dnow mmx i586 i486 i386
 .  elif ${CPUTYPE} == "c3-2"
 MACHINE_CPU = sse mmx i586 i486 i386
+.  elif ${CPUTYPE} == "geode"
+MACHINE_CPU = 3dnow i686 mmx i586 i486 i386
 .  elif ${CPUTYPE} == "winchip2"
 MACHINE_CPU = 3dnow mmx i486 i386
 .  elif ${CPUTYPE} == "winchip-c6"
