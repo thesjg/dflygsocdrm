@@ -1895,12 +1895,20 @@ vm_pageout_thread(void)
 		 * deactivate more than an additional 1/10 the inactive
 		 * target's worth of active pages.
 		 */
+#if 0 /* reverts 11 Nov 2011 heavy memory IO use */
 		if (delta1 < inactive_shortage) {
 			tmp = (inactive_shortage - delta1) * 2;
 			if (tmp > vmstats.v_inactive_target / 10)
 				tmp = vmstats.v_inactive_target / 10;
 			active_shortage += tmp;
 		}
+#endif
+		tmp = inactive_shortage;
+		if (tmp < vmstats.v_inactive_target / 10)
+			tmp = vmstats.v_inactive_target / 10;
+		inactive_shortage -= delta1;
+		if (inactive_shortage <= 0 && active_shortage > tmp * 2)
+			active_shortage = tmp * 2;
 
 		delta2 = 0;
 		for (q = 0; q < PQ_MAXL2_SIZE; ++q) {
