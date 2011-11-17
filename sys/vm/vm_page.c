@@ -201,6 +201,7 @@ vm_add_new_page(vm_paddr_t pa)
 	atomic_add_int(&vmstats.v_page_count, 1);
 	atomic_add_int(&vmstats.v_free_count, 1);
 	vpq = &vm_page_queues[m->queue];
+#if 0 /* reverts 731b842..9eed65b from Tue, 8 Nov 2011 */
 	if ((vpq->flipflop & 15) == 0) {
 		pmap_zero_page(VM_PAGE_TO_PHYS(m));
 		m->flags |= PG_ZERO;
@@ -210,6 +211,13 @@ vm_add_new_page(vm_paddr_t pa)
 		TAILQ_INSERT_HEAD(&vpq->pl, m, pageq);
 	}
 	++vpq->flipflop;
+#endif
+	if (vpq->flipflop) {
+		TAILQ_INSERT_TAIL(&vpq->pl, m, pageq);
+	} else {
+		TAILQ_INSERT_HEAD(&vpq->pl, m, pageq);
+	}
+	vpq->flipflop = 1 - vpq->flipflop;
 	++vpq->lcnt;
 
 	return (m);
