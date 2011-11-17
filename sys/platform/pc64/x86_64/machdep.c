@@ -447,10 +447,6 @@ sendsig(sig_t catcher, int sig, sigset_t *mask, u_long code)
 	/* Make the size of the saved context visible to userland */
 	sf.sf_uc.uc_mcontext.mc_len = sizeof(sf.sf_uc.uc_mcontext);
 
-	/* Save mailbox pending state for syscall interlock semantics */
-	if (p->p_flag & P_MAILBOX)
-		sf.sf_uc.uc_mcontext.mc_xflags |= PGEX_MAILBOX;
-
 	/* Allocate and validate space for the signal handler context. */
         if ((lp->lwp_flag & LWP_ALTSTACK) != 0 && !oonstack &&
 	    SIGISMEMBER(psp->ps_sigonstack, sig)) {
@@ -567,6 +563,7 @@ sendsig(sig_t catcher, int sig, sigset_t *mask, u_long code)
 	 */
 	regs->tf_cs = _ucodesel;
 	regs->tf_ss = _udatasel;
+	clear_quickret();
 }
 
 /*
@@ -619,7 +616,6 @@ int
 sys_sigreturn(struct sigreturn_args *uap)
 {
 	struct lwp *lp = curthread->td_lwp;
-	struct proc *p = lp->lwp_proc;
 	struct trapframe *regs;
 	ucontext_t uc;
 	ucontext_t *ucp;
@@ -719,16 +715,6 @@ sys_sigreturn(struct sigreturn_args *uap)
 	crit_enter();
 	npxpop(&ucp->uc_mcontext);
 
-	/*
-	 * Merge saved signal mailbox pending flag to maintain interlock
-	 * semantics against system calls.
-	 */
-	if (ucp->uc_mcontext.mc_xflags & PGEX_MAILBOX) {
-		lwkt_gettoken(&p->p_token);
-		p->p_flag |= P_MAILBOX;
-		lwkt_reltoken(&p->p_token);
-	}
-
 	if (ucp->uc_mcontext.mc_onstack & 1)
 		lp->lwp_sigstk.ss_flags |= SS_ONSTACK;
 	else
@@ -736,6 +722,7 @@ sys_sigreturn(struct sigreturn_args *uap)
 
 	lp->lwp_sigmask = ucp->uc_sigmask;
 	SIG_CANTMASK(lp->lwp_sigmask);
+	clear_quickret();
 	crit_exit();
 	return(EJUSTRETURN);
 }
@@ -1063,6 +1050,7 @@ exec_setregs(u_long entry, u_long stack, u_long ps_strings)
 	/* was i386_user_cleanup() in NetBSD */
 	user_ldt_free(pcb);
   
+	clear_quickret();
 	bzero((char *)regs, sizeof(struct trapframe));
 	regs->tf_rip = entry;
 	regs->tf_rsp = ((stack - 8) & ~0xFul) + 8; /* align the stack */
@@ -2039,6 +2027,7 @@ set_regs(struct lwp *lp, struct reg *regs)
 	    !CS_SECURE(regs->r_cs))
 		return (EINVAL);
 	bcopy(&regs->r_rdi, &tp->tf_rdi, sizeof(*regs));
+	clear_quickret();
 	return (0);
 }
 
