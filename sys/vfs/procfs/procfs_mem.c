@@ -71,7 +71,7 @@ static int	procfs_rwmem (struct proc *curp,
 				  struct proc *p, struct uio *uio);
 
 /*
- * p->p_token must be held.
+ * p->p_token is held on entry.
  */
 static int
 procfs_rwmem(struct proc *curp, struct proc *p, struct uio *uio)
@@ -90,16 +90,17 @@ procfs_rwmem(struct proc *curp, struct proc *p, struct uio *uio)
 	 * page table usage in that process may be messed up.
 	 */
 	vm = p->p_vmspace;
-	if ((p->p_flag & P_WEXIT) || sysref_isinactive(&vm->vm_sysref)) {
+	if (p->p_stat == SIDL || p->p_stat == SZOMB)
 		return EFAULT;
-	}
+	if ((p->p_flags & P_WEXIT) || sysref_isinactive(&vm->vm_sysref))
+		return EFAULT;
 
 	/*
 	 * The map we want...
 	 */
 	map = &vm->vm_map;
 
-	writing = uio->uio_rw == UIO_WRITE;
+	writing = (uio->uio_rw == UIO_WRITE);
 	reqprot = VM_PROT_READ;
 	if (writing)
 		reqprot |= VM_PROT_WRITE | VM_PROT_OVERRIDE_WRITE;
@@ -112,8 +113,8 @@ procfs_rwmem(struct proc *curp, struct proc *p, struct uio *uio)
 	 */
 	do {
 		vm_offset_t uva;
-		int page_offset;		/* offset into page */
-		u_int len;
+		vm_offset_t page_offset;	/* offset into page */
+		size_t len;
 		vm_page_t m;
 
 		uva = (vm_offset_t) uio->uio_offset;
@@ -142,11 +143,12 @@ procfs_rwmem(struct proc *curp, struct proc *p, struct uio *uio)
 
 		/*
 		 * Cleanup tmap then create a temporary KVA mapping and
-		 * do the I/O.
+		 * do the I/O.  We can switch between cpus so don't bother
+		 * synchronizing across all cores.
 		 */
-		pmap_kenter(kva, VM_PAGE_TO_PHYS(m));
+		pmap_kenter_quick(kva, VM_PAGE_TO_PHYS(m));
 		error = uiomove((caddr_t)(kva + page_offset), len, uio);
-		pmap_kremove(kva);
+		pmap_kremove_quick(kva);
 
 		/*
 		 * release the page and we are done
@@ -155,6 +157,7 @@ procfs_rwmem(struct proc *curp, struct proc *p, struct uio *uio)
 	} while (error == 0 && uio->uio_resid > 0);
 
 	kmem_free(&kernel_map, kva, PAGE_SIZE);
+
 	return (error);
 }
 
@@ -163,6 +166,8 @@ procfs_rwmem(struct proc *curp, struct proc *p, struct uio *uio)
  * We do this by mapping the process's page into
  * the kernel and then doing a uiomove direct
  * from the kernel address space.
+ *
+ * lp->lwp_proc->p_token is held on entry.
  */
 int
 procfs_domem(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
@@ -174,8 +179,7 @@ procfs_domem(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 	if (uio->uio_resid == 0)
 		return (0);
 
-	lwkt_gettoken(&p->p_token);
-	if ((p->p_flag & P_INEXEC) != 0) {
+	if ((p->p_flags & P_INEXEC) != 0) {
 		/*
 		 * Can't trace a process that's currently exec'ing.
 		 */
@@ -188,7 +192,6 @@ procfs_domem(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 	} else {
 		error = procfs_rwmem(curp, p, uio);
 	}
-	lwkt_reltoken(&p->p_token);
 	return(error);
 }
 

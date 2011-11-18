@@ -24,7 +24,6 @@
  * SUCH DAMAGE.
  *
  * $FreeBSD: src/sys/fs/udf/udf_vnops.c,v 1.33 2003/12/07 05:04:49 scottl Exp $
- * $DragonFly: src/sys/vfs/udf/udf_vnops.c,v 1.32 2007/11/20 21:03:51 dillon Exp $
  */
 
 /* udf_vnops.c */
@@ -46,6 +45,8 @@
 #include <sys/unistd.h>
 
 #include <machine/inttypes.h>
+
+#include <sys/buf2.h>
 
 #include <vfs/udf/ecma167-udf.h>
 #include <vfs/udf/osta.h>

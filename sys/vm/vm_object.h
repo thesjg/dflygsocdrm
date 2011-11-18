@@ -89,12 +89,11 @@
 #ifndef _VM_VM_PAGE_H_
 #include <vm/vm_page.h>
 #endif
-
-#ifdef _KERNEL
-
 #ifndef _SYS_THREAD_H_
 #include <sys/thread.h>
 #endif
+
+#ifdef _KERNEL
 
 #ifndef _SYS_THREAD2_H_
 #include <sys/thread2.h>
@@ -186,6 +185,7 @@ struct vm_object {
 	 */
 	RB_HEAD(swblock_rb_tree, swblock) swblock_root;
 	int	swblock_count;
+	struct	lwkt_token	token;
 };
 
 /*
@@ -272,7 +272,7 @@ vm_object_pip_wait(vm_object_t object, char *waitid)
 static __inline lwkt_token_t
 vm_object_token(vm_object_t obj)
 {
-	return (lwkt_token_pool_lookup(obj));
+	return (&obj->token);
 }
 
 vm_object_t vm_object_allocate (objtype_t, vm_pindex_t);
@@ -304,14 +304,19 @@ void vm_object_dead_sleep(vm_object_t, const char *);
 void vm_object_dead_wakeup(vm_object_t);
 void vm_object_lock_swap(void);
 void vm_object_lock(vm_object_t);
+void vm_object_lock_shared(vm_object_t);
 void vm_object_unlock(vm_object_t);
 
 #ifndef DEBUG_LOCKS
 void vm_object_hold(vm_object_t);
+void vm_object_hold_shared(vm_object_t);
 #else
-#define vm_object_hold(obj)	\
+#define vm_object_hold(obj)		\
 	debugvm_object_hold(obj, __FILE__, __LINE__)
 void debugvm_object_hold(vm_object_t, char *, int);
+#define vm_object_hold_shared(obj)	\
+	debugvm_object_hold_shared(obj, __FILE__, __LINE__)
+void debugvm_object_hold_shared(vm_object_t, char *, int);
 #endif
 
 void vm_object_drop(vm_object_t);

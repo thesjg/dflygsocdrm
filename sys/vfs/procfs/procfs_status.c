@@ -57,7 +57,13 @@
 #include <vm/vm_param.h>
 #include <sys/exec.h>
 
-#define DOCHECK() do { if (ps >= psbuf+sizeof(psbuf)) goto bailout; } while (0)
+#define DOCHECK() do {	\
+	if (ps >= psbuf+sizeof(psbuf)) {	\
+		error = ENOMEM;			\
+		goto bailout;			\
+	}					\
+    } while (0)
+
 int
 procfs_dostatus(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 		struct uio *uio)
@@ -97,7 +103,7 @@ procfs_dostatus(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 	ps += ksnprintf(ps, psbuf + sizeof(psbuf) - ps,
 	    " %d %d %d %d ", pid, ppid, pgid, sid);
 	DOCHECK();
-	if ((p->p_flag&P_CONTROLT) && (tp = sess->s_ttyp))
+	if ((p->p_flags & P_CONTROLT) && (tp = sess->s_ttyp))
 		ps += ksnprintf(ps, psbuf + sizeof(psbuf) - ps,
 		    "%d,%d ", major(tp->t_dev), minor(tp->t_dev));
 	else
@@ -121,7 +127,7 @@ procfs_dostatus(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 		DOCHECK();
 	}
 
-	if (p->p_flag & P_SWAPPEDOUT) {
+	if (p->p_flags & P_SWAPPEDOUT) {
 		ps += ksnprintf(ps, psbuf + sizeof(psbuf) - ps,
 		    " -1,-1 -1,-1 -1,-1");
 	} else {
@@ -168,18 +174,10 @@ procfs_dostatus(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 	DOCHECK();
 
 	xlen = ps - psbuf;
-	xlen -= (size_t)uio->uio_offset;
-	ps = psbuf + uio->uio_offset;
-	xlen = szmin(xlen, uio->uio_resid);
-	if (xlen == 0)
-		error = 0;
-	else
-		error = uiomove_frombuf(ps, xlen, uio);
-
-	return (error);
+	error = uiomove_frombuf(psbuf, xlen, uio);
 
 bailout:
-	return (ENOMEM);
+	return (error);
 }
 
 int
@@ -194,7 +192,7 @@ procfs_docmdline(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 	char **ps_argvstr;
 	int i;
 	size_t bytes_left, done;
-	size_t buflen, xlen;
+	size_t buflen;
 
 	if (uio->uio_rw != UIO_READ)
 		return (EOPNOTSUPP);
@@ -211,7 +209,8 @@ procfs_docmdline(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 
 	if (p->p_args &&
 	    (ps_argsopen || (CHECKIO(curp, p) &&
-	     (p->p_flag & P_INEXEC) == 0 && !p_trespass(curp->p_ucred, p->p_ucred)))
+	     (p->p_flags & P_INEXEC) == 0 &&
+	     !p_trespass(curp->p_ucred, p->p_ucred)))
 	 ) {
 		bp = p->p_args->ar_args;
 		buflen = p->p_args->ar_length;
@@ -226,18 +225,24 @@ procfs_docmdline(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 		bp = buf;
 		ps = buf;
 		error = copyin((void*)PS_STRINGS, &pstr, sizeof(pstr));
+
 		if (error) {
 			FREE(buf, M_TEMP);
 			return (error);
+		}
+		if (pstr.ps_nargvstr < 0) {
+			FREE(buf, M_TEMP);
+			return (EINVAL);
 		}
 		if (pstr.ps_nargvstr > ARG_MAX) {
 			FREE(buf, M_TEMP);
 			return (E2BIG);
 		}
-		MALLOC(ps_argvstr, char **, pstr.ps_nargvstr * sizeof(char *),
-		    M_TEMP, M_WAITOK);
+		MALLOC(ps_argvstr, char **,
+		       pstr.ps_nargvstr * sizeof(char *),
+		       M_TEMP, M_WAITOK);
 		error = copyin((void *)pstr.ps_argvstr, ps_argvstr,
-		    pstr.ps_nargvstr * sizeof(char *));
+			       pstr.ps_nargvstr * sizeof(char *));
 		if (error) {
 			FREE(ps_argvstr, M_TEMP);
 			FREE(buf, M_TEMP);
@@ -259,13 +264,7 @@ procfs_docmdline(struct proc *curp, struct lwp *lp, struct pfsnode *pfs,
 		FREE(ps_argvstr, M_TEMP);
 	}
 
-	buflen -= (size_t)uio->uio_offset;
-	ps = bp + (size_t)uio->uio_offset;
-	xlen = szmin(buflen, uio->uio_resid);
-	if (xlen == 0)
-		error = 0;
-	else
-		error = uiomove_frombuf(bp, buflen, uio);
+	error = uiomove_frombuf(bp, buflen, uio);
 	if (buf)
 		FREE(buf, M_TEMP);
 	return (error);

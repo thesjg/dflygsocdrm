@@ -295,7 +295,7 @@ enterpgrp(struct proc *p, pid_t pgid, int mksess)
 			KASSERT(p == curproc,
 				("enterpgrp: mksession and p != curproc"));
 			lwkt_gettoken(&p->p_token);
-			p->p_flag &= ~P_CONTROLT;
+			p->p_flags &= ~P_CONTROLT;
 			lwkt_reltoken(&p->p_token);
 		} else {
 			pgrp->pg_session = p->p_session;
@@ -634,7 +634,9 @@ again:
  * Called from exit1 to remove a process from the allproc
  * list and move it to the zombie list.
  *
- * No requirements.
+ * Caller must hold p->p_token.  We are required to wait until p_lock
+ * becomes zero before we can manipulate the list, allowing allproc
+ * scans to guarantee consistency during a list scan.
  */
 void
 proc_move_allproc_zombie(struct proc *p)
@@ -656,14 +658,16 @@ proc_move_allproc_zombie(struct proc *p)
  * from the zombie list and the sibling list.  This routine will block
  * if someone has a lock on the proces (p_lock).
  *
- * No requirements.
+ * Caller must hold p->p_token.  We are required to wait until p_lock
+ * becomes zero before we can manipulate the list, allowing allproc
+ * scans to guarantee consistency during a list scan.
  */
 void
 proc_remove_zombie(struct proc *p)
 {
 	lwkt_gettoken(&proc_token);
 	while (p->p_lock) {
-		tsleep(p, 0, "reap1", hz / 10);
+		tsleep(p, 0, "reap2", hz / 10);
 	}
 	LIST_REMOVE(p, p_list); /* off zombproc */
 	LIST_REMOVE(p, p_sibling);
@@ -690,6 +694,11 @@ allproc_scan(int (*callback)(struct proc *, void *), void *data)
 	int r;
 	int limit = nprocs + ncpus;
 
+	/*
+	 * proc_token protects the allproc list and PHOLD() prevents the
+	 * process from being removed from the allproc list or the zombproc
+	 * list.
+	 */
 	lwkt_gettoken(&proc_token);
 	LIST_FOREACH(p, &allproc, p_list) {
 		PHOLD(p);
@@ -707,8 +716,9 @@ allproc_scan(int (*callback)(struct proc *, void *), void *data)
  * Scan all lwps of processes on the allproc list.  The lwp is automatically
  * held for the callback.  A return value of -1 terminates the loop.
  *
- * No requirements.
  * The callback is made with the proces and lwp both held, and proc_token held.
+ *
+ * No requirements.
  */
 void
 alllwp_scan(int (*callback)(struct lwp *, void *), void *data)
@@ -717,6 +727,11 @@ alllwp_scan(int (*callback)(struct lwp *, void *), void *data)
 	struct lwp *lp;
 	int r = 0;
 
+	/*
+	 * proc_token protects the allproc list and PHOLD() prevents the
+	 * process from being removed from the allproc list or the zombproc
+	 * list.
+	 */
 	lwkt_gettoken(&proc_token);
 	LIST_FOREACH(p, &allproc, p_list) {
 		PHOLD(p);
@@ -878,6 +893,7 @@ sysctl_kern_proc(SYSCTL_HANDLER_ARGS)
 	struct proc *p;
 	struct proclist *plist;
 	struct thread *td;
+	struct thread *marker;
 	int doingzomb, flags = 0;
 	int error = 0;
 	int n;
@@ -888,9 +904,15 @@ sysctl_kern_proc(SYSCTL_HANDLER_ARGS)
 	oid &= ~KERN_PROC_FLAGMASK;
 
 	if ((oid == KERN_PROC_ALL && namelen != 0) ||
-	    (oid != KERN_PROC_ALL && namelen != 1))
+	    (oid != KERN_PROC_ALL && namelen != 1)) {
 		return (EINVAL);
+	}
 
+	/*
+	 * proc_token protects the allproc list and PHOLD() prevents the
+	 * process from being removed from the allproc list or the zombproc
+	 * list.
+	 */
 	lwkt_gettoken(&proc_token);
 	if (oid == KERN_PROC_PID) {
 		p = pfindn((pid_t)name[0]);
@@ -939,7 +961,7 @@ sysctl_kern_proc(SYSCTL_HANDLER_ARGS)
 				break;
 
 			case KERN_PROC_TTY:
-				if ((p->p_flag & P_CONTROLT) == 0 ||
+				if ((p->p_flags & P_CONTROLT) == 0 ||
 				    p->p_session == NULL ||
 				    p->p_session->s_ttyp == NULL ||
 				    dev2udev(p->p_session->s_ttyp->t_dev) != 
@@ -981,6 +1003,9 @@ sysctl_kern_proc(SYSCTL_HANDLER_ARGS)
 	if (!ps_showallthreads || jailed(cr1))
 		goto post_threads;
 
+	marker = kmalloc(sizeof(struct thread), M_TEMP, M_WAITOK|M_ZERO);
+	error = 0;
+
 	for (n = 1; n <= ncpus; ++n) {
 		globaldata_t rgd;
 		int nid;
@@ -991,25 +1016,54 @@ sysctl_kern_proc(SYSCTL_HANDLER_ARGS)
 		rgd = globaldata_find(nid);
 		lwkt_setcpu_self(rgd);
 
-		TAILQ_FOREACH(td, &mycpu->gd_tdallq, td_allq) {
-			if (td->td_proc)
+		crit_enter();
+		TAILQ_INSERT_TAIL(&rgd->gd_tdallq, marker, td_allq);
+		crit_exit();
+
+		while ((td = TAILQ_PREV(marker, lwkt_queue, td_allq)) != NULL) {
+			crit_enter();
+			if (td != TAILQ_PREV(marker, lwkt_queue, td_allq)) {
+				crit_exit();
 				continue;
+			}
+			TAILQ_REMOVE(&rgd->gd_tdallq, marker, td_allq);
+			TAILQ_INSERT_BEFORE(td, marker, td_allq);
+			lwkt_hold(td);
+			crit_exit();
+
+			if (td->td_flags & TDF_MARKER) {
+				lwkt_rele(td);
+				continue;
+			}
+			if (td->td_proc) {
+				lwkt_rele(td);
+				continue;
+			}
+
 			switch (oid) {
 			case KERN_PROC_PGRP:
 			case KERN_PROC_TTY:
 			case KERN_PROC_UID:
 			case KERN_PROC_RUID:
-				continue;
+				break;
 			default:
+				error = sysctl_out_proc_kthread(td, req,
+								doingzomb);
 				break;
 			}
-			lwkt_hold(td);
-			error = sysctl_out_proc_kthread(td, req, doingzomb);
 			lwkt_rele(td);
 			if (error)
-				goto post_threads;
+				break;
 		}
+		crit_enter();
+		TAILQ_REMOVE(&rgd->gd_tdallq, marker, td_allq);
+		crit_exit();
+
+		if (error)
+			break;
 	}
+	kfree(marker, M_TEMP);
+
 post_threads:
 	lwkt_reltoken(&proc_token);
 	return (error);
@@ -1037,11 +1091,10 @@ sysctl_kern_proc_args(SYSCTL_HANDLER_ARGS)
 	if (namelen != 1) 
 		return (EINVAL);
 
-	p = pfindn((pid_t)name[0]);
+	p = pfind((pid_t)name[0]);
 	if (p == NULL)
-		goto done2;
+		goto done;
 	lwkt_gettoken(&p->p_token);
-	PHOLD(p);
 
 	if ((!ps_argsopen) && p_trespass(cr1, p->p_ucred))
 		goto done;
@@ -1050,9 +1103,11 @@ sysctl_kern_proc_args(SYSCTL_HANDLER_ARGS)
 		error = EPERM;
 		goto done;
 	}
-	if (req->oldptr && p->p_args != NULL) {
-		error = SYSCTL_OUT(req, p->p_args->ar_args,
-				   p->p_args->ar_length);
+	if (req->oldptr && (pa = p->p_args) != NULL) {
+		refcount_acquire(&pa->ar_ref);
+		error = SYSCTL_OUT(req, pa->ar_args, pa->ar_length);
+		if (refcount_release(&pa->ar_ref))
+			kfree(pa, M_PARGS);
 	}
 	if (req->newptr == NULL)
 		goto done;
@@ -1086,9 +1141,10 @@ sysctl_kern_proc_args(SYSCTL_HANDLER_ARGS)
 		}
 	}
 done:
-	PRELE(p);
-	lwkt_reltoken(&p->p_token);
-done2:
+	if (p) {
+		lwkt_reltoken(&p->p_token);
+		PRELE(p);
+	}
 	return (error);
 }
 
@@ -1105,10 +1161,10 @@ sysctl_kern_proc_cwd(SYSCTL_HANDLER_ARGS)
 	if (namelen != 1) 
 		return (EINVAL);
 
-	lwkt_gettoken(&proc_token);
-	p = pfindn((pid_t)name[0]);
+	p = pfind((pid_t)name[0]);
 	if (p == NULL)
 		goto done;
+	lwkt_gettoken(&p->p_token);
 
 	/*
 	 * If we are not allowed to see other args, we certainly shouldn't
@@ -1117,20 +1173,23 @@ sysctl_kern_proc_cwd(SYSCTL_HANDLER_ARGS)
 	if ((!ps_argsopen) && p_trespass(cr1, p->p_ucred))
 		goto done;
 
-	PHOLD(p);
-	if (req->oldptr && p->p_fd != NULL) {
-		error = cache_fullpath(p, &p->p_fd->fd_ncdir,
-		    &fullpath, &freepath, 0);
+	if (req->oldptr && p->p_fd != NULL && p->p_fd->fd_ncdir.ncp) {
+		struct nchandle nch;
+
+		cache_copy(&p->p_fd->fd_ncdir, &nch);
+		error = cache_fullpath(p, &nch, &fullpath, &freepath, 0);
+		cache_drop(&nch);
 		if (error)
 			goto done;
 		error = SYSCTL_OUT(req, fullpath, strlen(fullpath) + 1);
 		kfree(freepath, M_TEMP);
 	}
 
-	PRELE(p);
-
 done:
-	lwkt_reltoken(&proc_token);
+	if (p) {
+		lwkt_reltoken(&p->p_token);
+		PRELE(p);
+	}
 	return (error);
 }
 

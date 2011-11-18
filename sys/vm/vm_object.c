@@ -172,19 +172,25 @@ vm_object_lock_swap(void)
 void
 vm_object_lock(vm_object_t obj)
 {
-	lwkt_getpooltoken(obj);
+	lwkt_gettoken(&obj->token);
+}
+
+void
+vm_object_lock_shared(vm_object_t obj)
+{
+	lwkt_gettoken_shared(&obj->token);
 }
 
 void
 vm_object_unlock(vm_object_t obj)
 {
-	lwkt_relpooltoken(obj);
+	lwkt_reltoken(&obj->token);
 }
 
 static __inline void
 vm_object_assert_held(vm_object_t obj)
 {
-	ASSERT_LWKT_TOKEN_HELD(lwkt_token_pool_lookup(obj));
+	ASSERT_LWKT_TOKEN_HELD(&obj->token);
 }
 
 void
@@ -207,17 +213,69 @@ debugvm_object_hold(vm_object_t obj, char *file, int line)
 
 #if defined(DEBUG_LOCKS)
 	int i;
+	u_int mask;
 
-	i = ffs(~obj->debug_hold_bitmap) - 1;
-	if (i == -1) {
-		kprintf("vm_object hold count > VMOBJ_DEBUG_ARRAY_SIZE");
-		obj->debug_hold_ovfl = 1;
+	for (;;) {
+		mask = ~obj->debug_hold_bitmap;
+		cpu_ccfence();
+		if (mask == 0xFFFFFFFFU) {
+			if (obj->debug_hold_ovfl == 0)
+				obj->debug_hold_ovfl = 1;
+			break;
+		}
+		i = ffs(mask) - 1;
+		if (atomic_cmpset_int(&obj->debug_hold_bitmap, ~mask,
+				      ~mask | (1 << i))) {
+			obj->debug_hold_bitmap |= (1 << i);
+			obj->debug_hold_thrs[i] = curthread;
+			obj->debug_hold_file[i] = file;
+			obj->debug_hold_line[i] = line;
+			break;
+		}
 	}
+#endif
+}
 
-	obj->debug_hold_bitmap |= (1 << i);
-	obj->debug_hold_thrs[i] = curthread;
-	obj->debug_hold_file[i] = file;
-	obj->debug_hold_line[i] = line;
+void
+#ifndef DEBUG_LOCKS
+vm_object_hold_shared(vm_object_t obj)
+#else
+debugvm_object_hold_shared(vm_object_t obj, char *file, int line)
+#endif
+{
+	KKASSERT(obj != NULL);
+
+	/*
+	 * Object must be held (object allocation is stable due to callers
+	 * context, typically already holding the token on a parent object)
+	 * prior to potentially blocking on the lock, otherwise the object
+	 * can get ripped away from us.
+	 */
+	refcount_acquire(&obj->hold_count);
+	vm_object_lock_shared(obj);
+
+#if defined(DEBUG_LOCKS)
+	int i;
+	u_int mask;
+
+	for (;;) {
+		mask = ~obj->debug_hold_bitmap;
+		cpu_ccfence();
+		if (mask == 0xFFFFFFFFU) {
+			if (obj->debug_hold_ovfl == 0)
+				obj->debug_hold_ovfl = 1;
+			break;
+		}
+		i = ffs(mask) - 1;
+		if (atomic_cmpset_int(&obj->debug_hold_bitmap, ~mask,
+				      ~mask | (1 << i))) {
+			obj->debug_hold_bitmap |= (1 << i);
+			obj->debug_hold_thrs[i] = curthread;
+			obj->debug_hold_file[i] = file;
+			obj->debug_hold_line[i] = line;
+			break;
+		}
+	}
 #endif
 }
 
@@ -251,16 +309,20 @@ vm_object_drop(vm_object_t obj)
 #endif
 
 	/*
-	 * The lock is a pool token, no new holders should be possible once
-	 * we drop hold_count 1->0 as there is no longer any way to reference
-	 * the object.
+	 * No new holders should be possible once we drop hold_count 1->0 as
+	 * there is no longer any way to reference the object.
 	 */
 	KKASSERT(obj->hold_count > 0);
 	if (refcount_release(&obj->hold_count)) {
-		if (obj->ref_count == 0 && (obj->flags & OBJ_DEAD))
+		if (obj->ref_count == 0 && (obj->flags & OBJ_DEAD)) {
+			vm_object_unlock(obj);
 			zfree(obj_zone, obj);
+		} else {
+			vm_object_unlock(obj);
+		}
+	} else {
+		vm_object_unlock(obj);
 	}
-	vm_object_unlock(obj);	/* uses pool token, ok to call on freed obj */
 }
 
 /*
@@ -277,6 +339,7 @@ _vm_object_allocate(objtype_t type, vm_pindex_t size, vm_object_t object)
 
 	RB_INIT(&object->rb_memq);
 	LIST_INIT(&object->shadow_head);
+	lwkt_token_init(&object->token, "vmobj");
 
 	object->type = type;
 	object->size = size;
@@ -1609,11 +1672,13 @@ vm_object_backing_scan_callback(vm_page_t p, void *data)
 	struct rb_vm_page_scan_info *info = data;
 	vm_object_t backing_object;
 	vm_object_t object;
+	vm_pindex_t pindex;
 	vm_pindex_t new_pindex;
 	vm_pindex_t backing_offset_index;
 	int op;
 
-	new_pindex = p->pindex - info->backing_offset_index;
+	pindex = p->pindex;
+	new_pindex = pindex - info->backing_offset_index;
 	op = info->limit;
 	object = info->object;
 	backing_object = info->backing_object;
@@ -1630,8 +1695,7 @@ vm_object_backing_scan_callback(vm_page_t p, void *data)
 		 * note that we do not busy the backing object's
 		 * page.
 		 */
-		if (
-		    p->pindex < backing_offset_index ||
+		if (pindex < backing_offset_index ||
 		    new_pindex >= object->size
 		) {
 			return(0);
@@ -1646,7 +1710,6 @@ vm_object_backing_scan_callback(vm_page_t p, void *data)
 		 * If this fails, the parent does not completely shadow
 		 * the object and we might as well give up now.
 		 */
-
 		pp = vm_page_lookup(object, new_pindex);
 		if ((pp == NULL || pp->valid == 0) &&
 		    !vm_pager_has_page(object, new_pindex)
@@ -1657,7 +1720,8 @@ vm_object_backing_scan_callback(vm_page_t p, void *data)
 	}
 
 	/*
-	 * Check for busy page
+	 * Check for busy page.  Note that we may have lost (p) when we
+	 * possibly blocked above.
 	 */
 	if (op & (OBSC_COLLAPSE_WAIT | OBSC_COLLAPSE_NOWAIT)) {
 		vm_page_t pp;
@@ -1678,6 +1742,18 @@ vm_object_backing_scan_callback(vm_page_t p, void *data)
 				return(-1);
 			}
 		}
+
+		/*
+		 * If (p) is no longer valid restart the scan.
+		 */
+		if (p->object != backing_object || p->pindex != pindex) {
+			kprintf("vm_object_backing_scan: Warning: page "
+				"%p ripped out from under us\n", p);
+			vm_page_wakeup(p);
+			info->error = -1;
+			return(-1);
+		}
+
 		if (op & OBSC_COLLAPSE_NOWAIT) {
 			if (p->valid == 0 /*|| p->hold_count*/ ||
 			    p->wire_count) {
@@ -2354,7 +2430,14 @@ vm_object_set_writeable_dirty(vm_object_t object)
 	struct vnode *vp;
 
 	/*vm_object_assert_held(object);*/
-	vm_object_set_flag(object, OBJ_WRITEABLE|OBJ_MIGHTBEDIRTY);
+	/*
+	 * Avoid contention in vm fault path by checking the state before
+	 * issuing an atomic op on it.
+	 */
+	if ((object->flags & (OBJ_WRITEABLE|OBJ_MIGHTBEDIRTY)) !=
+	    (OBJ_WRITEABLE|OBJ_MIGHTBEDIRTY)) {
+		vm_object_set_flag(object, OBJ_WRITEABLE|OBJ_MIGHTBEDIRTY);
+	}
 	if (object->type == OBJT_VNODE &&
 	    (vp = (struct vnode *)object->handle) != NULL) {
 		if ((vp->v_flag & VOBJDIRTY) == 0) {

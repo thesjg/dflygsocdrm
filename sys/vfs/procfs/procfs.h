@@ -99,7 +99,7 @@ struct pfsnode {
      ((((p1)->p_ucred->cr_uid == (p2)->p_ucred->cr_ruid) && \
        ((p1)->p_ucred->cr_ruid == (p2)->p_ucred->cr_ruid) && \
        ((p1)->p_ucred->cr_svuid == (p2)->p_ucred->cr_ruid) && \
-       ((p2)->p_flag & (P_SUGID|P_INEXEC)) == 0) || \
+       ((p2)->p_flags & (P_SUGID|P_INEXEC)) == 0) || \
       (priv_check_cred((p1)->p_ucred, PRIV_DEBUG_UNPRIV, 0) == 0))
 
 /*
@@ -154,6 +154,7 @@ int procfs_validmap (struct lwp *);
 int procfs_validtype (struct lwp *);
 
 struct proc *pfs_pfind(pid_t);
+void pfs_pdone(struct proc *);
 
 #define PROCFS_LOCKED	0x01
 #define PROCFS_WANT	0x02
