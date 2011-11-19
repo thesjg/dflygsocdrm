@@ -231,7 +231,7 @@ vm_swapcached_thread(void)
 			if (vm_swap_cache_use > SWAPMAX(0))
 				state = SWAPC_CLEANING;
 		} else {
-			if (vm_swap_cache_use < SWAPMAX(-5))
+			if (vm_swap_cache_use < SWAPMAX(-10))
 				state = SWAPC_WRITING;
 		}
 
@@ -636,10 +636,13 @@ vm_swapcache_cleaning(vm_object_t marker)
 	lwkt_gettoken(&vmobj_token);
 
 	while ((object = TAILQ_NEXT(object, object_list)) != NULL) {
-		lwkt_yield();
-		if (--count <= 0)
-			break;
 		vm_object_hold(object);
+
+		lwkt_yield();
+		if (--count <= 0) {
+			vm_object_drop(object);
+			break;
+		}
 
 		/* 
 		 * Only operate on live VNODE objects with regular/chardev types
@@ -678,9 +681,13 @@ vm_swapcache_cleaning(vm_object_t marker)
 		 * requested number of blocks, it will return n >= count
 		 * and we break and pick it back up on a future attempt.
 		 */
+		lwkt_token_swap();
+		lwkt_reltoken(&vmobj_token);
+
 		n = swap_pager_condfree(object, &marker->size, count);
 
 		vm_object_drop(object);
+		lwkt_gettoken(&vmobj_token);
 	
 		count -= n;
 		if (count < 0) 
