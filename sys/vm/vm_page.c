@@ -217,6 +217,7 @@ vm_add_new_page(vm_paddr_t pa)
 		atomic_add_int(&vmstats.v_dma_pages, 1);
 		m->queue = PQ_NONE;
 		m->wire_count = 1;
+		atomic_add_int(&vmstats.v_wire_count, 1);
 		alist_free(&vm_contig_alist, pa >> PAGE_SHIFT, 1);
 		return;
 	}
@@ -1486,6 +1487,7 @@ vm_page_alloc(vm_object_t object, vm_pindex_t pindex, int page_req)
 #ifdef SMP
 	globaldata_t gd = mycpu;
 #endif
+	vm_object_t obj;
 	vm_page_t m;
 	u_short pg_color;
 
@@ -1569,12 +1571,29 @@ loop:
 #endif
 		/*
 		 * On success move the page into the free queue and loop.
+		 *
+		 * Only do this if we can safely acquire the vm_object lock,
+		 * because this is effectively a random page and the caller
+		 * might be holding the lock shared, we don't want to
+		 * deadlock.
 		 */
 		if (m != NULL) {
 			KASSERT(m->dirty == 0,
 				("Found dirty cache page %p", m));
-			vm_page_protect(m, VM_PROT_NONE);
-			vm_page_free(m);
+			if ((obj = m->object) != NULL) {
+				if (vm_object_hold_try(obj)) {
+					vm_page_protect(m, VM_PROT_NONE);
+					vm_page_free(m);
+					/* m->object NULL here */
+					vm_object_drop(obj);
+				} else {
+					vm_page_deactivate(m);
+					vm_page_wakeup(m);
+				}
+			} else {
+				vm_page_protect(m, VM_PROT_NONE);
+				vm_page_free(m);
+			}
 			goto loop;
 		}
 
