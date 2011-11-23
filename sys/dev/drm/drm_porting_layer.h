@@ -1264,24 +1264,9 @@ finish_wait(
 	;
 }
 
-/* file ttm_memory.c, function ttm_mem_global_init() */
-/*
-struct work {
-	int placeholder;
-};
-*/
-
-struct DRM_DELAYED_WORK {
-	struct task task;
-	unsigned long delay; /* in jiffies */
-	int cancel;
-};
-
 struct work_struct {
 	struct task task;
-	void (*function)(void *data);
-	void (*task_fn)(void *context, int pending);
-	void *data;
+	void (*work_fn)(struct work_struct *work);
 };
 
 /* file ttm_bo_c, function ttm_bo_cleanup_refs() */
@@ -1289,29 +1274,32 @@ struct delayed_work {
 	struct work_struct work;
 	struct callout callout;
 	unsigned long delay;
+	struct taskqueue *tq;
 	int cancel;
 };
 
-/* file ttm_memory.c, function ttm_mem_global_init() */
+#define DRM_DELAYED_WORK delayed_work 
 
-static __inline__ void
-DRM_INIT_WORK(
-    struct work_struct *work,
-    void (*task_fn)(void *context, int pending)
-) {
-	TASK_INIT(&work->task, 0, task_fn, work);
-}
-
-static __inline__ void
-DRM_INIT_DELAYED_WORK(
-    struct delayed_work *work,
-    void (*task_fn)(void *context, int pending)
-) {
-	TASK_INIT(&work->work.task, 0, task_fn, work);
-}
+void convert_work(void *context, int pending);
 
 /* file intel_display.c, function intel_crtc_page_flip() */
-#define INIT_WORK(a, b) /* UNIMPLEMENTED */
+#define INIT_WORK(pwork, funct)                                      \
+	do {                                                         \
+		TASK_INIT(&(pwork)->task, 0, convert_work, (pwork)); \
+		(pwork)->work_fn = (funct);                          \
+	}                                                            \
+	while (0)
+
+/* file intel_display.c, function intel_crtc_page_flip() */
+#define INIT_DELAYED_WORK(pwork, funct)                                          \
+	do {                                                                     \
+		TASK_INIT(&(pwork)->work.task, 0, convert_work, &(pwork)->work); \
+		(pwork)->work.work_fn = (funct);                                 \
+		callout_init(&(pwork)->callout);                                 \
+		(pwork)->delay = 0;                                              \
+		(pwork)->cancel = 0;                                             \
+	}                                                                        \
+	while (0)
 
 /* defined out: file drm_fb_helper.c, function drm_fb_helper.sysrq() */
 /* intel_display.c, function intel_finish_page_flip() */
@@ -1320,16 +1308,55 @@ schedule_work(struct work_struct *work) {
 	return 0;
 }
 
-#if 0
-struct workqueue {
-	int placeholder;
-};
-#endif
-
 /* file ttm_memory.c, function ttm_mem_global_reserve() */
-struct workqueue_struct {
-	int placeholder;
-};
+
+#define workqueue_struct  taskqueue
+
+/* file ttm_memory.c, function ttm_mem_global_init() */
+/* context should be a pointer to the taskqueue pointer */
+static __inline__ struct workqueue_struct *
+DRM_CREATE_WORKQUEUE(const char *name, void *context) {
+	struct taskqueue *tsq = taskqueue_create(name, M_WAITOK,
+		taskqueue_thread_enqueue, context);
+	if (tsq == NULL) {
+		goto failalloc;
+	}
+	if (taskqueue_start_threads(&tsq, 1, TDPRI_KERN_DAEMON, -1,
+		"%s taskq", "drmstq")) {
+		goto failthread;
+	}
+	return (tsq);
+
+failthread:
+	taskqueue_free(tsq);
+	return NULL;
+
+failalloc:
+	return NULL;
+}
+
+/* file ttm_memory.c, function ttm_mem_global_init() */
+/* context should be a pointer to the taskqueue pointer */
+static __inline__ struct workqueue_struct *
+DRM_CREATE_SINGLETHREAD_WORKQUEUE(const char *name, void *context) {
+	struct taskqueue *tsq = taskqueue_create(name, M_WAITOK,
+		taskqueue_thread_enqueue, context);
+	if (tsq == NULL) {
+		goto failalloc;
+	}
+	if (taskqueue_start_threads(&tsq, 1, TDPRI_KERN_DAEMON, -1,
+		"%s taskq", "drmstq")) {
+		goto failthread;
+	}
+	return (tsq);
+
+failthread:
+	taskqueue_free(tsq);
+	return NULL;
+
+failalloc:
+	return NULL;
+}
 
 /* file ttm_memory.c, function ttm_mem_global_init() */
 static __inline__ struct workqueue_struct *
@@ -1337,33 +1364,52 @@ create_singlethread_workqueue(const char *name) {
 	return NULL;
 }
 
+/* Insert delayed_work onto workqueue after a delay */
+void call_delayed(void *arg);
+
+/* file radeon_pm.c, function radeon_pm_compute_clocks() */
+static __inline__ int
+queue_delayed_work(
+	struct workqueue_struct *wq,
+	struct delayed_work *work,
+	unsigned long delayed 
+) {
+	callout_reset(&work->callout, delayed, call_delayed, work);
+	return 0;
+}
+
 /* file ttm_memory.c, function ttm_check_swapping() */
 /* file intel_display.c, function intel_gpu_idle_timer() */
+/* return value of queue_work does not appear to be used
+ * but apparently is supposed to be nonzero if normal return,
+ * 0 if already queued
+ */
 static __inline__ int
-queue_work(struct workqueue_struct *swap_queue, struct work_struct *work) {
-	return 0;
+queue_work(struct workqueue_struct *queue, struct work_struct *work) {
+	return taskqueue_enqueue(queue, &work->task);
 }
 
 /* file ttm_memory.c, function ttm_mem_global_release() */
-static __inline__ int
-flush_workqueue(struct workqueue_struct *swap_queue) {
-	return 0;
+static __inline__ void 
+flush_workqueue(struct workqueue_struct *queue) {
+	;
 }
 
 /* file ttm_memory.c, function ttm_mem_global_release() */
-static __inline__ int
+static __inline__ void 
 destroy_workqueue(struct workqueue_struct *swap_queue) {
-	return 0;
+	taskqueue_free(swap_queue);
 }
 
-/* file ttm_bo_c, function ttm_bo_cleanup_refs() */
-#if 0
-void INIT_DELAYED_WORK(
-    struct delayed_work *wq,
-    void (*callback)(struct work_struct *work)
-);
-#endif
-#define INIT_DELAYED_WORK(a, b) /* UNIMPLEMENTED */
+/* file ttm_bo_c, function ttm_bo_lock_delayed_workqueue() */
+/* file i915_gem.c */
+static __inline__ int
+cancel_delayed_work_sync(struct delayed_work *work) {
+	work->cancel = 1;
+	taskqueue_drain(work->tq, &work->work.task);
+	work->cancel = 0;
+	return 0;
+}
 
 /* file ttm_bo_c,
  * function ttm_bo_cleanup_refs() */
@@ -1389,26 +1435,9 @@ cancel_delayed_work(struct delayed_work *wq) {
 	return 0;
 }
 
-/* file ttm_bo_c, function ttm_bo_lock_delayed_workqueue() */
-/* file i915_gem.c */
-static __inline__ int
-cancel_delayed_work_sync(struct delayed_work *wq) {
-	return 0;
-}
-
 /* file ttm_bo_c, function ttm_bo_device_release() */
 static __inline__ int
 flush_scheduled_work(void) {
-	return 0;
-}
-
-/* file radeon_pm.c, function radeon_pm_compute_clocks() */
-static __inline__ int
-queue_delayed_work(
-	struct workqueue_struct *wq,
-	struct delayed_work *dynpm_idle_work,
-	unsigned long jiffies
-) {
 	return 0;
 }
 

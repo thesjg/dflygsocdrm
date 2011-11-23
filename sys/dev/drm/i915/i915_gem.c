@@ -1906,16 +1906,8 @@ i915_add_request(struct drm_device *dev, struct drm_file *file_priv,
 		callout_reset(&dev_priv->hangcheck_timer, DRM_I915_HANGCHECK_PERIOD,
 			i915_hangcheck_elapsed, dev);
 #endif
-#ifdef __linux__
 		if (was_empty)
 			queue_delayed_work(dev_priv->wq, &dev_priv->mm.retire_work, HZ);
-#else
-		if (was_empty) {
-			dev_priv->mm.retire_work.delay = HZ;
-			dev_priv->mm.retire_work.cancel = 0;
-			taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->mm.retire_work.task);
-		}
-#endif
 	}
 	return seqno;
 }
@@ -2063,36 +2055,20 @@ i915_gem_retire_requests(struct drm_device *dev)
 }
 
 void
-i915_gem_retire_work_handler(void *context, int pending)
+i915_gem_retire_work_handler(struct work_struct *work)
 {
 	drm_i915_private_t *dev_priv;
 	struct drm_device *dev;
 
-#ifdef __linux__
 	dev_priv = container_of(work, drm_i915_private_t,
 				mm.retire_work.work);
-#else
-	struct DRM_DELAYED_WORK *work = (struct DRM_DELAYED_WORK *)context;
-	unsigned long delay = work->delay;
-	dev_priv = (drm_i915_private_t *)work->task.ta_context;
-/* delay for delay in HZ */
-	msleep(delay);
-#endif
 	dev = dev_priv->dev;
 
 	mutex_lock(&dev->struct_mutex);
 	i915_gem_retire_requests(dev);
-#ifdef __linux__
 	if (!dev_priv->mm.suspended &&
 	    !list_empty(&dev_priv->mm.request_list))
 		queue_delayed_work(dev_priv->wq, &dev_priv->mm.retire_work, HZ);
-#else
-	if (!dev_priv->mm.suspended &&
-	    !list_empty(&dev_priv->mm.request_list) && !work->cancel) {
-		dev_priv->mm.retire_work.delay = HZ;
-		taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->mm.retire_work.task);
-	}
-#endif
 	mutex_unlock(&dev->struct_mutex);
 }
 
@@ -4926,12 +4902,7 @@ i915_gem_idle(struct drm_device *dev)
 	mutex_unlock(&dev->struct_mutex);
 
 	/* Cancel the retire work handler, which should be idle now. */
-#ifdef __linux__
 	cancel_delayed_work_sync(&dev_priv->mm.retire_work);
-#else
-	dev_priv->mm.retire_work.cancel = 1;
-	taskqueue_drain(dev_priv->wq_legacy, &dev_priv->mm.retire_work.task);
-#endif
 
 	return 0;
 }
@@ -5297,14 +5268,8 @@ i915_gem_load(struct drm_device *dev)
 	INIT_LIST_HEAD(&dev_priv->mm.inactive_list);
 	INIT_LIST_HEAD(&dev_priv->mm.request_list);
 	INIT_LIST_HEAD(&dev_priv->mm.fence_list);
-#ifdef __linux__
 	INIT_DELAYED_WORK(&dev_priv->mm.retire_work,
 			  i915_gem_retire_work_handler);
-#else
-	TASK_INIT(&dev_priv->mm.retire_work.task, 0,
-			  i915_gem_retire_work_handler, dev_priv);
-	dev_priv->mm.retire_work.cancel = 0;
-#endif
 	dev_priv->mm.next_gem_seqno = 1;
 
 	spin_lock(&shrink_list_lock);

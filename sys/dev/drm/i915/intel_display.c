@@ -3926,11 +3926,7 @@ static void intel_gpu_idle_timer(void *arg)
 
 	dev_priv->busy = false;
 
-#ifdef __linux__
 	queue_work(dev_priv->wq, &dev_priv->idle_work);
-#else
-	taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->idle_work);
-#endif
 }
 
 #define CRTC_IDLE_TIMEOUT 1000 /* ms */
@@ -3949,11 +3945,7 @@ static void intel_crtc_idle_timer(void *arg)
 
 	intel_crtc->busy = false;
 
-#ifdef __linux__
 	queue_work(dev_priv->wq, &dev_priv->idle_work);
-#else
-	taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->idle_work);
-#endif
 }
 
 static void intel_increase_pllclock(struct drm_crtc *crtc, bool schedule)
@@ -4049,18 +4041,10 @@ static void intel_decrease_pllclock(struct drm_crtc *crtc)
  * Either the GPU or display (or both) went idle.  Check the busy status
  * here and adjust the CRTC and GPU clocks as necessary.
  */
-#ifdef __linux__
 static void intel_idle_update(struct work_struct *work)
-#else /* adapted for BSD task */
-static void intel_idle_update(void *context, int pending)
-#endif
 {
-#ifdef __linux__
 	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
 						    idle_work);
-#else
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *)context;
-#endif
 	struct drm_device *dev = dev_priv->dev;
 	struct drm_crtc *crtc;
 	struct intel_crtc *intel_crtc;
@@ -5025,11 +5009,7 @@ void intel_modeset_init(struct drm_device *dev)
 	if (IS_IRONLAKE_M(dev))
 		ironlake_enable_drps(dev);
 
-#ifdef __linux__
 	INIT_WORK(&dev_priv->idle_work, intel_idle_update);
-#else
-	TASK_INIT(&dev_priv->idle_work, 0, intel_idle_update, (void *)dev_priv);
-#endif
 #ifdef __linux__
 	setup_timer(&dev_priv->idle_timer, intel_gpu_idle_timer,
 		    (unsigned long)dev);

@@ -342,3 +342,17 @@ ida_destroy(struct ida *pida) {
  **********************************************************/
 
 const char *fb_mode_option = DEFAULT_FB_MODE_OPTION;
+
+/**********************************************************
+ * WORKQUEUE                                              *
+ **********************************************************/
+
+void convert_work(void *context, int pending) {
+	struct work_struct *work = (struct work_struct *)context;
+	(work->work_fn)(work);
+}
+
+void call_delayed(void *arg) {
+	struct delayed_work *work = (struct delayed_work *)arg;
+	taskqueue_enqueue(work->tq, &work->work.task);
+}

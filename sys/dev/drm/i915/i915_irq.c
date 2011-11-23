@@ -263,18 +263,10 @@ u32 gm45_get_vblank_counter(struct drm_device *dev, int pipe)
 /*
  * Handle hotplug events outside the interrupt handler proper.
  */
-#ifdef __linux__
 static void i915_hotplug_work_func(struct work_struct *work)
-#else
-static void i915_hotplug_work_func(void *context, int pending)
-#endif
 {
-#ifdef __linux__
 	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
 						    hotplug_work);
-#else
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *)context;
-#endif
 	struct drm_device *dev = dev_priv->dev;
 	struct drm_mode_config *mode_config = &dev->mode_config;
 	struct drm_connector *connector;
@@ -410,11 +402,7 @@ irqreturn_t ironlake_irq_handler(struct drm_device *dev)
 	/* check event from PCH */
 	if ((de_iir & DE_PCH_EVENT) &&
 	    (pch_iir & SDE_HOTPLUG_MASK)) {
-#ifdef __linux__
 		queue_work(dev_priv->wq, &dev_priv->hotplug_work);
-#else
-		taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->hotplug_work);
-#endif
 	}
 #endif
 
@@ -442,18 +430,10 @@ done:
  * Fire an error uevent so userspace can see that a hang or error
  * was detected.
  */
-#ifdef __linux__
 static void i915_error_work_func(struct work_struct *work)
-#else
-static void i915_error_work_func(void *context, int pending)
-#endif
 {
-#ifdef __linux__
 	drm_i915_private_t *dev_priv = container_of(work, drm_i915_private_t,
 						    error_work);
-#else
-	drm_i915_private_t *dev_priv = (drm_i915_private_t *)context;
-#endif
 	struct drm_device *dev = dev_priv->dev;
 	char *error_event[] = { "ERROR=1", NULL };
 	char *reset_event[] = { "RESET=1", NULL };
@@ -914,11 +894,7 @@ static void i915_handle_error(struct drm_device *dev, bool wedged)
 		DRM_WAKEUP(&dev_priv->irq_queue);
 	}
 
-#ifdef __linux__
 	queue_work(dev_priv->wq, &dev_priv->error_work);
-#else
-	taskqueue_enqueue(dev_priv->wq_legacy, &dev_priv->error_work);
-#endif
 }
 
 irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
@@ -997,13 +973,8 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 			DRM_DEBUG_DRIVER("hotplug event received, stat 0x%08x\n",
 				  hotplug_status);
 			if (hotplug_status & dev_priv->hotplug_supported_mask)
-#ifdef __linux__
 				queue_work(dev_priv->wq,
 					   &dev_priv->hotplug_work);
-#else
-				taskqueue_enqueue(dev_priv->wq_legacy,
-					   &dev_priv->hotplug_work);
-#endif
 
 			I915_WRITE(PORT_HOTPLUG_STAT, hotplug_status);
 			I915_READ(PORT_HOTPLUG_STAT);
@@ -1508,14 +1479,11 @@ void i915_driver_irq_preinstall(struct drm_device * dev)
 	atomic_set(&dev_priv->irq_received, 0);
 
 #ifdef DRM_NEWER_HOTPLUG
-#ifdef __linux__
 	INIT_WORK(&dev_priv->hotplug_work, i915_hotplug_work_func);
-	INIT_WORK(&dev_priv->error_work, i915_error_work_func);
-#else
-	TASK_INIT(&dev_priv->hotplug_work, 0, i915_hotplug_work_func, (void *)dev_priv);
-	TASK_INIT(&dev_priv->error_work, 0, i915_error_work_func, (void *)dev_priv);
 #endif
+	INIT_WORK(&dev_priv->error_work, i915_error_work_func);
 
+#ifdef DRM_NEWER_HOTPLUG
 	if (HAS_PCH_SPLIT(dev)) {
 		ironlake_irq_preinstall(dev);
 		return;
@@ -1525,7 +1493,7 @@ void i915_driver_irq_preinstall(struct drm_device * dev)
 		I915_WRITE(PORT_HOTPLUG_EN, 0);
 		I915_WRITE(PORT_HOTPLUG_STAT, I915_READ(PORT_HOTPLUG_STAT));
 	}
-#endif /* __linux__ */
+#endif
 
 	I915_WRITE(HWSTAM, 0xeffe);
 	I915_WRITE(PIPEASTAT, 0);
