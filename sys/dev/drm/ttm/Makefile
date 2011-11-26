@@ -14,7 +14,6 @@ SRCS    = \
 	ttm_memory.c \
 	ttm_module.c \
 	ttm_object.c \
-	ttm_page_alloc.c \
 	ttm_tt.c
 
 SRCS   += device_if.h bus_if.h pci_if.h opt_drm.h
