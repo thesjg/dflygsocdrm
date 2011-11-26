@@ -32,7 +32,9 @@
 #include "drmP.h"
 #include "vmwgfx_drm.h"
 #include "drm_hashtab.h"
+#ifdef __linux__
 #include "linux/suspend.h"
+#endif
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_object.h"
 #include "ttm/ttm_lock.h"

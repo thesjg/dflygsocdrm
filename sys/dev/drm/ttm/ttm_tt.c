@@ -64,7 +64,6 @@ static void ttm_tt_free_page_directory(struct ttm_tt *ttm)
 
 static struct page *ttm_tt_alloc_page(unsigned page_flags)
 {
-#ifdef __linux__ /* UNIMPLEMENTED */
 	gfp_t gfp_flags = GFP_USER;
 
 	if (page_flags & TTM_PAGE_FLAG_ZERO_ALLOC)
@@ -76,9 +75,6 @@ static struct page *ttm_tt_alloc_page(unsigned page_flags)
 		gfp_flags |= __GFP_HIGHMEM;
 
 	return alloc_page(gfp_flags);
-#else
-	return NULL;
-#endif
 }
 
 static void ttm_tt_free_user_pages(struct ttm_tt *ttm)

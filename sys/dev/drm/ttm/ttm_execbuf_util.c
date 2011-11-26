@@ -31,10 +31,10 @@
 #include <linux/module.h>
 #else
 #include "drm_porting_layer.h"
+#endif
 #include "ttm/ttm_execbuf_util.h"
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_placement.h"
-#endif
 
 void ttm_eu_backoff_reservation(struct list_head *list)
 {

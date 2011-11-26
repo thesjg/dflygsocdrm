@@ -38,7 +38,7 @@
 #include "drm_porting_layer.h"
 #include "ttm/ttm_memory.h"
 #include "ttm/ttm_module.h"
-#include "drm_porting_memory.h"
+#include "drmP.h"
 #endif
 
 #define TTM_MEMORY_ALLOC_RETRIES 4
@@ -83,7 +83,11 @@ static void ttm_mem_zone_kobj_release(struct kobject *kobj)
 	printk(KERN_INFO TTM_PFX
 	       "Zone %7s: Used memory at exit: %llu kiB.\n",
 	       zone->name, (unsigned long long) zone->used_mem >> 10);
+#ifdef __linux__
 	kfree(zone);
+#else
+	free(zone, DRM_MEM_DRIVER);
+#endif
 }
 
 static ssize_t ttm_mem_zone_show(struct kobject *kobj,
@@ -176,7 +180,11 @@ static void ttm_mem_global_kobj_release(struct kobject *kobj)
 	struct ttm_mem_global *glob =
 		container_of(kobj, struct ttm_mem_global, kobj);
 
+#ifdef __linux__
 	kfree(glob);
+#else
+	free(glob, DRM_MEM_DRIVER);
+#endif
 }
 
 static struct kobj_type ttm_mem_glob_kobj_type = {
@@ -195,8 +203,13 @@ static bool ttm_zones_above_swap_target(struct ttm_mem_global *glob,
 
 		if (from_wq)
 			target = zone->swap_limit;
+#ifdef __linux__
 		else if (capable(CAP_SYS_ADMIN))
 			target = zone->emer_mem;
+#else
+		else if (DRM_SUSER(DRM_CURPROC))
+			target = zone->emer_mem;
+#endif
 		else
 			target = zone->max_mem;
 
@@ -250,7 +263,11 @@ static void ttm_shrink_work(struct work_struct *work)
 static int ttm_mem_init_kernel_zone(struct ttm_mem_global *glob,
 				    const struct sysinfo *si)
 {
+#ifdef __linux__
 	struct ttm_mem_zone *zone = kzalloc(sizeof(*zone), GFP_KERNEL);
+#else
+	struct ttm_mem_zone *zone = malloc(sizeof(*zone), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	uint64_t mem;
 	int ret;
 
@@ -289,7 +306,11 @@ static int ttm_mem_init_highmem_zone(struct ttm_mem_global *glob,
 	if (si->totalhigh == 0)
 		return 0;
 
+#ifdef __linux__
 	zone = kzalloc(sizeof(*zone), GFP_KERNEL);
+#else
+	zone = malloc(sizeof(*zone), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	if (unlikely(!zone))
 		return -ENOMEM;
 
@@ -317,7 +338,11 @@ static int ttm_mem_init_highmem_zone(struct ttm_mem_global *glob,
 static int ttm_mem_init_dma32_zone(struct ttm_mem_global *glob,
 				   const struct sysinfo *si)
 {
+#ifdef __linux__
 	struct ttm_mem_zone *zone = kzalloc(sizeof(*zone), GFP_KERNEL);
+#else
+	struct ttm_mem_zone *zone = malloc(sizeof(*zone), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	uint64_t mem;
 	int ret;
 
@@ -332,7 +357,11 @@ static int ttm_mem_init_dma32_zone(struct ttm_mem_global *glob,
 	 */
 
 	if (mem <= ((uint64_t) 1ULL << 32)) {
+#ifdef __linux__
 		kfree(zone);
+#else
+		free(zone, DRM_MEM_DRIVER);
+#endif
 		return 0;
 	}
 
@@ -370,7 +399,11 @@ int ttm_mem_global_init(struct ttm_mem_global *glob)
 	struct ttm_mem_zone *zone;
 
 	spin_lock_init(&glob->lock);
+#ifdef __linux__
 	glob->swap_queue = create_singlethread_workqueue("ttm_swap");
+#else
+	glob->swap_queue = DRM_CREATE_SINGLETHREAD_WORKQUEUE("ttm_swap", &glob->swap_queue);
+#endif
 	INIT_WORK(&glob->work, ttm_shrink_work);
 	init_waitqueue_head(&glob->queue);
 	ret = kobject_init_and_add(

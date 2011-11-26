@@ -134,7 +134,7 @@ static void ttm_agp_destroy(struct ttm_backend *backend)
 	if (agp_be->mem)
 		ttm_agp_clear(backend);
 #ifdef __linux__
-	kfree(agp_be);
+	free(agp_be, DRM_MEM_DRIVER);
 #endif
 }
 
@@ -151,7 +151,7 @@ struct ttm_backend *ttm_agp_backend_init(struct ttm_bo_device *bdev,
 {
 #ifdef __linux__ /* UNIMPLEMENTED */
 	struct ttm_agp_backend *agp_be;
-	agp_be = kmalloc(sizeof(*agp_be), GFP_KERNEL);
+	agp_be = malloc(sizeof(*agp_be), DRM_MEM_DRIVER, M_WAITOK);
 	if (!agp_be)
 		return NULL;
 

@@ -72,7 +72,11 @@ static bool __ttm_read_lock(struct ttm_lock *lock)
 
 	spin_lock(&lock->lock);
 	if (unlikely(lock->kill_takers)) {
+#ifdef __linux__
 		send_sig(lock->signal, current, 0);
+#else
+		DRM_SEND_SIG(lock->signal, curproc, 0);
+#endif
 		spin_unlock(&lock->lock);
 		return false;
 	}
@@ -105,7 +109,11 @@ static bool __ttm_read_trylock(struct ttm_lock *lock, bool *locked)
 
 	spin_lock(&lock->lock);
 	if (unlikely(lock->kill_takers)) {
+#ifdef __linux__
 		send_sig(lock->signal, current, 0);
+#else
+		DRM_SEND_SIG(lock->signal, curproc, 0);
+#endif
 		spin_unlock(&lock->lock);
 		return false;
 	}
@@ -155,7 +163,11 @@ static bool __ttm_write_lock(struct ttm_lock *lock)
 
 	spin_lock(&lock->lock);
 	if (unlikely(lock->kill_takers)) {
+#ifdef __linux__
 		send_sig(lock->signal, current, 0);
+#else
+		DRM_SEND_SIG(lock->signal, curproc, 0);
+#endif
 		spin_unlock(&lock->lock);
 		return false;
 	}

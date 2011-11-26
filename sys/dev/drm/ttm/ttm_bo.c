@@ -51,7 +51,7 @@
 #include "ttm/ttm_module.h"
 #include "ttm/ttm_bo_driver.h"
 #include "ttm/ttm_placement.h"
-#include "drm_porting_memory.h"
+#include "drmP.h"
 #endif
 
 #define TTM_ASSERT_LOCKED(param)
@@ -173,7 +173,11 @@ static void ttm_bo_release_list(struct kref *list_kref)
 		bo->destroy(bo);
 	else {
 		ttm_mem_global_free(bdev->glob->mem_glob, bo->acc_size);
+#ifdef __linux__
 		kfree(bo);
+#else
+		free(bo, DRM_MEM_DRIVER);
+#endif
 	}
 }
 
@@ -1244,7 +1248,11 @@ int ttm_bo_create(struct ttm_bo_device *bdev,
 	if (unlikely(ret != 0))
 		return ret;
 
+#ifdef __linux__
 	bo = kzalloc(sizeof(*bo), GFP_KERNEL);
+#else
+	bo = malloc(sizeof(*bo), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 
 	if (unlikely(bo == NULL)) {
 		ttm_mem_global_free(mem_glob, acc_size);
@@ -1401,7 +1409,11 @@ static void ttm_bo_global_kobj_release(struct kobject *kobj)
 
 	ttm_mem_unregister_shrink(glob->mem_glob, &glob->shrink);
 	__free_page(glob->dummy_read_page);
+#ifdef __linux__
 	kfree(glob);
+#else
+	free(glob, DRM_MEM_DRIVER);
+#endif
 }
 
 void ttm_bo_global_release(struct ttm_global_reference *ref)
@@ -1458,7 +1470,11 @@ int ttm_bo_global_init(struct ttm_global_reference *ref)
 out_no_shrink:
 	__free_page(glob->dummy_read_page);
 out_no_drp:
+#ifdef __linux__
 	kfree(glob);
+#else
+	free(glob, DRM_MEM_DRIVER);
+#endif
 	return ret;
 }
 EXPORT_SYMBOL(ttm_bo_global_init);

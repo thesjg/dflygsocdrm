@@ -588,7 +588,11 @@ err_defio:
 err_unref:
 	ttm_bo_unref((struct ttm_buffer_object **)&par->vmw_bo);
 err_free:
+#ifdef __linux__
 	vfree(par->vmalloc);
+#else
+	free(par->vmalloc, DRM_MEM_DRIVER);
+#endif
 	framebuffer_release(info);
 	vmw_priv->fb_info = NULL;
 
@@ -616,7 +620,11 @@ int vmw_fb_close(struct vmw_private *vmw_priv)
 	ttm_bo_kunmap(&par->map);
 	ttm_bo_unref(&bo);
 
+#ifdef __linux__
 	vfree(par->vmalloc);
+#else
+	free(par->vmalloc, DRM_MEM_DRIVER);
+#endif
 	framebuffer_release(info);
 
 	return 0;

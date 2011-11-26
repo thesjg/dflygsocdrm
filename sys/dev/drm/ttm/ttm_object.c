@@ -61,7 +61,6 @@
 #include "drm_porting_layer.h"
 #include "ttm/ttm_object.h"
 #include "ttm/ttm_module.h"
-#include "drm_porting_memory.h"
 #endif
 
 struct ttm_object_file {
@@ -133,7 +132,11 @@ static void ttm_object_file_destroy(struct kref *kref)
 	struct ttm_object_file *tfile =
 		container_of(kref, struct ttm_object_file, refcount);
 
+#ifdef __linux__
 	kfree(tfile);
+#else
+	free(tfile, DRM_MEM_DRIVER);
+#endif
 }
 
 
@@ -278,7 +281,11 @@ int ttm_ref_object_add(struct ttm_object_file *tfile,
 					   false, false);
 		if (unlikely(ret != 0))
 			return ret;
+#ifdef __linux__
 		ref = kmalloc(sizeof(*ref), GFP_KERNEL);
+#else
+		ref = malloc(sizeof(*ref), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 		if (unlikely(ref == NULL)) {
 			ttm_mem_global_free(mem_glob, sizeof(*ref));
 			return -ENOMEM;
@@ -306,7 +313,11 @@ int ttm_ref_object_add(struct ttm_object_file *tfile,
 		BUG_ON(ret != -EINVAL);
 
 		ttm_mem_global_free(mem_glob, sizeof(*ref));
+#ifdef __linux__
 		kfree(ref);
+#else
+		free(ref, DRM_MEM_DRIVER);
+#endif
 	}
 
 	return ret;
@@ -332,7 +343,11 @@ static void ttm_ref_object_release(struct kref *kref)
 
 	ttm_base_object_unref(&ref->obj);
 	ttm_mem_global_free(mem_glob, sizeof(*ref));
+#ifdef __linux__
 	kfree(ref);
+#else
+	free(ref, DRM_MEM_DRIVER);
+#endif
 	write_lock(&tfile->lock);
 }
 
@@ -389,7 +404,11 @@ EXPORT_SYMBOL(ttm_object_file_release);
 struct ttm_object_file *ttm_object_file_init(struct ttm_object_device *tdev,
 					     unsigned int hash_order)
 {
+#ifdef __linux__
 	struct ttm_object_file *tfile = kmalloc(sizeof(*tfile), GFP_KERNEL);
+#else
+	struct ttm_object_file *tfile = malloc(sizeof(*tfile), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 	unsigned int i;
 	unsigned int j = 0;
 	int ret;
@@ -415,7 +434,11 @@ out_err:
 	for (i = 0; i < j; ++i)
 		drm_ht_remove(&tfile->ref_hash[i]);
 
+#ifdef __linux__
 	kfree(tfile);
+#else
+	free(tfile, DRM_MEM_DRIVER);
+#endif
 
 	return NULL;
 }
@@ -425,7 +448,11 @@ struct ttm_object_device *ttm_object_device_init(struct ttm_mem_global
 						 *mem_glob,
 						 unsigned int hash_order)
 {
+#ifdef __linux__
 	struct ttm_object_device *tdev = kmalloc(sizeof(*tdev), GFP_KERNEL);
+#else
+	struct ttm_object_device *tdev = malloc(sizeof(*tdev), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 	int ret;
 
 	if (unlikely(tdev == NULL))
@@ -439,7 +466,11 @@ struct ttm_object_device *ttm_object_device_init(struct ttm_mem_global
 	if (likely(ret == 0))
 		return tdev;
 
+#ifdef __linux__
 	kfree(tdev);
+#else
+	free(tdev, DRM_MEM_DRIVER);
+#endif
 	return NULL;
 }
 EXPORT_SYMBOL(ttm_object_device_init);
@@ -454,6 +485,10 @@ void ttm_object_device_release(struct ttm_object_device **p_tdev)
 	drm_ht_remove(&tdev->object_hash);
 	write_unlock(&tdev->object_lock);
 
+#ifdef __linux__
 	kfree(tdev);
+#else
+	free(tdev, DRM_MEM_DRIVER);
+#endif
 }
 EXPORT_SYMBOL(ttm_object_device_release);

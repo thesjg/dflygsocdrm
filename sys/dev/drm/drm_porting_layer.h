@@ -618,8 +618,14 @@ current_euid(void) {
  * PERMISSIONS AND SECURITY                               *
  **********************************************************/
 
+#define CAP_SYS_ADMIN  PRIV_DRIVER 
+
 /* file ttm_memory.c, function ttm_mem_global_reserve() */
-#define capable(CAP_SYS_ADMIN) 1 /* UNIMPLEMENTED */
+static __inline__ int
+capable(int capacity) {
+	return (0 == priv_check(curthread, capacity));
+}
+/* #define capable(CAP_SYS_ADMIN) 1 UNIMPLEMENTED */
 
 /* defined for DragonFly BSD in sys/sys/poll.h */
 /* #define POLLIN      0x0001 */
@@ -641,6 +647,7 @@ typedef uint32_t gfp_t;
 #define __GFP_COLD        0x0004
 #define __GFP_COMP        0x0008
 #define __GFP_DMA32       0x0010
+/* file vmwgfx_gmr.c, function vmw_gmr_build_descriptors() */
 #define __GFP_HIGHMEM     0x0020
 #define __GFP_NORETRY     0x0040
 #define __GFP_NOWARN      0x0080
@@ -704,7 +711,7 @@ local_irq_restore(unsigned long flags) {
 
 /* file ttm/ttm_bo.c, function ttm_bo_mem_space() */
 /* Positive, larger than any in sys/errno.h */
-#define ERESTARTSYS 110
+#define ERESTARTSYS  ERESTART 
 
 /* DragonFlyBSD defines ERESTART -1 */
 
@@ -723,6 +730,15 @@ struct sigset_t {
 static __inline__ void
 send_sig(uint32_t signal, DRM_CURRENT_THREAD *cur, uint32_t flags) {
 	;
+}
+
+typedef struct proc *DRM_PROCESS_T;
+
+/* file ttm/ttm_lock.c, function __ttm_read_lock() */
+static __inline__ void
+DRM_SEND_SIG(uint32_t signal, DRM_PROCESS_T proc, uint32_t flags) {
+	if (proc != NULL)
+		ksignal(proc, signal);
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapin.c */
@@ -797,6 +813,8 @@ preempt_enable(void) {
 /* file ttm/ttm_global.c, function ttm_global_item_ref() */
 #define mutex_init(l)      lockinit(l, "linux_mutex", 0, LK_CANRECURSE)
 #define mutex_lock(l)      lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
+/* file vmwgfx_execbuf.c, function vmw_execbuf_ioctl() */
+#define mutex_lock_interruptible(l) lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE | LK_PCATCH)
 #define mutex_trylock(l)  !lockmgr(l, LK_EXCLUSIVE | LK_NOWAIT | LK_CANRECURSE)
 #define mutex_unlock(u)    lockmgr(u, LK_RELEASE)
 
@@ -879,6 +897,7 @@ up_read(DRM_RWSEMAPHORE *sem) {
 }
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
+/* file vmwgfx_fifo.c, function vmw_fifo_commit() */
 static __inline__ void
 down_write(DRM_RWSEMAPHORE *rwlock) {
 	lockmgr(rwlock, LK_EXCLUSIVE | LK_RETRY);
@@ -1026,13 +1045,18 @@ kref_put(struct kref *kref, void (*release)(struct kref *kref)) {
 	}
 }
 
+void default_kref_release(struct kref *kref);
+
 /*
  * kobject
  */
 
 /* ttm/ttm_memory.c */
 struct kobject {
-	int placeholder;
+	struct kref kref;
+	struct kobj_type *ktype;
+	struct kobject *parent;
+	const char *fmt;
 };
 
 /* file ttm/ttm_memory.c,
@@ -1065,21 +1089,13 @@ struct kobj_type {
 };
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
-/* UNIMPLEMENTED */
 static __inline__ void
 kobject_init(struct kobject *kobj, struct kobj_type *type) {
-	;
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
-/* UNIMPLEMENTED */
-static __inline__ int
-kobject_add(struct kobject *kobj, struct kobject *glob, char *name) {
-	return 0;
+	kref_init(&kobj->kref);
+	kobj->ktype = type;
 }
 
 /* file ttm/ttm_memory.c, function ttm_mem_init_kernel_zone() */
-/* UNIMPLEMENTED */
 static __inline__ int
 kobject_init_and_add(
 	struct kobject *zone,
@@ -1087,14 +1103,16 @@ kobject_init_and_add(
 	struct kobject *glob,
 	const char *name
 ) {
-	return 1;
+	kobject_init(zone, type);
+	zone->parent = glob;
+	zone->fmt = name;
+	return 0;
 }
 
 /* file ttm/ttm_memory.c, static struct such as ttm_mem_zone_kobj_type */
-/* UNIMPLEMENTED */
 static __inline__ void
 kobject_put(struct kobject *kobj) {
-	;
+	kref_put(&kobj->kref, default_kref_release);
 }
 
 /* file ttm_memory.c, function ttm_mem_global_release() */
@@ -1123,7 +1141,7 @@ kobject_uevent_env(struct kobject *kobj, uint32_t flags, char *event[]) {
 #define wait_queue_head_t atomic_t
 
 /* file ttm/ttm_module.c, preamble */
-#define DECLARE_WAIT_QUEUE_HEAD(var) wait_queue_head_t var /* UNIMPLEMENTED */
+#define DECLARE_WAIT_QUEUE_HEAD(var) wait_queue_head_t var
 
 /* file ttm/ttm_lock.c, function ttm_lock_init() */
 static __inline__ void
@@ -1174,6 +1192,7 @@ wait_event_interruptible(wait_queue_head_t wqh, int condition) {
 })
 
 /* vmwgfx_irq.c */
+/* file vmwgfx_fifo.c, function vmw_fifo_wait() */
 /* file radeon_pm.c, function radeon_sync_with_vblank() */
 /* file radeon_fence.c, function radeon_fence_wait() */
 #define wait_event_timeout(wqh, condition, timeout)          \
@@ -1192,6 +1211,7 @@ wait_event_interruptible(wait_queue_head_t wqh, int condition) {
 })
 
 /* vmwgfx_irq.c */
+/* file vmwgfx_fifo.c, function vmw_fifo_wait() */
 /* file radeon_pm.c, function radeon_pm_set_clocks() */
 /* file radeon_fence.c, function radeon_fence_wait() */
 #define wait_event_interruptible_timeout(wqh, condition, timeout) \
@@ -1301,13 +1321,6 @@ void convert_work(void *context, int pending);
 	}                                                                        \
 	while (0)
 
-/* defined out: file drm_fb_helper.c, function drm_fb_helper.sysrq() */
-/* intel_display.c, function intel_finish_page_flip() */
-static __inline__ int
-schedule_work(struct work_struct *work) {
-	return 0;
-}
-
 /* file ttm_memory.c, function ttm_mem_global_reserve() */
 
 #define workqueue_struct  taskqueue
@@ -1374,6 +1387,7 @@ queue_delayed_work(
 	struct delayed_work *work,
 	unsigned long delayed 
 ) {
+	work->tq = wq;
 	callout_reset(&work->callout, delayed, call_delayed, work);
 	return 0;
 }
@@ -1392,6 +1406,9 @@ queue_work(struct workqueue_struct *queue, struct work_struct *work) {
 /* file ttm_memory.c, function ttm_mem_global_release() */
 static __inline__ void 
 flush_workqueue(struct workqueue_struct *queue) {
+#if 0
+	taskqueue_run(queue);
+#endif
 	;
 }
 
@@ -1411,13 +1428,22 @@ cancel_delayed_work_sync(struct delayed_work *work) {
 	return 0;
 }
 
+/* defined out: file drm_fb_helper.c, function drm_fb_helper.sysrq() */
+/* intel_display.c, function intel_finish_page_flip() */
+static __inline__ int
+schedule_work(struct work_struct *work) {
+	return taskqueue_enqueue(taskqueue_swi, &work->task);
+}
+
 /* file ttm_bo_c,
  * function ttm_bo_cleanup_refs() */
 static __inline__ int
 schedule_delayed_work(
-    struct delayed_work *wq,
-    unsigned long time
+    struct delayed_work *work,
+    unsigned long delayed 
 ) {
+	work->tq = taskqueue_swi;
+	callout_reset(&work->callout, delayed, call_delayed, work);
 	return 0;
 }
 
@@ -1569,6 +1595,7 @@ struct address_space {
 };
 
 /* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
+/* file ttm/ttm_tt.c, function __ttm_tt_get_page() */
 static __inline__ int
 PageHighMem(struct page *page) {
 	return 0;
@@ -1600,15 +1627,18 @@ SetPageDirty(struct page *page) {
 
 /* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
 /* file ttm/ttm_bo.c, function ttm_bo_global_kobj_release() */
+/* file ttm/ttm_tt.c, function ttm_tt_free_alloced_pages() */
 /* file vmwgfx_gmr.c, function vmw_gmr_free_descriptors() */
 static __inline__ void
 __free_page(struct page *page) {
 	;
 }
 
-/* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
 /* file ttm/ttm_bo.c, function ttm_bo_global_init() */
+/* file ttm/ttm_page_alloc.c, function ttm_alloc_new_pages() */
+/* file ttm/ttm_tt.c, function ttm_tt_alloc_page() */
 /* file vmwgfx_gmr.c, function vmw_gmr_build_descriptors() */
+/* file radeon_device.c, function radeon_dummy_page_init() */
 static __inline__ struct page *
 alloc_page(int gfp_flags) {
 	return NULL;
@@ -1645,8 +1675,8 @@ mark_page_accessed(struct page *to_page) {
 	;
 }
 
-/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 /* file i915_gem.c, i915_gem_object_get_pages() */
+/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 static __inline__ void
 page_cache_release(struct page *to_page) {
 	;
@@ -1729,6 +1759,7 @@ read_cache_page_gfp(
 }
 
 /* file ttm/ttm_bo.c, function ttm_bo_unmap_virtual() */
+/* UNIMPLEMENTED */
 static __inline__ void
 unmap_mapping_range(
     struct address_space *dev_mapping,
@@ -1767,6 +1798,7 @@ signal_pending(struct task_struct *currenttask) {
 }
 
 /* file i915_gem.c */
+/* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 static __inline__ int
 get_user_pages(
 	struct task_struct * tsk,
@@ -1975,10 +2007,13 @@ unlock_kernel(void) {
 					"lock; addl $0,0(%%rsp)" : : : "memory");
 #endif
 #endif
+
+/* file vmwgfx_fifo.c, function vmw_fifo_init() */
 #ifndef mb
 #define mb()   cpu_mfence()
 #endif
 
+/* file vmwgfx_fifo.c, function vmw_fifo_init() */
 #ifndef wmb
 #define wmb()  cpu_sfence()
 #endif
@@ -2101,15 +2136,20 @@ typedef unsigned long pgprot_t; /* UNIMPLEMENTED */
 
 /* file drm_info.c, function drm_vma_info() */
 /* file drm_vm.c, function drm_mmap_lock() needs to return lvalue? */
+/* file ttm/ttm_bo_util.c, function ttm_copy_io_ttm_page() */
+/* UNIMPLEMENTED */
 #define pgprot_val(prot) prot
 
-/* file ttm/ttm_bo_util.c, function ttm_io_prot() */
 /* file drm_gem.c, function drm_gem_mmap() */
+/* file ttm/ttm_bo_util.c, function ttm_io_prot() */
+/* UNIMPLEMENTED */
 static __inline__ pgprot_t
 pgprot_writecombine(pgprot_t prot) {
 	return 0;
 }
 
+/* file ttm/ttm_bo_util.c, function ttm_io_prot() */
+/* UNIMPLEMENTED */
 static __inline__ pgprot_t
 pgprot_noncached(pgprot_t prot) {
 	return 0;
@@ -2382,6 +2422,7 @@ memcpy_toio(void *dst, void *src, unsigned long size) {
 extern int sysctl_vfs_cache_pressure;
 
 /* file ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
+/* file vmwgfx_fifo.c, function vmw_fifo_vm_fault() */
 struct vm_area_struct {
 /* file drm_vm.c, function drm_mmap_locked() */
 	pgprot_t vm_page_prot;
@@ -2392,6 +2433,7 @@ struct vm_area_struct {
 /* file drm_gem.c, function drm_gem_mmap() */
 /* file radeon_mmap.c, function radeon_mmap() */
 	unsigned long vm_pgoff;
+/* file vmwgfx_fifo.c, function vmw_fifo_vm_fault() */
 	unsigned long vm_start;
 /* file drm_vm.c, function drm_do_shm_close() */
 	unsigned long vm_end;
@@ -2406,6 +2448,7 @@ struct vm_area_struct {
 #define FAULT_FLAG_WRITE  0x0001
 
 /* file drm_vm.c, function drm_do_vm_fault() */
+/* file vmwgfx_fifo.c, function vmw_fifo_vm_fault() */
 struct vm_fault {
 	void *virtual_address;
 	struct page* page;
@@ -2416,6 +2459,7 @@ struct vm_fault {
 /* file drm_vm.c, struct drm_vm_ops */
 /* file i915_drv.c, struct i915_gem_vm_ops */
 /* file radeon_ttm.c, function radeon_ttm_fault() */
+/* file vmwgfx_fifo.c, struct vm_ops */
 struct vm_operations_struct {
 	int (*fault)(struct vm_area_struct *vma, struct vm_fault *vmf);
 	void (*open)(struct vm_area_struct *vma);
@@ -2433,6 +2477,8 @@ vm_insert_mixed(
 }
 
 /* file i915_gem.c, function i915_gem_fault() */
+/* file vmwgfx_fifo.c, function vmw_fifo_vm_fault() */
+/* pfn stands for "page frame number" */
 static __inline__ int
 vm_insert_pfn(
 	struct vm_area_struct *vma,
@@ -2575,8 +2621,9 @@ io_remap_pfn_range(
 	return 0;
 }
 
-/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
 /* File ttm/ttm_bo_vm.c, function ttm_bo_vm_fault() */
+/* File ttm/ttm_memory.c, function ttm_mem_global_alloc_page() */
+/* UNIMPLEMENTED */
 static __inline__ unsigned long
 page_to_pfn(struct page *page) {
 	return 0;
@@ -2655,6 +2702,7 @@ struct file {
 };
 
 /* file drm_gem.c, function drm_gem_object_alloc() */
+/* file ttm/ttm_tt.c, function ttm_tt_destroy() */
 static __inline__ void
 fput(struct file *filp) {
 	;
@@ -2733,6 +2781,7 @@ shmem_file_setup(char *name, unsigned long num_pages, uint32_t flags) {
 
 /* For now just treat the same as regular allocation */
 /* file drm_memory.c, function agp_remap() */
+/* file vmwgfx_fifo.c, function vmw_fifo_init() */
 static __inline__ void *
 vmalloc(size_t size) {
 	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK);
@@ -2747,6 +2796,7 @@ vmalloc_32(size_t size) {
 
 
 /* file drm_bufs.c, function drm_rmmap_locked() */
+/* file vmwgfx_fifo.c, function vmw_fifo_init() */
 static __inline__ void
 vfree(void *handle) {
 	free(handle, DRM_MEM_DEFAULT);
@@ -2808,6 +2858,9 @@ device_is_registered(struct device *dev) {
  *    variable number of arguments
  */
 #define dev_warn(arg, ...) /* UNIMPLEMENTED */
+
+/* file radeon_device.c, function radeon_vram_location() */
+#define dev_info(arg, ...) /* UNIMPLEMENTED */
 
 /* file ttm/ttm_module.c, function ttm_init() */
 static __inline__ int
@@ -3499,6 +3552,8 @@ struct fb_info {
 /* file intel_fb.c, function intelfb_create() */
 	resource_size_t aperture_base;
 	resource_size_t aperture_size;
+/*file vmwgfx_fb.c, function vmw_fb_dirty_mark() */
+	struct delayed_work deferred_work;
 };
 
 /* file drm_fb_helper.c, function drm_fb_helper_parse_command_line() */
@@ -3571,6 +3626,7 @@ struct fb_image {
 	unsigned height;
 };
 
+/* vmwgfx_fb.c, vmw_fb_fillrect() */
 static __inline__ void
 cfb_fillrect(struct fb_info *info, const struct fb_fillrect *rect) {
 	;
