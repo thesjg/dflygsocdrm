@@ -1607,6 +1607,7 @@ PageReserved(struct page *page) {
 	return 0;
 }
 
+/* file drm_pci.c, function drm_pci_alloc() */
 /* file drm_scatter.c, function drm_sg_alloc() */
 static __inline__ void
 SetPageReserved(struct page *page) {
@@ -2925,11 +2926,11 @@ device_remove_file(
  * BUS AND DEVICE CLASSES                                 *
  **********************************************************/
 
-/*
- * DMA
- */
+/**********************************************************
+ * DMA                                                    *
+ **********************************************************/
 
-typedef unsigned long dma_addr_t;
+typedef bus_addr_t dma_addr_t;
 
 /* From legacy older version of drmP.h */
 
@@ -2937,7 +2938,21 @@ typedef unsigned long dma_addr_t;
 #define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
 #endif
 
+#if 0
 /* file drm_pci.c, function __drm_pci_free() */
+/* UNIMPLEMENTED */
+static __inline__ void *
+dma_alloc_coherent(
+	struct device *dev,
+	size_t size,
+	dma_addr_t *busaddr,
+	gfp_t flag
+) {
+	return NULL;
+}
+
+/* file drm_pci.c, function __drm_pci_free() */
+/* UNIMPLEMENTED */
 static __inline__ void
 dma_free_coherent(
 	struct device *dev,
@@ -2947,10 +2962,15 @@ dma_free_coherent(
 ) {
 	;
 }
+#endif
 
 /**********************************************************
  * PCI                                                    *
  **********************************************************/
+
+/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
+/* file radeon_gart.c, function radeon_gart_unbind() */
+#define PCI_DMA_BIDIRECTIONAL 0x0001
 
 /* file drm_vm.c, function drm_mmap_locked() */
 #define PCI_VENDOR_ID_APPLE 0x0001
@@ -2990,6 +3010,41 @@ struct pci_dev {
 	uint32_t device;
 	void *devfn;
 };
+
+/* file ati_pcigart.c, function drm_ati_pcigart_init() */
+/* file radeon_device.c, function radeon_device_init() */
+/* UNIMPLEMENTED */
+static __inline__ int
+pci_set_dma_mask(struct pci_dev *pdev, dma_addr_t table_mask) {
+	return 0;
+}
+
+/* file ati_pcigart.c, function drm_ati_pcigart_init() */
+/* file radeon_gart.c, function radeon_gart_bind() */
+/* UNIMPLEMENTED */
+static __inline__ dma_addr_t
+pci_map_page(
+	struct pci_dev *pdev,
+	struct page *page,
+	unsigned long offset,
+	unsigned long pagesize,
+	uint32_t flags
+) {
+	return 0;
+}
+
+/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
+/* file radeon_gart.c, function radeon_gart_unbind() */
+/* UNIMPLEMENTED */
+static __inline__ int
+pci_unmap_page(
+	struct pci_dev *pdev,
+	dma_addr_t pages_addr,
+	unsigned long pagesize,
+	uint32_t flags
+) {
+	return 0;
+}
 
 /* file radeon_gart.c, function radeon_gart_table_ram_alloc() */
 static __inline__ void *
@@ -3085,10 +3140,6 @@ pci_save_state(struct pci_dev *pdev) {
 	;
 }
 
-/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
-/* file radeon_gart.c, function radeon_gart_unbind() */
-#define PCI_DMA_BIDIRECTIONAL 0x0001
-
 /* file intel_bios.c, function intel_init_bios() */
 static __inline__ u8 __iomem*
 pci_map_rom(
@@ -3113,40 +3164,9 @@ pci_set_power_state(struct pci_dev *pdev, uint32_t flag) {
 	;
 }
 
-/* file ati_pcigart.c, function drm_ati_pcigart_init() */
-/* file radeon_gart.c, function radeon_gart_bind() */
-static __inline__ dma_addr_t
-pci_map_page(
-	struct pci_dev *pdev,
-	struct page *page,
-	unsigned long offset,
-	unsigned long pagesize,
-	uint32_t flags
-) {
-	return 0;
-}
-
-/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
-/* file radeon_gart.c, function radeon_gart_unbind() */
-static __inline__ int
-pci_unmap_page(
-	struct pci_dev *pdev,
-	dma_addr_t pages_addr,
-	unsigned long pagesize,
-	uint32_t flags
-) {
-	return 0;
-}
-
 /* file radeon_gart.c, function radeon_gart_bind() */
 static __inline__ int
 pci_dma_mapping_error(struct pci_dev *pdev, dma_addr_t pages_addr) {
-	return 0;
-}
-
-/* file ati_pcigart.c, function drm_ati_pcigart_init() */
-static __inline__ int
-pci_set_dma_mask(struct pci_dev *pdev, dma_addr_t table_mask) {
 	return 0;
 }
 

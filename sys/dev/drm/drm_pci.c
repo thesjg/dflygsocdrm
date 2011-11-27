@@ -95,33 +95,45 @@ drm_pci_busdma_callback(void *arg, bus_dma_segment_t *segs, int nsegs, int error
  */
 drm_dma_handle_t *drm_pci_alloc(struct drm_device * dev, size_t size, size_t align)
 {
-
-/* All calls to drm_pci_alloc in legacy drm set maxaddr to this value */
-	dma_addr_t maxaddr = 0xfffffffful;
-
 	drm_dma_handle_t *dmah;
+#ifdef __linux__
+#if 1
+	unsigned long addr;
+	size_t sz;
+#endif
+#else
+/* All calls to drm_pci_alloc in legacy drm set maxaddr to this value */
+	//dma_addr_t maxaddr = 0xfffffffful;
 	int ret;
+#endif
 
+	/* pci_alloc_consistent only guarantees alignment to the smallest
+	 * PAGE_SIZE order which is greater than or equal to the requested size.
+	 * Return NULL here for now to make sure nobody tries for larger alignment
+	 */
+	if (align > size)
+#ifdef __linux__
+		return NULL;
+#else
+		DRM_ERROR("align > size\n");
+#endif
+
+#ifndef __linux__
 	/* Need power-of-two alignment, so fail the allocation if it isn't. */
 	if ((align & (align - 1)) != 0) {
 		DRM_ERROR("drm_pci_alloc with non-power-of-two alignment %d\n",
 		    (int)align);
 		return NULL;
 	}
+#endif
 
-	dmah = malloc(sizeof(drm_dma_handle_t), DRM_MEM_DMA, M_ZERO | M_WAITOK);
+#ifdef __linux__
+	dmah = kmalloc(sizeof(drm_dma_handle_t), GFP_KERNEL);
+#else
+	dmah = malloc(sizeof(drm_dma_handle_t), DRM_MEM_DMA, M_WAITOK | M_ZERO);
+#endif
 	if (!dmah)
 		return NULL;
-
-#if 0 /* HT XXX XXX XXX */
-	/* Make sure we aren't holding locks here */
-	mtx_assert(&dev->dev_lock, MA_NOTOWNED);
-	if (mtx_owned(&dev->dev_lock))
-	    DRM_ERROR("called while holding dev_lock\n");
-	mtx_assert(&dev->dma_lock, MA_NOTOWNED);
-	if (mtx_owned(&dev->dma_lock))
-	    DRM_ERROR("called while holding dma_lock\n");
-#endif
 
 	dmah->size = size;
 #ifdef __linux__
@@ -142,7 +154,7 @@ drm_dma_handle_t *drm_pci_alloc(struct drm_device * dev, size_t size, size_t ali
 	}
 #else /* !__linux__ */
 	ret = bus_dma_tag_create(NULL, align, 0, /* parent, align, boundary */
-	    maxaddr, BUS_SPACE_MAXADDR, /* lowaddr, highaddr */
+	    BUS_SPACE_MAXADDR_32BIT, BUS_SPACE_MAXADDR, /* lowaddr, highaddr */
 	    NULL, NULL, /* filtfunc, filtfuncargs */
 	    size, 1, size, /* maxsize, nsegs, maxsegsize */
 	    0, /* flags */
@@ -203,7 +215,7 @@ void __drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
 #else /* !__linux__ */
 	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
 	bus_dma_tag_destroy(dmah->tag);
-#endif
+#endif /* __linux__ */
 }
 
 /**
@@ -211,12 +223,11 @@ void __drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
  */
 void drm_pci_free(struct drm_device * dev, drm_dma_handle_t * dmah)
 {
-	if (dmah == NULL)
+#ifndef __linux__
+	if (dmah == NULL) {
+		DRM_ERROR("dmah == NULL\n");
 		return;
-
-#if 0
-	bus_dmamem_free(dmah->tag, dmah->vaddr, dmah->map);
-	bus_dma_tag_destroy(dmah->tag);
+	}
 #endif
 	__drm_pci_free(dev, dmah);
 	free(dmah, DRM_MEM_DMA);
