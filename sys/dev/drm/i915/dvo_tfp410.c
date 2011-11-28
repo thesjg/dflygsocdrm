@@ -109,13 +109,21 @@ static bool tfp410_readb(struct intel_dvo_device *dvo, int addr, uint8_t *ch)
 
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = dvo->slave_addr,
+#else
+			.slave = dvo->slave_addr,
+#endif
 			.flags = 0,
 			.len = 1,
 			.buf = out_buf,
 		},
 		{
+#ifdef __linux__
 			.addr = dvo->slave_addr,
+#else
+			.slave = dvo->slave_addr,
+#endif
 			.flags = I2C_M_RD,
 			.len = 1,
 			.buf = in_buf,
@@ -144,7 +152,11 @@ static bool tfp410_writeb(struct intel_dvo_device *dvo, int addr, uint8_t ch)
 	struct intel_i2c_chan *i2cbus = container_of(adapter, struct intel_i2c_chan, adapter);
 	uint8_t out_buf[2];
 	struct i2c_msg msg = {
+#ifdef __linux__
 		.addr = dvo->slave_addr,
+#else
+		.slave = dvo->slave_addr,
+#endif
 		.flags = 0,
 		.len = 2,
 		.buf = out_buf,

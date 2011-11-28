@@ -213,13 +213,21 @@ static bool intel_sdvo_read_byte(struct intel_encoder *intel_encoder, u8 addr,
 
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = sdvo_priv->slave_addr >> 1,
+#else
+			.slave = sdvo_priv->slave_addr >> 1,
+#endif
 			.flags = 0,
 			.len = 1,
 			.buf = out_buf,
 		},
 		{
+#ifdef __linux__
 			.addr = sdvo_priv->slave_addr >> 1,
+#else
+			.slave = sdvo_priv->slave_addr >> 1,
+#endif
 			.flags = I2C_M_RD,
 			.len = 1,
 			.buf = buf,
@@ -246,7 +254,11 @@ static bool intel_sdvo_write_byte(struct intel_encoder *intel_encoder, int addr,
 	u8 out_buf[2];
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = sdvo_priv->slave_addr >> 1,
+#else
+			.slave = sdvo_priv->slave_addr >> 1,
+#endif
 			.flags = 0,
 			.len = 2,
 			.buf = out_buf,
@@ -484,20 +496,32 @@ static void intel_sdvo_set_control_bus_switch(struct intel_encoder *intel_encode
 	u8 out_buf[2], cmd_buf[2], ret_value[2], ret;
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = sdvo_priv->slave_addr >> 1,
+#else
+			.slave = sdvo_priv->slave_addr >> 1,
+#endif
 			.flags = 0,
 			.len = 2,
 			.buf = out_buf,
 		},
 		/* the following two are to read the response */
 		{
+#ifdef __linux__
 			.addr = sdvo_priv->slave_addr >> 1,
+#else
+			.slave = sdvo_priv->slave_addr >> 1,
+#endif
 			.flags = 0,
 			.len = 1,
 			.buf = cmd_buf,
 		},
 		{
+#ifdef __linux__
 			.addr = sdvo_priv->slave_addr >> 1,
+#else
+			.slave = sdvo_priv->slave_addr >> 1,
+#endif
 			.flags = I2C_M_RD,
 			.len = 1,
 			.buf = ret_value,

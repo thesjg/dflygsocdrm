@@ -176,18 +176,30 @@ static bool ivch_read(struct intel_dvo_device *dvo, int addr, uint16_t *data)
 
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = dvo->slave_addr,
+#else
+			.slave = dvo->slave_addr,
+#endif
 			.flags = I2C_M_RD,
 			.len = 0,
 		},
 		{
+#ifdef __linux__
 			.addr = 0,
+#else
+			.slave = 0,
+#endif
 			.flags = I2C_M_NOSTART,
 			.len = 1,
 			.buf = out_buf,
 		},
 		{
+#ifdef __linux__
 			.addr = dvo->slave_addr,
+#else
+			.slave = dvo->slave_addr,
+#endif
 			.flags = I2C_M_RD | I2C_M_NOSTART,
 			.len = 2,
 			.buf = in_buf,
@@ -217,7 +229,11 @@ static bool ivch_write(struct intel_dvo_device *dvo, int addr, uint16_t data)
 	struct intel_i2c_chan *i2cbus = container_of(adapter, struct intel_i2c_chan, adapter);
 	u8 out_buf[3];
 	struct i2c_msg msg = {
+#ifdef __linux__
 		.addr = dvo->slave_addr,
+#else
+		.slave = dvo->slave_addr,
+#endif
 		.flags = 0,
 		.len = 3,
 		.buf = out_buf,

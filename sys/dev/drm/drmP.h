@@ -1649,7 +1649,6 @@ extern void drm_agp_copy_info(DRM_AGP_BRIDGE_DATA_T bridge, DRM_AGP_KERN *agp_in
 				/* Stub support (drm_stub.h) */
 #ifndef __linux__
 extern DRM_PCI_DEVICE_ID *drm_find_description(int vendor, int device, DRM_PCI_DEVICE_ID *idlist);
-extern int drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
 #endif /* __linux__ */
 extern int drm_setmaster_ioctl(struct drm_device *dev, void *data,
 			       struct drm_file *file_priv);

@@ -437,8 +437,13 @@ static int drm_pick_crtcs(struct drm_device *dev,
 	if (modes[n] == NULL)
 		return best_score;
 
+#ifdef __linux__
+	crtcs = kmalloc(dev->mode_config.num_connector *
+			sizeof(struct drm_crtc *), GFP_KERNEL);
+#else
 	crtcs = malloc(dev->mode_config.num_connector *
 			sizeof(struct drm_crtc *), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 	if (!crtcs)
 		return best_score;
 
@@ -491,7 +496,11 @@ static int drm_pick_crtcs(struct drm_device *dev,
 		c++;
 	}
 out:
+#ifdef __linux__
+	kfree(crtcs);
+#else
 	free(crtcs, DRM_MEM_DRIVER);
+#endif
 	return best_score;
 }
 
@@ -515,12 +524,21 @@ static void drm_setup_crtcs(struct drm_device *dev)
 		encoder->crtc = NULL;
 	}
 
+#ifdef __linux__
+	crtcs = kcalloc(dev->mode_config.num_connector,
+			sizeof(struct drm_crtc *), GFP_KERNEL);
+	modes = kcalloc(dev->mode_config.num_connector,
+			sizeof(struct drm_display_mode *), GFP_KERNEL);
+	enabled = kcalloc(dev->mode_config.num_connector,
+			  sizeof(bool), GFP_KERNEL);
+#else
 	crtcs = malloc(dev->mode_config.num_connector *
 			sizeof(struct drm_crtc *), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	modes = malloc(dev->mode_config.num_connector *
 			sizeof(struct drm_display_mode *), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	enabled = malloc(dev->mode_config.num_connector *
 			  sizeof(bool), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 
 	drm_enable_connectors(dev, enabled);
 
@@ -554,9 +572,15 @@ static void drm_setup_crtcs(struct drm_device *dev)
 		i++;
 	}
 
+#ifdef __linux__
+	kfree(crtcs);
+	kfree(modes);
+	kfree(enabled);
+#else
 	free(crtcs, DRM_MEM_DRIVER);
 	free(modes, DRM_MEM_DRIVER);
 	free(enabled, DRM_MEM_DRIVER);
+#endif
 }
 
 /**

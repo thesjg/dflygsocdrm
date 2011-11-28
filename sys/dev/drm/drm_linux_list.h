@@ -133,6 +133,41 @@ list_move_tail(struct list_head *entry, struct list_head *toadd) {
 	list_add_tail(entry, toadd);
 }
 
-#define list_first_entry(ptr, type, member) list_entry(((ptr)->next), type, member)	
+#define list_first_entry(ptr, type, member) list_entry(((ptr)->next), type, member)
+
+/** list_sort - sort list using the crudest algorithm possible 
+ * @priv:	to be passed to the comparison function	
+ * @head:	list to be sorted
+ * @comparer:	comparison function	
+ */
+static __inline__ void
+list_sort(void *priv, struct list_head *head,
+	int (*comparer)(void *priv, struct list_head *lh_a, struct list_head *lh_b)) {
+	struct list_head *cursor = head;
+	struct list_head *highest;
+	struct list_head *seek;
+	if (list_empty(head))
+		return;
+	while (cursor->next != head) {
+		highest = cursor;
+		seek = cursor;
+		while (seek->next != head) {
+			if ((*comparer)(priv, seek, seek->next) > 0) {
+				highest = seek->next;
+			}
+			seek = seek->next;
+		}
+		if (cursor == highest) {
+			cursor = cursor->next;
+		}
+		else {
+			list_del(highest);
+			cursor->prev->next = highest;
+			highest->prev = cursor->prev;
+			highest->next = cursor;
+			cursor->prev = highest;
+		}
+	}
+}
 
 #endif /* _DRM_LINUX_LIST_H_ */

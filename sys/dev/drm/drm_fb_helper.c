@@ -51,7 +51,11 @@ static struct list_head kernel_fb_helper_list;
 
 int drm_fb_helper_add_connector(struct drm_connector *connector)
 {
+#ifdef __linux__
+	connector->fb_helper_private = kzalloc(sizeof(struct drm_fb_helper_connector), GFP_KERNEL);
+#else
 	connector->fb_helper_private = malloc(sizeof(struct drm_fb_helper_connector), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	if (!connector->fb_helper_private)
 		return -ENOMEM;
 
@@ -409,8 +413,16 @@ static void drm_fb_helper_crtc_free(struct drm_fb_helper *helper)
 	int i;
 
 	for (i = 0; i < helper->crtc_count; i++)
+#ifdef __linux__
+		kfree(helper->crtc_info[i].mode_set.connectors);
+#else
 		free(helper->crtc_info[i].mode_set.connectors, DRM_MEM_DRIVER);
+#endif
+#ifdef __linux__
+	kfree(helper->crtc_info);
+#else
 	free(helper->crtc_info, DRM_MEM_DRIVER);
+#endif
 }
 
 int drm_fb_helper_init_crtc_count(struct drm_fb_helper *helper, int crtc_count, int max_conn_count)
@@ -420,17 +432,28 @@ int drm_fb_helper_init_crtc_count(struct drm_fb_helper *helper, int crtc_count, 
 	int ret = 0;
 	int i;
 
+#ifdef __linux__
+	helper->crtc_info = kcalloc(crtc_count, sizeof(struct drm_fb_helper_crtc), GFP_KERNEL);
+#else
 	helper->crtc_info = malloc(crtc_count * sizeof(struct drm_fb_helper_crtc), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 	if (!helper->crtc_info)
 		return -ENOMEM;
 
 	helper->crtc_count = crtc_count;
 
 	for (i = 0; i < crtc_count; i++) {
+#ifdef __linux__
+		helper->crtc_info[i].mode_set.connectors =
+			kcalloc(max_conn_count,
+				sizeof(struct drm_connector *),
+				GFP_KERNEL);
+#else
 		helper->crtc_info[i].mode_set.connectors =
 			malloc(max_conn_count *
 				sizeof(struct drm_connector *),
 				DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+#endif
 
 		if (!helper->crtc_info[i].mode_set.connectors) {
 			ret = -ENOMEM;

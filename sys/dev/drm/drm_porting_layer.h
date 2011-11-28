@@ -74,7 +74,7 @@ request_module(char *modalias) {
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 static __inline__ int
 try_module_get(struct module *module) {
-	return 0;
+	return 1;
 }
 
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
@@ -323,6 +323,10 @@ hweight16(uint16_t mask) {
 	return num_bits;
 }
 
+/* file drm_mode.c, function drm_mode_equal() */
+/* Convert kilohertz to picos */
+#define KHZ2PICOS(clock) (1000000000ul / (clock))
+
 /**********************************************************
  * HASH                                                   *
  **********************************************************/
@@ -523,16 +527,6 @@ list_cut_position(struct list_head *pages, struct list_head *list, struct list_h
 	list->next->prev = p;
 	pages->prev = p;
 	p->next = list->next;
-}
-
-/* file drm_modes.c, function drm_mode_sort() */
-static __inline__ void
-list_sort(
-	void *priv,
-	struct list_head *list,
-	int (*compare)(void *priv, struct list_head *lh_a, struct list_head *lh_b)
-) {
-	;
 }
 
 /*
@@ -2266,26 +2260,6 @@ access_ok(int flags, void *ptr, int size) {
 	return useracc(__DECONST(caddr_t, ptr), size, flags);
 }
 
-#if 0
-/* file drm_ioc32.c, function compat_drm_version() */
-static __inline__ int
-__put_user(void * src, void *dest) {
-	return 0;
-}
-
-/* file drm_crtc.c, function drm_mode_getresources() */
-static __inline__ int
-put_user(long src, void *dest) {
-	return 0;
-}
-
-/* file drm_crtc.c, function drm_mode_setcrtc() */
-static __inline__ int
-__get_user(void *dest, void *src) {
-	return 0;
-}
-#endif
-
 /* file drm_crtc.c, function drm_mode_setcrtc() */
 #define get_user(dest, src)  copyin(&dest, src, sizeof(dest))
 
@@ -3428,7 +3402,7 @@ struct dev_pm_ops {
  * FRAMEBUFFER                                            *
  **********************************************************/
 
-/* file drm_fb_helper.c */
+/* file drm_fb_helper.c, function drm_fb_helper_blank() */
 #define FB_BLANK_UNBLANK        0x0001
 #define FB_BLANK_NORMAL         0x0002
 #define FB_BLANK_HSYNC_SUSPEND  0x0004
@@ -3451,9 +3425,6 @@ struct dev_pm_ops {
 
 /* file intelfb.c, function intelfb_create() */
 #define FB_PIXMAP_SYSTEM	0x0800
-
-/* file drm_mode.c, function drm_mode_equal() */
-#define KHZ2PICOS(clock) (clock) /* UNIMPLEMENTED */
 
 struct DRM_FB_COLOR {
 	uint16_t offset;
@@ -3558,7 +3529,6 @@ struct fb_info {
 	struct fb_var_screeninfo var;
 	struct fb_fix_screeninfo fix;
 	void *pseudo_palette;
-	void *par;
 	uint32_t node;
 /* file radeon_fb.c, function radeonfb_create() */
 	uint32_t flags;
@@ -3572,8 +3542,10 @@ struct fb_info {
 /* file intel_fb.c, function intelfb_create() */
 	resource_size_t aperture_base;
 	resource_size_t aperture_size;
-/*file vmwgfx_fb.c, function vmw_fb_dirty_mark() */
+/* file vmwgfx_fb.c, function vmw_fb_dirty_mark() */
 	struct delayed_work deferred_work;
+/* file drm_fb_helper.c, function drm_fb_helper_single_fb_probe() */
+	void *par;
 };
 
 /* file drm_fb_helper.c, function drm_fb_helper_parse_command_line() */
@@ -3598,8 +3570,8 @@ unregister_framebuffer(struct fb_info *info) {
 /* file radeon_fb.c, function radeonfb_create() */
 /* file intel_fb.c, function intelfb_create() */
 static __inline__ struct fb_info *
-framebuffer_alloc(unsigned long isZero, struct device *device) {
-	return malloc(sizeof(struct fb_info), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+framebuffer_alloc(unsigned long extra, struct device *device) {
+	return malloc(sizeof(struct fb_info) + extra, DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 }
 
 /* file i915/intel_fb.c, function intelfb_remove() */
@@ -3718,6 +3690,7 @@ struct edi {
  * I2C                                                    *
  **********************************************************/
 
+/* file drm_dp_i2c_helper.c, function i2c_algo_dp_aux_functionality() */
 /* file drm_encoder_slave.c, function i2c_algo_dp_aux_functionality() */
 /* file radeon_i2c.c, function radeon_hw_i2c_func() */
 #define I2C_FUNC_I2C                    0x0001
@@ -3733,9 +3706,9 @@ struct edi {
 
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 /* file radeon_i2c.c, function r500_hw_i2c_xfer() */
-#define I2C_M_RD       0x0001
+#define I2C_M_RD       IIC_M_RD 
 /* file dvo_ivch.c */
-#define I2C_M_NOSTART  0x0002
+#define I2C_M_NOSTART  0x0004
 
 /* file intel_dp.c, function intel_dp_i2c_init() */
 #define I2C_CLASS_DDC  0x0001
@@ -3832,12 +3805,6 @@ i2c_bit_add_bus(struct i2c_adapter *adapter) {
 /* file radeon_i2c.c, function radeon_ddc_probe() */
 int
 i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num);
-#if 0
-static __inline__ int
-i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
-	return 0;
-}
-#endif
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_init */
 struct i2c_board_info {
@@ -3854,23 +3821,41 @@ struct i2c_driver {
 struct i2c_client {
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 	struct i2c_driver *driver;
+	struct i2c_adapter *adap;
+	const struct i2c_board_info *info;
 };
 
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 static __inline__ struct i2c_client *
 i2c_new_device(struct i2c_adapter *adap, const struct i2c_board_info *info) {
+	struct i2c_client *client = kmalloc(sizeof(*client), M_TEMP, M_WAITOK);
+	if (client == NULL)
+		return NULL;
+	client->driver = kmalloc(sizeof(struct i2c_driver), M_TEMP, M_WAITOK);
+	if (client->driver == NULL)
+		goto failed;
+	client->adap = adap;
+	client->info = info;
+	return client;
+
+failed:
+	kfree(client, M_TEMP);
 	return NULL;
 }
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
 static __inline__ int
-i2c_register_driver(struct module *owner, struct i2c_driver *driver) {
+i2c_unregister_device(struct i2c_client *client) {
+	if (client == NULL)
+		return 1;
+	kfree(client->driver, M_TEMP);
+	kfree(client, M_TEMP);
 	return 0;
 }
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
 static __inline__ int
-i2c_unregister_device(struct i2c_client *client) {
+i2c_register_driver(struct module *owner, struct i2c_driver *driver) {
 	return 0;
 }
 

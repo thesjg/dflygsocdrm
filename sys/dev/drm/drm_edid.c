@@ -35,14 +35,11 @@
 #include "drmP.h"
 #include "drm_edid.h"
 
+#ifndef __linux__
 #include <bus/iicbus/iic.h>
 #include <bus/iicbus/iiconf.h>
 #include <bus/iicbus/iicbus.h>
 #include "iicbus_if.h"
-
-/**********************************************************
- * I2C                                                    *
- **********************************************************/
 
 int
 i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
@@ -57,11 +54,7 @@ i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
 	adapter->iicbus_release_bus(iicbus, iicdev);
 	return (error); 
 }
-
-int
-drm_i2c_transfer(struct i2c_adapter *adapter, struct i2c_msg *msgs, int num) {
-	return 0;
-}
+#endif
 
 /*
  * TODO:
@@ -1196,12 +1189,20 @@ int drm_do_probe_ddc_edid(struct i2c_adapter *adapter,
 	unsigned char start = 0x0;
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr	= DDC_ADDR,
+#else
+			.slave	= DDC_ADDR,
+#endif
 			.flags	= 0,
 			.len	= 1,
 			.buf	= &start,
 		}, {
+#ifdef __linux__
 			.addr	= DDC_ADDR,
+#else
+			.slave	= DDC_ADDR,
+#endif
 			.flags	= I2C_M_RD,
 			.len	= len,
 			.buf	= buf,
@@ -1229,8 +1230,13 @@ static int drm_ddc_read_edid(struct drm_connector *connector,
 	}
 
 	/* repeated checksum failures; warn, but carry on */
+#ifdef __linux__
 	dev_warn(&connector->dev->pdev->dev, "%s: EDID invalid.\n",
 		 drm_get_connector_name(connector));
+#else
+	DRM_ERROR("%s: EDID invalid.\n",
+		 drm_get_connector_name(connector));
+#endif
 	return -1;
 }
 
@@ -1249,11 +1255,21 @@ struct edid *drm_get_edid(struct drm_connector *connector,
 	int ret;
 	struct edid *edid;
 
+#ifdef __linux__
+	edid = kmalloc(EDID_LENGTH * (DRM_MAX_EDID_EXT_NUM + 1),
+		       GFP_KERNEL);
+#else
 	edid = malloc(EDID_LENGTH * (DRM_MAX_EDID_EXT_NUM + 1),
-		       DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+		       DRM_MEM_DRIVER, M_WAITOK);
+#endif
 	if (edid == NULL) {
+#ifdef __linux__
 		dev_warn(&connector->dev->pdev->dev,
 			 "Failed to allocate EDID\n");
+#else
+		DRM_ERROR(
+			 "Failed to allocate EDID\n");
+#endif
 		goto end;
 	}
 
@@ -1268,11 +1284,19 @@ struct edid *drm_get_edid(struct drm_connector *connector,
 		int edid_ext_num = edid->extensions;
 
 		if (edid_ext_num > DRM_MAX_EDID_EXT_NUM) {
+#ifdef __linux__
 			dev_warn(&connector->dev->pdev->dev,
 				 "The number of extension(%d) is "
 				 "over max (%d), actually read number (%d)\n",
 				 edid_ext_num, DRM_MAX_EDID_EXT_NUM,
 				 DRM_MAX_EDID_EXT_NUM);
+#else
+			DRM_ERROR(
+				 "The number of extension(%d) is "
+				 "over max (%d), actually read number (%d)\n",
+				 edid_ext_num, DRM_MAX_EDID_EXT_NUM,
+				 DRM_MAX_EDID_EXT_NUM);
+#endif
 			/* Reset EDID extension number to be read */
 			edid_ext_num = DRM_MAX_EDID_EXT_NUM;
 		}
@@ -1288,7 +1312,11 @@ struct edid *drm_get_edid(struct drm_connector *connector,
 	goto end;
 
 clean_up:
+#ifdef __linux__
+	kfree(edid);
+#else
 	free(edid, DRM_MEM_DRIVER);
+#endif
 	edid = NULL;
 end:
 	return edid;
@@ -1376,8 +1404,13 @@ int drm_add_edid_modes(struct drm_connector *connector, struct edid *edid)
 		return 0;
 	}
 	if (!drm_edid_is_valid(edid)) {
+#ifdef __linux__
 		dev_warn(&connector->dev->pdev->dev, "%s: EDID invalid.\n",
 			 drm_get_connector_name(connector));
+#else
+		DRM_ERROR("%s: EDID invalid.\n",
+			 drm_get_connector_name(connector));
+#endif
 		return 0;
 	}
 

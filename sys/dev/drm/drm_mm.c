@@ -44,7 +44,6 @@
 #include "drmP.h"
 #include "drm_mm.h"
 #include "drm_linux_list.h"
-#include "drm_porting_memory.h"
 
 #define MM_UNUSED_TARGET 4
 
@@ -83,9 +82,17 @@ static struct drm_mm_node *drm_mm_kmalloc(struct drm_mm *mm, int atomic)
 	struct drm_mm_node *child;
 
 	if (atomic)
+#ifdef __linux__
 		child = kmalloc(sizeof(*child), GFP_ATOMIC);
+#else
+		child = malloc(sizeof(*child), DRM_MEM_DRIVER, M_NOWAIT);
+#endif
 	else
+#ifdef __linux__
 		child = kmalloc(sizeof(*child), GFP_KERNEL);
+#else
+		child = malloc(sizeof(*child), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 
 	if (unlikely(child == NULL)) {
 		spin_lock(&mm->unused_lock);
@@ -115,7 +122,11 @@ int drm_mm_pre_get(struct drm_mm *mm)
 	spin_lock(&mm->unused_lock);
 	while (mm->num_unused < MM_UNUSED_TARGET) {
 		spin_unlock(&mm->unused_lock);
+#ifdef __linux__
 		node = kmalloc(sizeof(*node), GFP_KERNEL);
+#else
+		node = malloc(sizeof(*node), DRM_MEM_DRIVER, M_WAITOK);
+#endif
 		spin_lock(&mm->unused_lock);
 
 		if (unlikely(node == NULL)) {
@@ -302,7 +313,11 @@ void drm_mm_put_block(struct drm_mm_node *cur)
 						 &mm->unused_nodes);
 					++mm->num_unused;
 				} else
+#ifdef __linux__
 					kfree(next_node);
+#else
+					free(next_node, DRM_MEM_DRIVER);
+#endif
 				spin_unlock(&mm->unused_lock);
 			} else {
 				next_node->size += cur->size;
@@ -321,7 +336,11 @@ void drm_mm_put_block(struct drm_mm_node *cur)
 			list_add(&cur->fl_entry, &mm->unused_nodes);
 			++mm->num_unused;
 		} else
+#ifdef __linux__
 			kfree(cur);
+#else
+			free(cur, DRM_MEM_DRIVER);
+#endif
 		spin_unlock(&mm->unused_lock);
 	}
 }
@@ -456,12 +475,20 @@ void drm_mm_takedown(struct drm_mm * mm)
 
 	list_del(&entry->fl_entry);
 	list_del(&entry->ml_entry);
+#ifdef __linux__
 	kfree(entry);
+#else
+	free(entry, DRM_MEM_DRIVER);
+#endif
 
 	spin_lock(&mm->unused_lock);
 	list_for_each_entry_safe(entry, next, &mm->unused_nodes, fl_entry) {
 		list_del(&entry->fl_entry);
+#ifdef __linux__
 		kfree(entry);
+#else
+		free(entry, DRM_MEM_DRIVER);
+#endif
 		--mm->num_unused;
 	}
 	spin_unlock(&mm->unused_lock);

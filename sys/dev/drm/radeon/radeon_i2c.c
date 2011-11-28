@@ -39,7 +39,11 @@ bool radeon_ddc_probe(struct radeon_connector *radeon_connector)
 	int ret;
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = 0x50,
+#else
+			.slave = 0x50,
+#endif
 			.flags = 0,
 			.len = 1,
 			.buf = out_buf,
@@ -997,13 +1001,21 @@ void radeon_i2c_get_byte(struct radeon_i2c_chan *i2c_bus,
 	u8 in_buf[2];
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = slave_addr,
+#else
+			.slave = slave_addr,
+#endif
 			.flags = 0,
 			.len = 1,
 			.buf = out_buf,
 		},
 		{
+#ifdef __linux__
 			.addr = slave_addr,
+#else
+			.slave = slave_addr,
+#endif
 			.flags = I2C_M_RD,
 			.len = 1,
 			.buf = in_buf,
@@ -1029,7 +1041,11 @@ void radeon_i2c_put_byte(struct radeon_i2c_chan *i2c_bus,
 {
 	uint8_t out_buf[2];
 	struct i2c_msg msg = {
+#ifdef __linux__
 		.addr = slave_addr,
+#else
+		.slave = slave_addr,
+#endif
 		.flags = 0,
 		.len = 2,
 		.buf = out_buf,

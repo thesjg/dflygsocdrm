@@ -44,13 +44,21 @@ bool intel_ddc_probe(struct intel_encoder *intel_encoder)
 	int ret;
 	struct i2c_msg msgs[] = {
 		{
+#ifdef __linux__
 			.addr = 0x50,
+#else
+			.slave = 0x50,
+#endif
 			.flags = 0,
 			.len = 1,
 			.buf = out_buf,
 		},
 		{
+#ifdef __linux__
 			.addr = 0x50,
+#else
+			.slave = 0x50,
+#endif
 			.flags = I2C_M_RD,
 			.len = 1,
 			.buf = buf,

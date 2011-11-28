@@ -142,7 +142,11 @@ i2c_algo_dp_aux_xfer(struct i2c_adapter *adapter,
 		u16 len = msgs[m].len;
 		u8 *buf = msgs[m].buf;
 		reading = (msgs[m].flags & I2C_M_RD) != 0;
+#ifdef __linux__
 		ret = i2c_algo_dp_aux_address(adapter, msgs[m].addr, reading);
+#else
+		ret = i2c_algo_dp_aux_address(adapter, msgs[m].slave, reading);
+#endif
 		if (ret < 0)
 			break;
 		if (reading) {
