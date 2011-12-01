@@ -51,7 +51,11 @@ int drm_i2c_encoder_init(struct drm_device *dev,
 {
 	char modalias[sizeof(I2C_MODULE_PREFIX)
 		      + I2C_NAME_SIZE];
+#ifdef __linux__
 	struct module *module = NULL;
+#else
+	DRM_MODULE_T module = NULL;
+#endif
 	struct i2c_client *client;
 	struct drm_i2c_encoder_driver *encoder_drv;
 	int err = 0;
@@ -106,7 +110,11 @@ void drm_i2c_encoder_destroy(struct drm_encoder *drm_encoder)
 {
 	struct drm_encoder_slave *encoder = to_encoder_slave(drm_encoder);
 	struct i2c_client *client = drm_i2c_encoder_get_client(drm_encoder);
+#ifdef __linux__
 	struct module *module = client->driver->driver.owner;
+#else
+	DRM_MODULE_T module = client->driver->driver.owner;
+#endif
 
 	i2c_unregister_device(client);
 	encoder->bus_priv = NULL;

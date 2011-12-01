@@ -40,6 +40,16 @@
 
 #define EXPORT_SYMBOL(sym)
 
+/* substitute for struct module which has another definition */
+typedef void *DRM_MODULE_T;
+/* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
+/* file drm_drv.c, struct drm_stub_fops */
+#if 0
+struct module {
+	int placeholder;
+};
+#endif
+
 /* file ttm/ttm_module.c, epilogue */
 /* file drm_stub.c */
 #define MODULE_AUTHOR(arg, ...)
@@ -59,12 +69,6 @@
 /* file i915_drv.c */
 #define MODULE_DEVICE_TABLE(arg, ...)
 
-/* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
-/* file drm_drv.c, struct drm_stub_fops */
-struct module {
-	int placeholder;
-};
-
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 static __inline__ int
 request_module(char *modalias) {
@@ -73,35 +77,35 @@ request_module(char *modalias) {
 
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 static __inline__ int
-try_module_get(struct module *module) {
+try_module_get(DRM_MODULE_T module) {
 	return 1;
 }
 
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
 static __inline__ int
-module_put(struct module *module) {
+module_put(DRM_MODULE_T module) {
 	return 0;
 }
 
-#define THIS_MODULE (struct module *)NULL
+#define THIS_MODULE (DRM_MODULE_T)NULL
 
-/* file ttm/ttm_module.c, epilogue */
+/* file _drv.c and ttm_module.c epilogue */
+/*
+ * The functions initialize a module's callback for load and unload.
+ * The callbacks for legacy BSD can instead be called in the
+ * module MOD_LOAD / MOD_UNLOAD handler.
+ */
 #if 0
 static __inline__ void
 module_init(int (*func)(void)) {
 	;
 }
-#endif
-#define module_init(arg) /* UNIMPLEMENTED */
 
-#if 0
-/* file ttm/ttm_module.c, epilogue */
 static __inline__ void
 module_exit(void (*func)(void)) {
 	;
 }
 #endif
-#define module_exit(arg) /* UNIMPLEMENTED */
 
 /* Called in drm_drawable.c, function drm_update_drawable_info().
  * Negative of error indicators sometimes assigned to (void *).
@@ -1483,6 +1487,7 @@ delayed_slow_work_enqueue(struct delayed_slow_work *delayed_work, uint32_t flags
 	return 0;
 }
 
+#if 0
 /* drm_crtc_helper.c, function output_poll_execute() */
 static __inline__ int
 slow_work_register_user(struct module *thisModule) {
@@ -1494,6 +1499,7 @@ static __inline__ int
 slow_work_unregister_user(struct module *thisModule) {
 	return 0;
 }
+#endif
 
 /* drm_crtc_helper.c, function drm_kms_helper_poll_init() */
 static __inline__ int
@@ -2640,12 +2646,13 @@ iminor(struct inode *inode) {
 /* file drm_fops.c, function drm_stub_open() */
 struct file_operations {
 /* file drm_drv.c, struct drm_stub_fops */
-	struct module *owner;
+	DRM_MODULE_T owner;
 	int (*open)(struct inode *inode, struct file *file);
 };
 
 /* file drm_stub.c */
-struct class {
+/* Substitite for struct class */
+struct DRM_CLASS {
 	int placeholder;
 };
 
@@ -3635,8 +3642,9 @@ cfb_imageblit(struct fb_info *info, const struct fb_image *image) {
 }
 
 /* file intel_fb.c, struct intelfb_ops */
+/* file vmwgfx_fb.c, struct vmw_fb_ops */
 struct fb_ops {
-	struct module *owner;
+	DRM_MODULE_T owner;
 	int (*fb_check_var)(struct fb_var_screeninfo *var, struct fb_info *info);
 	int (*fb_set_par)(struct fb_info *info);
 	int (*fb_setcolreg)(unsigned regno, unsigned red, unsigned green,
@@ -3734,7 +3742,7 @@ struct i2c_msg {
 /* file drm_edid.c, function drm_do_probe_ddc_edid() */
 struct i2c_adapter {
 /* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
-	struct module *owner;
+	DRM_MODULE_T owner;
 /* file drm_dp_i2c_helper.c, function i2c_algo_dp_aux_transaction() */
 	void *algo_data;
 /* file drm_dp_i2c_helper.c, function i2c_dp_aux_prepare_bus() */
@@ -3855,7 +3863,7 @@ i2c_unregister_device(struct i2c_client *client) {
 
 /* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
 static __inline__ int
-i2c_register_driver(struct module *owner, struct i2c_driver *driver) {
+i2c_register_driver(DRM_MODULE_T owner, struct i2c_driver *driver) {
 	return 0;
 }
 

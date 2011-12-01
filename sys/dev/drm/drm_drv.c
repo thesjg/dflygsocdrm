@@ -464,8 +464,10 @@ static void __exit drm_core_exit(void)
 	idr_destroy(&drm_minors_idr);
 }
 
+#ifdef __linux__
 module_init(drm_core_init);
 module_exit(drm_core_exit);
+#endif /* __linux__ */
 
 /**
  * Copy and IOCTL return string to user space

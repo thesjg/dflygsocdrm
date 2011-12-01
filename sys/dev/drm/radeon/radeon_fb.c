@@ -310,7 +310,7 @@ out_unref:
 		list_del(&fb->filp_head);
 		drm_gem_object_unreference(gobj);
 		drm_framebuffer_cleanup(fb);
-		kfree(fb);
+		free(fb, DRM_MEM_DRIVER);
 	}
 	drm_gem_object_unreference(gobj);
 	mutex_unlock(&rdev->ddev->struct_mutex);

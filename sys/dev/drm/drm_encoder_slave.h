@@ -142,8 +142,13 @@ static inline struct i2c_client *drm_i2c_encoder_get_client(struct drm_encoder *
  * @owner:	Module containing the driver.
  * @driver:	Driver to be registered.
  */
+#ifdef __linux__
 static inline int drm_i2c_encoder_register(struct module *owner,
 					   struct drm_i2c_encoder_driver *driver)
+#else
+static inline int drm_i2c_encoder_register(DRM_MODULE_T owner,
+					   struct drm_i2c_encoder_driver *driver)
+#endif
 {
 	return i2c_register_driver(owner, &driver->i2c_driver);
 }

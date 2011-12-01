@@ -88,7 +88,11 @@ module_param_named(debug, drm_debug, int, 0600);
 
 struct idr drm_minors_idr;
 
+#ifdef __linux__
 struct class *drm_class;
+#else
+struct DRM_CLASS *drm_class;
+#endif
 struct proc_dir_entry *drm_proc_root;
 struct dentry *drm_debugfs_root;
 void drm_ut_debug_printk(unsigned int request_level,

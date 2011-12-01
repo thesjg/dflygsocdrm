@@ -31,8 +31,8 @@ struct drm_sysfs_class {
 	int placeholder;
 };
 
-struct class *drm_sysfs_create(struct module *owner, char *name) {
-	return (struct class *)malloc(sizeof(struct class), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
+struct DRM_CLASS *drm_sysfs_create(DRM_MODULE_T owner, char *name) {
+	return (struct DRM_CLASS *)malloc(sizeof(struct DRM_CLASS), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 }
 
 void drm_sysfs_destroy(void) {

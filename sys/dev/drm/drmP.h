@@ -1668,7 +1668,11 @@ extern void drm_put_dev(struct drm_device *dev);
 extern int drm_put_minor(struct drm_minor **minor);
 extern unsigned int drm_debug;
 
+#ifdef __linux__
 extern struct class *drm_class;
+#else
+extern struct DRM_CLASS *drm_class;
+#endif
 extern struct proc_dir_entry *drm_proc_root;
 extern struct dentry *drm_debugfs_root;
 
@@ -1727,7 +1731,11 @@ extern void drm_pci_free(struct drm_device *dev, drm_dma_handle_t * dmah);
 
 			       /* sysfs support (drm_sysfs.c) */
 struct drm_sysfs_class;
+#ifdef __linux__
 extern struct class *drm_sysfs_create(struct module *owner, char *name);
+#else
+extern struct DRM_CLASS *drm_sysfs_create(DRM_MODULE_T owner, char *name);
+#endif
 extern void drm_sysfs_destroy(void);
 extern int drm_sysfs_device_add(struct drm_minor *minor);
 extern void drm_sysfs_hotplug_event(struct drm_device *dev);

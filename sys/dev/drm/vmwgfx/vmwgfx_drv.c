@@ -881,9 +881,11 @@ static void __exit vmwgfx_exit(void)
 	drm_exit(&driver);
 }
 
+#ifdef __linux__
 module_init(vmwgfx_init);
 module_exit(vmwgfx_exit);
 
 MODULE_AUTHOR("VMware Inc. and others");
 MODULE_DESCRIPTION("Standalone drm driver for the VMware SVGA device");
 MODULE_LICENSE("GPL and additional rights");
+#endif /* __linux__ */

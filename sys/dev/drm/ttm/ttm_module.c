@@ -108,9 +108,39 @@ static void __exit ttm_exit(void)
 	ttm_global_release();
 }
 
+static int ttmdrm_handler(module_t mod, int what, void *arg) {
+	int err = 0;
+	switch(what) {
+	case MOD_LOAD:
+		ttm_init();
+		break;
+	case MOD_UNLOAD:
+		ttm_exit();
+		break;
+	default:
+		err = EINVAL;
+		break;
+	}
+	return (err);
+}
+
+static moduledata_t ttmdrm_data= {
+	"ttmdrm",
+	ttmdrm_handler,
+	0
+};
+
+MODULE_VERSION(ttmdrm, 1);
+DECLARE_MODULE(ttmdrm, ttmdrm_data, SI_SUB_DRIVERS, SI_ORDER_MIDDLE);
+MODULE_DEPEND(ttmdrm, agp, 1, 1, 1);
+MODULE_DEPEND(ttmdrm, pci, 1, 1, 1);
+MODULE_DEPEND(ttmdrm, drm, 1, 1, 1);
+
+#ifdef __linux__
 module_init(ttm_init);
 module_exit(ttm_exit);
 
 MODULE_AUTHOR("Thomas Hellstrom, Jerome Glisse");
 MODULE_DESCRIPTION("TTM memory manager subsystem (for DRM device)");
 MODULE_LICENSE("GPL and additional rights");
+#endif /* __linux__ */
