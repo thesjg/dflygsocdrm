@@ -581,78 +581,41 @@ DRM_AGP_MEM *drm_agp_allocate_memory(DRM_AGP_BRIDGE_DATA_T bridge,
 	if (handle == NULL)
 		return NULL;
 
-	device_t agpdev;
-
-	agpdev = DRM_AGP_FIND_DEVICE();
-	if (!agpdev) {
-		free(handle, DRM_MEM_AGPLISTS);
-		return NULL;
-	}
-
-	if (bridge == NULL) {
-		DRM_ERROR("bridge == null\n");
-	}
-	if (agpdev != bridge) {
-		DRM_ERROR("agpdev != bridge argument\n");
-	}
-	handle->bridge = agpdev;
-
-#ifdef __linux__
-	handle->pages = malloc(sizeof (struct page *) * pages,
-		DRM_MEM_AGPLISTS, M_WAITOK);
-	if (handle->pages == NULL)
-		return NULL;
-#else
-	handle->pages = NULL;
-#endif /* __linux__ */
+	handle->bridge = bridge;
 
 /* QUESTION: Should one use PAGE_SHIFT or AGP_PAGE_SHIFT? */
 /* On DragonFly AGP_PAGE_SHIFT is defined to be 12 */
-	handle->memory = agp_alloc_memory(agpdev, type, pages << AGP_PAGE_SHIFT);
+	handle->memory = agp_alloc_memory(handle->bridge, type, pages << AGP_PAGE_SHIFT);
 	return handle;
 }
 
 /** Calls agp_free_memory() */
 int drm_agp_free_memory(DRM_AGP_MEM * handle)
 {
-	device_t agpdev;
-
-	agpdev = DRM_AGP_FIND_DEVICE();
-	if (agpdev && handle && handle->memory)
-		agp_free_memory(agpdev, handle->memory);
-	if (handle) {
-		if (handle->pages)
-			free(handle->pages, DRM_MEM_AGPLISTS);
-		free(handle, DRM_MEM_AGPLISTS);
-	}
-	if (!agpdev || !handle || !handle->memory)
+	if (!handle)
 		return 0;
 
+	if (handle->bridge && handle->memory)
+		agp_free_memory(handle->bridge, handle->memory);
+	free(handle, DRM_MEM_AGPLISTS);
 	return 1;
 }
 
 /** Calls agp_bind_memory() */
 int drm_agp_bind_memory(DRM_AGP_MEM * handle, off_t start)
 {
-	device_t agpdev;
-
-	agpdev = DRM_AGP_FIND_DEVICE();
-	if (!agpdev || !handle || !handle->memory)
+	if (!handle)
 		return -EINVAL;
 
-	return agp_bind_memory(agpdev, handle->memory, start * PAGE_SIZE);
+	return agp_bind_memory(handle->bridge, handle->memory, start * PAGE_SIZE);
 }
 
 /** Calls agp_unbind_memory() */
 int drm_agp_unbind_memory(DRM_AGP_MEM * handle)
 {
-	device_t agpdev;
-
-	agpdev = DRM_AGP_FIND_DEVICE();
-	if (!agpdev || !handle || !handle->memory)
+	if (!handle)
 		return -EINVAL;
-
-	return agp_unbind_memory(agpdev, handle->memory);
+	return agp_unbind_memory(handle->bridge, handle->memory);
 }
 
 /**
@@ -691,6 +654,7 @@ drm_agp_bind_pages(struct drm_device *dev,
 		mem->pages[i] = pages[i];
 #endif /* __linux__ */
 	mem->page_count = num_pages;
+	mem->bridge = dev->agp->agpdev;
 
 	mem->is_flushed = true;
 	ret = drm_agp_bind_memory(mem, gtt_offset / PAGE_SIZE);
@@ -706,11 +670,12 @@ EXPORT_SYMBOL(drm_agp_bind_pages);
 
 void drm_agp_chipset_flush(struct drm_device *dev)
 {
+#ifdef __linux__
+	agp_flush_chipset(dev->agp->bridge);
+#else /* !__linux__ */
 #if defined(__i386__) || defined(__x86_64__)
 	wbinvd();
 #endif
-#ifdef __linux__
-	agp_flush_chipset(dev->agp->bridge);
 #endif /* __linux__ */
 }
 EXPORT_SYMBOL(drm_agp_chipset_flush);
@@ -725,27 +690,12 @@ static DRM_AGP_MEM *drm_agp_alloc_given(DRM_AGP_BRIDGE_DATA_T bridge,
 	if (handle == NULL)
 		return NULL;
 
-	device_t agpdev;
-
-	agpdev = DRM_AGP_FIND_DEVICE();
-	if (!agpdev) {
-		free(handle, DRM_MEM_AGPLISTS);
-		return NULL;
-	}
-
-	if (bridge == NULL) {
-		DRM_ERROR("bridge == null\n");
-	}
-	if (agpdev != bridge) {
-		DRM_ERROR("agpdev != bridge argument\n");
-	}
-	handle->bridge = agpdev;
-
+	handle->bridge = bridge;
 	handle->object = (vm_object_t)object;
 
 /* QUESTION: Should one use PAGE_SHIFT or AGP_PAGE_SHIFT? */
 /* On DragonFly AGP_PAGE_SHIFT is defined to be 12 */
-	handle->memory = agp_alloc_given(agpdev, type, pages << AGP_PAGE_SHIFT, object);
+	handle->memory = agp_alloc_given(handle->bridge, type, pages << AGP_PAGE_SHIFT, object);
 	return handle;
 }
 
@@ -765,7 +715,6 @@ drm_agp_bind_object(struct drm_device *dev,
 {
 	DRM_AGP_MEM *mem;
 	int ret;
-	device_t agpdev = drm_agp_find_bridge(NULL);
 
 	DRM_DEBUG("\n");
 
@@ -778,14 +727,16 @@ drm_agp_bind_object(struct drm_device *dev,
 	}
 
 	mem->page_count = num_pages;
+	mem->bridge = dev->agp->agpdev;
 
 	mem->is_flushed = true;
-	ret = agp_bind_memory(agpdev, mem->memory, gtt_offset);
+	ret = drm_agp_bind_memory(mem, gtt_offset / PAGE_SIZE);
 	if (ret != 0) {
 		DRM_ERROR("Failed to bind AGP memory: %d\n", ret);
 		drm_agp_free_memory(mem);
 		return NULL;
 	}
+
 	return mem;
 }
 
