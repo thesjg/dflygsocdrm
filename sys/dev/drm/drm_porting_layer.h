@@ -3188,6 +3188,8 @@ struct agp_memory {
 
 struct agp_memory;
 
+typedef device_t	DRM_AGP_BRIDGE_DATA_T;
+
 struct agp_bridge_data {
 	int placeholder;
 };
@@ -3272,7 +3274,7 @@ typedef struct DRM_AGP_KERN {
 	struct DRM_AGP_VERSION version;
 	unsigned long mode;
 	unsigned long aper_base;
-/* units of 1024 x 1024 bytes */
+/* DIFFERENCE units of 1024 x 1024 bytes */
 	unsigned long aper_size;
 /* units of pages */
 	unsigned long max_memory;

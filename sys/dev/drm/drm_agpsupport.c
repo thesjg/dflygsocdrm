@@ -147,6 +147,14 @@ int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info)
 	info->id_vendor = kern->ai_devid & 0xffff;
 	info->id_device = kern->ai_devid >> 16;
 #endif
+#ifndef __linux__
+	if (info->id_vendor != (unsigned short)(kern->ai_devid & 0xffff))
+		DRM_ERROR("info vendor %d != ai_devid %d!\n",
+			info->id_vendor, kern->ai_devid & 0xffff); 
+	if (info->id_device != (unsigned short)(kern->ai_devid >> 16))
+		DRM_ERROR("info device %d != ai_devid %d!\n",
+			info->id_device, kern->ai_devid >> 16);
+#endif
 
 	return 0;
 }
@@ -515,34 +523,52 @@ int drm_agp_free_ioctl(struct drm_device *dev, void *data,
  */
 struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 {
-	device_t agpdev;
 	struct drm_agp_head *head = NULL;
-	int      agp_available = 1;
-   
-	agpdev = drm_agp_find_bridge(NULL);
-	if (!agpdev)
-		agp_available = 0;
 
-	DRM_DEBUG("agp_available = %d\n", agp_available);
-
-	if (agp_available) {
-		head = malloc(sizeof(*head), DRM_MEM_AGPLISTS,
-		    M_WAITOK | M_ZERO);
-		if (head == NULL)
+#ifdef __linux__
+	if (!(head = kmalloc(sizeof(*head), GFP_KERNEL)))
+		return NULL;
+#else
+	if (!(head = malloc(sizeof(*head), DRM_MEM_AGPLISTS, M_WAITOK)))
+		return NULL;
+#endif
+	memset((void *)head, 0, sizeof(*head));
+#ifdef __linux__
+	head->bridge = agp_find_bridge(dev->pdev);
+#else
+	head->agpdev = drm_agp_find_bridge(NULL);
+#endif
+	if (!head->agpdev) {
+#ifdef __linux__
+		if (!(head->bridge = agp_backend_acquire(dev->pdev))) {
+			kfree(head);
 			return NULL;
-		head->agpdev = agpdev;
-		agp_get_info(agpdev, &head->info);
-		drm_agp_copy_info(agpdev, &head->agp_info);
-		INIT_LIST_HEAD(&head->memory);
-/* legacy guesses at cant_use_aperture and page_mask */
-		head->cant_use_aperture = 0;
-		head->page_mask = 0x0fff;
-		head->base = head->info.ai_aperture_base;
+		}
+		agp_copy_info(head->bridge, &head->agp_info);
+		agp_backend_release(head->bridge);
+#else
+		free(head, DRM_MEM_AGPLISTS);
+		return NULL;
 
-		DRM_INFO("AGP at 0x%08lx %dMB\n",
-			 (long)head->info.ai_aperture_base,
-			 (int)(head->info.ai_aperture_size >> 20));
+#endif
+	} else {
+#ifdef __linux__
+		agp_copy_info(head->bridge, &head->agp_info);
+#else
+		agp_get_info(head->agpdev, &head->info);
+#endif
 	}
+
+	INIT_LIST_HEAD(&head->memory);
+/* legacy guesses at cant_use_aperture and page_mask */
+	head->cant_use_aperture = 0;
+	head->page_mask = 0x0fff;
+	head->base = head->info.ai_aperture_base;
+#ifndef __linux__
+	DRM_INFO("drm_agp_init(): AGP at 0x%08lx %dMB\n",
+		 (long)head->info.ai_aperture_base,
+		 (int)(head->info.ai_aperture_size >> 20));
+#endif
 	return head;
 }
 

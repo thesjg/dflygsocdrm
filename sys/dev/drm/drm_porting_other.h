@@ -264,7 +264,6 @@ extern DRM_PROC_DIR_ENTRY drm_sysctl_root;
 
 typedef device_t	DRM_DEVICE_T;
 typedef vm_object_t	DRM_VM_OBJECT_T;
-typedef device_t	DRM_AGP_BRIDGE_DATA_T;
 
 /* Switching to Linux drm drm_pciids.h format */
 #define DRM_NEWER_PCIID 1
