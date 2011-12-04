@@ -283,6 +283,8 @@ main(int argc, char **argv)
 	if (errno)
 		err(1, "fts_read");
 
+	fts_close(fts);
+
 	if (cflag) {
 		if (hflag) {
 			(void) prthumanval(howmany(savednumber, blocksize));
