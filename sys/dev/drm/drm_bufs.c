@@ -772,13 +772,6 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		DRM_ERROR("Bad map type %d\n", map->type);
 		break;
 	}
-#if 0
-	if (map->bsr != NULL) {
-		DRM_INFO("drm_rmmap_locked(): map->bsr != NULL\n");
-		bus_release_resource(dev->device, SYS_RES_MEMORY, map->rid,
-		    map->bsr);
-	}
-#endif
 	free(map, DRM_MEM_MAPS);
 
 	return 0;

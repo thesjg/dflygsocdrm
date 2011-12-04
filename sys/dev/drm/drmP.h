@@ -224,13 +224,6 @@ extern void drm_ut_debug_printk(unsigned int request_level,
 
 /*@}*/
 
-#if 0
-				/* Internal types and structures */
-#define DRM_ARRAY_SIZE(x) NELEM(x)
-#define DRM_MIN(a,b) ((a)<(b)?(a):(b))
-#define DRM_MAX(a,b) ((a)>(b)?(a):(b))
-#endif
-
 /***********************************************************************/
 /** \name Macros to make printk easier */
 /*@{*/
@@ -526,8 +519,6 @@ struct drm_file {
 /* legacy drm fields */
 	TAILQ_ENTRY(drm_file) link;
 	struct drm_device *dev;
-	int		  master_legacy;
-	int		  minor_legacy;
 	int		  refs;
 };
 
@@ -555,10 +546,6 @@ struct drm_lock_data {
 	struct drm_hw_lock *hw_lock;	/**< Hardware lock */
 	/** Private of lock holder's file (NULL=kernel) */
 	struct drm_file *file_priv;
-/* legacy drm implementation of field lock_queue is only used in drm_lock.c
- * as the memory address upon which to form a queue and then wake up
- * field lock_queue formerly defined as int
- */
 	wait_queue_head_t lock_queue;	/**< Queue of blocked processes */
 	unsigned long lock_time;	/**< Time of last lock in jiffies */
 	spinlock_t spinlock;
@@ -567,14 +554,6 @@ struct drm_lock_data {
 	int idle_has_lock;
 };
 
-/* This structure, in the struct drm_device, is always initialized while the
- * device
- * is open.  dev->dma_lock protects the incrementing of dev->buf_use, which
- * when set marks that no further bufs may be allocated until device teardown
- * occurs (when the last open of the device has closed).  The high/low
- * watermarks of bufs are only touched by the X Server, and thus not
- * concurrently accessed, so no locking is needed.
- */
 /**
  * DMA data.
  */
@@ -651,10 +630,11 @@ struct drm_sigdata {
 	struct drm_hw_lock *lock;
 };
 
+
 /**
  * Kernel side of a mapping
  */
-typedef struct drm_local_map {
+struct drm_local_map {
 	resource_size_t offset;	 /**< Requested physical address (0 for SAREA)*/
 	unsigned long size;	 /**< Requested physical size (bytes) */
 	enum drm_map_type type;	 /**< Type of memory to map */
@@ -666,12 +646,11 @@ typedef struct drm_local_map {
 /* legacy drm */
 				 /* Private data			    */
 	int		rid;	 /* PCI resource ID for bus_space */
-	struct resource *bsr;
-	bus_space_tag_t bst;
-	bus_space_handle_t bsh;
 	drm_dma_handle_t *dmah;
 	TAILQ_ENTRY(drm_local_map) link;
-} drm_local_map_t;
+};
+
+typedef struct drm_local_map drm_local_map_t;
 
 /* legacy drm struct */
 struct drm_vblank_info {
@@ -726,12 +705,6 @@ struct drm_ati_pcigart_info {
 	struct drm_dma_handle *table_handle;
 	struct drm_local_map mapping;
 	int table_size;
-
-/* legacy drm */
-#if 0
-	dma_addr_t member_mask;
-	struct drm_dma_handle *dmah; /* handle for ATI PCIGART table */
-#endif
 };
 
 /**
@@ -758,9 +731,6 @@ struct drm_gem_object {
 
 	/** File representing the shmem storage */
 	struct file *filp;
-
-	/** vm_object representating the backing store */
-	vm_object_t object;
 
 	/* Mapping info for this object */
 	struct drm_map_list map_list;
@@ -796,6 +766,10 @@ struct drm_gem_object {
 	uint32_t pending_write_domain;
 
 	void *driver_private;
+
+/* legacy drm BSD */
+	/** vm_object representating the backing store */
+	vm_object_t object;
 };
 
 #include "drm_crtc.h"
@@ -807,6 +781,7 @@ struct drm_master {
 
 	struct list_head head; /**< each minor contains a list of masters */
 	struct drm_minor *minor; /**< link back to minor we are a master for */
+
 	char *unique;			/**< Unique identifier: e.g., busid */
 	int unique_len;			/**< Length of unique field */
 	int unique_size;		/**< amount allocated */
@@ -1211,13 +1186,6 @@ struct drm_device {
 	/*@} */
 
 /* legacy BSD drm */
-#if 0
-	atomic_t context_flag;
-	u_int16_t pci_vendor;		/* PCI vendor id */
-	u_int16_t pci_device;		/* PCI device id */
-	/* Linked list of mappable regions. Protected by dev_lock */
-	drm_map_list_t_legacy maplist_legacy;
-#endif
 	DRM_PCI_DEVICE_ID *id_entry;	/* PCI ID, name, and chipset private */
 
 	char		  *unique;	/* Unique identifier: e.g., busid  */
@@ -1416,19 +1384,10 @@ extern unsigned int drm_poll(struct file *filp, struct poll_table_struct *wait);
 #ifdef __linux__
 #include "drm_memory.h"
 #endif
-
 extern void drm_mem_init(void);
 extern int drm_mem_info(char *buf, char **start, off_t offset,
 			int request, int *eof, void *data);
 extern void *drm_realloc(void *oldpt, size_t oldsize, size_t size, int area);
-#if 0
-static __inline__ void *
-drm_realloc(void *oldpt, size_t oldsize, size_t size,
-    struct malloc_type *area)
-{
-	return reallocf(oldpt, size, area, M_NOWAIT);
-}
-#endif
 
 extern DRM_AGP_MEM *drm_alloc_agp(struct drm_device *dev, int pages, u32 type);
 extern int drm_free_agp(DRM_AGP_MEM * handle, int pages);
