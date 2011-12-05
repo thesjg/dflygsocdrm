@@ -145,6 +145,10 @@ static int	strict_mcast_mship = 1;
 SYSCTL_INT(_net_inet_udp, OID_AUTO, strict_mcast_mship, CTLFLAG_RW,
 	&strict_mcast_mship, 0, "Only send multicast to member sockets");
 
+int	udp_sosnd_async = 1;
+SYSCTL_INT(_net_inet_udp, OID_AUTO, sosnd_async, CTLFLAG_RW,
+	&udp_sosnd_async, 0, "UDP asynchronized pru_send");
+
 struct	inpcbinfo udbinfo;
 
 static struct netisr_barrier *udbinfo_br;
@@ -182,7 +186,7 @@ static void ip_2_ip6_hdr (struct ip6_hdr *ip6, struct ip *ip);
 static int udp_connect_oncpu(struct socket *so, struct thread *td,
 			struct sockaddr_in *sin, struct sockaddr_in *if_sin);
 static int udp_output (struct inpcb *, struct mbuf *, struct sockaddr *,
-			struct mbuf *, struct thread *);
+			struct thread *, int);
 
 void
 udp_init(void)
@@ -784,7 +788,7 @@ SYSCTL_PROC(_net_inet_udp, OID_AUTO, getcred, CTLTYPE_OPAQUE|CTLFLAG_RW,
 
 static int
 udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *dstaddr,
-	   struct mbuf *control, struct thread *td)
+	   struct thread *td, int flags)
 {
 	struct udpiphdr *ui;
 	int len = m->m_pkthdr.len;
@@ -902,7 +906,7 @@ udp_output(struct inpcb *inp, struct mbuf *m, struct sockaddr *dstaddr,
 
 	error = ip_output(m, inp->inp_options, &inp->inp_route,
 	    (inp->inp_socket->so_options & (SO_DONTROUTE | SO_BROADCAST)) |
-	    IP_DEBUGROUTE,
+	    flags | IP_DEBUGROUTE,
 	    inp->inp_moptions, inp);
 
 	/*
@@ -1238,24 +1242,33 @@ static void
 udp_send(netmsg_t msg)
 {
 	struct socket *so = msg->send.base.nm_so;
+	struct mbuf *m = msg->send.nm_m;
+	struct sockaddr *addr = msg->send.nm_addr;
+	int pru_flags = msg->send.nm_flags;
 	struct inpcb *inp;
 	int error;
 
 	KKASSERT(&curthread->td_msgport == cpu_portfn(0));
+	KKASSERT(msg->send.nm_control == NULL);
 
 	inp = so->so_pcb;
 	if (inp) {
-		error = udp_output(inp,
-				   msg->send.nm_m,
-				   msg->send.nm_addr,
-				   msg->send.nm_control,
-				   msg->send.nm_td);
+		struct thread *td = msg->send.nm_td;
+		int flags = 0;
+
+		if (pru_flags & PRUS_DONTROUTE)
+			flags |= SO_DONTROUTE;
+		error = udp_output(inp, m, addr, td, flags);
 	} else {
-		m_freem(msg->send.nm_m);
+		m_freem(m);
 		error = EINVAL;
 	}
-	msg->send.nm_m = NULL;
-	lwkt_replymsg(&msg->send.base.lmsg, error);
+
+	if (pru_flags & PRUS_FREEADDR)
+		kfree(addr, M_SONAME);
+
+	if ((pru_flags & PRUS_NOREPLY) == 0)
+		lwkt_replymsg(&msg->send.base.lmsg, error);
 }
 
 void

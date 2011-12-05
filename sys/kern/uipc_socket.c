@@ -100,6 +100,7 @@
 
 extern int tcp_sosnd_agglim;
 extern int tcp_sosnd_async;
+extern int udp_sosnd_async;
 
 #ifdef INET
 static int	 do_setopt_accept_filter(struct socket *so, struct sockopt *sopt);
@@ -891,9 +892,8 @@ int
 sosendudp(struct socket *so, struct sockaddr *addr, struct uio *uio,
 	  struct mbuf *top, struct mbuf *control, int flags, struct thread *td)
 {
-	boolean_t dontroute;		/* temporary SO_DONTROUTE setting */
 	size_t resid;
-	int error;
+	int error, pru_flags = 0;
 	int space;
 
 	if (td->td_lwp != NULL)
@@ -937,15 +937,16 @@ restart:
 			goto release;
 	}
 
-	dontroute = (flags & MSG_DONTROUTE) && !(so->so_options & SO_DONTROUTE);
-	if (dontroute)
-		so->so_options |= SO_DONTROUTE;
+	if (flags & MSG_DONTROUTE)
+		pru_flags |= PRUS_DONTROUTE;
 
-	error = so_pru_send(so, 0, top, addr, NULL, td);
+	if (udp_sosnd_async && (flags & MSG_SYNC) == 0) {
+		so_pru_send_async(so, pru_flags, top, addr, NULL, td);
+		error = 0;
+	} else {
+		error = so_pru_send(so, pru_flags, top, addr, NULL, td);
+	}
 	top = NULL;		/* sent or freed in lower layer */
-
-	if (dontroute)
-		so->so_options &= ~SO_DONTROUTE;
 
 release:
 	ssb_unlock(&so->so_snd);
