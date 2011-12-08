@@ -817,8 +817,11 @@ nfsm_request_bio(nfsm_info_t info, struct vnode *vp, int procnum,
 	if (error != EINPROGRESS) {
 		kprintf("nfsm_request_bio: early abort %d\n", error);
 		bp = info->bio->bio_buf;
-		if (error)
+		if (error) {
 			bp->b_flags |= B_ERROR;
+			if (error == EIO)		/* unrecoverable */
+				bp->b_flags |= B_INVAL;
+		}
 		bp->b_error = error;
 		biodone(info->bio);
 	}
