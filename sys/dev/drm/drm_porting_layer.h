@@ -199,6 +199,7 @@ typedef u_int32_t u32;
 typedef u_int16_t u16;
 typedef u_int8_t  u8;
 
+/* typedef int32_t __s32 in drm.h */
 /* i915/i915.drv.h, struct drm_i915_error_buffer */
 typedef int32_t s32;
 
@@ -211,16 +212,17 @@ typedef int32_t s32;
 
 /* file drm_fixed.h, function dfixed_div,
  * extend interpretation of upper_32_bits */
+/* 2.6.34.7, file radeon_fixed.h, function rfixed_div() return value */
 #define lower_32_bits(n) ((uint32_t)((n) & 0xffffffff))
 
 /* file drm_fixed.h, function dfixed_div,
  * extend interpretation of upper_32_bits */
+/* 2.6.34.7, file radeon_fixed.h, function rfixed_div() */
 #define do_div(a, b) (a = (uint64_t)(((uint64_t)(a)) / ((uint64_t)(b))))
 
 /* drmP.h, declaration of function drm_read() */
 #define loff_t	off_t
 
-/* i915_drv.h */
 /* evidently now defined in DragonFly in libprop/prop_object.h */
 #if 0
 typedef boolean_t bool;
@@ -261,7 +263,7 @@ typedef boolean_t bool;
  * Endian considerations
  */
 
-/* vmware */
+/* vmwgfx */
 #ifndef __le32
 #define __le32 uint32_t
 #endif
@@ -285,8 +287,7 @@ typedef boolean_t bool;
 /* file drm_bufs.c, function drm_get_resource_start() */
 typedef unsigned long resource_size_t;
 
-/* file i915_gem.c, function i915_gem_object_save_bit_17_swizzle() */
-
+/* file drm_bufs.c, function drm_map_handle() */
 #ifdef __x86_64__
 #define BITS_PER_LONG  64
 #else
@@ -295,17 +296,10 @@ typedef unsigned long resource_size_t;
 
 #define BITS_TO_LONGS(b) (((b) + BITS_PER_LONG - 1) / BITS_PER_LONG)
 
-static __inline__ void
-__set_bit(int bit, volatile void *bytes) {
-	set_bit(bit, bytes);
-}
-
-static __inline__ void
-__clear_bit(int bit, volatile void *bytes) {
-	clear_bit(bit, bytes);
-}
-
 /* file intel_display.c, function ironlake_compute_m_n() */
+/* gmch_m and link_m are defined to be u32, but
+ * temp is defined to be u64
+ */
 static __inline__ uint32_t
 div_u64(uint64_t temp, uint32_t link_clock) {
 	return (uint32_t)(temp / link_clock);
@@ -332,66 +326,7 @@ hweight16(uint16_t mask) {
 #define KHZ2PICOS(clock) (1000000000ul / (clock))
 
 /**********************************************************
- * HASH                                                   *
- **********************************************************/
-
-/* file drm_hashtab.c */
-/* return value unsigned long from drm_ht_just_insert_please */
-static __inline__ unsigned int
-hash_long(unsigned long key, int bits) {
-	unsigned long val;
-#ifdef __x86_64__
-/* Prime close to golden ratio obtained from
- * Bob Jenkins, Public Domain code
- * http://burtleburtle.net/bob/c/lookup8.c */
-	val = key * 0x9e3779b97f4a7c13L;
-#else
-/* Prime close to golden ratio obtained from
- * Bob Jenkins, Public Domain code
- * http://burtleburtle.net/bob/c/lookup2.c */
-	val = key * 0x9e3779b9;
-#endif
-	return (unsigned int)((val >> (BITS_PER_LONG - bits))
-		& ((1 << bits) - 1)); 
-}
-
-/**********************************************************
- * Atomic instructions                                    *
- **********************************************************/
-
-/* Uses of atomic functions defined below all appear
- * to use constant n for addition or subtraction
- */
-
-/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
-static __inline__ uint32_t
-atomic_add_return(uint32_t n, atomic_t *v) {
-	return n + atomic_fetchadd_int(v, n);
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_fini() */
-static __inline__ uint32_t
-atomic_sub_return(uint32_t n, atomic_t *v) {
-	return (uint32_t)(-n) + atomic_fetchadd_int(v, (uint32_t)(-n));
-}
-
-/* file ttm/ttm_bo.c, function ttm_bo_reserve_locked() */
-static __inline__ uint32_t
-atomic_cmpxchg(atomic_t *reserved, uint32_t v0, uint32_t v1){
-	return atomic_cmpset_int(reserved, v0, v1);
-}
-
-/* file drm_irq.c, function drm_vblank_put() */
-static __inline__ uint32_t
-atomic_dec_and_test(atomic_t *refcount){
-	return atomic_fetchadd_int(refcount, -1) == 1;
-}
-
-/* file ttm/ttm_page_alloc.c, struct ttm_pool_manager */
-#define ATOMIC_INIT(n)  (n)
-
-/**********************************************************
- * C standard library equivalents                         *
+ * C LIBRARY equivalents                                  *
  **********************************************************/
 
 /*
@@ -399,20 +334,13 @@ atomic_dec_and_test(atomic_t *refcount){
  */
 
 /* file intel_dp.c, function intel_dp_i2c_aux_ch() */
-#define EREMOTEIO  EIO
+#define EREMOTEIO    EIO
 
-/*
- * Math
- */
+/* file ttm/ttm_bo.c, function ttm_bo_mem_space() */
+/* Positive, larger than any in sys/errno.h */
+#define ERESTARTSYS  ERESTART 
 
-/* file drm_edid.c, macro MODE_REFRESH_DIFF() */
-#define abs(x) (x) > 0 ? (x) : -(x)
-
-/* file drm_fb_helper.c, function drm_fb_helper_connector_parse_command_line() */
-static __inline__ long
-simple_strtol(const char *nptr, char **endptr, int base) {
-	return strtol(nptr, endptr, base);
-}
+/* DragonFlyBSD defines ERESTART -1 */
 
 /*
  * Memory management
@@ -485,6 +413,93 @@ struct seq_file {
  * UGO to mean user, group, other
  */
 #define S_IRUGO  S_IRUSR|S_IRGRP|S_IROTH
+
+/*
+ * String
+ */
+
+/* file drm_fb_helper.c, function drm_fb_helper_connector_parse_command_line() */
+static __inline__ long
+simple_strtol(const char *nptr, char **endptr, int base) {
+	return strtol(nptr, endptr, base);
+}
+
+/**********************************************************
+ * MATH                                                   *
+ **********************************************************/
+
+/* file drm_edid.c, macro MODE_REFRESH_DIFF() */
+#define abs(x) (x) > 0 ? (x) : (-(x))
+
+/**********************************************************
+ * Atomic instructions                                    *
+ **********************************************************/
+
+/* Uses functions from drm_atomic.h */
+static __inline__ void
+__set_bit(int bit, volatile void *bytes) {
+	set_bit(bit, bytes);
+}
+
+static __inline__ void
+__clear_bit(int bit, volatile void *bytes) {
+	clear_bit(bit, bytes);
+}
+
+/* Uses of atomic functions defined below all appear
+ * to use constant n for addition or subtraction
+ */
+
+/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
+static __inline__ uint32_t
+atomic_add_return(uint32_t n, atomic_t *v) {
+	return n + atomic_fetchadd_int(v, n);
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_fini() */
+static __inline__ uint32_t
+atomic_sub_return(uint32_t n, atomic_t *v) {
+	return (uint32_t)(-n) + atomic_fetchadd_int(v, (uint32_t)(-n));
+}
+
+/* file ttm/ttm_bo.c, function ttm_bo_reserve_locked() */
+static __inline__ uint32_t
+atomic_cmpxchg(atomic_t *reserved, uint32_t v0, uint32_t v1){
+	return atomic_cmpset_int(reserved, v0, v1);
+}
+
+/* file drm_irq.c, function drm_vblank_put() */
+static __inline__ uint32_t
+atomic_dec_and_test(atomic_t *refcount){
+	return atomic_fetchadd_int(refcount, -1) == 1;
+}
+
+/* file ttm/ttm_page_alloc.c, struct ttm_pool_manager */
+#define ATOMIC_INIT(n)  (n)
+
+/**********************************************************
+ * HASH                                                   *
+ **********************************************************/
+
+/* file drm_hashtab.c */
+/* return value unsigned long from drm_ht_just_insert_please */
+static __inline__ unsigned int
+hash_long(unsigned long key, int bits) {
+	unsigned long val;
+#ifdef __x86_64__
+/* Prime close to golden ratio obtained from
+ * Bob Jenkins, Public Domain code
+ * http://burtleburtle.net/bob/c/lookup8.c */
+	val = key * 0x9e3779b97f4a7c13L;
+#else
+/* Prime close to golden ratio obtained from
+ * Bob Jenkins, Public Domain code
+ * http://burtleburtle.net/bob/c/lookup2.c */
+	val = key * 0x9e3779b9;
+#endif
+	return (unsigned int)((val >> (BITS_PER_LONG - bits))
+		& ((1 << bits) - 1)); 
+}
 
 /**********************************************************
  * DATA STRUCTURES                                        *
@@ -706,12 +721,6 @@ static __inline__ void
 local_irq_restore(unsigned long flags) {
 	;
 }
-
-/* file ttm/ttm_bo.c, function ttm_bo_mem_space() */
-/* Positive, larger than any in sys/errno.h */
-#define ERESTARTSYS  ERESTART 
-
-/* DragonFlyBSD defines ERESTART -1 */
 
 #define _IOC_NR(n) ((n) & 0xff)
 
