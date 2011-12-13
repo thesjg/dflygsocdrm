@@ -29,15 +29,259 @@
 #include <sys/tree.h>
 
 /**********************************************************
- * GLOBAL VARIABLES                                       *
- **********************************************************/
-int sysctl_vfs_cache_pressure = 0;
-
-struct atomic_notifier_head panic_notifier_list;
-
-/**********************************************************
  * DATA STRUCTURES                                        *
  **********************************************************/
+
+/**********************************************************
+ * RED-BLACK TREES                                        *
+ **********************************************************/
+
+/*
+ * Assume that x has non-null child y.
+ */
+static void
+rb_left_rotate(struct rb_node *x, struct rb_root *root) {
+	struct rb_node *y = x->rb_right;
+	x->rb_right = y->rb_left;
+	if (y->rb_left) {
+		y->rb_left->rb_parent = x;
+	}
+	y->rb_parent = x->rb_parent;
+	if (x->rb_parent == NULL) {
+		root->rb_node = y;	
+	}
+	else {
+		if (x == x->rb_parent->rb_left) {
+			x->rb_parent->rb_left = y;
+		}
+		else {
+			x->rb_parent->rb_right = y;
+		}
+	}
+	y->rb_left = x;
+	x->rb_parent = y;
+}
+
+/*
+ * Assume that y has non-null left child x.
+ */
+static void
+rb_right_rotate(struct rb_node *y, struct rb_root *root) {
+	struct rb_node *x = y->rb_left;
+	y->rb_left = x->rb_right;
+	if (x->rb_right) {
+		x->rb_right->rb_parent = y;
+	}
+	x->rb_parent = y->rb_parent;
+	if (y->rb_parent == NULL) {
+		root->rb_node = x;	
+	}
+	else {
+		if (y == y->rb_parent->rb_right) {
+			y->rb_parent->rb_right = x;
+		}
+		else {
+			y->rb_parent->rb_left = x;
+		}
+	}
+	x->rb_right = y;
+	y->rb_parent = x;
+}
+
+/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
+void
+rb_link_node(struct rb_node *x, struct rb_node *parent, struct rb_node **cur) {
+	if (cur == &(parent->rb_left)) {
+		parent->rb_left = x;
+	}
+	else {
+		parent->rb_right = x;
+	}
+	x->rb_parent = parent;
+	x->color = 0; /* color red */
+}
+
+void
+rb_insert_color(struct rb_node *z, struct rb_root *root) {
+	struct rb_node *y;
+	if (z == root->rb_node)
+		goto finished;
+	while (z->rb_parent->color == 0) {
+		if (z->rb_parent == z->rb_parent->rb_parent->rb_left) {
+			y = z->rb_parent->rb_parent->rb_right;
+			if (y->color == 0) {
+				z->rb_parent->color = 1;
+				y->color = 1;
+				z->rb_parent->rb_parent->color = 0;
+				z = z->rb_parent->rb_parent;
+			}
+			else {
+				if (z == z->rb_parent->rb_right) {
+					z = z->rb_parent;
+					rb_left_rotate(z, root);
+				}
+				z->rb_parent->color = 1;
+				z->rb_parent->rb_parent->color = 0;
+				rb_right_rotate(z->rb_parent->rb_parent, root);
+			}
+		}
+		else {
+			y = z->rb_parent->rb_parent->rb_left;
+			if (y->color == 0) {
+				z->rb_parent->color = 1;
+				y->color = 1;
+				z->rb_parent->rb_parent->color = 0;
+				z = z->rb_parent->rb_parent;
+			}
+			else {
+				if (z == z->rb_parent->rb_left) {
+					z = z->rb_parent;
+					rb_right_rotate(z, root);
+				}
+				z->rb_parent->color = 1;
+				z->rb_parent->rb_parent->color = 0;
+				rb_left_rotate(z->rb_parent->rb_parent, root);
+			}
+		}
+	}
+finished:
+	root->rb_node->color = 1;
+}
+
+static struct rb_node *rb_minimum(struct rb_node *x) {
+	while (x->rb_left != NULL) {
+		x = x->rb_left;
+	}
+	return x;
+}
+
+static struct rb_node *rb_next(struct rb_node *x) {
+	struct rb_node *y;
+	if (x->rb_right != NULL) {
+		return rb_minimum(x->rb_right);
+	}
+	y = x->rb_parent;
+	while ((y != NULL) && (x == y->rb_right)) {
+		x = y;
+		y = y->rb_parent;
+	}
+	return y;
+}
+
+/* Required: x != NULL */
+static void rb_erase_fixup(struct rb_node *x, struct rb_root *root) {
+	struct rb_node *w;
+	while ((x != root->rb_node) && (x->color == 0)) {
+		if (x == x->rb_parent->rb_left) {
+			w = x->rb_parent->rb_right;
+			if ((w != NULL) && (w->color == 0)) {
+				w->color = 1;
+				x->rb_parent->color = 0;
+				rb_left_rotate(x->rb_parent, root);
+				w = x->rb_parent->rb_right;
+			}
+			if (((w->rb_left == NULL) || (w->rb_left->color == 1))
+			&& ((w->rb_right == NULL) || (w->rb_right->color == 1))) {
+				w->color = 0;
+				x = x->rb_parent;
+			}
+			else {
+				if ((w->rb_right == NULL) || (w->rb_right->color == 1)) {
+					w->rb_left->color = 1;
+					w->color = 0;
+					rb_right_rotate(w, root);
+					w = x->rb_parent->rb_right;
+				}
+				w->color = x->rb_parent->color;
+				x->rb_parent->color = 1;
+				w->rb_right->color = 1;
+				rb_left_rotate(x->rb_parent, root);
+				x = root->rb_node;
+			}
+		}
+		else { /* x == x->rb_parent->rb_right */
+			w = x->rb_parent->rb_left;
+			if ((w != NULL) && (w->color == 0)) {
+				w->color = 1;
+				x->rb_parent->color = 0;
+				rb_right_rotate(x->rb_parent, root);
+				w = x->rb_parent->rb_left;
+			}
+			if (((w->rb_right == NULL) || (w->rb_right->color == 1))
+			&& ((w->rb_left == NULL) || (w->rb_left->color == 1))) {
+				w->color = 0;
+				x = x->rb_parent;
+			}
+			else {
+				if ((w->rb_left == NULL) || (w->rb_left->color == 1)) {
+					w->rb_right->color = 1;
+					w->color = 0;
+					rb_left_rotate(w, root);
+					w = x->rb_parent->rb_left;
+				}
+				w->color = x->rb_parent->color;
+				x->rb_parent->color = 1;
+				w->rb_left->color = 1;
+				rb_right_rotate(x->rb_parent, root);
+				x = root->rb_node;
+			}
+
+		}	
+	}
+	x->color = 1;
+}
+
+void
+rb_erase(struct rb_node *z, struct rb_root *root) {
+	struct rb_node *y;
+	struct rb_node *x;
+	int old_y_color;
+	if ((z->rb_left == NULL) || (z->rb_right == NULL)) {
+		y = z;
+	}
+	else {
+		y = rb_next(z);
+	}
+	if (y->rb_left != NULL) {
+		x = y->rb_left;
+	}
+	else {
+		x = y->rb_right;
+	}
+	if (x != NULL) {
+		x->rb_parent = y->rb_parent;
+	}
+	if (y->rb_parent == NULL) {
+		root->rb_node = x;
+	}
+	else {
+		if (y == y->rb_parent->rb_left) {
+			y->rb_parent->rb_left = x;
+		}
+		else {
+			y->rb_parent->rb_right = x;
+		}
+	}
+	old_y_color = y->color;
+	if (y != z) {
+		y->rb_left = z->rb_left;
+		y->rb_right = z->rb_left;
+		y->rb_parent = z->rb_parent;
+		y->color = z->color;
+		if (z->rb_parent != NULL) {
+			if (z == z->rb_parent->rb_left) {
+				z->rb_parent->rb_left = y;
+			}
+			else {
+				z->rb_parent->rb_right = y;
+			}
+		}
+	}
+	if  ((old_y_color == 1) && (x != NULL)) {
+		rb_erase_fixup(x, root);
+	}
+}
+
 
 /**********************************************************
  * idr                                                    *
@@ -338,12 +582,6 @@ ida_destroy(struct ida *pida) {
 }
 
 /**********************************************************
- * FRAMEBUFFER                                            *
- **********************************************************/
-
-const char *fb_mode_option = DEFAULT_FB_MODE_OPTION;
-
-/**********************************************************
  * KREF and KOBJECT                                       *
  **********************************************************/
 
@@ -364,3 +602,17 @@ void call_delayed(void *arg) {
 	struct delayed_work *work = (struct delayed_work *)arg;
 	taskqueue_enqueue(work->tq, &work->work.task);
 }
+
+/**********************************************************
+ * GLOBAL VARIABLES                                       *
+ **********************************************************/
+
+int sysctl_vfs_cache_pressure = 0;
+
+struct atomic_notifier_head panic_notifier_list;
+
+/**********************************************************
+ * FRAMEBUFFER                                            *
+ **********************************************************/
+
+const char *fb_mode_option = DEFAULT_FB_MODE_OPTION;

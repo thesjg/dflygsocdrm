@@ -581,22 +581,17 @@ struct rb_root {
 #define rb_entry(ptr, type, member) container_of(ptr,type,member)
 
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-static __inline__ void
-rb_link_node(struct rb_node *vm_rb, struct rb_node *parent, struct rb_node **cur) {
-	;
-}
+void
+rb_link_node(struct rb_node *x, struct rb_node *parent, struct rb_node **cur);
 
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-static __inline__ void
-rb_insert_color(struct rb_node *vm_rb, struct rb_root *addr_space_rb) {
-	;
-}
+void
+rb_insert_color(struct rb_node *x, struct rb_root *root);
 
 /* file ttm/ttm_bo.c, function ttm_bo_release() */
-static __inline__ void
-rb_erase(struct rb_node * vm_node, struct rb_root * addr_space_rb) {
-	;
-}
+void
+rb_erase(struct rb_node *node, struct rb_root *root);
+
 /**********************************************************
  * GLOBAL DATA                                            *
  **********************************************************/
