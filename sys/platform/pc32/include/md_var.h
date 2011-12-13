@@ -111,20 +111,12 @@ void    dump_add_page(vm_paddr_t);
 void    dump_drop_page(vm_paddr_t);
 void	enable_sse (void);
 void	fillw (int /*u_short*/ pat, void *base, size_t cnt);
-#if 0
-void	i486_bzero (volatile void *buf, size_t len);
-void	i586_bzero (volatile void *buf, size_t len);
-void	i586_bcopy (const void *from, void *to, size_t len);
-int	i586_copyin (const void *udaddr, void *kaddr, size_t len);
-int	i586_copyout (const void *kaddr, void *udaddr, size_t len);
-#endif
 void	asm_generic_memcpy(void);
 void	asm_mmx_memcpy(void);
 void	asm_xmm_memcpy(void);
 void	asm_generic_bcopy(void);
 void	asm_mmx_bcopy(void);
 void	asm_xmm_bcopy(void);
-void	i686_pagezero (void *addr);
 void	init_AMD_Elan_sc520(void);
 void	setidt (int idx, alias_for_inthand_t *func, int typ, int dpl,
 		    int selec);
