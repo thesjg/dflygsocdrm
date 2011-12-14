@@ -502,258 +502,6 @@ hash_long(unsigned long key, int bits) {
 }
 
 /**********************************************************
- * DATA STRUCTURES                                        *
- **********************************************************/
-
-/*
- * Lists
- */
-
-/* file i915_gem.c */
-#define DRM_LIST_HEAD(arg)  struct list_head arg
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_pool_free() */
-#define __list_del(entry, list) /* UNIMPLEMENTED */
-
-/* Extension of function in drm_linux_list.h */
-#define list_for_each_entry_reverse(pos, head, member)			\
-	for (pos = list_entry((head)->prev, __typeof(*pos), member);	\
-	    &pos->member != (head);					\
-	    pos = list_entry(pos->member.prev, __typeof(*pos), member))
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_pool_filled_lock() */
-static __inline__ void
-list_splice(struct list_head* newp, struct list_head* head) {
-	if (!list_empty(newp)) {
-		(head)->next->prev = (newp)->prev;
-		(newp)->prev->next = (head)->next;
-		(newp)->next->prev = (head)->next;
-		(head)->next = (newp)->next;
-	}
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_pool_get_pages() */
-static __inline__ void
-list_splice_init(struct list_head* newp, struct list_head* head) {
-	list_splice(newp, head);
-	list_empty(newp);
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_pool_get_pages() */
-static __inline__ void
-list_cut_position(struct list_head *pages, struct list_head *list, struct list_head *p) {
-	pages->next = list->next;
-	list->next->prev = p;
-	pages->prev = p;
-	p->next = list->next;
-}
-
-/**********************************************************
- * RED-BLACK TREES                                        *
- **********************************************************/
-
-/* file ttm_bo.c, function ttm_bo_vm_insert() */
-struct rb_node {
-/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-	struct rb_node *rb_left;
-	struct rb_node *rb_right;
-	struct rb_node *rb_parent;
-/* Arbitrarily choose 0 == red, 1 == black */
-	int color;
-};
-
-/* file ttm/ttm_bo.c, function ttm_bo_release() */
-struct rb_root {
-/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-    struct rb_node *rb_node;
-};
-
-/* file ttm/ttm_bo.c, function ttm_bo_device_init() */
-/* RB_ROOT already defined for DragonFly in sys/tree.h */
-#define DRM_RB_ROOT    (struct rb_root) \
-{                                       \
-	.rb_node = NULL                 \
-}
-
-/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-/* Used implementation from drm_linux_list.h */
-#define rb_entry(ptr, type, member) container_of(ptr,type,member)
-
-/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-void
-rb_link_node(struct rb_node *node, struct rb_node *parent, struct rb_node **cur);
-
-/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
-void
-rb_insert_color(struct rb_node *node, struct rb_root *root);
-
-/* file ttm/ttm_bo.c, function ttm_bo_release() */
-void
-rb_erase(struct rb_node *node, struct rb_root *root);
-
-/**********************************************************
- * GLOBAL DATA                                            *
- **********************************************************/
-
-/* file ttm/ttm_lock.c, function __ttm_read_lock() */
-/* current is either the current thread or current process */
-/* DragonFly BSD has curthread of type struct thread *     */
-
-typedef struct thread DRM_CURRENT_THREAD;
-
-#define current curthread
-
-/* file drm_vm.c, function drm_vm_open_locked() */
-/* Need to find pid associated with current, current->pid */
-
-/* file drm_fops.c, function drm_open_helper() */
-static __inline__ pid_t
-task_pid_nr(DRM_CURRENT_THREAD *cur) {
-	return 0;
-}
-
-/* file drm_fops.c, function drm_open_helper() */
-static __inline__ uid_t
-current_euid(void) {
-	return 0;
-}
-
-/* file drm_fops.c, function drm_cpu_valid() */
-/* boot_cpu_data.x86 appears to be an int sometimes 3 */
-
-/**********************************************************
- * PERMISSIONS AND SECURITY                               *
- **********************************************************/
-
-#define CAP_SYS_ADMIN  PRIV_DRIVER 
-
-/* file ttm_memory.c, function ttm_mem_global_reserve() */
-static __inline__ int
-capable(int capacity) {
-	return (0 == priv_check(curthread, capacity));
-}
-/* #define capable(CAP_SYS_ADMIN) 1 UNIMPLEMENTED */
-
-/* defined for DragonFly BSD in sys/sys/poll.h */
-/* #define POLLIN      0x0001 */
-/* #define POLLRDNORM  0x0040 */
-
-/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
-typedef uint32_t gfp_t;
-
-#ifdef GFP_ATOMIC
-#undef GFP_ATOMIC
-#endif
-#define GFP_ATOMIC   M_NOWAIT
-
-#ifdef GFP_KERNEL
-#undef GFP_KERNEL
-#endif
-#define GFP_KERNEL   M_WAITOK
-
-#define __GFP_COLD        0x0004
-#define __GFP_COMP        0x0008
-#define __GFP_DMA32       0x0010
-/* file vmwgfx_gmr.c, function vmw_gmr_build_descriptors() */
-#define __GFP_HIGHMEM     0x0020
-#define __GFP_NORETRY     0x0040
-#define __GFP_NOWARN      0x0080
-#define __GFP_ZERO        0x0100
-#define __GFP_RECLAIMABLE 0x0200
-
-/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
-#define GFP_DMA32       0x0400
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
-#define GFP_HIGHUSER    0x0800
-#define GFP_USER        0x01000
-
-/**********************************************************
- * SIGNALS AND INTERRUPTS                                 *
- **********************************************************/
-
-/*
- * IRQ
- */
-/* legacy drm drmP.h */
-
-typedef int			irqreturn_t;
-#define IRQ_HANDLED		0x00
-#define IRQ_NONE		0x01
-
-#define DRM_IRQ_ARGS		void *arg
-
-/* file drm_irq.c, function drm_irq_install() */
-static __inline__ int
-request_irq(
-	int irq,
-	irqreturn_t (*irqhandler)(DRM_IRQ_ARGS),
-	uint32_t flags,
-	char *name,
-	void *dev
-) {
-	return 0;
-}
-
-/* file drm_irq.c, function drm_irq_uninstall() */
-static __inline__ int
-free_irq(
-	int irq,
-	void *dev
-) {
-	return 0;
-}
-
-/* file i915_irq.c, function i915_error_object_create() */
-static __inline__ void
-local_irq_save(unsigned long flags) {
-	;
-}
-
-/* file i915_irq.c, function i915_error_object_create() */
-static __inline__ void
-local_irq_restore(unsigned long flags) {
-	;
-}
-
-#define _IOC_NR(n) ((n) & 0xff)
-
-/* file drm_drv.c, function drm_ioctl() */
-#define _IOC_SIZE(cmd) sizeof(unigned long)
-
-/* Appears to be used nowhere */
-struct sigset_t {
-	int placeholder;
-};
-
-/* file ttm/ttm_lock.c, function __ttm_read_lock() */
-/* UNIMPLEMENTED */
-static __inline__ void
-send_sig(uint32_t signal, DRM_CURRENT_THREAD *cur, uint32_t flags) {
-	;
-}
-
-typedef struct proc *DRM_PROCESS_T;
-
-/* file ttm/ttm_lock.c, function __ttm_read_lock() */
-static __inline__ void
-DRM_SEND_SIG(uint32_t signal, DRM_PROCESS_T proc, uint32_t flags) {
-	if (proc != NULL)
-		ksignal(proc, signal);
-}
-
-/* file ttm/ttm_tt.c, function ttm_tt_swapin.c */
-static __inline__ void
-preempt_disable(void) {
-	;
-}
-
-static __inline__ void
-preempt_enable(void) {
-	;
-}
-
-/**********************************************************
  * LOCKING                                                *
  **********************************************************/
 
@@ -911,6 +659,96 @@ up_write(DRM_RWSEMAPHORE *rwlock) {
 }
 
 /**********************************************************
+ * DATA STRUCTURES                                        *
+ **********************************************************/
+
+/*
+ * Lists
+ */
+
+/* file i915_gem.c */
+#define DRM_LIST_HEAD(arg)  struct list_head arg
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_pool_free() */
+#define __list_del(entry, list) /* UNIMPLEMENTED */
+
+/* Extension of function in drm_linux_list.h */
+#define list_for_each_entry_reverse(pos, head, member)			\
+	for (pos = list_entry((head)->prev, __typeof(*pos), member);	\
+	    &pos->member != (head);					\
+	    pos = list_entry(pos->member.prev, __typeof(*pos), member))
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_pool_filled_lock() */
+static __inline__ void
+list_splice(struct list_head* newp, struct list_head* head) {
+	if (!list_empty(newp)) {
+		(head)->next->prev = (newp)->prev;
+		(newp)->prev->next = (head)->next;
+		(newp)->next->prev = (head)->next;
+		(head)->next = (newp)->next;
+	}
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_pool_get_pages() */
+static __inline__ void
+list_splice_init(struct list_head* newp, struct list_head* head) {
+	list_splice(newp, head);
+	list_empty(newp);
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_pool_get_pages() */
+static __inline__ void
+list_cut_position(struct list_head *pages, struct list_head *list, struct list_head *p) {
+	pages->next = list->next;
+	list->next->prev = p;
+	pages->prev = p;
+	p->next = list->next;
+}
+
+/**********************************************************
+ * RED-BLACK TREES                                        *
+ **********************************************************/
+
+/* file ttm_bo.c, function ttm_bo_vm_insert() */
+struct rb_node {
+/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
+	struct rb_node *rb_left;
+	struct rb_node *rb_right;
+	struct rb_node *rb_parent;
+/* Arbitrarily choose 0 == red, 1 == black */
+	int color;
+};
+
+/* file ttm/ttm_bo.c, function ttm_bo_release() */
+struct rb_root {
+/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
+    struct rb_node *rb_node;
+};
+
+/* file ttm/ttm_bo.c, function ttm_bo_device_init() */
+/* RB_ROOT already defined for DragonFly in sys/tree.h */
+#define DRM_RB_ROOT    (struct rb_root) \
+{                                       \
+	.rb_node = NULL                 \
+}
+
+/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
+/* Used implementation from drm_linux_list.h */
+#define rb_entry(ptr, type, member) container_of(ptr,type,member)
+
+/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
+void
+rb_link_node(struct rb_node *node, struct rb_node *parent, struct rb_node **cur);
+
+/* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
+void
+rb_insert_color(struct rb_node *node, struct rb_root *root);
+
+/* file ttm/ttm_bo.c, function ttm_bo_release() */
+void
+rb_erase(struct rb_node *node, struct rb_root *root);
+
+/**********************************************************
  * idr                                                    *
  **********************************************************/
 
@@ -1015,6 +853,171 @@ ida_remove(struct ida *pida, int id);
 
 void
 ida_destroy(struct ida *pida);
+
+/**********************************************************
+ * GLOBAL DATA                                            *
+ **********************************************************/
+
+/* file ttm/ttm_lock.c, function __ttm_read_lock() */
+/* current is either the current thread or current process */
+/* DragonFly BSD has curthread of type struct thread *     */
+
+typedef struct thread DRM_CURRENT_THREAD;
+
+#define current curthread
+
+/* file drm_vm.c, function drm_vm_open_locked() */
+/* Need to find pid associated with current, current->pid */
+
+/* file drm_fops.c, function drm_open_helper() */
+static __inline__ pid_t
+task_pid_nr(DRM_CURRENT_THREAD *cur) {
+	if (cur->td_proc)
+		return cur->td_proc->p_pid;
+	return 0;
+}
+
+/* file drm_fops.c, function drm_open_helper() */
+static __inline__ uid_t
+current_euid(void) {
+	if (curthread->td_proc)
+		return curthread->td_proc->p_ucred->cr_uid;
+	return 0;
+}
+
+/* file drm_fops.c, function drm_cpu_valid() */
+/* boot_cpu_data.x86 appears to be an int sometimes 3 */
+
+/**********************************************************
+ * PERMISSIONS AND SECURITY                               *
+ **********************************************************/
+
+#define CAP_SYS_ADMIN  PRIV_DRIVER 
+
+/* file ttm_memory.c, function ttm_mem_global_reserve() */
+static __inline__ int
+capable(int capacity) {
+	return (0 == priv_check(curthread, capacity));
+}
+
+/* defined for DragonFly BSD in sys/sys/poll.h */
+/* #define POLLIN      0x0001 */
+/* #define POLLRDNORM  0x0040 */
+
+/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
+typedef uint32_t gfp_t;
+
+#ifdef GFP_ATOMIC
+#undef GFP_ATOMIC
+#endif
+#define GFP_ATOMIC   M_NOWAIT
+
+#ifdef GFP_KERNEL
+#undef GFP_KERNEL
+#endif
+#define GFP_KERNEL   M_WAITOK
+
+#define __GFP_COLD        0x0004
+#define __GFP_COMP        0x0008
+#define __GFP_DMA32       0x0010
+/* file vmwgfx_gmr.c, function vmw_gmr_build_descriptors() */
+#define __GFP_HIGHMEM     0x0020
+#define __GFP_NORETRY     0x0040
+#define __GFP_NOWARN      0x0080
+#define __GFP_ZERO        0x0100
+#define __GFP_RECLAIMABLE 0x0200
+
+/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
+#define GFP_DMA32       0x0400
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
+#define GFP_HIGHUSER    0x0800
+#define GFP_USER        0x01000
+
+/**********************************************************
+ * SIGNALS AND INTERRUPTS                                 *
+ **********************************************************/
+
+/*
+ * IRQ
+ */
+/* legacy drm drmP.h */
+
+typedef int			irqreturn_t;
+#define IRQ_HANDLED		0x00
+#define IRQ_NONE		0x01
+
+#define DRM_IRQ_ARGS		void *arg
+
+/* file drm_irq.c, function drm_irq_install() */
+static __inline__ int
+request_irq(
+	int irq,
+	irqreturn_t (*irqhandler)(DRM_IRQ_ARGS),
+	uint32_t flags,
+	char *name,
+	void *dev
+) {
+	return 0;
+}
+
+/* file drm_irq.c, function drm_irq_uninstall() */
+static __inline__ int
+free_irq(
+	int irq,
+	void *dev
+) {
+	return 0;
+}
+
+/* file i915_irq.c, function i915_error_object_create() */
+static __inline__ void
+local_irq_save(unsigned long flags) {
+	;
+}
+
+/* file i915_irq.c, function i915_error_object_create() */
+static __inline__ void
+local_irq_restore(unsigned long flags) {
+	;
+}
+
+#define _IOC_NR(n) ((n) & 0xff)
+
+/* file drm_drv.c, function drm_ioctl() */
+#define _IOC_SIZE(cmd) sizeof(unigned long)
+
+/* Appears to be used nowhere */
+struct sigset_t {
+	int placeholder;
+};
+
+/* file ttm/ttm_lock.c, function __ttm_read_lock() */
+/* UNIMPLEMENTED */
+static __inline__ void
+send_sig(uint32_t signal, DRM_CURRENT_THREAD *cur, uint32_t flags) {
+	;
+}
+
+typedef struct proc *DRM_PROCESS_T;
+
+/* file ttm/ttm_lock.c, function __ttm_read_lock() */
+static __inline__ void
+DRM_SEND_SIG(uint32_t signal, DRM_PROCESS_T proc, uint32_t flags) {
+	if (proc != NULL)
+		ksignal(proc, signal);
+}
+
+/* file ttm/ttm_tt.c, function ttm_tt_swapin.c */
+static __inline__ void
+preempt_disable(void) {
+	;
+}
+
+static __inline__ void
+preempt_enable(void) {
+	;
+}
 
 /**********************************************************
  * kref reference counting                                *
