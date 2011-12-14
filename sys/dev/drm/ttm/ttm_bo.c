@@ -1549,8 +1549,10 @@ int ttm_bo_device_init(struct ttm_bo_device *bdev,
 	if (unlikely(ret != 0))
 		goto out_no_sys;
 
-#ifdef __linux__ /* UNIMPLEMENTED */
+#ifdef __linux__
 	bdev->addr_space_rb = RB_ROOT;
+#else
+	bdev->addr_space_rb = DRM_RB_ROOT;
 #endif
 	ret = drm_mm_init(&bdev->addr_space_mm, file_page_offset, 0x10000000);
 	if (unlikely(ret != 0))

@@ -548,9 +548,9 @@ list_cut_position(struct list_head *pages, struct list_head *list, struct list_h
 	p->next = list->next;
 }
 
-/*
- * red-black trees
- */
+/**********************************************************
+ * RED-BLACK TREES                                        *
+ **********************************************************/
 
 /* file ttm_bo.c, function ttm_bo_vm_insert() */
 struct rb_node {
@@ -558,6 +558,7 @@ struct rb_node {
 	struct rb_node *rb_left;
 	struct rb_node *rb_right;
 	struct rb_node *rb_parent;
+/* Arbitrarily choose 0 == red, 1 == black */
 	int color;
 };
 
@@ -567,13 +568,11 @@ struct rb_root {
     struct rb_node *rb_node;
 };
 
-#define DRM_RB_ROOT  {                        \
-.rb_node =	{                             \
-	.rb_left =   (struct rb_node *)NULL,  \
-	.rb_right =  (struct rb_node *)NULL,  \
-	.rb_parent = (struct rb_node *)NULL,  \
-	.color =     0                        \
-		}                             \
+/* file ttm/ttm_bo.c, function ttm_bo_device_init() */
+/* RB_ROOT already defined for DragonFly in sys/tree.h */
+#define DRM_RB_ROOT    (struct rb_root) \
+{                                       \
+	.rb_node = NULL                 \
 }
 
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
@@ -582,11 +581,11 @@ struct rb_root {
 
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
 void
-rb_link_node(struct rb_node *x, struct rb_node *parent, struct rb_node **cur);
+rb_link_node(struct rb_node *node, struct rb_node *parent, struct rb_node **cur);
 
 /* file ttm/ttm_bo.c, function ttm_bo_vm_insert_rb() */
 void
-rb_insert_color(struct rb_node *x, struct rb_root *root);
+rb_insert_color(struct rb_node *node, struct rb_root *root);
 
 /* file ttm/ttm_bo.c, function ttm_bo_release() */
 void
