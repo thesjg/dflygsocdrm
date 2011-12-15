@@ -375,11 +375,7 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	priv->minor = idr_find(&drm_minors_idr, minor_id);
 	priv->ioctl_count = 0;
 	/* for compatibility root is always authenticated */
-#ifdef __linux__
 	priv->authenticated = capable(CAP_SYS_ADMIN);
-#else
-	priv->authenticated = DRM_SUSER(p);
-#endif
 	priv->lock_count = 0;
 
 	INIT_LIST_HEAD(&priv->lhead);

@@ -628,7 +628,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	if (!(dev->flags & (FREAD|FWRITE)))
 		return -EPERM; /* Require read/write */
 
-	if (!DRM_SUSER(DRM_CURPROC) && request->type != _DRM_AGP && map->type != _DRM_SHM)
+	if (!(capable(CAP_SYS_ADMIN) || request->type == _DRM_AGP || request->type == _DRM_SHM))
 		return -EPERM;
 
 	err = drm_addmap(dev, request->offset, request->size, request->type,
@@ -1115,7 +1115,7 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 	if (!dma)
 		return -EINVAL;
 
-	if (!DRM_SUSER(DRM_CURPROC))
+	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	count = request->count;
@@ -1341,7 +1341,7 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 	if (!dma)
 		return -EINVAL;
 
-	if (!DRM_SUSER(DRM_CURPROC))
+	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	count = request->count;
@@ -1504,7 +1504,7 @@ static int drm_addbufs_fb(struct drm_device * dev, struct drm_buf_desc * request
 	if (!dma)
 		return -EINVAL;
 
-	if (!DRM_SUSER(DRM_CURPROC))
+	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
 	count = request->count;

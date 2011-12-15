@@ -862,7 +862,7 @@ ida_destroy(struct ida *pida);
 /* current is either the current thread or current process */
 /* DragonFly BSD has curthread of type struct thread *     */
 
-typedef struct thread DRM_CURRENT_THREAD;
+typedef struct thread *DRM_CURRENT_T;
 
 #define current curthread
 
@@ -871,7 +871,7 @@ typedef struct thread DRM_CURRENT_THREAD;
 
 /* file drm_fops.c, function drm_open_helper() */
 static __inline__ pid_t
-task_pid_nr(DRM_CURRENT_THREAD *cur) {
+task_pid_nr(DRM_CURRENT_T cur) {
 	if (cur->td_proc)
 		return cur->td_proc->p_pid;
 	return 0;
@@ -894,7 +894,10 @@ current_euid(void) {
 
 #define CAP_SYS_ADMIN  PRIV_DRIVER 
 
-/* file ttm_memory.c, function ttm_mem_global_reserve() */
+/* same role as DRM_SUSER
+ * Positive return value for success
+ * Only argument used appears to be CAP_SYS_ADMIN
+ */
 static __inline__ int
 capable(int capacity) {
 	return (0 == priv_check(curthread, capacity));
@@ -995,7 +998,7 @@ struct sigset_t {
 /* file ttm/ttm_lock.c, function __ttm_read_lock() */
 /* UNIMPLEMENTED */
 static __inline__ void
-send_sig(uint32_t signal, DRM_CURRENT_THREAD *cur, uint32_t flags) {
+send_sig(uint32_t signal, DRM_CURRENT_T cur, uint32_t flags) {
 	;
 }
 

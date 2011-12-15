@@ -211,7 +211,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	}
 
 	if (map == NULL) {
-		DRM_ERROR("Can't find map, requested offset = %016lx\n",
+		DRM_ERROR("Could not find map, requested offset = %016lx\n",
 			(unsigned long)offset);
 #ifdef DRM_NEWER_FOFF
 		if (drm_ht_find_item(&dev->map_hash, foff >> PAGE_SHIFT, &hash)) {
@@ -220,7 +220,7 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 		}
 		map = drm_hash_entry(hash, struct drm_map_list, hash)->map;
 #else
-		return -1;
+		return EINVAL;
 #endif
 	}
 
@@ -238,9 +238,9 @@ static int drm_mmap_legacy_locked(struct dev_mmap_args *ap)
 	}
 #endif
 
-	if (((map->flags&_DRM_RESTRICTED) && !DRM_SUSER(DRM_CURPROC))) {
-		DRM_DEBUG("restricted map\n");
-		return -1;
+	if (((map->flags &_DRM_RESTRICTED) && !capable(CAP_SYS_ADMIN))) {
+		DRM_ERROR("restricted map\n");
+		return EPERM;
 	}
 	type = map->type;
 

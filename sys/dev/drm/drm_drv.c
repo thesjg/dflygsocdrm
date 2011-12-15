@@ -694,11 +694,9 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 
 	/* Do not trust userspace, use our own definition */
 	func = ioctl->func;
-#if 1
 	/* is there a local override? */
 	if ((nr == DRM_IOCTL_NR(DRM_IOCTL_DMA)) && dev->driver->dma_ioctl)
 		func = dev->driver->dma_ioctl;
-#endif
 
 	if (!func) {
 		DRM_DEBUG("no function\n");
@@ -706,7 +704,7 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		goto err_i1;
 	}
 
-	if (((ioctl->flags & DRM_ROOT_ONLY) && !DRM_SUSER(p)) ||
+	if (((ioctl->flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN)) ||
 	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
 	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
 		retcode = EACCES;
