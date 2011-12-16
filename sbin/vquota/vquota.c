@@ -41,9 +41,14 @@
 #include <fts.h>
 #include <libprop/proplib.h>
 #include <unistd.h>
+#include <sys/tree.h>
+#include <errno.h>
 #include <inttypes.h>
+#include <sys/types.h>
+#include <libutil.h>
 
 static bool flag_debug = 0;
+static bool flag_humanize = 0;
 
 static void usage(int);
 static int get_dirsize(char *);
@@ -52,26 +57,223 @@ static int get_fslist(void);
 static void
 usage(int retcode)
 {
-	fprintf(stderr, "usage: vquota [-D] check directory\n");
-	fprintf(stderr, "       vquota [-D] lsfs\n");
-	fprintf(stderr, "       vquota [-D] show mount_point\n");
+	fprintf(stderr, "usage: vquota [-Dh] check directory\n");
+	fprintf(stderr, "       vquota [-Dh] lsfs\n");
+	fprintf(stderr, "       vquota [-Dh] show mount_point\n");
+	fprintf(stderr, "       vquota [-Dh] sync mount_point\n");
 	exit(retcode);
 }
 
+/*
+ * Inode numbers with more than one hard link often come in groups;
+ * use linear arrays of 1024 ones as the basic unit of allocation.
+ * We only need to check if the inodes have been previously processed,
+ * bit arrays are perfect for that purpose.
+ */
+#define HL_CHUNK_BITS		10
+#define HL_CHUNK_ENTRIES	(1<<HL_CHUNK_BITS)
+#define HL_CHUNK_MASK		(HL_CHUNK_ENTRIES - 1)
+#define BA_UINT64_BITS		6
+#define BA_UINT64_ENTRIES	(1<<BA_UINT64_BITS)
+#define BA_UINT64_MASK		(BA_UINT64_ENTRIES - 1)
+
+struct hl_node {
+	RB_ENTRY(hl_node)	rb_entry;
+	ino_t			ino_left_bits;
+	uint64_t		hl_chunk[HL_CHUNK_ENTRIES/64];
+};
+
+RB_HEAD(hl_tree,hl_node)	hl_root;
+
+RB_PROTOTYPE(hl_tree, hl_node, rb_entry, rb_hl_node_cmp);
+
+static int
+rb_hl_node_cmp(struct hl_node *a, struct hl_node *b);
+
+RB_GENERATE(hl_tree, hl_node, rb_entry, rb_hl_node_cmp);
+
+struct hl_node* hl_node_insert(ino_t);
+
+
+static int
+rb_hl_node_cmp(struct hl_node *a, struct hl_node *b)
+{
+	if (a->ino_left_bits < b->ino_left_bits)
+		return(-1);
+	else if (a->ino_left_bits > b->ino_left_bits)
+		return(1);
+	return(0);
+}
+
+struct hl_node* hl_node_insert(ino_t inode)
+{
+	struct hl_node *hlp, *res;
+
+	hlp = malloc(sizeof(struct hl_node));
+	if (hlp == NULL) {
+		/* shouldn't happen */
+		printf("hl_node_insert(): malloc failed\n");
+		exit(ENOMEM);
+	}
+	bzero(hlp, sizeof(struct hl_node));
+
+	hlp->ino_left_bits = (inode >> HL_CHUNK_BITS);
+	res = RB_INSERT(hl_tree, &hl_root, hlp);
+
+	if (res != NULL)	/* shouldn't happen */
+		printf("hl_node_insert(): RB_INSERT didn't return NULL\n");
+
+	return hlp;
+}
+
+/*
+ * hl_register: register an inode number in a rb-tree of bit arrays
+ * returns:
+ * - true if the inode was already processed
+ * - false otherwise
+ */
+static bool
+hl_register(ino_t inode)
+{
+	struct hl_node hl_find, *hlp;
+	uint64_t ino_right_bits, ba_index, ba_offset;
+	uint64_t bitmask, bitval;
+	bool retval = false;
+
+	/* calculate the different addresses of the wanted bit */
+	hl_find.ino_left_bits = (inode >> HL_CHUNK_BITS);
+
+	ino_right_bits = inode & HL_CHUNK_MASK;
+	ba_index  = ino_right_bits >> BA_UINT64_BITS;
+	ba_offset = ino_right_bits & BA_UINT64_MASK;
+
+	/* no existing node? create and initialize it */
+	if ((hlp = RB_FIND(hl_tree, &hl_root, &hl_find)) == NULL) {
+		hlp = hl_node_insert(inode);
+	}
+
+	/* node was found, check the bit value */
+	bitmask = 1 << ba_offset;
+	bitval = hlp->hl_chunk[ba_index] & bitmask;
+	if (bitval != 0) {
+		retval = true;
+	}
+
+	/* set the bit */
+	hlp->hl_chunk[ba_index] |= bitmask;
+
+	return retval;
+}
+
+/* global variable used by get_dir_size() */
+uint64_t global_size;
+
+/* storage for collected id numbers */
+/* FIXME: same data structures used in kernel, should find a way to
+ * deduplicate this code */
+
+static int
+rb_ac_unode_cmp(struct ac_unode*, struct ac_unode*);
+static int
+rb_ac_gnode_cmp(struct ac_gnode*, struct ac_gnode*);
+
+RB_HEAD(ac_utree,ac_unode) ac_uroot;
+RB_HEAD(ac_gtree,ac_gnode) ac_groot;
+RB_PROTOTYPE(ac_utree, ac_unode, rb_entry, rb_ac_unode_cmp);
+RB_PROTOTYPE(ac_gtree, ac_gnode, rb_entry, rb_ac_gnode_cmp);
+RB_GENERATE(ac_utree, ac_unode, rb_entry, rb_ac_unode_cmp);
+RB_GENERATE(ac_gtree, ac_gnode, rb_entry, rb_ac_gnode_cmp);
+
+static int
+rb_ac_unode_cmp(struct ac_unode *a, struct ac_unode *b)
+{
+	if (a->left_bits < b->left_bits)
+		return(-1);
+	else if (a->left_bits > b->left_bits)
+		return(1);
+	return(0);
+}
+
+static int
+rb_ac_gnode_cmp(struct ac_gnode *a, struct ac_gnode *b)
+{
+	if (a->left_bits < b->left_bits)
+		return(-1);
+	else if (a->left_bits > b->left_bits)
+		return(1);
+	return(0);
+}
+
+static struct ac_unode*
+unode_insert(uid_t uid)
+{
+	struct ac_unode *unp, *res;
+
+	unp = malloc(sizeof(struct ac_unode));
+	if (unp == NULL) {
+		printf("unode_insert(): malloc failed\n");
+		exit(ENOMEM);
+	}
+	bzero(unp, sizeof(struct ac_unode));
+
+	unp->left_bits = (uid >> ACCT_CHUNK_BITS);
+	res = RB_INSERT(ac_utree, &ac_uroot, unp);
+
+	if (res != NULL)	/* shouldn't happen */
+		printf("unode_insert(): RB_INSERT didn't return NULL\n");
+
+	return unp;
+}
+
+static struct ac_gnode*
+gnode_insert(gid_t gid)
+{
+	struct ac_gnode *gnp, *res;
+
+	gnp = malloc(sizeof(struct ac_gnode));
+	if (gnp == NULL) {
+		printf("gnode_insert(): malloc failed\n");
+		exit(ENOMEM);
+	}
+	bzero(gnp, sizeof(struct ac_gnode));
+
+	gnp->left_bits = (gid >> ACCT_CHUNK_BITS);
+	res = RB_INSERT(ac_gtree, &ac_groot, gnp);
+
+	if (res != NULL)	/* shouldn't happen */
+		printf("gnode_insert(): RB_INSERT didn't return NULL\n");
+
+	return gnp;
+}
+
+/*
+ * get_dirsize(): walks a directory tree in the same filesystem
+ * output:
+ * - global rb-trees ac_uroot and ac_groot
+ * - global variable global_size
+ */
 static int
 get_dirsize(char* dirname)
 {
 	FTS		*fts;
 	FTSENT		*p;
 	char*		fts_args[2];
-	uint64_t	size_of_files = 0;
 	int		retval = 0;
+
+	/* what we need */
+	ino_t		file_inode;
+	off_t		file_size;
+	uid_t		file_uid;
+	gid_t		file_gid;
+
+	struct ac_unode *unp, ufind;
+	struct ac_gnode *gnp, gfind;
 
 	/* TODO: check directory name sanity */
 	fts_args[0] = dirname;
 	fts_args[1] = NULL;
 
-	if ((fts = fts_open(fts_args, FTS_PHYSICAL, NULL)) == NULL)
+	if ((fts = fts_open(fts_args, FTS_PHYSICAL|FTS_XDEV, NULL)) == NULL)
 		err(1, "fts_open() failed");
 
 	while ((p = fts_read(fts)) != NULL) {
@@ -89,17 +291,87 @@ get_dirsize(char* dirname)
 			retval = 1;
 			break;
 		default:
-			size_of_files += p->fts_statp->st_size;
+			file_inode = p->fts_statp->st_ino;
+			file_size = p->fts_statp->st_size;
+			file_uid = p->fts_statp->st_uid;
+			file_gid = p->fts_statp->st_gid;
+
+			/* files with more than one hard link: */
+			/* process them only once */
+			if (p->fts_statp->st_nlink > 1)
+				if (hl_register(file_inode) == false)
+					break;
+
+			global_size += file_size;
+			ufind.left_bits = (file_uid >> ACCT_CHUNK_BITS);
+			gfind.left_bits = (file_gid >> ACCT_CHUNK_BITS);
+			if ((unp = RB_FIND(ac_utree, &ac_uroot, &ufind)) == NULL)
+				unp = unode_insert(file_uid);
+			if ((gnp = RB_FIND(ac_gtree, &ac_groot, &gfind)) == NULL)
+				gnp = gnode_insert(file_gid);
+			unp->uid_chunk[(file_uid & ACCT_CHUNK_MASK)] += file_size;
+			gnp->gid_chunk[(file_gid & ACCT_CHUNK_MASK)] += file_size;
 		}
 	}
 	fts_close(fts);
 
-	printf("%"PRIu64"\n", size_of_files);
 	return retval;
 }
 
+static int
+cmd_check(char* dirname)
+{
+	int32_t uid, gid;
+	char	hbuf[5];
+	struct  ac_unode *unp;
+	struct  ac_gnode *gnp;
+	int	rv, i;
+
+	rv = get_dirsize(dirname);
+
+	if (flag_humanize) {
+		humanize_number(hbuf, sizeof(hbuf), global_size, "",
+		    HN_AUTOSCALE, HN_NOSPACE);
+		printf("total: %s\n", hbuf);
+	} else {
+		printf("total: %"PRIu64"\n", global_size);
+	}
+	RB_FOREACH(unp, ac_utree, &ac_uroot) {
+	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
+		if (unp->uid_chunk[i] != 0) {
+		    uid = (unp->left_bits << ACCT_CHUNK_BITS) + i;
+		    if (flag_humanize) {
+			humanize_number(hbuf, sizeof(hbuf),
+			unp->uid_chunk[i], "", HN_AUTOSCALE, HN_NOSPACE);
+			printf("uid %"PRIu32": %s\n", uid, hbuf);
+		    } else {
+			printf("uid %"PRIu32": %"PRIu64"\n", uid, unp->uid_chunk[i]);
+		    }
+		}
+	    }
+	}
+	RB_FOREACH(gnp, ac_gtree, &ac_groot) {
+	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
+		if (gnp->gid_chunk[i] != 0) {
+		    gid = (gnp->left_bits << ACCT_CHUNK_BITS) + i;
+		    if (flag_humanize) {
+			humanize_number(hbuf, sizeof(hbuf),
+			gnp->gid_chunk[i], "", HN_AUTOSCALE, HN_NOSPACE);
+			printf("gid %"PRIu32": %s\n", gid, hbuf);
+		    } else {
+			printf("gid %"PRIu32": %"PRIu64"\n", gid, gnp->gid_chunk[i]);
+		    }
+		}
+	    }
+	}
+
+	return rv;
+}
+
 /* print a list of filesystems with accounting enabled */
-static int get_fslist(void) {
+static int
+get_fslist(void)
+{
 	struct statfs *mntbufp;
 	int nloc, i;
 
@@ -115,7 +387,7 @@ static int get_fslist(void) {
 	    /* vfs accounting enabled on this one ? */
 	    if (mntbufp[i].f_flags & MNT_ACCOUNTING)
 		printf("%s on %s\n", mntbufp[i].f_mntfromname,
-						mntbufp[i].f_mntonname);
+		    mntbufp[i].f_mntonname);
 	}
 
 	return 0;
@@ -123,7 +395,8 @@ static int get_fslist(void) {
 
 static bool
 send_command(const char *path, const char *cmd,
-		prop_dictionary_t args, prop_dictionary_t *res) {
+		prop_object_t args, prop_dictionary_t *res)
+{
 	prop_dictionary_t dict;
 	struct plistref pref;
 
@@ -157,7 +430,8 @@ send_command(const char *path, const char *cmd,
 	}
 
 	if (flag_debug)
-		printf("message to kernel:\n%s\n", prop_dictionary_externalize(dict));
+		printf("Message to kernel:\n%s\n",
+		    prop_dictionary_externalize(dict));
 
 	error = vquotactl(path, &pref);
 	if (error != 0) {
@@ -171,13 +445,16 @@ send_command(const char *path, const char *cmd,
 	}
 
 	if (flag_debug)
-		printf("Message from kernel:\n%s\n", prop_dictionary_externalize(*res));
+		printf("Message from kernel:\n%s\n",
+		    prop_dictionary_externalize(*res));
 
 	return true;
 }
 
 /* show collected statistics on mount point */
-static int show_mp(char *path) {
+static int
+show_mp(char *path)
+{
 	prop_dictionary_t args, res;
 	prop_array_t reslist;
 	bool rv;
@@ -185,11 +462,15 @@ static int show_mp(char *path) {
 	prop_dictionary_t item;
 	uint32_t id;
 	uint64_t space;
+	char hbuf[5];
 
 	args = prop_dictionary_create();
 	res  = prop_dictionary_create();
 	if (args == NULL)
-		printf("couldn't create args dictionary\n");
+		printf("show_mp(): couldn't create args dictionary\n");
+	res  = prop_dictionary_create();
+	if (res == NULL)
+		printf("show_mp(): couldn't create res dictionary\n");
 
 	rv = send_command(path, "get usage all", args, &res);
 	if (rv == false) {
@@ -197,7 +478,7 @@ static int show_mp(char *path) {
 		goto end;
 	}
 
-	reslist = prop_dictionary_get(res, "get usage all");
+	reslist = prop_dictionary_get(res, "returned data");
 	if (reslist == NULL) {
 		printf("show_mp(): failed to get array of results");
 		rv = false;
@@ -218,8 +499,13 @@ static int show_mp(char *path) {
 		else if (prop_dictionary_get_uint32(item, "gid", &id))
 			printf("gid %u:", id);
 		else
-			printf("total space used");
-		printf(" %" PRIu64 "\n", space);
+			printf("total:");
+		if (flag_humanize) {
+			humanize_number(hbuf, sizeof(hbuf), space, "", HN_AUTOSCALE, HN_NOSPACE);
+			printf(" %s\n", hbuf);
+		} else {
+			printf(" %" PRIu64 "\n", space);
+		}
 	}
 	prop_object_iterator_release(iter);
 
@@ -229,14 +515,78 @@ end:
 	return (rv == true);
 }
 
+/* sync the in-kernel counters to the actual file system usage */
+static int cmd_sync(char *dirname)
+{
+	prop_dictionary_t res, item;
+	prop_array_t args;
+	struct ac_unode *unp;
+	struct ac_gnode *gnp;
+	int rv = 0, i;
+
+	args = prop_array_create();
+	if (args == NULL)
+		printf("cmd_sync(): couldn't create args dictionary\n");
+	res  = prop_dictionary_create();
+	if (res == NULL)
+		printf("cmd_sync(): couldn't create res dictionary\n");
+
+	rv = get_dirsize(dirname);
+
+	item = prop_dictionary_create();
+	if (item == NULL)
+		printf("cmd_sync(): couldn't create item dictionary\n");
+	(void) prop_dictionary_set_uint64(item, "space used", global_size);
+	prop_array_add_and_rel(args, item);
+
+	RB_FOREACH(unp, ac_utree, &ac_uroot) {
+	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
+		if (unp->uid_chunk[i] != 0) {
+		    item = prop_dictionary_create();
+		    (void) prop_dictionary_set_uint32(item, "uid",
+				(unp->left_bits << ACCT_CHUNK_BITS) + i);
+		    (void) prop_dictionary_set_uint64(item, "space used",
+				unp->uid_chunk[i]);
+		    prop_array_add_and_rel(args, item);
+		}
+	    }
+	}
+	RB_FOREACH(gnp, ac_gtree, &ac_groot) {
+	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
+		if (gnp->gid_chunk[i] != 0) {
+		    item = prop_dictionary_create();
+		    (void) prop_dictionary_set_uint32(item, "gid",
+				(gnp->left_bits << ACCT_CHUNK_BITS) + i);
+		    (void) prop_dictionary_set_uint64(item, "space used",
+				gnp->gid_chunk[i]);
+		    prop_array_add_and_rel(args, item);
+		}
+	    }
+	}
+
+	if (send_command(dirname, "set usage all", args, &res) == false) {
+		printf("Failed to send message to kernel\n");
+		rv = 1;
+	}
+
+	prop_object_release(args);
+	prop_object_release(res);
+
+	return rv;
+}
+
 int
-main(int argc, char **argv) {
+main(int argc, char **argv)
+{
 	int ch;
 
-	while ((ch = getopt(argc, argv, "D")) != -1) {
+	while ((ch = getopt(argc, argv, "Dh")) != -1) {
 		switch(ch) {
 		case 'D':
 			flag_debug = 1;
+			break;
+		case 'h':
+			flag_humanize = 1;
 			break;
 		}
 	}
@@ -248,7 +598,7 @@ main(int argc, char **argv) {
 	if (strcmp(argv[0], "check") == 0) {
 		if (argc != 2)
 			usage(1);
-		return get_dirsize(argv[1]);
+		return cmd_check(argv[1]);
 	}
 	if (strcmp(argv[0], "lsfs") == 0) {
 		return get_fslist();
@@ -257,6 +607,11 @@ main(int argc, char **argv) {
 		if (argc != 2)
 			usage(1);
 		return show_mp(argv[1]);
+	}
+	if (strcmp(argv[0], "sync") == 0) {
+		if (argc != 2)
+			usage(1);
+		return cmd_sync(argv[1]);
 	}
 
 	usage(0);
