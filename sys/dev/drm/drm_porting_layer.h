@@ -346,7 +346,31 @@ hweight16(uint16_t mask) {
  * Memory management
  */
 
-#define sscanf	ksscanf
+MALLOC_DECLARE(DRM_MEM_DMA);
+MALLOC_DECLARE(DRM_MEM_SAREA);
+MALLOC_DECLARE(DRM_MEM_DRIVER);
+MALLOC_DECLARE(DRM_MEM_MAGIC);
+MALLOC_DECLARE(DRM_MEM_IOCTLS);
+MALLOC_DECLARE(DRM_MEM_MAPS);
+MALLOC_DECLARE(DRM_MEM_BUFS);
+MALLOC_DECLARE(DRM_MEM_SEGS);
+MALLOC_DECLARE(DRM_MEM_PAGES);
+MALLOC_DECLARE(DRM_MEM_FILES);
+MALLOC_DECLARE(DRM_MEM_QUEUES);
+MALLOC_DECLARE(DRM_MEM_CMDS);
+MALLOC_DECLARE(DRM_MEM_MAPPINGS);
+MALLOC_DECLARE(DRM_MEM_BUFLISTS);
+MALLOC_DECLARE(DRM_MEM_AGPLISTS);
+MALLOC_DECLARE(DRM_MEM_CTXBITMAP);
+MALLOC_DECLARE(DRM_MEM_SGLISTS);
+MALLOC_DECLARE(DRM_MEM_DRAWABLE);
+MALLOC_DECLARE(DRM_MEM_MM);
+MALLOC_DECLARE(DRM_MEM_HASHTAB);
+MALLOC_DECLARE(DRM_MEM_DEFAULT);
+MALLOC_DECLARE(DRM_MEM_STUB);
+MALLOC_DECLARE(DRM_MEM_IDR);
+MALLOC_DECLARE(DRM_MEM_FENCE);
+
 #define malloc	kmalloc
 #define realloc	krealloc
 #define reallocf krealloc	/* XXX XXX XXX */
@@ -359,8 +383,67 @@ free(void *addr, struct malloc_type *type)
 }
 
 /*
+ * Large memory allocation
+ */
+
+/* For now just treat the same as regular allocation */
+/* file drm_memory.c, function agp_remap() */
+/* file vmwgfx_fifo.c, function vmw_fifo_init() */
+static __inline__ void *
+vmalloc(size_t size) {
+	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+}
+
+/* For now just treat the same as regular allocation */
+/* file drm_scatter.c, function drm_vmalloc_dma() */
+static __inline__ void *
+vmalloc_32(size_t size) {
+	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+}
+
+/* file drm_bufs.c, function drm_rmmap_locked() */
+/* file vmwgfx_fifo.c, function vmw_fifo_init() */
+static __inline__ void
+vfree(void *handle) {
+	free(handle, DRM_MEM_DEFAULT);
+}
+
+/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
+typedef uint32_t gfp_t;
+
+#ifdef GFP_ATOMIC
+#undef GFP_ATOMIC
+#endif
+#define GFP_ATOMIC        M_NOWAIT
+
+#ifdef GFP_KERNEL
+#undef GFP_KERNEL
+#endif
+#define GFP_KERNEL        M_WAITOK
+
+/* UNIMPLEMENTED */
+#define __GFP_COLD        0x0004
+#define __GFP_COMP        0x0008
+#define __GFP_DMA32       0x0010
+/* file vmwgfx_gmr.c, function vmw_gmr_build_descriptors() */
+#define __GFP_HIGHMEM     0x0020
+#define __GFP_NORETRY     0x0040
+#define __GFP_NOWARN      0x0080
+#define __GFP_ZERO        M_ZERO 
+#define __GFP_RECLAIMABLE 0x0200
+
+/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
+#define GFP_DMA32         0x0400
+
+/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
+#define GFP_HIGHUSER      0x0800
+#define GFP_USER          0x01000
+
+/*
  * Print functions
  */
+
+#define sscanf	ksscanf
 
 /* For file drm_stub.c, function drm_ut_debug_printk() */
 #define printk    printf
@@ -866,31 +949,30 @@ typedef struct thread *DRM_CURRENT_T;
 
 #define current curthread
 
+/**********************************************************
+ * PERMISSIONS AND CREDENTIALS                            *
+ **********************************************************/
+
 /* file drm_vm.c, function drm_vm_open_locked() */
 /* Need to find pid associated with current, current->pid */
 
 /* file drm_fops.c, function drm_open_helper() */
 static __inline__ pid_t
 task_pid_nr(DRM_CURRENT_T cur) {
-	if (cur->td_proc)
+	if (cur->td_proc) {
 		return cur->td_proc->p_pid;
+	}
 	return 0;
 }
 
-/* file drm_fops.c, function drm_open_helper() */
+/* returns saved uid not effective uid */
 static __inline__ uid_t
 current_euid(void) {
-	if (curthread->td_proc)
-		return curthread->td_proc->p_ucred->cr_uid;
+	if (curthread->td_proc) {
+		return curthread->td_proc->p_ucred->cr_svuid;
+	}
 	return 0;
 }
-
-/* file drm_fops.c, function drm_cpu_valid() */
-/* boot_cpu_data.x86 appears to be an int sometimes 3 */
-
-/**********************************************************
- * PERMISSIONS AND SECURITY                               *
- **********************************************************/
 
 #define CAP_SYS_ADMIN  PRIV_DRIVER 
 
@@ -903,39 +985,12 @@ capable(int capacity) {
 	return (0 == priv_check(curthread, capacity));
 }
 
+/* file drm_fops.c, function drm_cpu_valid() */
+/* boot_cpu_data.x86 appears to be an int sometimes 3 */
+
 /* defined for DragonFly BSD in sys/sys/poll.h */
 /* #define POLLIN      0x0001 */
 /* #define POLLRDNORM  0x0040 */
-
-/* file ttm/ttm_page_alloc.c, function ttm_pool_mm_shrink() */
-typedef uint32_t gfp_t;
-
-#ifdef GFP_ATOMIC
-#undef GFP_ATOMIC
-#endif
-#define GFP_ATOMIC   M_NOWAIT
-
-#ifdef GFP_KERNEL
-#undef GFP_KERNEL
-#endif
-#define GFP_KERNEL   M_WAITOK
-
-#define __GFP_COLD        0x0004
-#define __GFP_COMP        0x0008
-#define __GFP_DMA32       0x0010
-/* file vmwgfx_gmr.c, function vmw_gmr_build_descriptors() */
-#define __GFP_HIGHMEM     0x0020
-#define __GFP_NORETRY     0x0040
-#define __GFP_NOWARN      0x0080
-#define __GFP_ZERO        0x0100
-#define __GFP_RECLAIMABLE 0x0200
-
-/* file ttm/ttm_page_alloc.c, function ttm_get_pages() */
-#define GFP_DMA32       0x0400
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_alloc_init() */
-#define GFP_HIGHUSER    0x0800
-#define GFP_USER        0x01000
 
 /**********************************************************
  * SIGNALS AND INTERRUPTS                                 *
@@ -2104,35 +2159,6 @@ del_timer_sync(struct timer_list *timer){
 	;
 }
 
-/*
- * Processes and threads
- */
-
-MALLOC_DECLARE(DRM_MEM_DMA);
-MALLOC_DECLARE(DRM_MEM_SAREA);
-MALLOC_DECLARE(DRM_MEM_DRIVER);
-MALLOC_DECLARE(DRM_MEM_MAGIC);
-MALLOC_DECLARE(DRM_MEM_IOCTLS);
-MALLOC_DECLARE(DRM_MEM_MAPS);
-MALLOC_DECLARE(DRM_MEM_BUFS);
-MALLOC_DECLARE(DRM_MEM_SEGS);
-MALLOC_DECLARE(DRM_MEM_PAGES);
-MALLOC_DECLARE(DRM_MEM_FILES);
-MALLOC_DECLARE(DRM_MEM_QUEUES);
-MALLOC_DECLARE(DRM_MEM_CMDS);
-MALLOC_DECLARE(DRM_MEM_MAPPINGS);
-MALLOC_DECLARE(DRM_MEM_BUFLISTS);
-MALLOC_DECLARE(DRM_MEM_AGPLISTS);
-MALLOC_DECLARE(DRM_MEM_CTXBITMAP);
-MALLOC_DECLARE(DRM_MEM_SGLISTS);
-MALLOC_DECLARE(DRM_MEM_DRAWABLE);
-MALLOC_DECLARE(DRM_MEM_MM);
-MALLOC_DECLARE(DRM_MEM_HASHTAB);
-MALLOC_DECLARE(DRM_MEM_DEFAULT);
-MALLOC_DECLARE(DRM_MEM_STUB);
-MALLOC_DECLARE(DRM_MEM_IDR);
-MALLOC_DECLARE(DRM_MEM_FENCE);
-
 /**********************************************************
  * I/O                                                    *
  **********************************************************/
@@ -2765,34 +2791,6 @@ static __inline__ struct file *
 shmem_file_setup(char *name, unsigned long num_pages, uint32_t flags) {
 	return (struct file *)NULL;
 }
-
-/*
- * Large memory allocation
- */
-
-/* For now just treat the same as regular allocation */
-/* file drm_memory.c, function agp_remap() */
-/* file vmwgfx_fifo.c, function vmw_fifo_init() */
-static __inline__ void *
-vmalloc(size_t size) {
-	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK);
-}
-
-/* For now just treat the same as regular allocation */
-/* file drm_scatter.c, function drm_vmalloc_dma() */
-static __inline__ void *
-vmalloc_32(size_t size) {
-	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK);
-}
-
-
-/* file drm_bufs.c, function drm_rmmap_locked() */
-/* file vmwgfx_fifo.c, function vmw_fifo_init() */
-static __inline__ void
-vfree(void *handle) {
-	free(handle, DRM_MEM_DEFAULT);
-}
-
 /* file drm_memory.c, function agp_remap() */
 /* file ttm/ttm_bo_util.c, function ttm_copy_io_ttm_page() */
 static __inline__ void *

@@ -80,19 +80,27 @@ static int drm_alloc_resource(struct drm_device *dev, int resource)
 
 resource_size_t drm_get_resource_start(struct drm_device *dev, unsigned int resource)
 {
+#ifdef __linux__
+	return pci_resource_start(dev->pdev, resource);
+#else
 	if (drm_alloc_resource(dev, resource) != 0)
 		return 0;
 
 	return rman_get_start(dev->pcir[resource]);
+#endif
 }
 EXPORT_SYMBOL(drm_get_resource_start);
 
 resource_size_t drm_get_resource_len(struct drm_device *dev, unsigned int resource)
 {
+#ifdef __linux__
+	return pci_resource_len(dev->pdev, resource);
+#else
 	if (drm_alloc_resource(dev, resource) != 0)
 		return 0;
 
 	return rman_get_size(dev->pcir[resource]);
+#endif
 }
 
 EXPORT_SYMBOL(drm_get_resource_len);
@@ -459,43 +467,23 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 
 		break;
 	case _DRM_CONSISTENT:
-
-#ifdef __linux__
 		/* dma_addr_t is 64bit on i386 with CONFIG_HIGHMEM64G,
 		 * As we're limiting the address to 2^32-1 (or less),
 		 * casting it down to 32 bits is no problem, but we
 		 * need to point to a 64bit variable first. */
 		dmah = drm_pci_alloc(dev, map->size, map->size);
 		if (!dmah) {
-			kfree(map);
-			return -ENOMEM;
-		}
-		map->handle = dmah->vaddr;
-		map->offset = (unsigned long)dmah->busaddr;
-		kfree(dmah);
-#else /* __linux__ */
-		/* Unfortunately, we don't get any alignment specification from
-		 * the caller, so we have to guess.  drm_pci_alloc requires
-		 * a power-of-two alignment, so try to align the bus address of
-		 * the map to it size if possible, otherwise just assume
-		 * PAGE_SIZE alignment.
-		 */
-		align = map->size;
-		if ((align & (align - 1)) != 0) {
-			align = PAGE_SIZE;
-			DRM_ERROR("map->size (%016lx) not aligned\n", map->size);
-		}
-		dmah = drm_pci_alloc(dev, map->size, align);
-		if (!dmah) {
 			free(map, DRM_MEM_MAPS);
 			return -ENOMEM;
 		}
 		map->handle = dmah->vaddr;
 		map->offset = (unsigned long)dmah->busaddr;
-/* legacy BSD: dmah remembered because of dmah->tag for dma free */
+#ifdef __linux__
+		kfree(dmah);
+#else
+/* legacy BSD drm: dmah remembered because of dmah->tag for dma free */
 		map->dmah = dmah;
-#endif /* __linux__ */
-
+#endif
 		break;
 	default:
 		free(map, DRM_MEM_MAPS);
@@ -505,7 +493,11 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	list = malloc(sizeof(*list), DRM_MEM_MAPS, M_WAITOK | M_ZERO);
 	if (!list) {
 		if (map->type == _DRM_REGISTERS)
+#ifdef __linux__
+			iounmap(map->handle);
+#else
 			drm_ioremapfree(map);
+#endif
 		free(map, DRM_MEM_MAPS);
 		return -EINVAL;
 	}
@@ -522,7 +514,11 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			     (map->type == _DRM_SHM));
 	if (ret) {
 		if (map->type == _DRM_REGISTERS)
+#ifdef __linux__
+			iounmap(map->handle);
+#else
 			drm_ioremapfree(map);
+#endif
 		free(map, DRM_MEM_MAPS);
 		free(list, DRM_MEM_MAPS);
 		mutex_unlock(&dev->struct_mutex);
@@ -1030,9 +1026,6 @@ int drm_addbufs_agp(struct drm_device * dev, struct drm_buf_desc * request)
 		buf->file_priv = NULL;
 
 		buf->dev_priv_size = dev->driver->dev_priv_size;
-#if 0
-		buf->dev_priv_size = dev->driver->buf_priv_size;
-#endif
 		buf->dev_private = malloc(buf->dev_priv_size,
 			DRM_MEM_BUFS, M_WAITOK | M_ZERO);
 		if (!buf->dev_private) {
@@ -1208,9 +1201,6 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 	while (entry->buf_count < count) {
 
 		dmah = drm_pci_alloc(dev, PAGE_SIZE << page_order, 0x1000);
-#if 0
-		dmah = drm_pci_alloc(dev, size, alignment);
-#endif
 
 		if (!dmah) {
 			/* Set count correctly so we free the proper amount. */
@@ -1240,9 +1230,6 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 			buf->used = 0;
 			buf->offset = (dma->byte_count + byte_count + offset);
 			buf->address = (void *)(dmah->vaddr + offset);
-#if 0
-			buf->address = ((char *)dmah->vaddr + offset);
-#endif
 			buf->bus_address = dmah->busaddr + offset;
 			buf->next = NULL;
 			buf->waiting = 0;
@@ -1251,9 +1238,6 @@ int drm_addbufs_pci(struct drm_device * dev, struct drm_buf_desc * request)
 			buf->file_priv = NULL;
 
 			buf->dev_priv_size = dev->driver->dev_priv_size;
-#if 0
-			buf->dev_priv_size = dev->driver->buf_priv_size;
-#endif
 			buf->dev_private = malloc(buf->dev_priv_size,
 				DRM_MEM_BUFS, M_WAITOK | M_ZERO);
 			if (!buf->dev_private) {
@@ -1415,10 +1399,6 @@ static int drm_addbufs_sg(struct drm_device * dev, struct drm_buf_desc * request
 		buf->bus_address = agp_offset + offset;
 		buf->address = (void *)(agp_offset + offset
 					+ (unsigned long)dev->sg->virtual);
-#if 0
-		buf->address = (void *)(agp_offset + offset
-					+ (unsigned long)dev->sg->handle);
-#endif
 		buf->next = NULL;
 		buf->waiting = 0;
 		buf->pending = 0;
@@ -1702,9 +1682,6 @@ int drm_infobufs(struct drm_device *dev, void *data,
 	struct drm_buf_info *request = data;
 	int i;
 	int count;
-#if 0
-	int retcode = 0;
-#endif
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
 		return -EINVAL;
@@ -1730,7 +1707,6 @@ int drm_infobufs(struct drm_device *dev, void *data,
 	if (request->count >= count) {
 		for (i = 0, count = 0; i < DRM_MAX_ORDER + 1; i++) {
 			if (dma->bufs[i].buf_count) {
-
 				struct drm_buf_desc __user *to =
 				    &request->list[count];
 				struct drm_buf_entry *from = &dma->bufs[i];
@@ -1748,20 +1724,6 @@ int drm_infobufs(struct drm_device *dev, void *data,
 						 &list->high_mark,
 						 sizeof(list->high_mark)))
 					return -EFAULT;
-#if 0
-				struct drm_buf_desc from;
-
-				from.count = dma->bufs[i].buf_count;
-				from.size = dma->bufs[i].buf_size;
-				from.low_mark = dma->bufs[i].freelist.low_mark;
-				from.high_mark = dma->bufs[i].freelist.high_mark;
-
-				if (DRM_COPY_TO_USER(&request->list[count], &from,
-				    sizeof(struct drm_buf_desc)) != 0) {
-					retcode = EFAULT;
-					break;
-				}
-#endif /* DRM_NEWER_BUFTRY */
 
 				DRM_DEBUG("%d %d %d %d %d\n",
 					  i,
@@ -1775,11 +1737,7 @@ int drm_infobufs(struct drm_device *dev, void *data,
 	}
 	request->count = count;
 
-#ifdef DRM_NEWER_BUFTRY
 	return 0;
-#else
-	return retcode;
-#endif
 }
 
 /**
@@ -1824,30 +1782,6 @@ int drm_markbufs(struct drm_device *dev, void *data,
 
 	entry->freelist.low_mark = request->low_mark;
 	entry->freelist.high_mark = request->high_mark;
-#if 0
-
-	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
-		return -EINVAL;
-
-	if (!dma)
-		return -EINVAL;
-
-	DRM_DEBUG("%d, %d, %d\n",
-		  request->size, request->low_mark, request->high_mark);
-	order = drm_order(request->size);	
-	if (order < DRM_MIN_ORDER || order > DRM_MAX_ORDER ||
-	    request->low_mark < 0 || request->high_mark < 0) {
-		return EINVAL;
-	}
-
-	if (request->low_mark > dma->bufs[order].buf_count ||
-	    request->high_mark > dma->bufs[order].buf_count) {
-		return EINVAL;
-	}
-
-	dma->bufs[order].freelist.low_mark  = request->low_mark;
-	dma->bufs[order].freelist.high_mark = request->high_mark;
-#endif /* DRM_NEWER_BUFTRY */
 
 	return 0;
 }
@@ -1872,9 +1806,6 @@ int drm_freebufs(struct drm_device *dev, void *data,
 	int i;
 	int idx;
 	struct drm_buf *buf;
-#if 0
-	int retcode = 0;
-#endif
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_DMA))
 		return -EINVAL;
@@ -1897,32 +1828,10 @@ int drm_freebufs(struct drm_device *dev, void *data,
 				  task_pid_nr(current));
 			return -EINVAL;
 		}
-#if 0
-		if (DRM_COPY_FROM_USER(&idx, &request->list[i], sizeof(idx))) {
-			retcode = EFAULT;
-			break;
-		}
-		if (idx < 0 || idx >= dma->buf_count) {
-			DRM_ERROR("Index %d (of %d max)\n",
-			    idx, dma->buf_count - 1);
-			retcode = EINVAL;
-			break;
-		}
-		buf = dma->buflist[idx];
-		if (buf->file_priv != file_priv) {
-			DRM_ERROR("Process %d freeing buffer not owned\n",
-			    DRM_CURRENTPID);
-			retcode = EINVAL;
-			break;
-		}
-#endif /* DRM_NEWER_BUFTRY */
 		drm_free_buffer(dev, buf);
 	}
 
 	return 0;
-#if 0
-	return retcode;
-#endif
 }
 
 /**

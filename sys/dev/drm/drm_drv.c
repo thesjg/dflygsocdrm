@@ -621,7 +621,7 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 		  file_priv->authenticated);
 #else
 	DRM_DEBUG("pid=%d, cmd=0x%02lx, nr=0x%02x, dev 0x%lx, auth=%d\n",
-		  DRM_CURRENTPID, cmd, nr,
+		  task_pid_nr(current), cmd, nr,
 		  (long)dev->device,
 		  file_priv->authenticated);
 #endif

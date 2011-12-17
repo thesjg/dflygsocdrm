@@ -64,12 +64,12 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",
-			  DRM_CURRENTPID, lock->context);
+			  task_pid_nr(current), lock->context);
 		return -EINVAL;
 	}
 
 	DRM_DEBUG("%d (pid %d) requests lock (0x%08x), flags = 0x%08x\n",
-		  lock->context, DRM_CURRENTPID,
+		  lock->context, task_pid_nr(current),
 		  master->lock.hw_lock->lock, lock->flags);
 
 	if (drm_core_check_feature(dev, DRIVER_DMA_QUEUE))
@@ -206,7 +206,7 @@ int drm_unlock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 
 	if (lock->context == DRM_KERNEL_CONTEXT) {
 		DRM_ERROR("Process %d using kernel context %d\n",
-			  DRM_CURRENTPID, lock->context);
+			  task_pid_nr(current), lock->context);
 		return -EINVAL;
 	}
 

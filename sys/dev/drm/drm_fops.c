@@ -351,11 +351,7 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	if (!drm_cpu_valid())
 		return -EINVAL;
 
-#ifdef __linux__
 	DRM_DEBUG("pid = %d, minor = %d\n", task_pid_nr(current), minor_id);
-#else
-	DRM_DEBUG("pid = %d, minor = %d\n", DRM_CURRENTPID, minor_id);
-#endif
 
 	priv = malloc(sizeof(*priv), DRM_MEM_FILES, M_WAITOK | M_ZERO);
 	if (!priv)
@@ -365,13 +361,8 @@ static int drm_open_helper_legacy(struct cdev *kdev, int flags, int fmt, DRM_STR
 	filp->private_data = priv;
 	priv->filp = filp;
 #endif
-#ifdef __linux__
 	priv->uid = current_euid();
 	priv->pid = task_pid_nr(current);
-#else
-	priv->uid = p->td_proc->p_ucred->cr_svuid;
-	priv->pid = p->td_proc->p_pid;
-#endif
 	priv->minor = idr_find(&drm_minors_idr, minor_id);
 	priv->ioctl_count = 0;
 	/* for compatibility root is always authenticated */
@@ -729,7 +720,7 @@ int drm_close_legacy(struct dev_close_args *ap)
 		  dev->open_count);
 #else
 	DRM_DEBUG("pid = %d, device = 0x%lx, open_count = %d\n",
-		  DRM_CURRENTPID,
+		  task_pid_nr(current),
 		  (long)dev->device,
 		  dev->open_count);
 #endif
