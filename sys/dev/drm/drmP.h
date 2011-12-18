@@ -595,7 +595,11 @@ struct drm_agp_head {
 	DRM_AGP_KERN agp_info;		/**< AGP device information */
 	struct list_head memory;
 	unsigned long mode;		/**< AGP mode */
+#ifdef __linux__
 	struct agp_bridge_data *bridge;
+#else
+	DRM_AGP_BRIDGE_DATA_T bridge;
+#endif
 	int enabled;			/**< whether the AGP bus as been enabled */
 	int acquired;			/**< whether the AGP device has been acquired */
 	unsigned long base;
@@ -604,9 +608,6 @@ struct drm_agp_head {
 	unsigned long page_mask;
 
 /* legacy drm */
-	struct drm_agp_mem *memory_legacy;
-	const char         *chipset;
-	device_t	   agpdev;
 	int 		   mtrr;
 	struct agp_info    info;
 };

@@ -131,7 +131,7 @@ int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info)
 	info->id_device = kern->device->device;
 #else
 	kern = &dev->agp->info;
-	agp_get_info(dev->agp->agpdev, kern);
+	agp_get_info(dev->agp->bridge, kern);
 /* INVESTIGATE */
 	info->agp_version_major = 1;
 	info->agp_version_minor = 0;
@@ -140,8 +140,8 @@ int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info)
 	info->aperture_size = kern->ai_aperture_size;
 	info->memory_allowed = kern->ai_memory_allowed;
 	info->memory_used = kern->ai_memory_used;
-	info->id_vendor = pci_get_vendor(dev->agp->agpdev);
-	info->id_device = pci_get_device(dev->agp->agpdev);
+	info->id_vendor = pci_get_vendor(dev->agp->bridge);
+	info->id_device = pci_get_device(dev->agp->bridge);
 #endif
 #if 0
 	info->id_vendor = kern->ai_devid & 0xffff;
@@ -193,7 +193,7 @@ int drm_agp_acquire(struct drm_device * dev)
 	if (!(dev->agp->bridge = agp_backend_acquire(dev->pdev)))
 		return -ENODEV;
 #else
-	if (agp_acquire(dev->agp->agpdev))
+	if (agp_acquire(dev->agp->bridge))
 		return -ENODEV;
 #endif
 	dev->agp->acquired = 1;
@@ -235,7 +235,7 @@ int drm_agp_release(struct drm_device * dev)
 #ifdef __linux__
 	agp_backend_release(dev->agp->bridge);
 #else
-	agp_release(dev->agp->agpdev);
+	agp_release(dev->agp->bridge);
 #endif
 	dev->agp->acquired = 0;
 	return 0;
@@ -267,7 +267,7 @@ int drm_agp_enable(struct drm_device * dev, struct drm_agp_mode mode)
 #ifdef __linux__
 	agp_enable(dev->agp->bridge, mode.mode);
 #else
-	agp_enable(dev->agp->agpdev, mode.mode);
+	agp_enable(dev->agp->bridge, mode.mode);
 #endif
 	dev->agp->enabled = 1;
 	return 0;
@@ -334,7 +334,7 @@ int drm_agp_alloc(struct drm_device *dev, struct drm_agp_buffer *request)
 	list_add(&entry->head, &dev->agp->memory);
 
 #ifndef __linux__
-	agp_memory_info(dev->agp->agpdev, entry->memory, &info);
+	agp_memory_info(dev->agp->bridge, entry->memory, &info);
 #endif
 
 	request->handle = entry->handle;
@@ -536,9 +536,9 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 #ifdef __linux__
 	head->bridge = agp_find_bridge(dev->pdev);
 #else
-	head->agpdev = drm_agp_find_bridge(NULL);
+	head->bridge = drm_agp_find_bridge(NULL);
 #endif
-	if (!head->agpdev) {
+	if (!head->bridge) {
 #ifdef __linux__
 		if (!(head->bridge = agp_backend_acquire(dev->pdev))) {
 			kfree(head);
@@ -555,7 +555,7 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 #ifdef __linux__
 		agp_copy_info(head->bridge, &head->agp_info);
 #else
-		agp_get_info(head->agpdev, &head->info);
+		agp_get_info(head->bridge, &head->info);
 #endif
 	}
 
@@ -576,6 +576,9 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 DRM_AGP_MEM *drm_agp_allocate_memory(DRM_AGP_BRIDGE_DATA_T bridge,
 				     size_t pages, u32 type)
 {
+#ifdef __linux__
+	return agp_allocate_memory(bridge, pages, type);
+#else
 	DRM_AGP_MEM *handle = malloc(sizeof(DRM_AGP_MEM),
 		DRM_MEM_AGPLISTS, M_WAITOK | M_ZERO);
 	if (handle == NULL)
@@ -587,6 +590,7 @@ DRM_AGP_MEM *drm_agp_allocate_memory(DRM_AGP_BRIDGE_DATA_T bridge,
 /* On DragonFly AGP_PAGE_SHIFT is defined to be 12 */
 	handle->memory = agp_alloc_memory(handle->bridge, type, pages << AGP_PAGE_SHIFT);
 	return handle;
+#endif
 }
 
 /** Calls agp_free_memory() */
@@ -595,9 +599,13 @@ int drm_agp_free_memory(DRM_AGP_MEM * handle)
 	if (!handle)
 		return 0;
 
+#ifdef __linux__
+	agp_free_memory(handle);
+#else
 	if (handle->bridge && handle->memory)
 		agp_free_memory(handle->bridge, handle->memory);
 	free(handle, DRM_MEM_AGPLISTS);
+#endif
 	return 1;
 }
 
@@ -606,8 +614,11 @@ int drm_agp_bind_memory(DRM_AGP_MEM * handle, off_t start)
 {
 	if (!handle)
 		return -EINVAL;
-
+#ifdef __linux__
+	return agp_bind_memory(handle, start);
+#else
 	return agp_bind_memory(handle->bridge, handle->memory, start * PAGE_SIZE);
+#endif
 }
 
 /** Calls agp_unbind_memory() */
@@ -615,7 +626,11 @@ int drm_agp_unbind_memory(DRM_AGP_MEM * handle)
 {
 	if (!handle)
 		return -EINVAL;
+#ifdef __linux__
+	return agp_unbind_memory(handle);
+#else
 	return agp_unbind_memory(handle->bridge, handle->memory);
+#endif
 }
 
 /**
@@ -641,7 +656,7 @@ drm_agp_bind_pages(struct drm_device *dev,
 
 	DRM_DEBUG("\n");
 
-	mem = drm_agp_allocate_memory(dev->agp->agpdev, num_pages,
+	mem = drm_agp_allocate_memory(dev->agp->bridge, num_pages,
 				      type);
 	if (mem == NULL) {
 		DRM_ERROR("Failed to allocate memory for %ld pages\n",
@@ -654,7 +669,7 @@ drm_agp_bind_pages(struct drm_device *dev,
 		mem->pages[i] = pages[i];
 #endif /* __linux__ */
 	mem->page_count = num_pages;
-	mem->bridge = dev->agp->agpdev;
+	mem->bridge = dev->agp->bridge;
 
 	mem->is_flushed = true;
 	ret = drm_agp_bind_memory(mem, gtt_offset / PAGE_SIZE);
@@ -718,7 +733,7 @@ drm_agp_bind_object(struct drm_device *dev,
 
 	DRM_DEBUG("\n");
 
-	mem = drm_agp_alloc_given(dev->agp->agpdev, num_pages,
+	mem = drm_agp_alloc_given(dev->agp->bridge, num_pages,
 				      type, (void *)object);
 	if (mem == NULL) {
 		DRM_ERROR("Failed to allocate memory for %ld pages\n",
@@ -727,7 +742,7 @@ drm_agp_bind_object(struct drm_device *dev,
 	}
 
 	mem->page_count = num_pages;
-	mem->bridge = dev->agp->agpdev;
+	mem->bridge = dev->agp->bridge;
 
 	mem->is_flushed = true;
 	ret = drm_agp_bind_memory(mem, gtt_offset / PAGE_SIZE);

@@ -68,10 +68,6 @@
 #define DRM_MIN(a,b) ((a)<(b)?(a):(b))
 #define DRM_MAX(a,b) ((a)>(b)?(a):(b))
 
-#define DRM_DEV_MODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
-#define DRM_DEV_UID	0
-#define DRM_DEV_GID	0
-
 #define DRM_WAKEUP(w)		wakeup((void *)w)
 
 /* Not in Linux drm */
@@ -79,18 +75,9 @@
 
 #define DRM_INIT_WAITQUEUE(queue) do {(void)(queue);} while (0)
 
-#define DRM_CURPROC		curthread
-#define DRM_STRUCTPROC		struct thread
-
-#define DRM_CURRENTPID		curthread->td_proc->p_pid
-#define DRM_CURRENTUID		curthread->td_proc->p_ucred->cr_svuid
-
 /* Specific to BSD port of drm */
 /* drm_drv.c drm_ioctl() and drm_vm.c drm_mmap() */
 #define drm_get_device_from_kdev(_kdev) (_kdev->si_drv1)
-
-/* DRM_SUSER returns true if the user is superuser */
-#define DRM_SUSER(p)		(priv_check(p, PRIV_DRIVER) == 0)
 
 /*
  * AGP

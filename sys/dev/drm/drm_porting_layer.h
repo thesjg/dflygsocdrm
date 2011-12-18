@@ -382,10 +382,6 @@ free(void *addr, struct malloc_type *type)
 		kfree(addr, type);
 }
 
-/*
- * Large memory allocation
- */
-
 /* For now just treat the same as regular allocation */
 /* file drm_memory.c, function agp_remap() */
 /* file vmwgfx_fifo.c, function vmw_fifo_init() */
@@ -400,6 +396,15 @@ static __inline__ void *
 vmalloc_32(size_t size) {
 	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
 }
+
+#if 0 /* UNIMPLEMENTED */
+/* For _DRM_SHM are special methods necessary to obtain memory mappable to user space */
+/* file drm_bufs.c, function drm_addmap_core() */
+static __inline__ void *
+vmalloc_user(unsigned long size) {
+	return malloc(size, DRM_MEM_DEFAULT, M_WAITOK | M_ZERO);
+}
+#endif
 
 /* file drm_bufs.c, function drm_rmmap_locked() */
 /* file vmwgfx_fifo.c, function vmw_fifo_init() */
@@ -487,15 +492,6 @@ struct seq_file {
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_alloc_debugfs() */
 #define seq_printf(seq_file, ...) kprintf(__VA_ARGS__) /* UNIMPLEMENTED */
-
-/*
- * File mode permissions
- */
-/* In analogy to sys/stats.h, interpret
- * R to mean read
- * UGO to mean user, group, other
- */
-#define S_IRUGO  S_IRUSR|S_IRGRP|S_IROTH
 
 /*
  * String
@@ -941,17 +937,43 @@ ida_destroy(struct ida *pida);
  * GLOBAL DATA                                            *
  **********************************************************/
 
-/* file ttm/ttm_lock.c, function __ttm_read_lock() */
+#define DRM_CURPROC		curthread
+#define DRM_STRUCTPROC		struct thread
+
+#define DRM_CURRENTPID		curthread->td_proc->p_pid
+#define DRM_CURRENTUID		curthread->td_proc->p_ucred->cr_svuid
+
+/* effective user id */
+#define DRM_CURRENTEUID		curthread->td_proc->p_ucred->cr_uid
+/* saved effective user id */
+#define DRM_CURRENTSVUID	curthread->td_proc->p_ucred->cr_svuid
+/* real user id */
+#define DRM_CURRENTRUID		curthread->td_proc->p_ucred->cr_ruid
+
 /* current is either the current thread or current process */
 /* DragonFly BSD has curthread of type struct thread *     */
 
-typedef struct thread *DRM_CURRENT_T;
-
 #define current curthread
+
+typedef struct thread *DRM_CURRENT_T;
 
 /**********************************************************
  * PERMISSIONS AND CREDENTIALS                            *
  **********************************************************/
+
+/*
+ * File mode permissions
+ */
+
+#define DRM_DEV_MODE	(S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP)
+#define DRM_DEV_UID	0
+#define DRM_DEV_GID	0
+
+/* In analogy to sys/stats.h, interpret
+ * R to mean read
+ * UGO to mean user, group, other
+ */
+#define S_IRUGO  S_IRUSR|S_IRGRP|S_IROTH
 
 /* file drm_vm.c, function drm_vm_open_locked() */
 /* Need to find pid associated with current, current->pid */
@@ -973,6 +995,9 @@ current_euid(void) {
 	}
 	return 0;
 }
+
+/* DRM_SUSER returns true if the user is superuser */
+#define DRM_SUSER(p)		(priv_check(p, PRIV_DRIVER) == 0)
 
 #define CAP_SYS_ADMIN  PRIV_DRIVER 
 
@@ -3195,7 +3220,11 @@ struct agp_memory {
 
 struct agp_memory;
 
-typedef device_t	DRM_AGP_BRIDGE_DATA_T;
+#ifdef __linux__
+typedef struct agp_bridge_data *DRM_AGP_BRIDGE_DATA_T;
+#else
+typedef device_t                DRM_AGP_BRIDGE_DATA_T;
+#endif
 
 struct agp_bridge_data {
 	int placeholder;

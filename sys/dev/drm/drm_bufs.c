@@ -137,12 +137,14 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 		if (entry->master != dev->primary->master) {
 			if ((map->type == _DRM_REGISTERS) || (map->type == _DRM_FRAME_BUFFER)
 				|| (entry->map->offset == map->offset)) {
-				DRM_ERROR("mismatched master: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%u), entry (%p) != dev (%p)\n",
+				DRM_ERROR("mismatched master: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), svuid (%u), euid (%u), ruid (%u), entry (%p) != dev (%p)\n",
 					typestr,
 					(uint64_t)map->offset,
 					(uint64_t)map->handle,
 					DRM_CURRENTPID,
 					DRM_CURRENTUID,
+					DRM_CURRENTEUID,
+					DRM_CURRENTRUID,
 					entry->master,
 					dev->primary->master);
 			}
@@ -165,12 +167,15 @@ static struct drm_map_list *drm_find_matching_map(struct drm_device *dev,
 			return entry;
 	}
 #ifndef __linux__
-	DRM_INFO("map not found: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%u)\n",
+	DRM_INFO("map not found: type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), svuid (%u), euid (%u), ruid (%u)\n",
 		typestr,
 		(uint64_t)map->offset,
 		(uint64_t)map->handle,
 		DRM_CURRENTPID,
-		DRM_CURRENTUID);
+		DRM_CURRENTUID,
+		DRM_CURRENTEUID,
+		DRM_CURRENTRUID
+	);
 #endif
 
 	return NULL;
@@ -536,13 +541,16 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		typestr = "??";
 	else
 		typestr = types[list->map->type];
-	DRM_INFO("drm_addmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), master (%p), pid (%d), uid (%u)\n",
+	DRM_INFO("drm_addmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), master (%p), pid (%d), svuid (%u), euid (%u), ruid(%u)\n",
 		typestr,
 		(uint64_t)map->offset,
 		(uint64_t)map->handle,
 		list->master,
 		DRM_CURRENTPID,
-		DRM_CURRENTUID);
+		DRM_CURRENTUID,
+		DRM_CURRENTEUID,
+		DRM_CURRENTRUID
+	);
 #endif
 	*maplist = list;
 	return 0;
@@ -710,12 +718,15 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		typestr = "??";
 	else
 		typestr = types[map->type];
-	DRM_INFO("drm_rmmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), uid (%u)\n",
+	DRM_INFO("drm_rmmap_locked(): type (%4.4s), offset (%016lx), handle (%016lx), pid (%d), svuid (%u), euid(%d), ruid(%d)\n",
 		typestr,
 		(uint64_t)map->offset,
 		(uint64_t)map->handle,
 		DRM_CURRENTPID,
-		DRM_CURRENTUID);
+		DRM_CURRENTUID,
+		DRM_CURRENTEUID,
+		DRM_CURRENTRUID
+	);
 #endif
 
 	switch (map->type) {
@@ -1914,12 +1925,15 @@ int drm_mapbufs(struct drm_device *dev, void *data,
 	vaddr = round_page((vm_offset_t)vms->vm_daddr + MAXDSIZ);
 
 #ifndef __linux__
-	DRM_INFO("vm_mmap() before: vaddr (%016lx), size (%016lx), foff (%016lx), pid (%d), uid (%u)\n",
+	DRM_INFO("vm_mmap() before: vaddr (%016lx), size (%016lx), foff (%016lx), pid (%d), svuid (%u), euid(%d), ruid(%u)\n",
 		(unsigned long)vaddr,
 		(unsigned long)size,
 		foff,
 		DRM_CURRENTPID,
-		DRM_CURRENTUID);
+		DRM_CURRENTUID,
+		DRM_CURRENTEUID,
+		DRM_CURRENTRUID
+	);
 #endif
 
 #if defined(__DragonFly__)
