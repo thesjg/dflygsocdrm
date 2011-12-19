@@ -126,7 +126,9 @@
 #endif /* __linux__ */
 
 #define DRM_NEWER_MTRR_2 1
+#if 0
 #define DRM_NEWER_MTRR_POS 1
+#endif
 
 #ifdef DRM_NEWER_MTRR_2
 #define __OS_HAS_MTRR 1
