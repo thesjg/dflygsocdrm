@@ -125,7 +125,9 @@
 #define __OS_HAS_AGP	1
 #endif /* __linux__ */
 
-#ifdef DRM_NEWER_MTRR
+#define DRM_NEWER_MTRR_2 1
+
+#ifdef DRM_NEWER_MTRR_2
 #define __OS_HAS_MTRR 1
 #else
 #define __OS_HAS_MTRR (defined(CONFIG_MTRR))
@@ -1291,18 +1293,80 @@ static inline int drm_core_has_MTRR(struct drm_device *dev)
 	return drm_core_check_feature(dev, DRIVER_USE_MTRR);
 }
 
+#ifdef __linux__
 #define DRM_MTRR_WC		MTRR_TYPE_WRCOMB
+#else
+#define DRM_MTRR_WC		MDF_WRITECOMBINE
+#endif
+
+static inline int drm_mtrr_cookie(struct mem_range_desc *mrd) {
+	int nd = 0;
+	int ndesc;
+	int error;
+	struct mem_range_desc *md;
+	int match = -1;
+	int i;
+
+	error = mem_range_attr_get(mrd, &nd);
+	if (error) {
+		return -error;
+	}
+	ndesc = nd;
+	if (ndesc <= 0) {
+		return -1;
+	}
+	md = kmalloc(ndesc * sizeof(struct mem_range_desc), M_TEMP, M_WAITOK);
+	if (!md) {
+		return -ENOMEM;
+	}
+	error = mem_range_attr_get(md, &nd);
+	if (error) {
+		kfree(md, M_TEMP);
+		return -error;
+	}
+	for (i = 0; i < ndesc; i++, md++) {
+		if ((mrd->mr_base == md->mr_base) && (mrd->mr_len == md->mr_len)) {
+			match = i;
+		}
+	}
+	kfree(md, M_TEMP);
+	return match;
+}
 
 static inline int drm_mtrr_add(unsigned long offset, unsigned long size,
 			       unsigned int flags)
 {
+#ifdef __linux__
 	return mtrr_add(offset, size, flags, 1);
+#else
+	int act;
+	struct mem_range_desc mrdesc;
+
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_UPDATE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	return mem_range_attr_set(&mrdesc, &act);
+#endif
 }
 
 static inline int drm_mtrr_del(int handle, unsigned long offset,
 			       unsigned long size, unsigned int flags)
 {
+#ifdef __linux__
 	return mtrr_del(handle, offset, size);
+#else
+	int act;
+	struct mem_range_desc mrdesc;
+
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_REMOVE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	return mem_range_attr_set(&mrdesc, &act);
+#endif
 }
 
 #else
@@ -1412,8 +1476,10 @@ void	drm_mem_uninit(void);
 void	*drm_ioremap_wc(struct drm_device *dev, drm_local_map_t *map);
 void	*drm_ioremap(struct drm_device *dev, drm_local_map_t *map);
 void	drm_ioremapfree(drm_local_map_t *map);
+#ifndef DRM_NEWER_MTRR
 int	drm_mtrr_add(unsigned long offset, size_t size, int flags);
 int	drm_mtrr_del(int handle, unsigned long offset, size_t size, int flags);
+#endif
 
 				/* Misc. IOCTL support (drm_ioctl.h) */
 extern int drm_irq_by_busid(struct drm_device *dev, void *data,

@@ -221,6 +221,7 @@ void drm_mem_uninit(void)
 {
 }
 
+#ifndef DRM_NEWER_MTRR
 /* legacy, UNIMPLEMENTED how to know if MTRR available */
 int
 drm_mtrr_add(unsigned long offset, size_t size, int flags)
@@ -249,3 +250,4 @@ drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
 	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
 	return mem_range_attr_set(&mrdesc, &act);
 }
+#endif
