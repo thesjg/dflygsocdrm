@@ -126,6 +126,7 @@
 #endif /* __linux__ */
 
 #define DRM_NEWER_MTRR_2 1
+#define DRM_NEWER_MTRR_POS 1
 
 #ifdef DRM_NEWER_MTRR_2
 #define __OS_HAS_MTRR 1
@@ -1299,44 +1300,10 @@ static inline int drm_core_has_MTRR(struct drm_device *dev)
 #define DRM_MTRR_WC		MDF_WRITECOMBINE
 #endif
 
-static inline int drm_mtrr_cookie(struct mem_range_desc *mrd) {
-	int nd = 0;
-	int ndesc;
-	int error;
-	struct mem_range_desc *md;
-	int match = -1;
-	int i;
-
-	error = mem_range_attr_get(mrd, &nd);
-	if (error) {
-		return -error;
-	}
-	ndesc = nd;
-	if (ndesc <= 0) {
-		return -1;
-	}
-	md = kmalloc(ndesc * sizeof(struct mem_range_desc), M_TEMP, M_WAITOK);
-	if (!md) {
-		return -ENOMEM;
-	}
-	error = mem_range_attr_get(md, &nd);
-	if (error) {
-		kfree(md, M_TEMP);
-		return -error;
-	}
-	for (i = 0; i < ndesc; i++, md++) {
-		if ((mrd->mr_base == md->mr_base) && (mrd->mr_len == md->mr_len)) {
-			match = i;
-		}
-	}
-	kfree(md, M_TEMP);
-	return match;
-}
-
 static inline int drm_mtrr_add(unsigned long offset, unsigned long size,
 			       unsigned int flags)
 {
-#ifdef __linux__
+#ifdef DRM_NEWER_MTRR_POS
 	return mtrr_add(offset, size, flags, 1);
 #else
 	int act;
@@ -1354,7 +1321,7 @@ static inline int drm_mtrr_add(unsigned long offset, unsigned long size,
 static inline int drm_mtrr_del(int handle, unsigned long offset,
 			       unsigned long size, unsigned int flags)
 {
-#ifdef __linux__
+#ifdef DRM_NEWER_MTRR_POS
 	return mtrr_del(handle, offset, size);
 #else
 	int act;

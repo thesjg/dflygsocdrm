@@ -2555,26 +2555,81 @@ page_count(struct page *page) {
  * MTRR
  */
 
-/* file drm_bufs.c, function drm_addmap_core() */
-#define MTRR_TYPE_WRCOMB	0x0001
+/* It appears that DRM_MTRR_WC is always used as the flag */
+#define MTRR_TYPE_WRCOMB MDF_WRITECOMBINE
+
+static inline int mtrr_cookie(struct mem_range_desc *mrd) {
+	int nd = 0;
+	int ndesc;
+	int error;
+	struct mem_range_desc *md;
+	int match = -1;
+	int i;
+
+	error = mem_range_attr_get(mrd, &nd);
+	if (error) {
+		return -error;
+	}
+	ndesc = nd;
+	if (ndesc <= 0) {
+		return -1;
+	}
+	md = kmalloc(ndesc * sizeof(struct mem_range_desc), M_TEMP, M_WAITOK);
+	if (!md) {
+		return -ENOMEM;
+	}
+	error = mem_range_attr_get(md, &nd);
+	if (error) {
+		kfree(md, M_TEMP);
+		return -error;
+	}
+	for (i = 0; i < ndesc; i++, md++) {
+		if ((mrd->mr_base == md->mr_base) && (mrd->mr_len == md->mr_len)) {
+			match = i;
+		}
+	}
+	kfree(md, M_TEMP);
+	return match;
+}
 
 static __inline__ int
 mtrr_add(
 	unsigned long offset,
 	unsigned long size,
-	uint32_t type,
-	uint32_t flagsOne
+	unsigned int flags,
+	boolean_t flagsOne
 ) {
-	return 0;
+	int act;
+	struct mem_range_desc mrdesc;
+	int error;
+
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_UPDATE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	error = mem_range_attr_set(&mrdesc, &act);
+	if (error) {
+		return -error;
+	}
+	return mtrr_cookie(&mrdesc);
 }
 
 static __inline__ int
 mtrr_del(
-	int mtrr,
-	unsigned long offset,
+	int reg, /*unused */
+	unsigned long base,
 	unsigned long size
 ) {
-	return 0;
+	int act;
+	struct mem_range_desc mrdesc;
+
+	mrdesc.mr_base = base;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = MDF_WRITECOMBINE;
+	act = MEMRANGE_SET_REMOVE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	return mem_range_attr_set(&mrdesc, &act);
 }
 
 /*

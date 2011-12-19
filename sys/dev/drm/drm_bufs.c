@@ -306,11 +306,11 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	if (map->type == _DRM_SHM)
 		map->size = PAGE_ALIGN(map->size);
 
-#ifdef __linux__ /* legacy later test for map->mtrr == 0 */
+#ifdef DRM_NEWER_MTRR_POS /* legacy later test for map->mtrr == 0 */
 	map->mtrr = -1;
 #else
 	map->mtrr = 0;
-#endif /* __linux__ */
+#endif
 	map->handle = NULL;
 
 	switch (map->type) {
@@ -351,8 +351,13 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		if (drm_core_has_MTRR(dev)) {
 			if (map->type == _DRM_FRAME_BUFFER ||
 			    (map->flags & _DRM_WRITE_COMBINING)) {
+#if DRM_NEWER_MTRR_POS
+				map->mtrr = mtrr_add(map->offset, map->size,
+						     MTRR_TYPE_WRCOMB, 1);
+#else
 				if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
 					map->mtrr = 1;
+#endif
 			}
 		}
 #endif
@@ -433,7 +438,11 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		    dev->agp->info.ai_aperture_size - 1) {
 			map->offset += dev->agp->base;
 		}
+#ifdef DRM_NEWER_MTRR_POS
+		map->mtrr = dev->agp->agp_mtrr;	/* for getmap */
+#else
 		map->mtrr   = dev->agp->mtrr; /* for getmap */
+#endif
 
 		/* This assumes the DRM is in total control of AGP space.
 		 * It's not always the case as AGP can be in the control
@@ -734,7 +743,7 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		drm_ioremapfree(map);
 		/* FALLTHROUGH */
 	case _DRM_FRAME_BUFFER:
-#ifdef __linux__
+#ifdef DRM_NEWER_MTRR_POS
 		if (drm_core_has_MTRR(dev) && map->mtrr >= 0) {
 			int retcode;
 			retcode = mtrr_del(map->mtrr, map->offset, map->size);

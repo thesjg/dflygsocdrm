@@ -555,6 +555,7 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 #ifdef __linux__
 		agp_copy_info(head->bridge, &head->agp_info);
 #else
+		drm_agp_copy_info(head->bridge, &head->agp_info);
 		agp_get_info(head->bridge, &head->info);
 #endif
 	}
