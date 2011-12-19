@@ -2612,7 +2612,10 @@ mtrr_add(
 	if (error) {
 		return -error;
 	}
+	return 0;
+#if 0
 	return mtrr_cookie(&mrdesc);
+#endif
 }
 
 static __inline__ int
