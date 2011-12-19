@@ -740,6 +740,7 @@ void drm_put_dev(struct drm_device *dev)
 #else
 	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
 	    dev->agp && dev->agp->agp_mtrr > 0) {
+		int retval;
 		retval = mtrr_del(dev->agp->agp_mtrr,
 				  dev->agp->info.ai_aperture_base,
 				  dev->agp->info.ai_aperture_size);
