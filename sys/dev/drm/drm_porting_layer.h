@@ -2609,10 +2609,7 @@ mtrr_add(
 	act = MEMRANGE_SET_UPDATE;
 	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
 	error = mem_range_attr_set(&mrdesc, &act);
-	if (error) {
-		return -error;
-	}
-	return 0;
+	return -error;
 #if 0
 	return mtrr_cookie(&mrdesc);
 #endif

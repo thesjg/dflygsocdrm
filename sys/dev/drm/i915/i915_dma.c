@@ -1800,11 +1800,17 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 					 1024 * 1024,
 					 MTRR_TYPE_WRCOMB, 1);
 #else
-	dev_priv->mm.gtt_mtrr = mtrr_add(dev->agp->base,
-					 dev->agp->info.ai_aperture_size,
-					 MTRR_TYPE_WRCOMB, 1);
+	if (drm_mtrr_add(dev->agp->base,
+					 dev->agp->agp_info.aper_size *
+					 1024 * 1024,
+					 DRM_MTRR_WC) == 0) {
+		dev_priv->mm.gtt_mtrr = 0;
+	}
+	else {
+		dev_priv->mm.gtt_mtrr = -1;
+	}
 #endif
-#else
+#else /* !DRM_NEWER_MTRR_POS */
 	if (drm_mtrr_add(dev->agp->base,
 					 dev->agp->agp_info.aper_size *
 					 1024 * 1024,
@@ -1814,7 +1820,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	else {
 		dev_priv->mm.gtt_mtrr = -1;
 	} 
-#endif
+#endif /* DRM_NEWER_MTRR_POS */
 	if (dev_priv->mm.gtt_mtrr < 0) {
 		DRM_INFO("MTRR allocation failed.  Graphics "
 			 "performance may suffer.\n");

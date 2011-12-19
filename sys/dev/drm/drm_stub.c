@@ -393,6 +393,9 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 				    mtrr_add(dev->agp->info.ai_aperture_base,
 					     dev->agp->info.ai_aperture_size,
 					     MTRR_TYPE_WRCOMB, 1);
+				if (dev->agp->agp_mtrr == 0) {
+					dev->agp->agp_mtrr = 1;
+				}
 #endif
 		}
 #else
@@ -725,20 +728,24 @@ void drm_put_dev(struct drm_device *dev)
 	drm_lastclose(dev);
 
 #ifdef DRM_NEWER_MTRR_POS
+#ifdef __linux__
 	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
 	    dev->agp && dev->agp->agp_mtrr >= 0) {
 		int retval;
-#ifdef __linux__
 		retval = mtrr_del(dev->agp->agp_mtrr,
 				  dev->agp->agp_info.aper_base,
 				  dev->agp->agp_info.aper_size * 1024 * 1024);
+		DRM_DEBUG("mtrr_del=%d\n", retval);
+	}
 #else
+	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
+	    dev->agp && dev->agp->agp_mtrr > 0) {
 		retval = mtrr_del(dev->agp->agp_mtrr,
 				  dev->agp->info.ai_aperture_base,
 				  dev->agp->info.ai_aperture_size);
-#endif
 		DRM_DEBUG("mtrr_del=%d\n", retval);
 	}
+#endif
 #else /* !DRM_NEWER_MTRR_POS_ */
 #ifdef DRM_NEWER_MTRR
 	if (drm_core_has_MTRR(dev) && drm_core_has_AGP(dev) &&
