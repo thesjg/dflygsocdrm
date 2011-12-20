@@ -1794,22 +1794,10 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	 * MTRR if present.  Even if a UC MTRR isn't present.
 	 */
 #ifdef DRM_NEWER_MTRR_POS
-#ifdef __linux__
 	dev_priv->mm.gtt_mtrr = mtrr_add(dev->agp->base,
 					 dev->agp->agp_info.aper_size *
 					 1024 * 1024,
 					 MTRR_TYPE_WRCOMB, 1);
-#else
-	if (drm_mtrr_add(dev->agp->base,
-					 dev->agp->agp_info.aper_size *
-					 1024 * 1024,
-					 DRM_MTRR_WC) == 0) {
-		dev_priv->mm.gtt_mtrr = 0;
-	}
-	else {
-		dev_priv->mm.gtt_mtrr = -1;
-	}
-#endif
 #else /* !DRM_NEWER_MTRR_POS */
 	if (drm_mtrr_add(dev->agp->base,
 					 dev->agp->agp_info.aper_size *

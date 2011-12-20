@@ -220,34 +220,3 @@ void drm_mem_init(void)
 void drm_mem_uninit(void)
 {
 }
-
-#ifndef DRM_NEWER_MTRR
-/* legacy, UNIMPLEMENTED how to know if MTRR available */
-int
-drm_mtrr_add(unsigned long offset, size_t size, int flags)
-{
-	int act;
-	struct mem_range_desc mrdesc;
-
-	mrdesc.mr_base = offset;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = flags;
-	act = MEMRANGE_SET_UPDATE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	return mem_range_attr_set(&mrdesc, &act);
-}
-
-int
-drm_mtrr_del(int __unused handle, unsigned long offset, size_t size, int flags)
-{
-	int act;
-	struct mem_range_desc mrdesc;
-
-	mrdesc.mr_base = offset;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = flags;
-	act = MEMRANGE_SET_REMOVE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	return mem_range_attr_set(&mrdesc, &act);
-}
-#endif

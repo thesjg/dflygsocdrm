@@ -1338,16 +1338,7 @@ static inline int drm_mtrr_del(int handle, unsigned long offset,
 
 /* CONFIG_MTRR does not seem to be defined on DragonFly */
 
-#ifdef DRM_NEWER_MTRR
-static inline int drm_core_has_MTRR(struct drm_device *dev)
-{
-	return drm_core_check_feature(dev, DRIVER_USE_MTRR);
-}
-#else /* DRM_NEWER_MTRR */
 #define drm_core_has_MTRR(dev) (0)
-#endif /* DRM_NEWER_MTRR */
-
-#ifdef __linux__
 
 #define DRM_MTRR_WC		0
 
@@ -1362,11 +1353,6 @@ static inline int drm_mtrr_del(int handle, unsigned long offset,
 {
 	return 0;
 }
-#else /* legacy drm */
-
-#define DRM_MTRR_WC		MDF_WRITECOMBINE
-
-#endif
 
 #endif
 

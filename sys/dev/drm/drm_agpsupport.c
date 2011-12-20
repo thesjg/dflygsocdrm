@@ -136,20 +136,6 @@ int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info)
 	info->id_device = pci_get_device(dev->agp->bridge);
 #endif
 #if 0
-	kern = &dev->agp->info;
-	agp_get_info(dev->agp->bridge, kern);
-/* INVESTIGATE */
-	info->agp_version_major = 1;
-	info->agp_version_minor = 0;
-	info->mode = kern->ai_mode;
-	info->aperture_base = kern->ai_aperture_base;
-	info->aperture_size = kern->ai_aperture_size;
-	info->memory_allowed = kern->ai_memory_allowed;
-	info->memory_used = kern->ai_memory_used;
-	info->id_vendor = pci_get_vendor(dev->agp->bridge);
-	info->id_device = pci_get_device(dev->agp->bridge);
-#endif
-#if 0
 	info->id_vendor = kern->ai_devid & 0xffff;
 	info->id_device = kern->ai_devid >> 16;
 #endif
@@ -562,9 +548,6 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 		agp_copy_info(head->bridge, &head->agp_info);
 #else
 		drm_agp_copy_info(head->bridge, &head->agp_info);
-#if 0
-		agp_get_info(head->bridge, &head->info);
-#endif
 #endif
 	}
 

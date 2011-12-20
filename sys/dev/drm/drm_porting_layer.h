@@ -2563,6 +2563,7 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 	int ndesc;
 	int error;
 	struct mem_range_desc *md;
+	struct mem_range_desc *cand;
 	int match = -1;
 	int i;
 
@@ -2583,8 +2584,9 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 		kfree(md, M_TEMP);
 		return -error;
 	}
-	for (i = 0; i < ndesc; i++, md++) {
-		if ((mrd->mr_base == md->mr_base) && (mrd->mr_len == md->mr_len)) {
+	cand = md;
+	for (i = 0; i < ndesc; i++, cand++) {
+		if ((mrd->mr_base == cand->mr_base) && (mrd->mr_len == cand->mr_len)) {
 			match = i;
 		}
 	}
@@ -2609,6 +2611,9 @@ mtrr_add(
 	act = MEMRANGE_SET_UPDATE;
 	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
 	error = mem_range_attr_set(&mrdesc, &act);
+	if (error) {
+		return -error;
+	}
 	return -error;
 #if 0
 	return mtrr_cookie(&mrdesc);
