@@ -213,9 +213,7 @@ struct region_descriptor {
 #define SEGEX_IDX(s)	(((s)>>3)&0x1fff)
 
 /*
- * Size of the IDT table.  Theoretically we only need to cover past 0x81 
- * (NIDT=130) if not running APIC_IO or SMP, but at this point we might
- * as well just use all of them.
+ * Size of the IDT table.
  */
 #define	NIDT	256		/* we use them all */
 /*
@@ -262,7 +260,8 @@ struct region_descriptor {
 #ifdef _KERNEL
 extern struct user_segment_descriptor gdt[];
 extern struct soft_segment_descriptor gdt_segs[];
-extern struct gate_descriptor *idt;
+extern struct gate_descriptor idt_arr[MAXCPU][NIDT];
+extern struct region_descriptor r_idt_arr[];
 extern struct mtx dt_lock;
 
 void	lgdt(struct region_descriptor *rdp);

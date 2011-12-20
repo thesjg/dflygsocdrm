@@ -351,11 +351,8 @@ nexus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 
 	switch (type) {
 	case SYS_RES_IRQ:
-		if (cpuid < 0 || cpuid >= ncpus) {
-			kprintf("NEXUS cpuid %d:\n", cpuid);
-			print_backtrace(-1);
-			cpuid = 0; /* XXX */
-		}
+		KASSERT(cpuid >= 0 && cpuid < ncpus,
+		    ("nexus invalid cpuid %d:\n", cpuid));
 		rm = &irq_rman[cpuid];
 		break;
 
@@ -378,6 +375,7 @@ nexus_alloc_resource(device_t bus, device_t child, int type, int *rid,
 	rv = rman_reserve_resource(rm, start, end, count, flags, child);
 	if (rv == 0)
 		return 0;
+	rman_set_rid(rv, *rid);
 
 	if (type == SYS_RES_MEMORY) {
 		rman_set_bustag(rv, I386_BUS_SPACE_MEM);

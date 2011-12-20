@@ -39,7 +39,6 @@
  *
  * $Id: vinumstate.c,v 2.18 2000/05/10 07:30:50 grog Exp grog $
  * $FreeBSD: src/sys/dev/vinum/vinumstate.c,v 1.28.2.2 2000/06/08 02:00:23 grog Exp $
- * $DragonFly: src/sys/dev/raid/vinum/vinumstate.c,v 1.7 2006/12/20 18:14:40 dillon Exp $
  */
 
 #include "vinumhdr.h"
@@ -50,6 +49,7 @@
 int
 set_drive_state(int driveno, enum drivestate newstate, enum setstateflags flags)
 {
+    union daemoninfo di;
     struct drive *drive = &DRIVE[driveno];
     int oldstate = drive->state;
     int sdno;
@@ -79,9 +79,10 @@ set_drive_state(int driveno, enum drivestate newstate, enum setstateflags flags)
     if (newstate == drive_up) {				    /* want to bring it up */
 	if ((drive->flags & VF_OPEN) == 0)		    /* should be open, but we're not */
 	    init_drive(drive, 1);			    /* which changes the state again */
-    } else						    /* taking it down or worse */
-	queue_daemon_request(daemonrq_closedrive,	    /* get the daemon to close it */
-	    (union daemoninfo) drive);
+    } else {						    /* taking it down or worse */
+	di.drive = drive;
+	queue_daemon_request(daemonrq_closedrive, di);	    /* get the daemon to close it */
+    }
     if ((flags & setstate_configuring) == 0)		    /* configuring? */
 	save_config();					    /* no: save the updated configuration now */
     return 1;
@@ -128,7 +129,7 @@ set_sd_state(int sdno, enum sdstate newstate, enum setstateflags flags)
 	     * not reborn, we won't go down without
 	     * use of force.
 	     */
-	    if ((!flags & setstate_force)
+	    if (!(flags & setstate_force)
 		&& (sd->plexno >= 0)
 		&& (sd->state != sd_reborn))
 		return 0;				    /* don't do it */

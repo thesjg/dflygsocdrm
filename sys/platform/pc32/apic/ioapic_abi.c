@@ -525,20 +525,42 @@ struct ioapic_irqinfo	ioapic_irqs[IOAPIC_HWI_VECTORS];
 static void
 ioapic_abi_intr_enable(int irq)
 {
-	if (irq < 0 || irq >= IOAPIC_HWI_VECTORS) {
-		kprintf("ioapic_abi_intr_enable invalid irq %d\n", irq);
+	const struct ioapic_irqmap *map;
+
+	KASSERT(irq >= 0 && irq < IOAPIC_HWI_VECTORS,
+	    ("ioapic enable, invalid irq %d\n", irq));
+
+	map = &ioapic_irqmaps[mycpuid][irq];
+	KASSERT(IOAPIC_IMT_ISHWI(map),
+	    ("ioapic enable, not hwi irq %d, type %d, cpu%d\n",
+	     irq, map->im_type, mycpuid));
+	if (map->im_type != IOAPIC_IMT_LINE) {
+		kprintf("ioapic enable, irq %d cpu%d not LINE\n",
+		    irq, mycpuid);
 		return;
 	}
+
 	IOAPIC_INTREN(irq);
 }
 
 static void
 ioapic_abi_intr_disable(int irq)
 {
-	if (irq < 0 || irq >= IOAPIC_HWI_VECTORS) {
-		kprintf("ioapic_abi_intr_disable invalid irq %d\n", irq);
+	const struct ioapic_irqmap *map;
+
+	KASSERT(irq >= 0 && irq < IOAPIC_HWI_VECTORS,
+	    ("ioapic disable, invalid irq %d\n", irq));
+
+	map = &ioapic_irqmaps[mycpuid][irq];
+	KASSERT(IOAPIC_IMT_ISHWI(map),
+	    ("ioapic disable, not hwi irq %d, type %d, cpu%d\n",
+	     irq, map->im_type, mycpuid));
+	if (map->im_type != IOAPIC_IMT_LINE) {
+		kprintf("ioapic disable, irq %d cpu%d not LINE\n",
+		    irq, mycpuid);
 		return;
 	}
+
 	IOAPIC_INTRDIS(irq);
 }
 
@@ -579,13 +601,26 @@ ioapic_abi_stabilize(void)
 static void
 ioapic_abi_intr_setup(int intr, int flags)
 {
+	const struct ioapic_irqmap *map;
 	int vector, select;
 	uint32_t value;
 	u_long ef;
 
-	KKASSERT(intr >= 0 && intr < IOAPIC_HWI_VECTORS &&
-	    intr != IOAPIC_HWI_SYSCALL);
-	KKASSERT(ioapic_irqs[intr].io_addr != NULL);
+	KASSERT(intr >= 0 && intr < IOAPIC_HWI_VECTORS,
+	    ("ioapic setup, invalid irq %d\n", intr));
+
+	map = &ioapic_irqmaps[mycpuid][intr];
+	KASSERT(IOAPIC_IMT_ISHWI(map),
+	    ("ioapic setup, not hwi irq %d, type %d, cpu%d",
+	     intr, map->im_type, mycpuid));
+	if (map->im_type != IOAPIC_IMT_LINE) {
+		kprintf("ioapic setup, irq %d cpu%d not LINE\n",
+		    intr, mycpuid);
+		return;
+	}
+
+	KASSERT(ioapic_irqs[intr].io_addr != NULL,
+	    ("ioapic setup, no GSI information, irq %d\n", intr));
 
 	ef = read_eflags();
 	cpu_disable_intr();
@@ -612,7 +647,7 @@ ioapic_abi_intr_setup(int intr, int flags)
 
 	imen_unlock();
 
-	machintr_intr_enable(intr);
+	IOAPIC_INTREN(intr);
 
 	write_eflags(ef);
 }
@@ -620,13 +655,26 @@ ioapic_abi_intr_setup(int intr, int flags)
 static void
 ioapic_abi_intr_teardown(int intr)
 {
+	const struct ioapic_irqmap *map;
 	int vector, select;
 	uint32_t value;
 	u_long ef;
 
-	KKASSERT(intr >= 0 && intr < IOAPIC_HWI_VECTORS &&
-	    intr != IOAPIC_HWI_SYSCALL);
-	KKASSERT(ioapic_irqs[intr].io_addr != NULL);
+	KASSERT(intr >= 0 && intr < IOAPIC_HWI_VECTORS,
+	    ("ioapic teardown, invalid irq %d\n", intr));
+
+	map = &ioapic_irqmaps[mycpuid][intr];
+	KASSERT(IOAPIC_IMT_ISHWI(map),
+	    ("ioapic teardown, not hwi irq %d, type %d, cpu%d",
+	     intr, map->im_type, mycpuid));
+	if (map->im_type != IOAPIC_IMT_LINE) {
+		kprintf("ioapic teardown, irq %d cpu%d not LINE\n",
+		    intr, mycpuid);
+		return;
+	}
+
+	KASSERT(ioapic_irqs[intr].io_addr != NULL,
+	    ("ioapic teardown, no GSI information, irq %d\n", intr));
 
 	ef = read_eflags();
 	cpu_disable_intr();
@@ -635,7 +683,7 @@ ioapic_abi_intr_teardown(int intr)
 	 * Teardown an interrupt vector.  The vector should already be
 	 * installed in the cpu's IDT, but make sure.
 	 */
-	machintr_intr_disable(intr);
+	IOAPIC_INTRDIS(intr);
 
 	vector = IDT_OFFSET + intr;
 
