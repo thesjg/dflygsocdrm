@@ -3374,6 +3374,8 @@ typedef struct DRM_AGP_KERN {
 	uint16_t id_device;
 /* units of pages */
 	unsigned long current_memory;
+	int cant_use_aperture;
+	unsigned long page_mask;
 } DRM_AGP_KERN;
 
 /* file drm_agpsupport.c, function drm_agp_alloc() */

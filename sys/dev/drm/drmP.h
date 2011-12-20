@@ -611,10 +611,6 @@ struct drm_agp_head {
 	int agp_mtrr;
 	int cant_use_aperture;
 	unsigned long page_mask;
-
-/* legacy drm */
-	int 		   mtrr;
-	struct agp_info    info;
 };
 
 /**

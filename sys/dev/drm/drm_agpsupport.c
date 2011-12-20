@@ -93,6 +93,9 @@ drm_agp_copy_info(DRM_AGP_BRIDGE_DATA_T bridge, DRM_AGP_KERN *agp_info)
 	agp_info->current_memory = asked.ai_memory_used >> PAGE_SHIFT;
 	agp_info->id_vendor = pci_get_vendor(bridge);
 	agp_info->id_device = pci_get_device(bridge);
+/* legacy BSD drm guesses at cant_use_aperture and page_mask */
+	agp_info->cant_use_aperture = 0;
+	agp_info->page_mask = 0x0fff;
 }
 
 /**
@@ -109,16 +112,14 @@ drm_agp_copy_info(DRM_AGP_BRIDGE_DATA_T bridge, DRM_AGP_KERN *agp_info)
  */
 int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info)
 {
-#ifdef __linux__
 	DRM_AGP_KERN *kern;
-#else
+#if 0
 	struct agp_info *kern;
 #endif
 
 	if (!dev->agp || !dev->agp->acquired)
 		return -EINVAL;
 
-#ifdef __linux__
 	kern = &dev->agp->agp_info;
 	info->agp_version_major = kern->version.major;
 	info->agp_version_minor = kern->version.minor;
@@ -127,9 +128,14 @@ int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info)
 	info->aperture_size = kern->aper_size * 1024 * 1024;
 	info->memory_allowed = kern->max_memory << PAGE_SHIFT;
 	info->memory_used = kern->current_memory << PAGE_SHIFT;
+#ifdef __linux__
 	info->id_vendor = kern->device->vendor;
 	info->id_device = kern->device->device;
 #else
+	info->id_vendor = pci_get_vendor(dev->agp->bridge);
+	info->id_device = pci_get_device(dev->agp->bridge);
+#endif
+#if 0
 	kern = &dev->agp->info;
 	agp_get_info(dev->agp->bridge, kern);
 /* INVESTIGATE */
@@ -148,12 +154,12 @@ int drm_agp_info(struct drm_device *dev, struct drm_agp_info *info)
 	info->id_device = kern->ai_devid >> 16;
 #endif
 #ifndef __linux__
-	if (info->id_vendor != (unsigned short)(kern->ai_devid & 0xffff))
-		DRM_ERROR("info vendor %d != ai_devid %d!\n",
-			info->id_vendor, kern->ai_devid & 0xffff); 
-	if (info->id_device != (unsigned short)(kern->ai_devid >> 16))
-		DRM_ERROR("info device %d != ai_devid %d!\n",
-			info->id_device, kern->ai_devid >> 16);
+	if (info->id_vendor != kern->id_vendor)
+		DRM_ERROR("info vendor %d != kern vendor %d!\n",
+			info->id_vendor, kern->id_vendor); 
+	if (info->id_device != kern->id_device)
+		DRM_ERROR("info device %d != kern device %d!\n",
+			info->id_device, kern->id_device);
 #endif
 
 	return 0;
@@ -556,19 +562,20 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 		agp_copy_info(head->bridge, &head->agp_info);
 #else
 		drm_agp_copy_info(head->bridge, &head->agp_info);
+#if 0
 		agp_get_info(head->bridge, &head->info);
+#endif
 #endif
 	}
 
 	INIT_LIST_HEAD(&head->memory);
-/* legacy guesses at cant_use_aperture and page_mask */
-	head->cant_use_aperture = 0;
-	head->page_mask = 0x0fff;
-	head->base = head->info.ai_aperture_base;
+	head->cant_use_aperture = head->agp_info.cant_use_aperture;
+	head->page_mask = head->agp_info.page_mask;
+	head->base = head->agp_info.aper_base;
 #ifndef __linux__
 	DRM_INFO("drm_agp_init(): AGP at 0x%08lx %dMB\n",
-		 (long)head->info.ai_aperture_base,
-		 (int)(head->info.ai_aperture_size >> 20));
+		 (long)head->agp_info.aper_base,
+		 (int)(head->agp_info.aper_size));
 #endif
 	return head;
 }

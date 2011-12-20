@@ -390,21 +390,22 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 					     1024 * 1024, MTRR_TYPE_WRCOMB, 1);
 #else
 				dev->agp->agp_mtrr =
-				    mtrr_add(dev->agp->info.ai_aperture_base,
-					     dev->agp->info.ai_aperture_size,
-					     MTRR_TYPE_WRCOMB, 1);
+				    mtrr_add(dev->agp->agp_info.aper_base,
+					     dev->agp->agp_info.aper_size *
+					     1024 * 1024, MTRR_TYPE_WRCOMB, 1);
 				if (dev->agp->agp_mtrr == 0) {
 					dev->agp->agp_mtrr = 1;
 				}
 #endif
 		}
-#else
+#else /* !DRM_NEWER_MTRR_POS */
 #ifdef DRM_NEWER_MTRR
 		if (drm_core_has_MTRR(dev)) {
 			if (dev->agp) {
-				if (drm_mtrr_add(dev->agp->info.ai_aperture_base,
-				    dev->agp->info.ai_aperture_size, DRM_MTRR_WC) == 0)
-					dev->agp->mtrr = 1;
+				if (drm_mtrr_add(dev->agp->agp_info.aper_base,
+						 dev->agp->agp_info.aper_size *
+						 1024 * 1024, DRM_MTRR_WC) == 0)
+					dev->agp->agp_mtrr = 1;
 			}
 		}
 #else
@@ -742,8 +743,8 @@ void drm_put_dev(struct drm_device *dev)
 	    dev->agp && dev->agp->agp_mtrr > 0) {
 		int retval;
 		retval = mtrr_del(dev->agp->agp_mtrr,
-				  dev->agp->info.ai_aperture_base,
-				  dev->agp->info.ai_aperture_size);
+				  dev->agp->agp_info.aper_base,
+				  dev->agp->agp_info.aper_size * 1024 * 1024);
 		DRM_DEBUG("mtrr_del=%d\n", retval);
 	}
 #endif
@@ -753,8 +754,8 @@ void drm_put_dev(struct drm_device *dev)
 	    dev->agp && dev->agp->agp_mtrr > 0) {
 		int retval;
 		retval = drm_mtrr_del(0,
-			dev->agp->info.ai_aperture_base,
-			dev->agp->info.ai_aperture_size, DRM_MTRR_WC);
+			dev->agp->agp_info.aper_base,
+			dev->agp->agp_info.aper_size * 1024 * 1024, DRM_MTRR_WC);
 		DRM_DEBUG("mtrr_del=%d\n", retval);
 	}
 #else

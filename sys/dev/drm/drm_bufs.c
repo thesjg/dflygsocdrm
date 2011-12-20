@@ -444,12 +444,18 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 		 */
 		if (map->offset < dev->agp->base ||
 		    map->offset > dev->agp->base +
+		    dev->agp->agp_info.aper_size * 1024 * 1024 - 1) {
+			map->offset += dev->agp->base;
+		}
+#if 0
+		if (map->offset < dev->agp->base ||
+		    map->offset > dev->agp->base +
 		    dev->agp->info.ai_aperture_size - 1) {
 			map->offset += dev->agp->base;
 		}
-#ifdef DRM_NEWER_MTRR_POS
+#endif
 		map->mtrr = dev->agp->agp_mtrr;	/* for getmap */
-#else
+#if 0
 		map->mtrr   = dev->agp->mtrr; /* for getmap */
 #endif
 
