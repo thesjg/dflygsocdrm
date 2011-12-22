@@ -25,3 +25,8 @@ ENTRY(scalbnf)
 #endif
 	ret
 END(scalbnf)
+
+.globl	CNAME(ldexpf)
+.set	CNAME(ldexpf),CNAME(scalbnf)
+
+	.section .note.GNU-stack,"",%progbits

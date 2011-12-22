@@ -26,16 +26,16 @@
 .\" SUCH DAMAGE.
 .\"
 .\"     from: @(#)cos.3	5.1 (Berkeley) 5/2/91
-.\"	$NetBSD: cos.3,v 1.15 2003/08/07 16:44:47 agc Exp $
-.\"	$DragonFly: src/lib/libm/man/cos.3,v 1.1 2005/07/26 21:15:20 joerg Exp $
+.\" $FreeBSD$
 .\"
-.Dd May 2, 1991
+.Dd December 21, 2011
 .Dt COS 3
 .Os
 .Sh NAME
 .Nm cos ,
-.Nm cosf
-.Nd cosine function
+.Nm cosf ,
+.Nm cosl
+.Nd cosine functions
 .Sh LIBRARY
 .Lb libm
 .Sh SYNOPSIS
@@ -44,11 +44,14 @@
 .Fn cos "double x"
 .Ft float
 .Fn cosf "float x"
+.Ft long double
+.Fn cosl "long double x"
 .Sh DESCRIPTION
 The
-.Fn cos
+.Fn cos ,
+.Fn cosf ,
 and
-.Fn cosf
+.Fn cosl
 functions compute the cosine of
 .Fa x
 (measured in radians).
@@ -58,13 +61,17 @@ For a discussion of error due to roundoff, see
 .Xr math 3 .
 .Sh RETURN VALUES
 The
-.Fn cos
-function returns the cosine value.
+.Fn cos ,
+.Fn cosf ,
+and
+.Fn cosl
+functions return the cosine value.
 .Sh SEE ALSO
 .Xr acos 3 ,
 .Xr asin 3 ,
 .Xr atan 3 ,
 .Xr atan2 3 ,
+.Xr ccos 3 ,
 .Xr cosh 3 ,
 .Xr math 3 ,
 .Xr sin 3 ,
@@ -72,7 +79,5 @@ function returns the cosine value.
 .Xr tan 3 ,
 .Xr tanh 3
 .Sh STANDARDS
-The
-.Fn cos
-function conforms to
-.St -ansiC .
+These functions conform to
+.St -isoC-99 .
