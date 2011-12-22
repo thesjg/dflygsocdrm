@@ -2595,7 +2595,10 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 	}
 	kfree(md, M_TEMP);
 	kprintf("mtrr_add reg (%d) for offset (%016lx), size (%016lx)\n", match, mrd->mr_base, mrd->mr_len);
-	return match;
+	if (match < 0) {
+		return match;
+	}
+	return match + 1;
 }
 
 static __inline__ int
