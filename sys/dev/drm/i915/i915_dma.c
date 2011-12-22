@@ -1782,10 +1782,8 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 				     dev->agp->agp_info.aper_size * 1024*1024);
 	if (dev_priv->mm.gtt_mapping == NULL) {
 		DRM_ERROR("io_mapping_create_wc mm.gtt_mapping NULL\n");
-#if 1
 		ret = -EIO;
 		goto out_rmmap;
-#endif
 	}
 
 	/* Set up a WC MTRR for non-PAT systems.  This is more common than
@@ -1793,12 +1791,11 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	 * generation Core chips because WC PAT gets overridden by a UC
 	 * MTRR if present.  Even if a UC MTRR isn't present.
 	 */
-#ifdef DRM_NEWER_MTRR_POS
 	dev_priv->mm.gtt_mtrr = mtrr_add(dev->agp->base,
 					 dev->agp->agp_info.aper_size *
 					 1024 * 1024,
 					 MTRR_TYPE_WRCOMB, 1);
-#else /* !DRM_NEWER_MTRR_POS */
+#if 0
 	if (drm_mtrr_add(dev->agp->base,
 					 dev->agp->agp_info.aper_size *
 					 1024 * 1024,
@@ -1808,7 +1805,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	else {
 		dev_priv->mm.gtt_mtrr = -1;
 	} 
-#endif /* DRM_NEWER_MTRR_POS */
+#endif
 	if (dev_priv->mm.gtt_mtrr < 0) {
 		DRM_INFO("MTRR allocation failed.  Graphics "
 			 "performance may suffer.\n");
@@ -2012,10 +2009,9 @@ int i915_driver_unload(struct drm_device *dev)
 #endif
 
 	if (dev_priv->mm.gtt_mtrr >= 0) {
-#ifdef DRM_NEWER_MTRR_POS
 		mtrr_del(dev_priv->mm.gtt_mtrr, dev->agp->base,
 			 dev->agp->agp_info.aper_size * 1024 * 1024);
-#else
+#if 0
 		drm_mtrr_del(dev_priv->mm.gtt_mtrr, dev->agp->base,
 			 dev->agp->agp_info.aper_size * 1024 * 1024,
 			 DRM_MTRR_WC);

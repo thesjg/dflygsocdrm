@@ -306,13 +306,12 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	if (map->type == _DRM_SHM)
 		map->size = PAGE_ALIGN(map->size);
 
-#ifdef DRM_NEWER_MTRR_POS /* legacy later test for map->mtrr == 0 */
 #ifdef __linux__
 	map->mtrr = -1;
-#else
+#else /* legacy BSD drm test for map->mtrr >= 0 */
 	map->mtrr = 0;
 #endif
-#else
+#if 0
 	map->mtrr = 0;
 #endif
 	map->handle = NULL;
@@ -351,11 +350,9 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			return 0;
 		}
 
-#ifdef DRM_NEWER_MTRR
 		if (drm_core_has_MTRR(dev)) {
 			if (map->type == _DRM_FRAME_BUFFER ||
 			    (map->flags & _DRM_WRITE_COMBINING)) {
-#if DRM_NEWER_MTRR_POS
 #ifdef __linux__
 				map->mtrr = mtrr_add(map->offset, map->size,
 						     MTRR_TYPE_WRCOMB, 1);
@@ -363,13 +360,12 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 				if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
 					map->mtrr = 1;
 #endif
-#else
+#if 0
 				if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
 					map->mtrr = 1;
 #endif
 			}
 		}
-#endif
 
 		if (map->type == _DRM_REGISTERS) {
 			map->handle = drm_ioremap(dev, map);
@@ -379,7 +375,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			}
 		}
 
-#ifndef DRM_NEWER_MTRR
+#if 0
 		if (map->type == _DRM_FRAME_BUFFER ||
 		    (map->flags & _DRM_WRITE_COMBINING)) {
 			if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
@@ -748,7 +744,6 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 		drm_ioremapfree(map);
 		/* FALLTHROUGH */
 	case _DRM_FRAME_BUFFER:
-#ifdef DRM_NEWER_MTRR_POS
 #ifdef __linux__
 		if (drm_core_has_MTRR(dev) && map->mtrr >= 0) {
 			int retcode;
@@ -762,7 +757,7 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 			DRM_DEBUG("mtrr_del=%d\n", retcode);
 		}
 #endif
-#else
+#if 0
 		if (map->mtrr) {
 			int retcode;
 			retcode = drm_mtrr_del(0, map->offset, map->size,

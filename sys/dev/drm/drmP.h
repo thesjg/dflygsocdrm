@@ -125,13 +125,15 @@
 #define __OS_HAS_AGP	1
 #endif /* __linux__ */
 
+#if 0
 #define DRM_NEWER_MTRR_2 1
+#endif
 #define DRM_NEWER_MTRR_POS 1
 
-#ifdef DRM_NEWER_MTRR_2
-#define __OS_HAS_MTRR 1
-#else
+#ifdef __linux__
 #define __OS_HAS_MTRR (defined(CONFIG_MTRR))
+#else
+#define __OS_HAS_MTRR 1
 #endif
 
 struct drm_file;
@@ -1299,9 +1301,8 @@ static inline int drm_core_has_MTRR(struct drm_device *dev)
 static inline int drm_mtrr_add(unsigned long offset, unsigned long size,
 			       unsigned int flags)
 {
-#ifdef DRM_NEWER_MTRR_POS
 	return mtrr_add(offset, size, flags, 1);
-#else
+#if 0
 	int act;
 	struct mem_range_desc mrdesc;
 
@@ -1317,9 +1318,8 @@ static inline int drm_mtrr_add(unsigned long offset, unsigned long size,
 static inline int drm_mtrr_del(int handle, unsigned long offset,
 			       unsigned long size, unsigned int flags)
 {
-#ifdef DRM_NEWER_MTRR_POS
 	return mtrr_del(handle, offset, size);
-#else
+#if 0
 	int act;
 	struct mem_range_desc mrdesc;
 
@@ -1425,7 +1425,7 @@ void	drm_mem_uninit(void);
 void	*drm_ioremap_wc(struct drm_device *dev, drm_local_map_t *map);
 void	*drm_ioremap(struct drm_device *dev, drm_local_map_t *map);
 void	drm_ioremapfree(drm_local_map_t *map);
-#ifndef DRM_NEWER_MTRR
+#if 0
 int	drm_mtrr_add(unsigned long offset, size_t size, int flags);
 int	drm_mtrr_del(int handle, unsigned long offset, size_t size, int flags);
 #endif
