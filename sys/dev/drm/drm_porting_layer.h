@@ -2591,6 +2591,7 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 		}
 	}
 	kfree(md, M_TEMP);
+	kprintf("mtrr_add reg (%d) for offset (%016lx), size (%016lx)\n", match, mrd->mr_base, mrd->mr_len);
 	return match;
 }
 
@@ -2612,6 +2613,7 @@ mtrr_add(
 	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
 	error = mem_range_attr_set(&mrdesc, &act);
 	if (error) {
+		kprintf("mtrr_add failed for offset (%016lx), size (%016lx), error (%d)\n", offset, size, error);
 		return -error;
 	}
 	return mtrr_cookie(&mrdesc);
