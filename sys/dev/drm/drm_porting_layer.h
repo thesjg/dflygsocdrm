@@ -2569,10 +2569,12 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 
 	error = mem_range_attr_get(mrd, &nd);
 	if (error) {
+		kprintf("ERROR (%d) mem_range_attr_get ZERO mtrr regions configured\n", error);
 		return -error;
 	}
 	ndesc = nd;
 	if (ndesc <= 0) {
+		kprintf("ERROR (%d) mem_range_attr_get claimed (%d) mtrr regions configured\n", error, ndesc);
 		return -1;
 	}
 	md = kmalloc(ndesc * sizeof(struct mem_range_desc), M_TEMP, M_WAITOK);
@@ -2581,6 +2583,7 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 	}
 	error = mem_range_attr_get(md, &nd);
 	if (error) {
+		kprintf("ERROR (%d) mem_range_attr_get for offset (%016lx), size (%016lx)\n", error, mrd->mr_base, mrd->mr_len);
 		kfree(md, M_TEMP);
 		return -error;
 	}
