@@ -231,19 +231,20 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 		else
 			type = types[map->type];
 
-		if (!map->mtrr)
+		if (map->mtrr < 0)
 			yesno = "no";
 		else
 			yesno = "yes";
 
 		DRM_SYSCTL_PRINT(
-			"%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx 0x%016lx %s\n",
+			"%4d 0x%016lx 0x%08lx %4.4s  0x%02x 0x%016lx 0x%016lx %s %d\n",
 			i,
 			map->offset,
 			map->size, type, map->flags,
 			(unsigned long)map->handle,
 			(unsigned long)user_token[i],
-			yesno);
+			yesno,
+			map->mtrr);
 	}
 	SYSCTL_OUT(req, "", 1);
 
