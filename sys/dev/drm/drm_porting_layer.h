@@ -2598,7 +2598,7 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 	if (match < 0) {
 		return match;
 	}
-	return match + 1;
+	return match;
 }
 
 static __inline__ int
