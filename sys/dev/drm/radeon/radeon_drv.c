@@ -39,7 +39,7 @@
 #include <linux/console.h>
 #endif /* __linux__ */
 
-#define DRM_NEWER_MASTER 1
+#define DRM_NEWER_STATICDRIVER 1
 
 /*
  * KMS wrapper.
@@ -186,6 +186,7 @@ static DRM_PCI_DEVICE_ID radeon_pciidlist[] = {
 MODULE_DEVICE_TABLE(pci, pciidlist);
 #endif
 
+#ifndef DRM_NEWER_STATICDRIVER
 static void radeon_configure(struct drm_device *dev)
 {
 	dev->driver->driver_features =
@@ -196,12 +197,12 @@ static void radeon_configure(struct drm_device *dev)
 	dev->driver->dev_priv_size 	= sizeof(drm_radeon_buf_priv_t);
 	dev->driver->buf_priv_size	= sizeof(drm_radeon_buf_priv_t);
 	dev->driver->load		= radeon_driver_load;
-	dev->driver->unload		= radeon_driver_unload;
 	dev->driver->firstopen		= radeon_driver_firstopen;
 	dev->driver->open		= radeon_driver_open;
 	dev->driver->preclose		= radeon_driver_preclose;
 	dev->driver->postclose		= radeon_driver_postclose;
 	dev->driver->lastclose		= radeon_driver_lastclose;
+	dev->driver->unload		= radeon_driver_unload;
 	dev->driver->get_vblank_counter	= radeon_get_vblank_counter;
 	dev->driver->enable_vblank	= radeon_enable_vblank;
 	dev->driver->disable_vblank	= radeon_disable_vblank;
@@ -211,14 +212,12 @@ static void radeon_configure(struct drm_device *dev)
 	dev->driver->irq_postinstall	= radeon_driver_irq_postinstall;
 	dev->driver->irq_uninstall	= radeon_driver_irq_uninstall;
 	dev->driver->irq_handler	= radeon_driver_irq_handler;
-#if 1
 	dev->driver->reclaim_buffers = drm_core_reclaim_buffers;
 	dev->driver->get_map_ofs = drm_core_get_map_ofs;
 	dev->driver->get_reg_ofs = drm_core_get_reg_ofs;
-#endif
+	dev->driver->ioctls		= radeon_ioctls;
 	dev->driver->dma_ioctl		= radeon_cp_buffers;
 
-	dev->driver->ioctls		= radeon_ioctls;
 	dev->driver->max_ioctl		= radeon_max_ioctl;
 
 	dev->driver->name		= DRIVER_NAME;
@@ -230,6 +229,7 @@ static void radeon_configure(struct drm_device *dev)
 /* newer */
 	dev->driver->num_ioctls = radeon_max_ioctl;
 }
+#endif
 
 static struct drm_driver driver_old = {
 	.driver_features =
@@ -256,19 +256,15 @@ static struct drm_driver driver_old = {
 	.get_vblank_counter = radeon_get_vblank_counter,
 	.enable_vblank = radeon_enable_vblank,
 	.disable_vblank = radeon_disable_vblank,
-#ifdef DRM_NEWER_MASTER
 	.master_create = radeon_master_create,
 	.master_destroy = radeon_master_destroy,
-#endif
 	.irq_preinstall = radeon_driver_irq_preinstall,
 	.irq_postinstall = radeon_driver_irq_postinstall,
 	.irq_uninstall = radeon_driver_irq_uninstall,
 	.irq_handler = radeon_driver_irq_handler,
-#ifdef DRM_NEWER_MASTER
 	.reclaim_buffers = drm_core_reclaim_buffers,
 	.get_map_ofs = drm_core_get_map_ofs,
 	.get_reg_ofs = drm_core_get_reg_ofs,
-#endif
 	.ioctls = radeon_ioctls,
 	.dma_ioctl = radeon_cp_buffers,
 #ifdef __linux__
@@ -408,10 +404,14 @@ radeon_attach(device_t kdev)
 {
 	struct drm_device *dev = device_get_softc(kdev);
 
+#if DRM_NEWER_STATICDRIVER
+	dev->driver = &driver_old;
+#else
 	dev->driver = malloc(sizeof(struct drm_driver), DRM_MEM_DRIVER,
 	    M_WAITOK | M_ZERO);
 
 	radeon_configure(dev);
+#endif
 
 	return drm_attach(kdev, radeon_pciidlist);
 }
@@ -419,12 +419,16 @@ radeon_attach(device_t kdev)
 static int
 radeon_detach(device_t kdev)
 {
+#ifndef DRM_NEWER_STATICDRIVER
 	struct drm_device *dev = device_get_softc(kdev);
+#endif
 	int ret;
 
 	ret = drm_detach(kdev);
 
+#ifndef DRM_NEWER_STATICDRIVER
 	free(dev->driver, DRM_MEM_DRIVER);
+#endif
 
 	return ret;
 }
