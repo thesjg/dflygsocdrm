@@ -188,6 +188,12 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 
 	unsigned long *user_token;
 
+	struct mem_range_desc *md = NULL;
+	struct mem_range_desc *cand = NULL;
+	int error;
+	int nd = 0;
+	int ndesc;
+
 	/* We can't hold the lock while doing SYSCTL_OUTs, so allocate a
 	 * temporary copy of all the map entries and then SYSCTL_OUT that.
 	 */
@@ -218,7 +224,36 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 		user_token[i] = r_list->user_token;
 		tempmaps[i++] = *map;
 	}
+
+	error = mem_range_attr_get(md, &nd);
+	if (error) {
+		ndesc = 0;
+	} else {
+		ndesc = nd;
+	}
+	if (ndesc > 0) {
+		md = malloc(ndesc * sizeof(struct mem_range_desc), DRM_MEM_DRIVER, M_WAITOK);
+		if (!md) {
+			return ENOMEM;
+		}
+		error = mem_range_attr_get(md, &nd);
+		if (error) {
+			ndesc = 0;
+			free(md, DRM_MEM_DRIVER);
+		}
+	}	
+
 	mutex_unlock(&dev->struct_mutex);
+
+	cand = md;
+	DRM_SYSCTL_PRINT("mtrr reg|mtrr base       |mtrr length\n");
+	for (i = 0; i < ndesc; i++, cand++) {
+		DRM_SYSCTL_PRINT(
+			"%8d %016lx %016lx\n", i, cand->mr_base, cand->mr_len); 
+	}
+	if (ndesc > 0) {
+		free(md, DRM_MEM_DRIVER);
+	}
 
 	DRM_SYSCTL_PRINT("\nslot             offset       size type flags"
 	    "            address         user_token mtrr\n");
