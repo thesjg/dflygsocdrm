@@ -246,7 +246,7 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	mutex_unlock(&dev->struct_mutex);
 
 	cand = md;
-	DRM_SYSCTL_PRINT("\nmtrr reg|mtrr base       |mtrr length     |flags   |owner\n");
+	DRM_SYSCTL_PRINT("\nmtrr reg|mtrr base       |mtrr length     |flag    |owner\n");
 	for (i = 0; i < ndesc; i++, cand++) {
 		if (cand->mr_flags & MDF_ACTIVE) {
 			DRM_SYSCTL_PRINT(
