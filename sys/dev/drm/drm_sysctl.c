@@ -249,8 +249,8 @@ static int drm_vm_info_legacy DRM_SYSCTL_HANDLER_ARGS
 	DRM_SYSCTL_PRINT("\nmtrr reg|mtrr base       |mtrr length     |flags   |owner\n");
 	for (i = 0; i < ndesc; i++, cand++) {
 		DRM_SYSCTL_PRINT(
-			"%8d %016lx %016lx %08x %s\n",
-			i, cand->mr_base, cand->mr_len, cand->mr_flags, cand->mr_owner); 
+			"%8d %016lx %016lx %08x\n",
+			i, cand->mr_base, cand->mr_len, cand->mr_flags); 
 	}
 	if (ndesc > 0) {
 		free(md, DRM_MEM_DRIVER);
