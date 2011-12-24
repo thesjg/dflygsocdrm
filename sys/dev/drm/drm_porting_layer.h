@@ -2619,10 +2619,16 @@ mtrr_add(
 	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
 	error = mem_range_attr_set(&mrdesc, &act);
 	if (error) {
-		kprintf("mtrr_add failed for offset (%016lx), size (%016lx), error (%d)\n", offset, size, error);
-		return -error;
+		kprintf("mtrr_add FAILED for offset (%016lx), size (%016lx), error (%d)\n", offset, size, error);
+		if (error > 0) {
+			return -error;
+		}
+		else {
+			return error;
+		}
 	}
-	return mtrr_cookie(&mrdesc);
+	kprintf("mtrr_add SUCCESS for offset (%016lx), size (%016lx)\n", offset, size);
+	return error;
 }
 
 static __inline__ int
