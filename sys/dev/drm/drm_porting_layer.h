@@ -306,6 +306,7 @@ div_u64(uint64_t temp, uint32_t link_clock) {
 }
 
 /* file intel_display.c, function ironlake_update_wm() */
+/* from sys/param.h equivalent is howmany */
 #define DIV_ROUND_UP(x, y)  ((x) + (y) - 1) / (y)
 
 /* file i915/intel_sdvo.c, function intel_sdvo_select_ddc_bus() */
@@ -1981,12 +1982,14 @@ si_meminfo(struct sysinfo *si) {
 	;
 }
 
-/*
- * TIME Time
- */
+/********************************************************************
+ * TIME                                                             *
+ ********************************************************************/
 
 #define HZ	hz
-#define jiffies			ticks
+
+/* ticks defined in kern_clock.c as only int */
+#define jiffies	ticks
 
 /* file radeon_pm.c, function radeon_sync_with_vblank() */
 /* file intel_display.c */
@@ -2022,10 +2025,13 @@ schedule_timeout(signed long timo) {
 
 /* file drm_fops.c, function drm_reclaim_locked_buffers() */
 /* file intel_crt.c, function intel_crt_detect_hotplug() */
+#if 0
 static __inline__ int
 time_after_eq(unsigned long timeout, unsigned long _end) {
 	return (((long)_end - (long)timeout) >= 0);
 }
+#endif
+#define time_after_eq(timeout, _end) ((long)(timeout) - (long)(_end) >= 0)
 
 /* file radeon_fence.c, function radeon_fence_poll_locked() */
 /* file intel_crt.c, function intel_crt_detect_hotplug() */
