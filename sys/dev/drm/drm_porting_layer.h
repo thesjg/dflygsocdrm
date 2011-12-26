@@ -633,7 +633,7 @@ schedule(void) {
 }
 #endif
 
-/* have current process sleep for timo ticks,
+/* have current process sleep in HZ,
  * can have sleep interrupted by signal
  * return 0 if successful sleep for full time 
  */
