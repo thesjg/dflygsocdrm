@@ -684,18 +684,48 @@ msleep_interruptible(unsigned int millis);
 #define spin_unlock(u) lockmgr(u, LK_RELEASE)
 #define spin_lock_init(l) lockinit(l, "slinit", 0, LK_CANRECURSE)
 
-/* drm_drawable.c drm_addraw() and previous drmP.h */
-#define spin_lock_irqsave(l, irqflags) \
-        do {                           \
-                spin_lock(l);          \
-                (void)irqflags;        \
+static __inline__ unsigned long 
+drm_read_flags(void) {
+#if defined( __x86_64__)
+	return read_rflags();
+#elif defined(__i386__)
+	return read_eflags();
+#else
+	return 0;
+#endif
+}
+
+static __inline__ void
+drm_write_flags(unsigned long flags) {
+#if defined(__i386__)
+	write_eflags(flags);
+#elif defined(__x86_64__)
+	write_rflags(flags);
+#else
+	(void)flags;
+#endif
+}
+
+/* save flags, disable hard interrupts, lock */
+#define spin_lock_irqsave(l, irqflags)       \
+        do {                                 \
+		irqflags = drm_read_flags(); \
+		cpu_disable_intr();          \
+                spin_lock(l);                \
         } while (0)
 
-#define spin_unlock_irqrestore(u, irqflags) spin_unlock(u)
+/* unlock, enable hard interrupts, restore flags */
+#define spin_unlock_irqrestore(l, irqflags)  \
+	do {                                 \
+		spin_unlock(l);              \
+		cpu_enable_intr();           \
+		drm_write_flags(irqflags);   \
+	} while (0)
 
 /* file drm_fops.c, function drm_reclaim_locked_buffers() */
-#define spin_lock_bh(l)    spin_lock(l)    /* UNIMPLEMENTED */
-#define spin_unlock_bh(l)  spin_unlock(l)  /* UNIMPLEMENTED */
+/* UNIMPLEMENTED enabling or disabling soft interrupts */
+#define spin_lock_bh(l)    spin_lock(l)
+#define spin_unlock_bh(l)  spin_unlock(l)
 
 /**********************************************************
  * MUTEX                                                  *

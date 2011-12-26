@@ -934,7 +934,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 		 * It doesn't set the bit in iir again, but it still produces
 		 * interrupts (for non-MSI).
 		 */
-		DRM_SPINLOCK(&dev_priv->user_irq_lock);
+		spin_lock_irqsave(&dev_priv->user_irq_lock, irqflags);
 		pipea_stats = I915_READ(PIPEASTAT);
 		pipeb_stats = I915_READ(PIPEBSTAT);
 
@@ -957,7 +957,7 @@ irqreturn_t i915_driver_irq_handler(DRM_IRQ_ARGS)
 			I915_WRITE(PIPEBSTAT, pipeb_stats);
 			irq_received = 1;
 		}
-		DRM_SPINUNLOCK(&dev_priv->user_irq_lock);
+		spin_unlock_irqrestore(&dev_priv->user_irq_lock, irqflags);
 
 		if (!irq_received)
 			break;

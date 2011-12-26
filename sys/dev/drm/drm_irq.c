@@ -122,27 +122,27 @@ static void vblank_disable_fn(void *arg)
 #endif
 {
 	struct drm_device *dev = (struct drm_device *)arg;
-#ifdef __linux__
 	unsigned long irqflags;
-#endif
 	int i;
 
-	DRM_SPINLOCK(&dev->vbl_lock);
+#ifndef __linux__
+	spin_lock_irqsave(&dev->vbl_lock, irqflags);
 	
 	if (callout_pending(&dev->vblank_disable_timer)) {
 		/* callout was reset */
-		DRM_SPINUNLOCK(&dev->vbl_lock);
+		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 		return;
 	}
 	if (!callout_active(&dev->vblank_disable_timer)) {
 		/* callout was stopped */
-		DRM_SPINUNLOCK(&dev->vbl_lock);
+		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 		return;
 	}
 	callout_deactivate(&dev->vblank_disable_timer);
+#endif
 
 	if (!dev->vblank_disable_allowed) {
-		DRM_SPINUNLOCK(&dev->vbl_lock);
+		spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 		return;
 	}
 
@@ -156,7 +156,7 @@ static void vblank_disable_fn(void *arg)
 			dev->vblank_enabled[i] = 0;
 		}
 	}
-	DRM_SPINUNLOCK(&dev->vbl_lock);
+	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 }
 
 void drm_vblank_cleanup(struct drm_device *dev)
@@ -387,13 +387,12 @@ int drm_irq_uninstall(struct drm_device * dev)
 	/*
 	* Wake up any waiters so they don't hang.
 	*/
-	DRM_SPINLOCK(&dev->vbl_lock);
+	spin_lock_irqsave(&dev->vbl_lock, irqflags);
 	for (i = 0; i < dev->num_crtcs; i++) {
-#if DRM_NEWER_IRQRISK
 		DRM_WAKEUP(&dev->vbl_queue[i]);
 		dev->vblank_enabled[i] = 0;
 		dev->last_vblank[i] = dev->driver->get_vblank_counter(dev, i);
-#else
+#if 0
 		if (dev->vblank_enabled[i]) {
 			DRM_WAKEUP(&dev->vbl_queue[i]);
 			dev->vblank_enabled[i] = 0;
@@ -404,7 +403,7 @@ int drm_irq_uninstall(struct drm_device * dev)
 		}
 #endif
 	}
-	DRM_SPINUNLOCK(&dev->vbl_lock);
+	spin_unlock_irqrestore(&dev->vbl_lock, irqflags);
 
 	if (!irq_enabled)
 		return -EINVAL;
