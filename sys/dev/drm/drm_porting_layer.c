@@ -28,6 +28,38 @@
 
 #include <sys/tree.h>
 
+/********************************************************************
+ * TIME                                                             *
+ ********************************************************************/
+
+/* Pointer to local variable for tsleep ident
+ * is done in sys/dev/disk/ahci/ahci_dragonfly.c
+ */
+int
+schedule_timeout(signed long timo) {
+	int tosleep = (int)timo;
+	int result = EINVAL;
+	if (curproc != NULL) {
+		result = tsleep(&tosleep, PCATCH, "schtim", tosleep);
+		if (result == EWOULDBLOCK) {
+			return 0;
+		}
+	}
+	return result;
+}
+
+void
+msleep(unsigned int millis) {
+	int tosleep = (int)msecs_to_jiffies(millis);
+	tsleep(&tosleep, 0, "msleep", tosleep);
+}
+
+void
+msleep_interruptible(unsigned int millis) {
+	int tosleep = (int)msecs_to_jiffies(millis);
+	tsleep(&tosleep, PCATCH, "msleep", tosleep);
+}
+
 /**********************************************************
  * DATA STRUCTURES                                        *
  **********************************************************/

@@ -581,6 +581,73 @@ hash_long(unsigned long key, int bits) {
 		& ((1 << bits) - 1)); 
 }
 
+/********************************************************************
+ * TIME                                                             *
+ ********************************************************************/
+
+#define HZ	hz
+
+/* ticks defined in kern_clock.c as only int */
+#define jiffies	ticks
+
+static __inline__ unsigned long
+msecs_to_jiffies(unsigned long msecs) {
+	return DIV_ROUND_UP(msecs, (1000 / hz));
+}
+
+static __inline__ unsigned long
+usecs_to_jiffies(unsigned long usecs) {
+	unsigned long msecs = DIV_ROUND_UP(usecs, 1000);
+	return DIV_ROUND_UP(msecs, (1000 / hz));
+}
+
+typedef unsigned long cycles_t;
+
+/* define as macros for sign extension of int ticks */
+#define time_after(timeout, _end)    ((long)(_end) - (long)(timeout) < 0)
+
+#define time_after_eq(timeout, _end) ((long)(timeout) - (long)(_end) >= 0)
+
+/* file drm_irq., function drm_handle_vblank_events() */
+static __inline__ void
+do_gettimeofday(struct timeval *now) {
+	microtime(now);
+}
+
+/* spin delay in microseconds */
+static __inline__ void
+udelay(int delay) {
+	DELAY(delay);
+}
+
+/* spin delay in milliseconds */
+static __inline__ void
+mdelay(int delay) {
+	DELAY(1000 * delay);
+}
+
+#if 0
+static __inline__ void
+schedule(void) {
+	;
+}
+#endif
+
+/* have current process sleep for timo ticks,
+ * can have sleep interrupted by signal
+ * return 0 if successful sleep for full time 
+ */
+int
+schedule_timeout(signed long timo);
+
+/* noninterruptible process sleep in milliseconds */
+void
+msleep(unsigned int millis);
+
+/* signal-interruptible process sleep in milliseconds */
+void
+msleep_interruptible(unsigned int millis);
+
 /**********************************************************
  * LOCKING                                                *
  **********************************************************/
@@ -1981,95 +2048,6 @@ static __inline__ void
 si_meminfo(struct sysinfo *si) {
 	;
 }
-
-/********************************************************************
- * TIME                                                             *
- ********************************************************************/
-
-#define HZ	hz
-
-/* ticks defined in kern_clock.c as only int */
-#define jiffies	ticks
-
-/* file radeon_pm.c, function radeon_sync_with_vblank() */
-/* file intel_display.c */
-static __inline__ unsigned long
-msecs_to_jiffies(unsigned long msecs) {
-	return DIV_ROUND_UP(msecs, (1000 / hz));
-}
-
-static __inline__ unsigned long
-usecs_to_jiffies(unsigned long usecs) {
-	unsigned long msecs = DIV_ROUND_UP(usecs, 1000);
-	return DIV_ROUND_UP(msecs, (1000 / hz));
-}
-
-typedef unsigned long cycles_t;
-
-/* file drm_fops.c, function drm_reclaim_locked_buffers() */
-#if 0
-static __inline__ void
-schedule(void) {
-	;
-}
-#endif
-
-/* file vmwgfx_irq.c, function  vmw_fallback_wait() */
-static __inline__ void
-schedule_timeout(signed long timo) {
-	if (curproc != NULL) {
-		tsleep(curproc, 0, "schtim", timo);
-	}
-}
-
-
-/* file drm_fops.c, function drm_reclaim_locked_buffers() */
-/* file intel_crt.c, function intel_crt_detect_hotplug() */
-#if 0
-static __inline__ int
-time_after_eq(unsigned long timeout, unsigned long _end) {
-	return (((long)_end - (long)timeout) >= 0);
-}
-#endif
-#define time_after_eq(timeout, _end) ((long)(timeout) - (long)(_end) >= 0)
-
-/* file radeon_fence.c, function radeon_fence_poll_locked() */
-/* file intel_crt.c, function intel_crt_detect_hotplug() */
-static __inline__ int
-time_after(unsigned long timeout, unsigned long _end) {
-	return (((long)timeout - (long)_end) < 0);
-}
-
-/* file drm_irq., function drm_handle_vblank_events() */
-static __inline__ void
-do_gettimeofday(struct timeval *now) {
-	microtime(now);
-}
-
-/* file radeon_i2c.c, function r500_hw_i2c_xfer() */
-static __inline__ void
-udelay(int delay) {
-	DELAY(delay);
-}
-
-/* file intel_sdvo.c, function intel_sdvo_read_response() */
-static __inline__ void
-mdelay(int delay) {
-	DELAY(1000 * delay);
-}
-
-/* file intel_display.c, function intel_wait_for_vblank() */
-static __inline__ void
-msleep(int millis) {
-	tsleep(curthread, 0, "msleep", msecs_to_jiffies(millis));
-}
-
-/* file intel_display.c, function intel_wait_for_vblank() */
-static __inline__ void
-msleep_interruptible(int millis) {
-	tsleep(curthread, PCATCH, "msleep", msecs_to_jiffies(millis));
-}
-
 /**********************************************************
  * SYNCHRONIZATION                                        *
  **********************************************************/
