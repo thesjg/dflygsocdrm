@@ -1078,12 +1078,111 @@ capable(int capacity) {
 	return (0 == priv_check(curthread, capacity));
 }
 
-/* file drm_fops.c, function drm_cpu_valid() */
-/* boot_cpu_data.x86 appears to be an int sometimes 3 */
+/********************************************************************
+ * WAIT QUEUES                                                      *
+ ********************************************************************/
 
-/* defined for DragonFly BSD in sys/sys/poll.h */
-/* #define POLLIN      0x0001 */
-/* #define POLLRDNORM  0x0040 */
+#define wait_queue_head_t atomic_t
+
+/* file ttm/ttm_module.c, preamble */
+#define DECLARE_WAIT_QUEUE_HEAD(var) wait_queue_head_t var
+
+/* file ttm/ttm_lock.c, function ttm_lock_init() */
+static __inline__ void
+init_waitqueue_head(wait_queue_head_t *wqh) {
+	;
+}
+
+/* file drm_dma.c, function drm_free_buffer() */
+static __inline__ int
+waitqueue_active(wait_queue_head_t *wqh) {
+	return 0;
+}
+
+/* GCC extension for statement expression */
+
+/* sleep for condition without time limit */
+#define wait_event(wqh, condition)                         \
+({                                                         \
+	while (!(condition)) {                             \
+		tsleep(&(wqh), 0, "wtev", 0);              \
+	}                                                  \
+})
+
+/* sleep for condition without time limit, interruptible by signal */
+#define wait_event_interruptible(wqh, condition)           \
+({                                                         \
+	int retval = 0;                                    \
+	while (!retval && !(condition)) {                  \
+		retval = tsleep(&(wqh), PCATCH, "wei", 0); \
+	}                                                  \
+	if ((retval == ERESTART) || (retval == EINTR)){    \
+		retval = -ERESTART;                        \
+	}                                                  \
+	retval;                                            \
+})
+
+/* sleep for condition with time limit in HZ
+ * return time left if condition satisfied
+ */
+#define wait_event_timeout(wqh, condition, timeout)        \
+({                                                         \
+	long retval = 0;                                   \
+	unsigned long toend = (unsigned long)(timeout);    \
+	unsigned long left = (toend == 0) ? 1 : toend;     \
+	for (;;)) {                                        \
+		left--;                                    \
+		retval = tsleep(&(wqh), 0, "wetimu", 1);   \
+		if ((condition) || (left == 0)) {          \
+			retval = left;                     \
+			break;                             \
+		}                                          \
+	}                                                  \
+	retval;                                            \
+})
+
+/* signal-interruptible sleep for condition with time limit in HZ
+ * return time left if condition satisfied
+ */
+#define wait_event_interruptible_timeout(wqh, condition, timeout) \
+({                                                                \
+	long retval = 0;                                          \
+	unsigned long toend = (unsigned long)(timeout);           \
+	unsigned long left = (toend == 0) ? 1 : toend;            \
+	for (;;)) {                                               \
+		left--;                                           \
+		retval = tsleep(&(wqh), PCATCH, "wetimi", 1);     \
+		if ((retval == ERESTART) || (retval == EINTR)) {  \
+			retval = -ERESTART;                       \
+			break;                                    \
+		}                                                 \
+		else if ((condition) || (left == 0)) {            \
+			retval = left;                            \
+			break;                                    \
+		}                                                 \
+	}                                                         \
+	retval;                                                   \
+})
+
+static __inline__ void
+wake_up(void *wqh) {
+	wakeup(wqh);
+}
+
+static __inline__ void
+wake_up_all(void *wqh) {
+	wakeup(wqh);
+}
+
+static __inline__ void
+wake_up_interruptible(void *wqh) {
+	wakeup(wqh);
+}
+
+static __inline__ void
+wake_up_interruptible_all(void *wqh) {
+	wakeup(wqh);
+}
 
 /**********************************************************
  * SIGNALS AND INTERRUPTS                                 *
@@ -1132,6 +1231,13 @@ static __inline__ void
 local_irq_restore(unsigned long flags) {
 	;
 }
+
+/* file drm_fops.c, function drm_cpu_valid() */
+/* boot_cpu_data.x86 appears to be an int sometimes 3 */
+
+/* defined for DragonFly BSD in sys/sys/poll.h */
+/* #define POLLIN      0x0001 */
+/* #define POLLRDNORM  0x0040 */
 
 #define _IOC_NR(n) ((n) & 0xff)
 
@@ -1288,126 +1394,6 @@ kobject_uevent_env(struct kobject *kobj, uint32_t flags, char *event[]) {
 /*
  * Tasks
  */
-
-/*
- * Wait queues
- */
-
-#define wait_queue_head_t atomic_t
-
-/* file ttm/ttm_module.c, preamble */
-#define DECLARE_WAIT_QUEUE_HEAD(var) wait_queue_head_t var
-
-/* file ttm/ttm_lock.c, function ttm_lock_init() */
-static __inline__ void
-init_waitqueue_head(wait_queue_head_t *wqh) {
-	;
-}
-
-/* file drm_dma.c, function drm_free_buffer() */
-static __inline__ int
-waitqueue_active(wait_queue_head_t *wqh) {
-	return 0;
-}
-
-/* file ttm/ttm_lock.c, function ttm_read_lock() */
-/* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
-#if 0
-static __inline__ int
-wait_event(wait_queue_head_t wqh, int condition) {
-	return 0;
-}
-#endif
-
-/* GCC extension for statement expression */
-#define wait_event(wqh, condition)                       \
-({                                                       \
-	while (!(condition)) {                           \
-		tsleep(&wqh, 0, "wtev", 0);              \
-	}                                                \
-})
-
-/* file ttm/ttm_lock.c, function ttm_read_lock() */
-/* file ttm/ttm_bo.c, function ttm_bo_wait_unreserved() */
-/* file drm_fops.c, function drm_read() */
-#if 0
-static __inline__ int
-wait_event_interruptible(wait_queue_head_t wqh, int condition) {
-	return 0;
-}
-#endif
-/* GCC extension for statement expression */
-#define wait_event_interruptible(wqh, condition)         \
-({                                                       \
-	int retval = 0;                                  \
-	while (!retval && !(condition)) {                \
-		retval = tsleep(&wqh, PCATCH, "wei", 0); \
-	}                                                \
-	retval;                                          \
-})
-
-/* vmwgfx_irq.c */
-/* file vmwgfx_fifo.c, function vmw_fifo_wait() */
-/* file radeon_pm.c, function radeon_sync_with_vblank() */
-/* file radeon_fence.c, function radeon_fence_wait() */
-#define wait_event_timeout(wqh, condition, timeout)          \
-({                                                           \
-	long retval = 0;                                     \
-	long left = (timeout <= 0) ? 1 : timeout;            \
-	for (;;)) {                                          \
-		retval = tsleep(&wqh, 0, "wetime", 1);       \
-		left--;                                      \
-		if ((condition) || (left <= 0)) {            \
-			retval = left;                       \
-			break;                               \
-		}                                            \
-	}                                                    \
-	retval;                                              \
-})
-
-/* vmwgfx_irq.c */
-/* file vmwgfx_fifo.c, function vmw_fifo_wait() */
-/* file radeon_pm.c, function radeon_pm_set_clocks() */
-/* file radeon_fence.c, function radeon_fence_wait() */
-#define wait_event_interruptible_timeout(wqh, condition, timeout) \
-({                                                                \
-	long retval = 0;                                          \
-	long left = (timeout <= 0) ? 1 : timeout;                 \
-	for (;;)) {                                               \
-		retval = tsleep(&wqh, PCATCH, "wetime", 1);       \
-		left--;                                           \
-		if ((condition) || (left <= 0) || (retval)) {     \
-			retval = left;                            \
-			break;                                    \
-		}                                                 \
-	}                                                         \
-	retval;                                                   \
-})
-
-/* file drm_context.c, function drm_context_switch_complete() */
-static __inline__ void
-wake_up(wait_queue_head_t *wqh) {
-	wakeup(wqh);
-}
-
-/* file ttm/ttm_lock.c, function ttm_read_unlock() */
-/* file radeon_fence.c, function radeon_fence_process() */
-static __inline__ void
-wake_up_all(wait_queue_head_t *wqh) {
-	wakeup(wqh);
-}
-
-/* file drm_fops.c, function drm_release() */
-static __inline__ void
-wake_up_interruptible(wait_queue_head_t *wqh) {
-	wakeup(wqh);
-}
-
-/* file drm_fops.c, function drm_release() */
-static __inline__ void
-wake_up_interruptible_all(wait_queue_head_t *wqh) {
-	wakeup(wqh);
-}
 
 /* file i915_gem.c, function i915_gem_wait_for_pending_flip() */
 
@@ -2542,6 +2528,7 @@ page_count(struct page *page) {
 /* It appears that DRM_MTRR_WC is always used as the flag */
 #define MTRR_TYPE_WRCOMB MDF_WRITECOMBINE
 
+#if 0
 static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 	int nd = 0;
 	int ndesc;
@@ -2584,6 +2571,7 @@ static inline int mtrr_cookie(struct mem_range_desc *mrd) {
 	}
 	return match;
 }
+#endif
 
 static __inline__ int
 mtrr_add(
