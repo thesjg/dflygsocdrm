@@ -70,6 +70,7 @@
 #endif /* __linux__ */
 
 #define DRM_NEWER_IRQRISK 1
+#define DRM_NEWER_IRQSYNCH 1
 
 #ifdef DRM_NEWER_IRQSYNCH
 static int drm_msi = 1;	/* Enable by default. */

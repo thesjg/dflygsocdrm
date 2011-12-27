@@ -39,6 +39,8 @@
 #include "drmP.h"
 #include "drm_core.h"
 
+#define DRM_NEWER_IRQSYNCH 1
+
 #ifndef __linux__ /* legacy */
 static struct dev_ops drm_cdevsw = {
 /*	{ "drm", 145, D_TRACKCLOSE | D_KQFILTER }, */
