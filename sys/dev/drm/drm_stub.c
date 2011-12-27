@@ -51,6 +51,7 @@ static struct dev_ops drm_cdevsw = {
 	.d_mmap =       drm_mmap_legacy
 };
 
+#ifndef DRM_NEWER_IRQSYNCH
 static int drm_msi = 1;	/* Enable by default. */
 TUNABLE_INT("hw.drm.msi", &drm_msi);
 
@@ -74,6 +75,7 @@ static int drm_msi_is_blacklisted(int vendor, int device)
 
 	return 0;
 }
+#endif /* DRM_NEWER_IRQSYNCH */
 #endif /* !__linux__ */
 
 unsigned int drm_debug = 0;	/* 1 to enable debug output */
@@ -343,9 +345,6 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 	    dev->pci_device, idlist);
 	dev->id_entry = id_entry;
 
-#if 0
-	TAILQ_INIT(&dev->maplist_legacy);
-#endif
 	TAILQ_INIT(&dev->files);
 
 /* also done in drm_fops.c */
@@ -558,6 +557,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 #else /* !__linux__ */
 	pci_enable_busmaster(dev->device);
 
+#ifndef DRM_NEWER_IRQSYNCH
 	if (drm_core_check_feature(dev, DRIVER_HAVE_IRQ)) {
 		if (drm_msi &&
 		    !drm_msi_is_blacklisted(dev->pci_vendor, dev->pci_device)) {
@@ -584,6 +584,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 
 		dev->irq = (int) rman_get_start(dev->irqr);
 	}
+#endif /* !DRM_NEWER_IRQSYNCH */
 #endif /* __linux__ */
 
 	if ((ret = drm_fill_in_dev(dev, kdev, idlist, dev->driver))) {

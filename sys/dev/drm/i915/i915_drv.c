@@ -558,7 +558,7 @@ static void i915_configure(struct drm_device *dev)
 {
 	dev->driver->driver_features =
 	   DRIVER_USE_AGP | DRIVER_REQUIRE_AGP | DRIVER_USE_MTRR |
-	   DRIVER_HAVE_IRQ | DRIVER_GEM;
+	   DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED | DRIVER_GEM;
 /* newer */
 	dev->driver->dev_priv_size 	= sizeof(drm_i915_private_t);
 	dev->driver->buf_priv_size	= sizeof(drm_i915_private_t);
@@ -610,7 +610,7 @@ static struct drm_driver driver = {
 	    DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED | DRIVER_GEM,
 #else
 	    DRIVER_USE_AGP | DRIVER_REQUIRE_AGP | DRIVER_USE_MTRR |
-	    DRIVER_HAVE_IRQ | DRIVER_GEM,
+	    DRIVER_HAVE_IRQ | DRIVER_IRQ_SHARED | DRIVER_GEM,
 #endif /* __linux__ */
 	.load = i915_driver_load,
 	.unload = i915_driver_unload,

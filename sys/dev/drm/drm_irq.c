@@ -71,6 +71,32 @@
 
 #define DRM_NEWER_IRQRISK 1
 
+#ifdef DRM_NEWER_IRQSYNCH
+static int drm_msi = 1;	/* Enable by default. */
+TUNABLE_INT("hw.drm.msi", &drm_msi);
+
+static struct drm_msi_blacklist_entry drm_msi_blacklist[] = {
+	{0x8086, 0x2772}, /* Intel i945G	*/ \
+	{0x8086, 0x27A2}, /* Intel i945GM	*/ \
+	{0x8086, 0x27AE}, /* Intel i945GME	*/ \
+	{0, 0}
+};
+
+static int drm_msi_is_blacklisted(int vendor, int device)
+{
+	int i = 0;
+
+	for (i = 0; drm_msi_blacklist[i].vendor != 0; i++) {
+		if ((drm_msi_blacklist[i].vendor == vendor) &&
+		    (drm_msi_blacklist[i].device == device)) {
+			return 1;
+		}
+	}
+
+	return 0;
+}
+#endif /* DRM_NEWER_IRQSYNCH */
+
 /**
  * Get interrupt from bus id.
  *
@@ -292,7 +318,14 @@ int drm_irq_install(struct drm_device *dev)
 #ifdef __linux__
 	unsigned long sh_flags = 0;
 	char *irqname;
+#else /* !__linux__ */
+#ifdef DRM_NEWER_IRQSYNCH
+	int sh_flags = 0;
+#if 0
+	int msicount;
 #endif
+#endif /* DRM_NEWER_IRQSYNCH */
+#endif /* __linux__ */
 
 	if (!drm_core_check_feature(dev, DRIVER_HAVE_IRQ))
 		return -EINVAL;
@@ -320,8 +353,8 @@ int drm_irq_install(struct drm_device *dev)
 	/* Before installing handler */
 	dev->driver->irq_preinstall(dev);
 
-#ifdef __linux__
 	/* Install handler */
+#ifdef __linux__
 	if (drm_core_check_feature(dev, DRIVER_IRQ_SHARED))
 		sh_flags = IRQF_SHARED;
 
@@ -329,16 +362,47 @@ int drm_irq_install(struct drm_device *dev)
 		irqname = dev->devname;
 	else
 		irqname = dev->driver->name;
+#else
+#ifdef DRM_NEWER_IRQSYNCH
+	if (drm_core_check_feature(dev, DRIVER_IRQ_SHARED))
+		sh_flags = RF_SHAREABLE | RF_ACTIVE;
 #endif
+#endif /* __linux__ */
 
 #ifdef __linux__
 	ret = request_irq(drm_dev_to_irq(dev), dev->driver->irq_handler,
 			  sh_flags, irqname, dev);
 #else
+#ifdef DRM_NEWER_IRQSYNCH
+	if (drm_msi &&
+		!drm_msi_is_blacklisted(dev->pci_vendor, dev->pci_device)) {
+#if 0
+		msicount = pci_msi_count(dev->device);
+		DRM_DEBUG("MSI count = %d\n", msicount);
+		if (msicount > 1)
+			msicount = 1;
+
+		if (pci_alloc_msi(dev->device, &msicount) == 0) {
+			DRM_INFO("MSI enabled %d message(s)\n",
+			    msicount);
+			dev->msi_enabled = 1;
+			dev->irqrid = 1;
+		}
+#endif
+	}
+
+	dev->irqr = bus_alloc_resource_any(dev->device, SYS_RES_IRQ,
+		&dev->irqrid, sh_flags);
+	if (!dev->irqr) {
+		return -ENOENT;
+	}
+
+	dev->irq = (int) rman_get_start(dev->irqr);
+#endif /* DRM_NEWER_IRQSYNCH */
 	ret = bus_setup_intr(dev->device, dev->irqr, INTR_MPSAFE,
 				 dev->driver->irq_handler, dev, &dev->irqh,
 				 &dev->irq_lock);
-#endif
+#endif /* __linux__ */
 
 	if (ret != 0) {
 		mutex_lock(&dev->struct_mutex);

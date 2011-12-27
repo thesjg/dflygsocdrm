@@ -238,7 +238,7 @@ static struct drm_driver driver_old = {
 	    DRIVER_HAVE_IRQ | DRIVER_HAVE_DMA | DRIVER_IRQ_SHARED,
 #else
 	    DRIVER_USE_AGP | DRIVER_USE_MTRR | DRIVER_PCI_DMA | DRIVER_SG |
-	    DRIVER_HAVE_IRQ | DRIVER_HAVE_DMA,
+	    DRIVER_HAVE_IRQ | DRIVER_HAVE_DMA | DRIVER_IRQ_SHARED,
 #endif /* __linux__ */
 	.dev_priv_size = sizeof(drm_radeon_buf_priv_t),
 	.buf_priv_size	= sizeof(drm_radeon_buf_priv_t),
