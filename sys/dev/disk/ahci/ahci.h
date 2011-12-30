@@ -453,6 +453,7 @@ struct ahci_softc {
 	bus_space_tag_t		sc_iot;		/* split from sc_regs */
 	bus_space_handle_t	sc_ioh;		/* split from sc_regs */
 
+	int			sc_irq_type;
 	int			sc_rid_irq;	/* saved bus RIDs */
 	int			sc_rid_regs;
 	u_int32_t		sc_cap;		/* capabilities */

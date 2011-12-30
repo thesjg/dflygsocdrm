@@ -180,15 +180,15 @@ SYSCTL_ULONG(_net_link_ether, OID_AUTO, input_requeue, CTLFLAG_RW,
 #endif
 
 #define ETHER_KTR_STR		"ifp=%p"
-#define ETHER_KTR_ARG_SIZE	(sizeof(void *))
+#define ETHER_KTR_ARGS	struct ifnet *ifp
 #ifndef KTR_ETHERNET
 #define KTR_ETHERNET		KTR_ALL
 #endif
 KTR_INFO_MASTER(ether);
-KTR_INFO(KTR_ETHERNET, ether, chain_beg, 0, ETHER_KTR_STR, ETHER_KTR_ARG_SIZE);
-KTR_INFO(KTR_ETHERNET, ether, chain_end, 1, ETHER_KTR_STR, ETHER_KTR_ARG_SIZE);
-KTR_INFO(KTR_ETHERNET, ether, disp_beg, 2, ETHER_KTR_STR, ETHER_KTR_ARG_SIZE);
-KTR_INFO(KTR_ETHERNET, ether, disp_end, 3, ETHER_KTR_STR, ETHER_KTR_ARG_SIZE);
+KTR_INFO(KTR_ETHERNET, ether, chain_beg, 0, ETHER_KTR_STR, ETHER_KTR_ARGS);
+KTR_INFO(KTR_ETHERNET, ether, chain_end, 1, ETHER_KTR_STR, ETHER_KTR_ARGS);
+KTR_INFO(KTR_ETHERNET, ether, disp_beg, 2, ETHER_KTR_STR, ETHER_KTR_ARGS);
+KTR_INFO(KTR_ETHERNET, ether, disp_end, 3, ETHER_KTR_STR, ETHER_KTR_ARGS);
 #define logether(name, arg)	KTR_LOG(ether_ ## name, arg)
 
 /*
@@ -602,7 +602,7 @@ ether_ifdetach(struct ifnet *ifp)
 }
 
 int
-ether_ioctl(struct ifnet *ifp, int command, caddr_t data)
+ether_ioctl(struct ifnet *ifp, u_long command, caddr_t data)
 {
 	struct ifaddr *ifa = (struct ifaddr *) data;
 	struct ifreq *ifr = (struct ifreq *) data;

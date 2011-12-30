@@ -291,15 +291,19 @@ TUNABLE_INT("hw.pci.enable_msi", &pci_do_msi);
 SYSCTL_INT(_hw_pci, OID_AUTO, enable_msi, CTLFLAG_RW, &pci_do_msi, 1,
     "Enable support for MSI interrupts");
 
-static int pci_do_msix = 1;
+static int pci_do_msix = 0;
+#if 0
 TUNABLE_INT("hw.pci.enable_msix", &pci_do_msix);
 SYSCTL_INT(_hw_pci, OID_AUTO, enable_msix, CTLFLAG_RW, &pci_do_msix, 1,
     "Enable support for MSI-X interrupts");
+#endif
 
 static int pci_honor_msi_blacklist = 1;
 TUNABLE_INT("hw.pci.honor_msi_blacklist", &pci_honor_msi_blacklist);
 SYSCTL_INT(_hw_pci, OID_AUTO, honor_msi_blacklist, CTLFLAG_RD,
     &pci_honor_msi_blacklist, 1, "Honor chipset blacklist for MSI");
+
+static int pci_msi_cpuid;
 
 /* Find a device_t by bus/slot/function in domain 0 */
 
@@ -1955,7 +1959,7 @@ pci_remap_msi_irq(device_t dev, u_int irq)
 			    i + 1);
 			if (rle->start == irq) {
 				error = PCIB_MAP_MSI(device_get_parent(bus),
-				    dev, irq, &addr, &data);
+				    dev, irq, &addr, &data, -1 /* XXX */);
 				if (error)
 					return (error);
 				pci_disable_msi(dev);
@@ -1978,7 +1982,7 @@ pci_remap_msi_irq(device_t dev, u_int irq)
 			mv = &cfg->msix.msix_vectors[i];
 			if (mv->mv_irq == irq) {
 				error = PCIB_MAP_MSI(device_get_parent(bus),
-				    dev, irq, &addr, &data);
+				    dev, irq, &addr, &data, -1 /* XXX */);
 				if (error)
 					return (error);
 				mv->mv_address = addr;
@@ -2047,22 +2051,38 @@ pci_msi_blacklisted(void)
 }
 
 /*
- * Attempt to allocate *count MSI messages.  The actual number allocated is
- * returned in *count.  After this function returns, each message will be
- * available to the driver as SYS_RES_IRQ resources starting at a rid 1.
+ * Attempt to allocate count MSI messages on start_cpuid.
+ *
+ * If start_cpuid < 0, then the MSI messages' target CPU will be
+ * selected automaticly.
+ *
+ * If the caller explicitly specified the MSI messages' target CPU,
+ * i.e. start_cpuid >= 0, then we will try to allocate the count MSI
+ * messages on the specified CPU, if the allocation fails due to MD
+ * does not have enough vectors (EMSGSIZE), then we will try next
+ * available CPU, until the allocation fails on all CPUs.
+ *
+ * EMSGSIZE will be returned, if all available CPUs does not have
+ * enough vectors for the requested amount of MSI messages.  Caller
+ * should either reduce the amount of MSI messages to be requested,
+ * or simply giving up using MSI.
+ *
+ * The available SYS_RES_IRQ resources' rids, which are >= 1, are
+ * returned in 'rid' array, if the allocation succeeds.
  */
 int
-pci_alloc_msi_method(device_t dev, device_t child, int *count)
+pci_alloc_msi_method(device_t dev, device_t child, int *rid, int count,
+    int start_cpuid)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(child);
 	pcicfgregs *cfg = &dinfo->cfg;
 	struct resource_list_entry *rle;
-	int actual, error, i, irqs[32];
+	int error, i, irqs[32], cpuid = 0;
 	uint16_t ctrl;
 
-	/* Don't let count == 0 get us into trouble. */
-	if (*count == 0)
-		return (EINVAL);
+	KASSERT(count != 0 && count <= 32 && powerof2(count),
+	    ("invalid MSI count %d\n", count));
+	KASSERT(start_cpuid < ncpus, ("invalid cpuid %d\n", start_cpuid));
 
 	/* If rid 0 is allocated, then fail. */
 	rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, 0);
@@ -2081,47 +2101,47 @@ pci_alloc_msi_method(device_t dev, device_t child, int *count)
 	if (cfg->msi.msi_location == 0 || !pci_do_msi)
 		return (ENODEV);
 
-	if (bootverbose)
-		device_printf(child,
-		    "attempting to allocate %d MSI vectors (%d supported)\n",
-		    *count, cfg->msi.msi_msgnum);
-
-	/* Don't ask for more than the device supports. */
-	actual = min(*count, cfg->msi.msi_msgnum);
-
-	/* Don't ask for more than 32 messages. */
-	actual = min(actual, 32);
-
-	/* MSI requires power of 2 number of messages. */
-	if (!powerof2(actual))
-		return (EINVAL);
-
-	for (;;) {
-		/* Try to allocate N messages. */
-		error = PCIB_ALLOC_MSI(device_get_parent(dev), child, actual,
-		    cfg->msi.msi_msgnum, irqs);
-		if (error == 0)
-			break;
-		if (actual == 1)
-			return (error);
-
-		/* Try N / 2. */
-		actual >>= 1;
-	}
-
-	/*
-	 * We now have N actual messages mapped onto SYS_RES_IRQ
-	 * resources in the irqs[] array, so add new resources
-	 * starting at rid 1.
-	 */
-	for (i = 0; i < actual; i++)
-		resource_list_add(&dinfo->resources, SYS_RES_IRQ, i + 1,
-		    irqs[i], irqs[i], 1, -1);
+	KASSERT(count <= cfg->msi.msi_msgnum, ("large MSI count %d, max %d\n",
+	    count, cfg->msi.msi_msgnum));
 
 	if (bootverbose) {
-		if (actual == 1)
-			device_printf(child, "using IRQ %d for MSI\n", irqs[0]);
-		else {
+		device_printf(child,
+		    "attempting to allocate %d MSI vectors (%d supported)\n",
+		    count, cfg->msi.msi_msgnum);
+	}
+
+	if (start_cpuid < 0)
+		start_cpuid = atomic_fetchadd_int(&pci_msi_cpuid, 1) % ncpus;
+
+	error = EINVAL;
+	for (i = 0; i < ncpus; ++i) {
+		cpuid = (start_cpuid + i) % ncpus;
+
+		error = PCIB_ALLOC_MSI(device_get_parent(dev), child, count,
+		    cfg->msi.msi_msgnum, irqs, cpuid);
+		if (error == 0)
+			break;
+		else if (error != EMSGSIZE)
+			return error;
+	}
+	if (error)
+		return error;
+
+	/*
+	 * We now have N messages mapped onto SYS_RES_IRQ resources in
+	 * the irqs[] array, so add new resources starting at rid 1.
+	 */
+	for (i = 0; i < count; i++) {
+		rid[i] = i + 1;
+		resource_list_add(&dinfo->resources, SYS_RES_IRQ, i + 1,
+		    irqs[i], irqs[i], 1, cpuid);
+	}
+
+	if (bootverbose) {
+		if (count == 1) {
+			device_printf(child, "using IRQ %d on cpu%d for MSI\n",
+			    irqs[0], cpuid);
+		} else {
 			int run;
 
 			/*
@@ -2131,7 +2151,7 @@ pci_alloc_msi_method(device_t dev, device_t child, int *count)
 			 */
 			device_printf(child, "using IRQs %d", irqs[0]);
 			run = 0;
-			for (i = 1; i < actual; i++) {
+			for (i = 1; i < count; i++) {
 
 				/* Still in a run? */
 				if (irqs[i] == irqs[i - 1] + 1) {
@@ -2151,22 +2171,21 @@ pci_alloc_msi_method(device_t dev, device_t child, int *count)
 
 			/* Unfinished range? */
 			if (run)
-				kprintf("-%d", irqs[actual - 1]);
-			kprintf(" for MSI\n");
+				kprintf("-%d", irqs[count - 1]);
+			kprintf(" for MSI on cpu%d\n", cpuid);
 		}
 	}
 
-	/* Update control register with actual count. */
+	/* Update control register with count. */
 	ctrl = cfg->msi.msi_ctrl;
 	ctrl &= ~PCIM_MSICTRL_MME_MASK;
-	ctrl |= (ffs(actual) - 1) << 4;
+	ctrl |= (ffs(count) - 1) << 4;
 	cfg->msi.msi_ctrl = ctrl;
 	pci_write_config(child, cfg->msi.msi_location + PCIR_MSI_CTRL, ctrl, 2);
 
 	/* Update counts of alloc'd messages. */
-	cfg->msi.msi_alloc = actual;
+	cfg->msi.msi_alloc = count;
 	cfg->msi.msi_handlers = 0;
-	*count = actual;
 	return (0);
 }
 
@@ -2177,7 +2196,7 @@ pci_release_msi_method(device_t dev, device_t child)
 	struct pci_devinfo *dinfo = device_get_ivars(child);
 	struct pcicfg_msi *msi = &dinfo->cfg.msi;
 	struct resource_list_entry *rle;
-	int error, i, irqs[32];
+	int error, i, irqs[32], cpuid = -1;
 
 	/* Try MSI-X first. */
 	error = pci_release_msix(dev, child);
@@ -2197,6 +2216,15 @@ pci_release_msi_method(device_t dev, device_t child)
 		KASSERT(rle != NULL, ("missing MSI resource"));
 		if (rle->res != NULL)
 			return (EBUSY);
+		if (i == 0) {
+			cpuid = rle->cpuid;
+			KASSERT(cpuid >= 0 && cpuid < ncpus,
+			    ("invalid MSI target cpuid %d\n", cpuid));
+		} else {
+			KASSERT(rle->cpuid == cpuid,
+			    ("MSI targets different cpus, "
+			     "was cpu%d, now cpu%d", cpuid, rle->cpuid));
+		}
 		irqs[i] = rle->start;
 	}
 
@@ -2208,7 +2236,8 @@ pci_release_msi_method(device_t dev, device_t child)
 	    msi->msi_ctrl, 2);
 
 	/* Release the messages. */
-	PCIB_RELEASE_MSI(device_get_parent(dev), child, msi->msi_alloc, irqs);
+	PCIB_RELEASE_MSI(device_get_parent(dev), child, msi->msi_alloc, irqs,
+	    cpuid);
 	for (i = 0; i < msi->msi_alloc; i++)
 		resource_list_delete(&dinfo->resources, SYS_RES_IRQ, i + 1);
 
@@ -3150,16 +3179,14 @@ int
 pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
     driver_intr_t *intr, void *arg, void **cookiep, lwkt_serialize_t serializer)
 {
-#ifdef MSI
 	struct pci_devinfo *dinfo;
 	struct msix_table_entry *mte;
 	struct msix_vector *mv;
 	uint64_t addr;
 	uint32_t data;
-	int rid;
-#endif
-	int error;
+	int rid, error;
 	void *cookie;
+
 	error = bus_generic_setup_intr(dev, child, irq, flags, intr,
 	    arg, &cookie, serializer);
 	if (error)
@@ -3171,8 +3198,6 @@ pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
 		return(0);
 	}
 
-	pci_clear_command_bit(dev, child, PCIM_CMD_INTxDIS);
-#ifdef MSI
 	rid = rman_get_rid(irq);
 	if (rid == 0) {
 		/* Make sure that INTx is enabled */
@@ -3191,7 +3216,8 @@ pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
 				KASSERT(dinfo->cfg.msi.msi_handlers == 0,
 			    ("MSI has handlers, but vectors not mapped"));
 				error = PCIB_MAP_MSI(device_get_parent(dev),
-				    child, rman_get_start(irq), &addr, &data);
+				    child, rman_get_start(irq), &addr, &data,
+				    rman_get_cpuid(irq));
 				if (error)
 					goto bad;
 				dinfo->cfg.msi.msi_addr = addr;
@@ -3213,7 +3239,8 @@ pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
 				KASSERT(mte->mte_handlers == 0,
 		    ("MSI-X table entry has handlers, but vector not mapped"));
 				error = PCIB_MAP_MSI(device_get_parent(dev),
-				    child, rman_get_start(irq), &addr, &data);
+				    child, rman_get_start(irq), &addr, &data,
+				    rman_get_cpuid(irq));
 				if (error)
 					goto bad;
 				mv->mv_address = addr;
@@ -3236,7 +3263,6 @@ pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
 			return (error);
 		}
 	}
-#endif
 	*cookiep = cookie;
 	return (0);
 }
@@ -3245,13 +3271,10 @@ int
 pci_teardown_intr(device_t dev, device_t child, struct resource *irq,
     void *cookie)
 {
-#ifdef MSI
 	struct msix_table_entry *mte;
 	struct resource_list_entry *rle;
 	struct pci_devinfo *dinfo;
-	int rid;
-#endif
-	int error;
+	int rid, error;
 
 	if (irq == NULL || !(rman_get_flags(irq) & RF_ACTIVE))
 		return (EINVAL);
@@ -3260,8 +3283,6 @@ pci_teardown_intr(device_t dev, device_t child, struct resource *irq,
 	if (device_get_parent(child) != dev)
 		return(bus_generic_teardown_intr(dev, child, irq, cookie));
 
-	pci_set_command_bit(dev, child, PCIM_CMD_INTxDIS);
-#ifdef MSI
 	rid = rman_get_rid(irq);
 	if (rid == 0) {
 		/* Mask INTx */
@@ -3302,8 +3323,6 @@ pci_teardown_intr(device_t dev, device_t child, struct resource *irq,
 	if (rid > 0)
 		KASSERT(error == 0,
 		    ("%s: generic teardown failed for MSI/MSI-X", __func__));
-#endif
-	error = bus_generic_teardown_intr(dev, child, irq, cookie);
 	return (error);
 }
 
@@ -3896,11 +3915,9 @@ pci_alloc_resource(device_t dev, device_t child, int type, int *rid,
 			 * Can't alloc legacy interrupt once MSI messages
 			 * have been allocated.
 			 */
-#ifdef MSI
 			if (*rid == 0 && (cfg->msi.msi_alloc > 0 ||
 			    cfg->msix.msix_alloc > 0))
 				return (NULL);
-#endif
 			/*
 			 * If the child device doesn't have an
 			 * interrupt routed and is deserving of an
@@ -4260,3 +4277,39 @@ pci_devlist_get_parent(pcicfgregs *cfg)
 }
 
 #endif	/* COMPAT_OLDPCI */
+
+int
+pci_alloc_1intr(device_t dev, int msi_enable, int *rid0, u_int *flags0)
+{
+	int rid, type;
+	u_int flags;
+	char env[64];
+
+	rid = 0;
+	type = PCI_INTR_TYPE_LEGACY;
+	flags = RF_SHAREABLE | RF_ACTIVE;
+
+	ksnprintf(env, sizeof(env), "hw.%s.msi.enable",
+	    device_get_nameunit(dev));
+	kgetenv_int(env, &msi_enable);
+
+	if (msi_enable) {
+		int cpu = -1;
+
+		ksnprintf(env, sizeof(env), "hw.%s.msi.cpu",
+		    device_get_nameunit(dev));
+		kgetenv_int(env, &cpu);
+		if (cpu >= ncpus)
+			cpu = ncpus - 1;
+
+		if (pci_alloc_msi(dev, &rid, 1, cpu) == 0) {
+			flags &= ~RF_SHAREABLE;
+			type = PCI_INTR_TYPE_MSI;
+		}
+	}
+
+	*rid0 = rid;
+	*flags0 = flags;
+
+	return type;
+}

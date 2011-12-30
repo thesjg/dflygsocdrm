@@ -252,6 +252,7 @@ struct emx_softc {
 	struct resource		*intr_res;
 	void			*intr_tag;
 	int			intr_rid;
+	int			intr_type;
 
 	struct ifmedia		media;
 	struct callout		timer;

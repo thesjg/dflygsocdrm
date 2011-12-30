@@ -74,7 +74,7 @@ SYSINIT(sched_setup, SI_SUB_KICK_SCHEDULER, SI_ORDER_FIRST, sched_setup, NULL)
 
 int	hogticks;
 int	lbolt;
-int	lbolt_syncer;
+void	*lbolt_syncer;
 int	sched_quantum;		/* Roundrobin scheduling quantum in ticks. */
 int	ncpus;
 int	ncpus2, ncpus2_shift, ncpus2_mask;	/* note: mask not cpumask_t */
@@ -93,11 +93,11 @@ MALLOC_DEFINE(M_TSLEEP, "tslpque", "tsleep queues");
 #define KTR_TSLEEP	KTR_ALL
 #endif
 KTR_INFO_MASTER(tsleep);
-KTR_INFO(KTR_TSLEEP, tsleep, tsleep_beg, 0, "tsleep enter %p", sizeof(void *));
-KTR_INFO(KTR_TSLEEP, tsleep, tsleep_end, 1, "tsleep exit", 0);
-KTR_INFO(KTR_TSLEEP, tsleep, wakeup_beg, 2, "wakeup enter %p", sizeof(void *));
-KTR_INFO(KTR_TSLEEP, tsleep, wakeup_end, 3, "wakeup exit", 0);
-KTR_INFO(KTR_TSLEEP, tsleep, ilockfail,  4, "interlock failed %p", sizeof(void *));
+KTR_INFO(KTR_TSLEEP, tsleep, tsleep_beg, 0, "tsleep enter %p", const volatile void *ident);
+KTR_INFO(KTR_TSLEEP, tsleep, tsleep_end, 1, "tsleep exit");
+KTR_INFO(KTR_TSLEEP, tsleep, wakeup_beg, 2, "wakeup enter %p", const volatile void *ident);
+KTR_INFO(KTR_TSLEEP, tsleep, wakeup_end, 3, "wakeup exit");
+KTR_INFO(KTR_TSLEEP, tsleep, ilockfail,  4, "interlock failed %p", const volatile void *ident);
 
 #define logtsleep1(name)	KTR_LOG(tsleep_ ## name)
 #define logtsleep2(name, val)	KTR_LOG(tsleep_ ## name, val)
@@ -190,7 +190,7 @@ schedcpu(void *arg)
 	allproc_scan(schedcpu_stats, NULL);
 	allproc_scan(schedcpu_resource, NULL);
 	wakeup((caddr_t)&lbolt);
-	wakeup((caddr_t)&lbolt_syncer);
+	wakeup(lbolt_syncer);
 	callout_reset(&schedcpu_callout, hz, schedcpu, NULL);
 }
 

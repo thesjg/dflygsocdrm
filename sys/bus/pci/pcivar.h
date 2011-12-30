@@ -465,9 +465,9 @@ pci_is_pcix(device_t dev)
 }
 
 static __inline int
-pci_alloc_msi(device_t dev, int *count)
+pci_alloc_msi(device_t dev, int *rid, int count, int cpuid)
 {
-    return (PCI_ALLOC_MSI(device_get_parent(dev), dev, count));
+    return (PCI_ALLOC_MSI(device_get_parent(dev), dev, rid, count, cpuid));
 }
 
 static __inline int
@@ -516,6 +516,13 @@ int	pci_pending_msix(device_t dev, u_int index);
 int	pci_msi_device_blacklisted(device_t dev);
 
 void	pci_ht_map_msi(device_t dev, uint64_t addr);
+
+/* Returns PCI_INTR_TYPE_ */
+int	pci_alloc_1intr(device_t dev, int msi_enable, int *rid, u_int *flags);
+
+#define PCI_INTR_TYPE_LEGACY	0
+#define PCI_INTR_TYPE_MSI	1
+#define PCI_INTR_TYPE_MSIX	2	/* not yet */
 
 #endif	/* _SYS_BUS_H_ */
 

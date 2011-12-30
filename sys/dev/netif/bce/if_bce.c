@@ -436,12 +436,16 @@ static void	bce_enable_intr(struct bce_softc *, int);
 #ifdef DEVICE_POLLING
 static void	bce_poll(struct ifnet *, enum poll_cmd, int);
 #endif
-static void	bce_intr(void *);
+static void	bce_intr(struct bce_softc *);
+static void	bce_intr_legacy(void *);
+static void	bce_intr_msi(void *);
+static void	bce_intr_msi_oneshot(void *);
 static void	bce_set_rx_mode(struct bce_softc *);
 static void	bce_stats_update(struct bce_softc *);
 static void	bce_tick(void *);
 static void	bce_tick_serialized(struct bce_softc *);
 static void	bce_pulse(void *);
+static void	bce_pulse_check_msi(struct bce_softc *);
 static void	bce_add_sysctls(struct bce_softc *);
 
 static void	bce_coal_change(struct bce_softc *);
@@ -472,6 +476,8 @@ static uint32_t	bce_rx_bds = 128;		/* bcm: 6 */
 static uint32_t	bce_rx_ticks_int = 125;		/* bcm: 18 */
 static uint32_t	bce_rx_ticks = 125;		/* bcm: 18 */
 
+static int	bce_msi_enable = 1;
+
 TUNABLE_INT("hw.bce.tx_bds_int", &bce_tx_bds_int);
 TUNABLE_INT("hw.bce.tx_bds", &bce_tx_bds);
 TUNABLE_INT("hw.bce.tx_ticks_int", &bce_tx_ticks_int);
@@ -480,6 +486,7 @@ TUNABLE_INT("hw.bce.rx_bds_int", &bce_rx_bds_int);
 TUNABLE_INT("hw.bce.rx_bds", &bce_rx_bds);
 TUNABLE_INT("hw.bce.rx_ticks_int", &bce_rx_ticks_int);
 TUNABLE_INT("hw.bce.rx_ticks", &bce_rx_ticks);
+TUNABLE_INT("hw.bce.msi.enable", &bce_msi_enable);
 
 /****************************************************************************/
 /* DragonFly device dispatch table.                                         */
@@ -663,11 +670,10 @@ bce_attach(device_t dev)
 	struct bce_softc *sc = device_get_softc(dev);
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	uint32_t val;
+	u_int irq_flags;
+	void (*irq_handle)(void *);
 	int rid, rc = 0;
 	int i, j;
-#ifdef notyet
-	int count;
-#endif
 
 	sc->bce_dev = dev;
 	if_initname(ifp, device_get_name(dev), device_get_unit(dev));
@@ -688,16 +694,11 @@ bce_attach(device_t dev)
 	sc->bce_bhandle = rman_get_bushandle(sc->bce_res_mem);
 
 	/* Allocate PCI IRQ resources. */
-#ifdef notyet
-	count = pci_msi_count(dev);
-	if (count == 1 && pci_alloc_msi(dev, &count) == 0) {
-		rid = 1;
-		sc->bce_flags |= BCE_USING_MSI_FLAG;
-	} else
-#endif
-	rid = 0;
-	sc->bce_res_irq = bus_alloc_resource_any(dev, SYS_RES_IRQ, &rid,
-						 RF_SHAREABLE | RF_ACTIVE);
+	sc->bce_irq_type = pci_alloc_1intr(dev, bce_msi_enable,
+	    &sc->bce_irq_rid, &irq_flags);
+
+	sc->bce_res_irq = bus_alloc_resource_any(dev, SYS_RES_IRQ,
+	    &sc->bce_irq_rid, irq_flags);
 	if (sc->bce_res_irq == NULL) {
 		device_printf(dev, "PCI map interrupt failed\n");
 		rc = ENXIO;
@@ -734,6 +735,19 @@ bce_attach(device_t dev)
 			      BCE_CHIP_ID(sc));
 		rc = ENODEV;
 		goto fail;
+	}
+
+	if (sc->bce_irq_type == PCI_INTR_TYPE_LEGACY) {
+		irq_handle = bce_intr_legacy;
+	} else if (sc->bce_irq_type == PCI_INTR_TYPE_MSI) {
+		irq_handle = bce_intr_msi;
+		if (BCE_CHIP_NUM(sc) == BCE_CHIP_NUM_5709) {
+			irq_handle = bce_intr_msi_oneshot;
+			sc->bce_flags |= BCE_ONESHOT_MSI_FLAG;
+		}
+	} else {
+		panic("%s: unsupported intr type %d\n",
+		    device_get_nameunit(dev), sc->bce_irq_type);
 	}
 
 	/*
@@ -949,7 +963,7 @@ bce_attach(device_t dev)
 	callout_init_mp(&sc->bce_pulse_callout);
 
 	/* Hookup IRQ last. */
-	rc = bus_setup_intr(dev, sc->bce_res_irq, INTR_MPSAFE, bce_intr, sc,
+	rc = bus_setup_intr(dev, sc->bce_res_irq, INTR_MPSAFE, irq_handle, sc,
 			    &sc->bce_intrhand, ifp->if_serializer);
 	if (rc != 0) {
 		device_printf(dev, "Failed to setup IRQ!\n");
@@ -957,7 +971,7 @@ bce_attach(device_t dev)
 		goto fail;
 	}
 
-	ifp->if_cpuid = ithread_cpuid(rman_get_start(sc->bce_res_irq));
+	ifp->if_cpuid = rman_get_cpuid(sc->bce_res_irq);
 	KKASSERT(ifp->if_cpuid >= 0 && ifp->if_cpuid < ncpus);
 
 	/* Print some important debugging info. */
@@ -1025,15 +1039,12 @@ bce_detach(device_t dev)
 	bus_generic_detach(dev);
 
 	if (sc->bce_res_irq != NULL) {
-		bus_release_resource(dev, SYS_RES_IRQ,
-			sc->bce_flags & BCE_USING_MSI_FLAG ? 1 : 0,
-			sc->bce_res_irq);
+		bus_release_resource(dev, SYS_RES_IRQ, sc->bce_irq_rid,
+		    sc->bce_res_irq);
 	}
 
-#ifdef notyet
-	if (sc->bce_flags & BCE_USING_MSI_FLAG)
+	if (sc->bce_irq_type == PCI_INTR_TYPE_MSI)
 		pci_release_msi(dev);
-#endif
 
 	if (sc->bce_res_mem != NULL) {
 		bus_release_resource(dev, SYS_RES_MEMORY, PCIR_BAR(0),
@@ -3618,6 +3629,8 @@ bce_blockinit(struct bce_softc *sc)
 	sc->last_status_idx = 0;
 	sc->rx_mode = BCE_EMAC_RX_MODE_SORT_MODE;
 
+	sc->pulse_check_status_idx = 0xffff;
+
 	/* Set up link change interrupt generation. */
 	REG_WR(sc, BCE_EMAC_ATTENTION_ENA, BCE_EMAC_ATTENTION_ENA_LINK);
 
@@ -3650,9 +3663,14 @@ bce_blockinit(struct bce_softc *sc)
 	       (sc->bce_cmd_ticks_int << 16) | sc->bce_cmd_ticks);
 	REG_WR(sc, BCE_HC_STATS_TICKS, (sc->bce_stats_ticks & 0xffff00));
 	REG_WR(sc, BCE_HC_STAT_COLLECT_TICKS, 0xbb8);	/* 3ms */
-	REG_WR(sc, BCE_HC_CONFIG,
-	       BCE_HC_CONFIG_TX_TMR_MODE |
-	       BCE_HC_CONFIG_COLLECT_STATS);
+
+	val = BCE_HC_CONFIG_TX_TMR_MODE | BCE_HC_CONFIG_COLLECT_STATS;
+	if (sc->bce_flags & BCE_ONESHOT_MSI_FLAG) {
+		if (bootverbose)
+			if_printf(&sc->arpcom.ac_if, "oneshot MSI\n");
+		val |= BCE_HC_CONFIG_ONE_SHOT | BCE_HC_CONFIG_USE_INT_PARAM;
+	}
+	REG_WR(sc, BCE_HC_CONFIG, val);
 
 	/* Clear the internal statistics counters. */
 	REG_WR(sc, BCE_HC_COMMAND, BCE_HC_COMMAND_CLR_STAT_NOW);
@@ -5361,9 +5379,8 @@ bce_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 /*   0 for success, positive value for failure.                             */
 /****************************************************************************/
 static void
-bce_intr(void *xsc)
+bce_intr(struct bce_softc *sc)
 {
-	struct bce_softc *sc = xsc;
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	struct status_block *sblk;
 	uint16_t hw_rx_cons, hw_tx_cons;
@@ -5374,27 +5391,6 @@ bce_intr(void *xsc)
 	DBRUNIF(1, sc->interrupts_generated++);
 
 	sblk = sc->status_block;
-
-	/*
-	 * If the hardware status block index matches the last value
-	 * read by the driver and we haven't asserted our interrupt
-	 * then there's nothing to do.
-	 */
-	if (sblk->status_idx == sc->last_status_idx &&
-	    (REG_RD(sc, BCE_PCICFG_MISC_STATUS) &
-	     BCE_PCICFG_MISC_STATUS_INTA_VALUE))
-		return;
-
-	/* Ack the interrupt and stop others from occuring. */
-	REG_WR(sc, BCE_PCICFG_INT_ACK_CMD,
-	       BCE_PCICFG_INT_ACK_CMD_USE_INT_HC_PARAM |
-	       BCE_PCICFG_INT_ACK_CMD_MASK_INT);
-
-	/*
-	 * Read back to deassert IRQ immediately to avoid too
-	 * many spurious interrupts.
-	 */
-	REG_RD(sc, BCE_PCICFG_INT_ACK_CMD);
 
 	/* Check if the hardware has finished any work. */
 	hw_rx_cons = bce_get_hw_rx_cons(sc);
@@ -5485,6 +5481,57 @@ bce_intr(void *xsc)
 	/* Handle any frames that arrived while handling the interrupt. */
 	if (!ifq_is_empty(&ifp->if_snd))
 		if_devstart(ifp);
+}
+
+static void
+bce_intr_legacy(void *xsc)
+{
+	struct bce_softc *sc = xsc;
+	struct status_block *sblk;
+
+	sblk = sc->status_block;
+
+	/*
+	 * If the hardware status block index matches the last value
+	 * read by the driver and we haven't asserted our interrupt
+	 * then there's nothing to do.
+	 */
+	if (sblk->status_idx == sc->last_status_idx &&
+	    (REG_RD(sc, BCE_PCICFG_MISC_STATUS) &
+	     BCE_PCICFG_MISC_STATUS_INTA_VALUE))
+		return;
+
+	/* Ack the interrupt and stop others from occuring. */
+	REG_WR(sc, BCE_PCICFG_INT_ACK_CMD,
+	       BCE_PCICFG_INT_ACK_CMD_USE_INT_HC_PARAM |
+	       BCE_PCICFG_INT_ACK_CMD_MASK_INT);
+
+	/*
+	 * Read back to deassert IRQ immediately to avoid too
+	 * many spurious interrupts.
+	 */
+	REG_RD(sc, BCE_PCICFG_INT_ACK_CMD);
+
+	bce_intr(sc);
+}
+
+static void
+bce_intr_msi(void *xsc)
+{
+	struct bce_softc *sc = xsc;
+
+	/* Ack the interrupt and stop others from occuring. */
+	REG_WR(sc, BCE_PCICFG_INT_ACK_CMD,
+	       BCE_PCICFG_INT_ACK_CMD_USE_INT_HC_PARAM |
+	       BCE_PCICFG_INT_ACK_CMD_MASK_INT);
+
+	bce_intr(sc);
+}
+
+static void
+bce_intr_msi_oneshot(void *xsc)
+{
+	bce_intr(xsc);
 }
 
 
@@ -5818,6 +5865,12 @@ bce_pulse(void *xsc)
 
 	lwkt_serialize_enter(ifp->if_serializer);
 
+	if (ifp->if_flags & IFF_RUNNING) {
+		if (sc->bce_irq_type == PCI_INTR_TYPE_MSI &&
+		    (sc->bce_flags & BCE_ONESHOT_MSI_FLAG) == 0)
+			bce_pulse_check_msi(sc);
+	}
+
 	/* Tell the firmware that the driver is still running. */
 	msg = (uint32_t)++sc->bce_fw_drv_pulse_wr_seq;
 	bce_shmem_wr(sc, BCE_DRV_PULSE_MB, msg);
@@ -5852,6 +5905,42 @@ bce_pulse(void *xsc)
 	lwkt_serialize_exit(ifp->if_serializer);
 }
 
+static void
+bce_pulse_check_msi(struct bce_softc *sc)
+{
+	int check = 0;
+
+	if (bce_get_hw_rx_cons(sc) != sc->hw_rx_cons) {
+		check = 1;
+	} else if (bce_get_hw_tx_cons(sc) != sc->hw_tx_cons) {
+		check = 1;
+	} else {
+		struct status_block *sblk = sc->status_block;
+
+		if ((sblk->status_attn_bits & STATUS_ATTN_BITS_LINK_STATE) !=
+		    (sblk->status_attn_bits_ack & STATUS_ATTN_BITS_LINK_STATE))
+			check = 1;
+	}
+
+	if (check) {
+		uint32_t msi_ctrl;
+
+		msi_ctrl = REG_RD(sc, BCE_PCICFG_MSI_CONTROL);
+		if ((msi_ctrl & BCE_PCICFG_MSI_CONTROL_ENABLE) == 0)
+			return;
+
+		if (sc->pulse_check_status_idx == sc->last_status_idx) {
+			if_printf(&sc->arpcom.ac_if, "missing MSI\n");
+
+			REG_WR(sc, BCE_PCICFG_MSI_CONTROL,
+			    msi_ctrl & ~BCE_PCICFG_MSI_CONTROL_ENABLE);
+			REG_WR(sc, BCE_PCICFG_MSI_CONTROL, msi_ctrl);
+
+			bce_intr_msi(sc);
+		}
+	}
+	sc->pulse_check_status_idx = sc->last_status_idx;
+}
 
 /****************************************************************************/
 /* Periodic function to perform maintenance tasks.                          */

@@ -224,6 +224,7 @@ static struct resource_spec alc_irq_spec_legacy[] = {
 	{ -1,			0,		0 }
 };
 
+#ifdef OLD_MSI
 static struct resource_spec alc_irq_spec_msi[] = {
 	{ SYS_RES_IRQ,		1,		RF_ACTIVE },
 	{ -1,			0,		0 }
@@ -233,6 +234,7 @@ static struct resource_spec alc_irq_spec_msix[] = {
 	{ SYS_RES_IRQ,		1,		RF_ACTIVE },
 	{ -1,			0,		0 }
 };
+#endif
 
 static uint32_t alc_dma_burst[] = { 128, 256, 512, 1024, 2048, 4096, 0 };
 
@@ -925,6 +927,8 @@ alc_attach(device_t dev)
 		device_printf(dev, "MSIX count : %d\n", msixc);
 		device_printf(dev, "MSI count : %d\n", msic);
 	}
+
+#ifdef OLD_MSI
 	/* Prefer MSIX over MSI. */
 	if (msix_disable == 0 || msi_disable == 0) {
 		if (msix_disable == 0 && msixc == ALC_MSIX_MESSAGES &&
@@ -949,6 +953,7 @@ alc_attach(device_t dev)
 				pci_release_msi(dev);
 		}
 	}
+#endif
 
 	error = bus_alloc_resources(dev, sc->alc_irq_spec, sc->alc_irq);
 	if (error != 0) {

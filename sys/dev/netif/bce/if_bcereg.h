@@ -1059,6 +1059,9 @@ struct l2_fhdr {
  *  pci_config_l definition
  *  offset: 0000
  */
+#define BCE_PCICFG_MSI_CONTROL				0x00000058
+#define BCE_PCICFG_MSI_CONTROL_ENABLE			 (1L<<16)
+
 #define BCE_PCICFG_MISC_CONFIG				0x00000068
 #define BCE_PCICFG_MISC_CONFIG_TARGET_BYTE_SWAP		 (1L<<2)
 #define BCE_PCICFG_MISC_CONFIG_TARGET_MB_WORD_SWAP	 (1L<<3)
@@ -5858,6 +5861,8 @@ struct bce_softc {
 	bus_space_handle_t	bce_bhandle;	/* Device bus handle */
 	struct resource		*bce_res_irq;	/* IRQ Resource Handle */
 	void			*bce_intrhand;	/* Interrupt handler */
+	int			bce_irq_type;
+	int			bce_irq_rid;
 
 	/* ASIC Chip ID. */
 	uint32_t		bce_chipid;
@@ -5868,9 +5873,9 @@ struct bce_softc {
 #define BCE_PCI_32BIT_FLAG 	0x00000002
 #define BCE_NO_WOL_FLAG		0x00000008
 #define BCE_USING_DAC_FLAG	0x00000010
-#define BCE_USING_MSI_FLAG 	0x00000020
 #define BCE_MFW_ENABLE_FLAG	0x00000040	/* Management F/W is enabled */
 #define BCE_PCIE_FLAG		0x00000200
+#define BCE_ONESHOT_MSI_FLAG	0x00000400
 
 	uint32_t		bce_cap_flags;
 #define BCE_PCIE_CAPABLE_FLAG	0x00000004
@@ -5992,6 +5997,7 @@ struct bce_softc {
 	bus_addr_t		status_block_paddr;	/* Physical address */
 
 	/* Driver maintained status block values. */
+	uint16_t		pulse_check_status_idx;
 	uint16_t		last_status_idx;
 	uint16_t		hw_rx_cons;
 	uint16_t		hw_tx_cons;
