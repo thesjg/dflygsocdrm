@@ -159,30 +159,10 @@ enum {
 #define DRM_GET_USER_UNCHECKED(val, uaddr)		\
 	((val) = fuword32(uaddr), 0)
 
-#define DRM_HZ			hz
-#define DRM_UDELAY(udelay)	DELAY(udelay)
-
 /* Does not appear to be used either BSD or Linux drm */
 #define DRM_GET_PRIV_SAREA(_dev, _ctx, _map) do {	\
 	(_map) = (_dev)->context_sareas[_ctx];		\
 } while(0)
-
-
-/* Returns -errno to shared code */
-#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
-for ( ret = 0 ; !ret && !(condition) ; ) {			\
-	DRM_UNLOCK();						\
-	lwkt_serialize_enter(&dev->irq_lock);			\
-	if (!(condition)) {					\
-            tsleep_interlock(&(queue), PCATCH);			\
-            lwkt_serialize_exit(&dev->irq_lock);		\
-            ret = -tsleep(&(queue), PCATCH | PINTERLOCKED,	\
-			  "drmwtq", (timeout));			\
-	} else {						\
-		lwkt_serialize_exit(&dev->irq_lock);		\
-	}							\
-	DRM_LOCK();						\
-}
 
 /* Legacy drm used only in this file? */
 typedef struct drm_pci_id_list

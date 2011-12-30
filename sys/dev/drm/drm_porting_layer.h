@@ -322,10 +322,6 @@ hweight16(uint16_t mask) {
 	return num_bits;
 }
 
-/* file drm_mode.c, function drm_mode_equal() */
-/* Convert kilohertz to picos */
-#define KHZ2PICOS(clock) (1000000000ul / (clock))
-
 /**********************************************************
  * C LIBRARY equivalents                                  *
  **********************************************************/
@@ -585,6 +581,7 @@ hash_long(unsigned long key, int bits) {
  * TIME                                                             *
  ********************************************************************/
 
+#define DRM_HZ			hz
 #define HZ	hz
 
 /* ticks defined in kern_clock.c as only int */
@@ -613,6 +610,8 @@ static __inline__ void
 do_gettimeofday(struct timeval *now) {
 	microtime(now);
 }
+
+#define DRM_UDELAY(udelay)	DELAY(udelay)
 
 /* spin delay in microseconds */
 static __inline__ void
@@ -648,6 +647,9 @@ msleep(unsigned int millis);
 void
 msleep_interruptible(unsigned int millis);
 
+/* Convert kilohertz to picos */
+#define KHZ2PICOS(clock) (1000000000ul / (clock))
+
 /**********************************************************
  * LOCKING                                                *
  **********************************************************/
@@ -666,6 +668,10 @@ msleep_interruptible(unsigned int millis);
 #define DRM_SPINUNLOCK_IRQRESTORE(u, irqflags) DRM_SPINUNLOCK(u)
 #define DRM_SPINLOCK_ASSERT(l)
 
+/*
+ * At the moment DRM_LOCK is only used for graphics card driver ioctls
+ * not for any other code.
+ */
 #define DRM_LOCK()		DRM_SPINLOCK(&dev->dev_lock)
 #define DRM_UNLOCK()		DRM_SPINUNLOCK(&dev->dev_lock)
 #define DRM_SYSCTL_HANDLER_ARGS	(SYSCTL_HANDLER_ARGS)
@@ -722,118 +728,133 @@ drm_write_flags(unsigned long flags) {
 		drm_write_flags(irqflags);   \
 	} while (0)
 
-/* file drm_fops.c, function drm_reclaim_locked_buffers() */
 /* UNIMPLEMENTED enabling or disabling soft interrupts */
 #define spin_lock_bh(l)    spin_lock(l)
 #define spin_unlock_bh(l)  spin_unlock(l)
 
-/**********************************************************
- * MUTEX                                                  *
- **********************************************************/
-
-/* drm_crtc.h, struct drm_mode_config, field mutex and idr_mutex */
-/* file ttm/ttm_global.c, function ttm_global_init() */
+/********************************************************************
+ * MUTEX                                                            *
+ ********************************************************************/
 
 #define mutex lock
 
-/* file ttm/ttm_global.c, function ttm_global_item_ref() */
-#define mutex_init(l)      lockinit(l, "linux_mutex", 0, LK_CANRECURSE)
-#define mutex_lock(l)      lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE)
-/* file vmwgfx_execbuf.c, function vmw_execbuf_ioctl() */
-#define mutex_lock_interruptible(l) lockmgr(l, LK_EXCLUSIVE | LK_RETRY | LK_CANRECURSE | LK_PCATCH)
-#define mutex_trylock(l)  !lockmgr(l, LK_EXCLUSIVE | LK_NOWAIT | LK_CANRECURSE)
-#define mutex_unlock(u)    lockmgr(u, LK_RELEASE)
+#define mutex_init(l)               lockinit(l, "lmutex", 0, LK_CANRECURSE)
+#define mutex_lock(l)               lockmgr(l, LK_EXCLUSIVE | LK_RETRY  | LK_CANRECURSE)
+#define mutex_lock_interruptible(l) lockmgr(l, LK_EXCLUSIVE | LK_RETRY  | LK_CANRECURSE | LK_PCATCH)
+#define mutex_trylock(l)           !lockmgr(l, LK_EXCLUSIVE | LK_NOWAIT | LK_CANRECURSE)
+#define mutex_unlock(u)             lockmgr(u, LK_RELEASE)
+#define mutex_is_locked(l)          lockstatus(l, NULL)
 
-/* file drm_gem.c, function drm_gem_object_free() */
-#define mutex_is_locked(l) lockstatus(l, NULL)
+/********************************************************************
+ * READER WRITER SPINLOCKS                                          *
+ ********************************************************************/
 
-/*
- * Reader Writer Spinlocks
- */
-
-/* file ttm/ttm_object.c,
- * function ttm_object_file() */
 typedef struct lock rwlock_t;
 
-/* file ttm/ttm_object.c,
- * function ttm_object_file_init() */
 #define rwlock_init(l)   lockinit(l, "lrwspi", 0, LK_CANRECURSE)
-
-/* file ttm/ttm_object.c, function ttm_base_object_lookup() */
 #define read_lock(l)     lockmgr(l, LK_SHARED | LK_RETRY)
 #define read_unlock(l)   lockmgr(l, LK_RELEASE)
-
-/* file ttm/ttm_object.c, function ttm_base_object_init() */
 #define write_lock(l)    lockmgr(l, LK_EXCLUSIVE | LK_RETRY)
 #define write_unlock(l)  lockmgr(l, LK_RELEASE)
 
-/* file radeon_pm.c, function radeon_dynpm_idle_work_handler() */
-static __inline__ void
-read_lock_irqsave(rwlock_t *lock, unsigned long flags) {
-	lockmgr(lock, LK_SHARED | LK_RETRY);
-	(void)flags;
-}
+/* save flags, disable hard interrupts, lock */
+#define read_lock_irqsave(l, irqflags)                            \
+        do {                                                      \
+		irqflags = drm_read_flags();                      \
+		cpu_disable_intr();                               \
+                lockmgr(l, LK_SHARED | LK_RETRY | LK_CANRECURSE); \
+        } while (0)
 
-/* file radeon_pm.c, function radeon_dynpm_idle_work_handler() */
-static __inline__ void
-read_unlock_irqrestore(rwlock_t *lock, unsigned long flags) {
-	lockmgr(lock, LK_RELEASE);
-}
+/* unlock, enable hard interrupts, restore flags */
+#define read_unlock_irqrestore(l, irqflags)                       \
+	do {                                                      \
+		lockmgr(l, LK_RELEASE);                           \
+		cpu_enable_intr();                                \
+		drm_write_flags(irqflags);                        \
+	} while (0)
 
-/* file radeon_fence.c, function radeon_fence_emit() */
-static __inline__ void
-write_lock_irqsave(rwlock_t *lock, unsigned long flags) {
-	lockmgr(lock, LK_EXCLUSIVE | LK_RETRY);
-	(void)flags;
-}
+/* save flags, disable hard interrupts, lock */
+#define write_lock_irqsave(l, irqflags)                           \
+        do {                                                      \
+		irqflags = drm_read_flags();                      \
+		cpu_disable_intr();                               \
+                lockmgr(l, LK_EXCLUSIVE | LK_RETRY);              \
+        } while (0)
 
-/* file radeon_fence.c, function radeon_fence_emit() */
-static __inline__ void
-write_unlock_irqrestore(rwlock_t *lock, unsigned long flags) {
-	lockmgr(lock, LK_RELEASE);
-}
+/* unlock, enable hard interrupts, restore flags */
+#define write_unlock_irqrestore(l, irqflags)                      \
+	do {                                                      \
+		lockmgr(l, LK_RELEASE);                           \
+		cpu_enable_intr();                                \
+		drm_write_flags(irqflags);                        \
+	} while (0)
 
-/*
- * Semaphores
- */
+/********************************************************************
+ * SEMAPHORES                                                       *
+ ********************************************************************/
 
-/* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 /* Obviously this is not a rw-semaphore */
 /* but all downs seem to be matched with ups */
 typedef struct lock DRM_RWSEMAPHORE;
 
-/* file vmwgfx/vmwgfx_fifo.c */
 static __inline__ void
 init_rwsem(DRM_RWSEMAPHORE *rwlock) {
 	lockinit(rwlock, "lrwsem", 0, LK_CANRECURSE);
 }
 
-/* file ttm/ttm_tt.c, function ttm_tt_set_user() */
-/* file vmwgfx/vmwgfx_irq.c, function vmw_fallback_wait() */
 static __inline__ void
 down_read(DRM_RWSEMAPHORE *sem) {
 	lockmgr(sem, LK_SHARED | LK_RETRY);
 }
 
-/* file ttm/ttm_tt.c, function ttm_tt_set_user() */
-/* file vmwgfx/vmwgfx_irq.c, function vmw_fallback_wait() */
 static __inline__ void
 up_read(DRM_RWSEMAPHORE *sem) {
 	lockmgr(sem, LK_RELEASE);
 }
 
-/* file ttm/ttm_tt.c, function ttm_tt_set_user() */
-/* file vmwgfx_fifo.c, function vmw_fifo_commit() */
 static __inline__ void
 down_write(DRM_RWSEMAPHORE *rwlock) {
 	lockmgr(rwlock, LK_EXCLUSIVE | LK_RETRY);
 }
 
-/* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 static __inline__ void
 up_write(DRM_RWSEMAPHORE *rwlock) {
 	lockmgr(rwlock, LK_RELEASE);
 }
+
+
+/********************************************************************
+ * IRQ                                                              *
+ ********************************************************************/
+
+/* Used for return value,
+ * should probably rewrite IRQ handlers for DragonflyBSD
+ * to not have a return value
+ */
+typedef int			irqreturn_t;
+
+/* UNIMPLEMENTED
+ * Arbitrarily defined to compile,
+ * values only used for return not for comparison in drm
+ */
+#define IRQ_HANDLED		0x00
+#define IRQ_NONE		0x01
+
+#define DRM_IRQ_ARGS		void *arg
+
+/* save flags, disable hard interrupts */
+#define local_irq_save(irqflags)                                  \
+        do {                                                      \
+		irqflags = drm_read_flags();                      \
+		cpu_disable_intr();                               \
+        } while (0)
+
+/* enable hard interrupts, restore flags */
+#define local_irq_restore(irqflags)                               \
+	do {                                                      \
+		cpu_enable_intr();                                \
+		drm_write_flags(irqflags);                        \
+	} while (0)
 
 /**********************************************************
  * DATA STRUCTURES                                        *
@@ -1114,20 +1135,69 @@ capable(int capacity) {
 
 #define wait_queue_head_t atomic_t
 
-/* file ttm/ttm_module.c, preamble */
 #define DECLARE_WAIT_QUEUE_HEAD(var) wait_queue_head_t var
 
-/* file ttm/ttm_lock.c, function ttm_lock_init() */
 static __inline__ void
 init_waitqueue_head(wait_queue_head_t *wqh) {
 	;
 }
 
-/* file drm_dma.c, function drm_free_buffer() */
 static __inline__ int
 waitqueue_active(wait_queue_head_t *wqh) {
 	return 0;
 }
+
+/* Instead of sleeping potentially forever wait 1/10 seconds */
+#define DRM_TIMEOUT  (HZ / 10)
+
+/*
+ * Assert that in Linux 2.6.34.7 drm, DRM_WAIT_ON is
+ * only called in a graphics device driver ioctl,
+ * so that DRM_LOCK is held when called,
+ * with one exception in drm_irq.c that needs to be changed.
+ * Called in mga_driver_fence_wait() in mga_irq.c, which is
+ * only called by mga_wait_fence() in mga_state.c, which in turn
+ * services mga driver ioctl DRM_MGA_WAIT_FENCE.
+ * Called in i915_wait_irq() in i915_irq.c, which is
+ * only called by i915_irq_wait(), which in turn
+ * services i915 driver ioctl DRM_I915_IRQ_WAIT.
+ * Called in radeon_wait_irq() in radeon_irq.c, which is
+ * only called by radeon_irq_wait(), which in turn
+ * services (non-KMS) DRM_RADEON_IRQ_WAIT.
+ */
+/* Returns -errno to shared code */
+
+#ifdef DRM_NEWER_RATLOCK
+#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
+for ( ret = 0 ; !ret && !(condition) ; ) {			\
+	DRM_UNLOCK();						\
+	lwkt_serialize_enter(&dev->irq_lock);			\
+	if (!(condition)) {					\
+            tsleep_interlock(&(queue), PCATCH);			\
+            lwkt_serialize_exit(&dev->irq_lock);		\
+            ret = -tsleep(&(queue), PCATCH | PINTERLOCKED,	\
+			  "drmwtq", (timeout));			\
+	} else {						\
+		lwkt_serialize_exit(&dev->irq_lock);		\
+	}							\
+	DRM_LOCK();						\
+}
+#else
+#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
+for ( ret = 0 ; !ret && !(condition) ; ) {			\
+	DRM_UNLOCK();						\
+	lwkt_serialize_enter(&dev->irq_lock);			\
+	if (!(condition)) {					\
+            tsleep_interlock(&(queue), PCATCH);			\
+            lwkt_serialize_exit(&dev->irq_lock);		\
+            ret = -tsleep(&(queue), PCATCH | PINTERLOCKED,	\
+			  "drmwtq", (timeout));			\
+	} else {						\
+		lwkt_serialize_exit(&dev->irq_lock);		\
+	}							\
+	DRM_LOCK();						\
+}
+#endif
 
 /* GCC extension for statement expression */
 
@@ -1213,55 +1283,6 @@ static __inline__ void
 wake_up_interruptible_all(void *wqh) {
 	wakeup(wqh);
 }
-
-/**********************************************************
- * SIGNALS AND INTERRUPTS                                 *
- **********************************************************/
-
-/*
- * IRQ
- */
-/* legacy drm drmP.h */
-
-typedef int			irqreturn_t;
-#define IRQ_HANDLED		0x00
-#define IRQ_NONE		0x01
-
-#define DRM_IRQ_ARGS		void *arg
-
-/* file drm_irq.c, function drm_irq_install() */
-static __inline__ int
-request_irq(
-	int irq,
-	irqreturn_t (*irqhandler)(DRM_IRQ_ARGS),
-	uint32_t flags,
-	char *name,
-	void *dev
-) {
-	return 0;
-}
-
-/* file drm_irq.c, function drm_irq_uninstall() */
-static __inline__ int
-free_irq(
-	int irq,
-	void *dev
-) {
-	return 0;
-}
-
-/* file i915_irq.c, function i915_error_object_create() */
-static __inline__ void
-local_irq_save(unsigned long flags) {
-	;
-}
-
-/* file i915_irq.c, function i915_error_object_create() */
-static __inline__ void
-local_irq_restore(unsigned long flags) {
-	;
-}
-
 /* file drm_fops.c, function drm_cpu_valid() */
 /* boot_cpu_data.x86 appears to be an int sometimes 3 */
 

@@ -74,7 +74,7 @@
 #define DRM_NEWER_IRQSYNCH 1
 #endif
 
-#ifdef DRM_NEWER_IRQSYNCH
+#if 0
 static int drm_msi = 1;	/* Enable by default. */
 TUNABLE_INT("hw.drm.msi", &drm_msi);
 
@@ -269,7 +269,9 @@ int drm_vblank_init(struct drm_device *dev, int num_crtcs)
 		goto err;
 
 	/* Zero per-crtc vblank stuff */
+#ifndef __linux__ /* QUESTION: required? */
 	DRM_SPINLOCK(&dev->vbl_lock);
+#endif
 	for (i = 0; i < num_crtcs; i++) {
 		DRM_INIT_WAITQUEUE(&dev->vbl_queue[i]);
 		atomic_set_rel_32(&dev->vblank_refcount[i], 0);
@@ -277,7 +279,9 @@ int drm_vblank_init(struct drm_device *dev, int num_crtcs)
 	}
 
 	dev->vblank_disable_allowed = 0;
+#ifndef __linux__
 	DRM_SPINUNLOCK(&dev->vbl_lock);
+#endif
 	return 0;
 
 err:
@@ -322,7 +326,7 @@ int drm_irq_install(struct drm_device *dev)
 	unsigned long sh_flags = 0;
 	char *irqname;
 #else /* !__linux__ */
-#ifdef DRM_NEWER_IRQSYNCH
+#if 0
 	int sh_flags = 0;
 #if 0
 	int msicount;
@@ -366,7 +370,7 @@ int drm_irq_install(struct drm_device *dev)
 	else
 		irqname = dev->driver->name;
 #else
-#ifdef DRM_NEWER_IRQSYNCH
+#if 0
 	if (drm_core_check_feature(dev, DRIVER_IRQ_SHARED))
 		sh_flags = RF_SHAREABLE | RF_ACTIVE;
 #endif
@@ -376,7 +380,7 @@ int drm_irq_install(struct drm_device *dev)
 	ret = request_irq(drm_dev_to_irq(dev), dev->driver->irq_handler,
 			  sh_flags, irqname, dev);
 #else
-#ifdef DRM_NEWER_IRQSYNCH
+#if 0
 	if (drm_msi &&
 		!drm_msi_is_blacklisted(dev->pci_vendor, dev->pci_device)) {
 #if 0
@@ -909,7 +913,7 @@ int drm_wait_vblank(struct drm_device *dev, void *data,
 		goto done;
 	}
 
-#ifdef DRM_NEWER_IRQRISK
+#if 1
 	if (flags & _DRM_VBLANK_EVENT)
 		return drm_queue_vblank_event(dev, crtc, vblwait, file_priv);
 #endif
@@ -923,6 +927,7 @@ int drm_wait_vblank(struct drm_device *dev, void *data,
 		  vblwait->request.sequence, crtc);
 	dev->last_vblank_wait[crtc] = vblwait->request.sequence;
 
+/* legacy BSD drm does not have DRM_LOCK held anymore here */
 #ifdef __linux__
 	DRM_WAIT_ON(ret, dev->vbl_queue[crtc], 3 * DRM_HZ,
 		    (((drm_vblank_count(dev, crtc) -
@@ -1025,7 +1030,7 @@ void drm_handle_vblank(struct drm_device *dev, int crtc)
 	atomic_add_rel_32(&dev->_vblank_count[crtc], 1);
 #endif
 	DRM_WAKEUP(&dev->vbl_queue[crtc]);
-#if DRM_NEWER_IRQRISK
+#if 1 
 	drm_handle_vblank_events(dev, crtc);
 #endif /* __linux__ */
 }
