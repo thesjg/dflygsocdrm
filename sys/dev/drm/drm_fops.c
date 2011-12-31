@@ -552,7 +552,12 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 	if (drm_i_have_hw_lock(dev, file_priv)) {
 		dev->driver->reclaim_buffers_locked(dev, file_priv);
 	} else {
+#ifdef __linux__
 		unsigned long _end = jiffies + 3 * DRM_HZ;
+#else
+		int _end = jiffies + 3 * DRM_HZ;
+#endif
+
 		int locked = 0;
 
 		drm_idlelock_take(&file_priv->master->lock);
@@ -572,7 +577,7 @@ static void drm_reclaim_locked_buffers(struct drm_device *dev, struct drm_file *
 			tsleep_interlock((void *)&file_priv->master->lock.lock_queue, PCATCH);
 			spin_unlock(&dev->file_priv_lock);
 			tsleep((void *)&file_priv->master->lock.lock_queue,
-					 PCATCH | PINTERLOCKED, "drmlk2", _end);
+					 PCATCH | PINTERLOCKED, "drmlk2", DRM_TIMEOUT);
 			spin_lock(&dev->file_priv_lock);
 #endif
 		} while (!time_after_eq(jiffies, _end));
@@ -965,8 +970,8 @@ int drm_read_legacy(struct dev_read_args *ap)
 			error = EWOULDBLOCK;
 			break;
 		}
-		error = tsleep(&file_priv->event_wait, PCATCH, "drmrek", 0);
-		if (error)
+		error = tsleep(&file_priv->event_wait, PCATCH, "drmrek", DRM_TIMEOUT);
+		if ((error == ERESTART) || (error == EINTR))
 			break;
 	}
 	crit_exit();

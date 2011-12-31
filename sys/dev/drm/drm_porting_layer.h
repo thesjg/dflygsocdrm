@@ -1148,6 +1148,7 @@ waitqueue_active(wait_queue_head_t *wqh) {
 }
 
 /* Instead of sleeping potentially forever wait 1/10 seconds */
+#define DRM_NEWER_RATLOCK 1
 #define DRM_TIMEOUT  (HZ / 10)
 
 /*
@@ -1168,20 +1169,37 @@ waitqueue_active(wait_queue_head_t *wqh) {
 /* Returns -errno to shared code */
 
 #ifdef DRM_NEWER_RATLOCK
-#define DRM_WAIT_ON( ret, queue, timeout, condition )		\
-for ( ret = 0 ; !ret && !(condition) ; ) {			\
-	DRM_UNLOCK();						\
-	lwkt_serialize_enter(&dev->irq_lock);			\
-	if (!(condition)) {					\
-            tsleep_interlock(&(queue), PCATCH);			\
-            lwkt_serialize_exit(&dev->irq_lock);		\
-            ret = -tsleep(&(queue), PCATCH | PINTERLOCKED,	\
-			  "drmwtq", (timeout));			\
-	} else {						\
-		lwkt_serialize_exit(&dev->irq_lock);		\
-	}							\
-	DRM_LOCK();						\
-}
+#define DRM_WAIT_ON( ret, queue, timeout, condition )                   \
+do {                                                                    \
+	int _end = jiffies + (timeout);                                 \
+	int _wait = ((HZ / 100) > 1) ? (HZ / 100) : 2;                  \
+	lwkt_serialize_enter(&dev->irq_lock);                           \
+	ret = 0;                                                        \
+	for (;;) {                                                      \
+		if (!(condition)) {					\
+	        	tsleep_interlock(&(queue), PCATCH);             \
+			lwkt_serialize_exit(&dev->irq_lock);		\
+			DRM_UNLOCK();                                   \
+	            	ret = -tsleep(&(queue), PCATCH | PINTERLOCKED,	\
+				"drmwtq", (_wait));			\
+			DRM_LOCK();					\
+			lwkt_serialize_enter(&dev->irq_lock);           \
+			if ((ret == -ERESTART) || (ret == -EINTR)) {    \
+				ret = -EINTR;                           \
+				break;                                  \
+			} else if (time_after(jiffies, _end)) {         \
+				ret = -EBUSY;                           \
+				break;                                  \
+			}                                               \
+		}                                                       \
+		else {                                                  \
+			ret = 0;                                        \
+			break;                                          \
+		}							\
+	}                                                               \
+	lwkt_serialize_exit(&dev->irq_lock);                            \
+}                                                                       \
+while (0)
 #else
 #define DRM_WAIT_ON( ret, queue, timeout, condition )		\
 for ( ret = 0 ; !ret && !(condition) ; ) {			\
