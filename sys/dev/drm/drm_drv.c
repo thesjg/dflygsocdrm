@@ -94,9 +94,6 @@ static int drm_version(struct drm_device *dev, void *data,
 
 /** Ioctl table */
 static struct drm_ioctl_desc drm_ioctls[] = {
-#if 0
-static struct drm_ioctl_desc drm_ioctls[256] = {
-#endif
 	DRM_IOCTL_DEF(DRM_IOCTL_VERSION, drm_version, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_UNIQUE, drm_getunique, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_MAGIC, drm_getmagic, 0),
@@ -105,17 +102,12 @@ static struct drm_ioctl_desc drm_ioctls[256] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_CLIENT, drm_getclient, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_GET_STATS, drm_getstats, 0),
 	DRM_IOCTL_DEF(DRM_IOCTL_SET_VERSION, drm_setversion, DRM_MASTER),
-#if 0
-	DRM_IOCTL_DEF(DRM_IOCTL_SET_VERSION, drm_setversion, DRM_MASTER|DRM_ROOT_ONLY),
-#endif
 
 	DRM_IOCTL_DEF(DRM_IOCTL_SET_UNIQUE, drm_setunique, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_BLOCK, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_UNBLOCK, drm_noop, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_AUTH_MAGIC, drm_authmagic, DRM_AUTH|DRM_MASTER),
-#if 0
-	DRM_IOCTL_DEF(DRM_IOCTL_AUTH_MAGIC, drm_authmagic, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
-#endif
+
 	DRM_IOCTL_DEF(DRM_IOCTL_ADD_MAP, drm_addmap_ioctl, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 	DRM_IOCTL_DEF(DRM_IOCTL_RM_MAP, drm_rmmap_ioctl, DRM_AUTH),
 
@@ -148,9 +140,6 @@ static struct drm_ioctl_desc drm_ioctls[256] = {
 	DRM_IOCTL_DEF(DRM_IOCTL_FREE_BUFS, drm_freebufs, DRM_AUTH),
 	/* The DRM_IOCTL_DMA ioctl should be defined by the driver. */
 	DRM_IOCTL_DEF(DRM_IOCTL_DMA, NULL, DRM_AUTH),
-#if 0
-	DRM_IOCTL_DEF(DRM_IOCTL_DMA, drm_dma, DRM_AUTH),
-#endif
 
 	DRM_IOCTL_DEF(DRM_IOCTL_CONTROL, drm_control, DRM_AUTH|DRM_MASTER|DRM_ROOT_ONLY),
 
@@ -648,7 +637,7 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	atomic_inc(&dev->ioctl_count);
 #endif /* !__linux__ */
 
-#ifdef DRM_NEWER_IOCTL
+/* DRM_NEWER_IOCTL */
 	if ((nr >= DRM_CORE_IOCTL_COUNT) &&
 	    ((nr < DRM_COMMAND_BASE) || (nr >= DRM_COMMAND_END)))
 		goto err_i1;
@@ -676,7 +665,7 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 #endif /* !__linux__ */
 	} else
 		goto err_i1;
-#else /* DRM_NEWER_IOCTL */
+#if 0 /* !DRM_NEWER_IOCTL */
 	ioctl = &drm_ioctls[nr];
 	/* It's not a core DRM ioctl, try driver-specific. */
 	if (ioctl->func == NULL && nr >= DRM_COMMAND_BASE) {
@@ -701,56 +690,124 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	if (!func) {
 		DRM_DEBUG("no function\n");
 		retcode = EINVAL;
-		goto err_i1;
+	} else
+#ifdef __linux__
+	        if (((ioctl->flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN)) ||
+		   ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
+		   ((ioctl->flags & DRM_MASTER) && !file_priv->is_master) ||
+		   (!(ioctl->flags & DRM_CONTROL_ALLOW) && (file_priv->minor->type == DRM_MINOR_CONTROL))) {
+		retcode = -EACCES;
 	}
-
-	if (((ioctl->flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN)) ||
-	    ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
-	    ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
+#else
+	        if (((ioctl->flags & DRM_ROOT_ONLY) && !capable(CAP_SYS_ADMIN)) ||
+	 	   ((ioctl->flags & DRM_AUTH) && !file_priv->authenticated) ||
+	 	   ((ioctl->flags & DRM_MASTER) && !file_priv->is_master)) {
 		retcode = EACCES;
-		goto err_i1;
 	}
+#endif
+	  else {
+#ifndef __linux__
+		if (!(ioctl->flags & DRM_CONTROL_ALLOW) && (file_priv->minor->type == DRM_MINOR_CONTROL)) {
+			DRM_ERROR("!DRM_CONTROL_ALLOW yet minor->type == DRM_MINOR_CONTROL!\n");
+		}
+#endif
 
+#ifdef __linux__
+		if (cmd & (IOC_IN | IOC_OUT)) {
+			if (_IOC_SIZE(cmd) <= sizeof(stack_kdata)) {
+				kdata = stack_kdata;
+			} else {
+				kdata = kmalloc(_IOC_SIZE(cmd), GFP_KERNEL);
+				if (!kdata) {
+					retcode = -ENOMEM;
+					goto err_i1;
+				}
+			}
+		}
+
+		if (cmd & IOC_IN) {
+			if (copy_from_user(kdata, (void __user *)arg,
+					   _IOC_SIZE(cmd)) != 0) {
+				retcode = -EFAULT;
+				goto err_i1;
+			}
+		} else
+			memset(kdata, 0, _IOC_SIZE(cmd));
+#endif /* __linux__ */
+
+#if 0
 	if (is_driver_ioctl) {
 		if (!(ioctl->flags & DRM_UNLOCKED))
-#ifdef DRM_NEWER_RATLOCK
+/* DRM_NEWER_RATLOCK */
 			mutex_lock(&drm_global_mutex);
-#else
+#if 0 /* !DRM_NEWER_RATLOCK */
 			lock_kernel();
-#endif
+#endif /* DRM_NEWER_RATLOCK */
 /* legacy drm BSD: this lock seems essential for stability */
-#ifndef DRM_NEWER_RATLOCK
+#if 0 /* !DRM_NEWER_RATLOCK */
 		DRM_LOCK();
 #endif
 		retcode = -func(dev, data, file_priv);
-#ifndef DRM_NEWER_RATLOCK
+#if 0 /* !DRM_NEWER_RATLOCK */
 		DRM_UNLOCK();
 #endif
 
 		if (!(ioctl->flags & DRM_UNLOCKED))
-#ifdef DRM_NEWER_RATLOCK
+/* DRM_NEWER_RATLOCK */
 			mutex_unlock(&drm_global_mutex);
-#else
+#if 0 /* !DRM_NEWER_RATLOCK */
 			unlock_kernel();
-#endif
+#endif /* DRM_NEWER_RATLOCK */
 	} else {
 		if (!(ioctl->flags & DRM_UNLOCKED))
-#ifdef DRM_NEWER_RATLOCK
+/* DRM_NEWER_RATLOCK */
 			mutex_lock(&drm_global_mutex);
-#else
+#if 0 /* !DRM_NEWER_RATLOCK */
 			lock_kernel();
-#endif
+#endif /* DRM_NEWER_RATLOCK */
 		retcode = -func(dev, data, file_priv);
 
 		if (!(ioctl->flags & DRM_UNLOCKED))
-#ifdef DRM_NEWER_RATLOCK
+/* DRM_NEWER_RATLOCK */
 			mutex_unlock(&drm_global_mutex);
-#else
+#if 0 /* !DRM_NEWER_RATLOCK */
 			unlock_kernel();
+#endif /* DRM_NEWER_RATLOCK */
+	}
+#endif
+
+#ifdef __linux__
+		if (ioctl->flags & DRM_UNLOCKED)
+			retcode = func(dev, kdata, file_priv);
+		else {
+			lock_kernel();
+			retcode = func(dev, kdata, file_priv);
+			unlock_kernel();
+		}
+#else
+		if (ioctl->flags & DRM_UNLOCKED)
+			retcode = -func(dev, data, file_priv);
+		else {
+			mutex_lock(&drm_global_mutex);
+			retcode = -func(dev, data, file_priv);
+			mutex_unlock(&drm_global_mutex);
+		}
+#endif
+
+#ifdef __linux__
+		if (cmd & IOC_OUT) {
+			if (copy_to_user((void __user *)arg, kdata,
+					 _IOC_SIZE(cmd)) != 0)
+				retcode = -EFAULT;
+		}
 #endif
 	}
 
       err_i1:
+#ifdef __linux__
+	if (kdata != stack_kdata)
+		kfree(kdata);
+#endif
 	atomic_dec(&dev->ioctl_count);
 	if (retcode)
 		DRM_DEBUG("ret = %x\n", retcode);
