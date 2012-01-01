@@ -713,29 +713,41 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 
 	if (is_driver_ioctl) {
 		if (!(ioctl->flags & DRM_UNLOCKED))
+#ifdef DRM_NEWER_RATLOCK
+			mutex_lock(&drm_global_mutex);
+#else
 			lock_kernel();
-/* this lock seems essential for stability */
-#ifndef __linux__
+#endif
+/* legacy drm BSD: this lock seems essential for stability */
+#ifndef DRM_NEWER_RATLOCK
 		DRM_LOCK();
-#endif /* __linux__ */
+#endif
 		retcode = -func(dev, data, file_priv);
-#ifndef __linux__
+#ifndef DRM_NEWER_RATLOCK
 		DRM_UNLOCK();
-#endif /* __linux__ */
-
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			unlock_kernel();
-	} else {
-		if (!(ioctl->flags & DRM_UNLOCKED))
-			lock_kernel();
-
-		retcode = -func(dev, data, file_priv);
-#if 0
-		retcode = func(dev, data, file_priv);
 #endif
 
 		if (!(ioctl->flags & DRM_UNLOCKED))
+#ifdef DRM_NEWER_RATLOCK
+			mutex_unlock(&drm_global_mutex);
+#else
 			unlock_kernel();
+#endif
+	} else {
+		if (!(ioctl->flags & DRM_UNLOCKED))
+#ifdef DRM_NEWER_RATLOCK
+			mutex_lock(&drm_global_mutex);
+#else
+			lock_kernel();
+#endif
+		retcode = -func(dev, data, file_priv);
+
+		if (!(ioctl->flags & DRM_UNLOCKED))
+#ifdef DRM_NEWER_RATLOCK
+			mutex_unlock(&drm_global_mutex);
+#else
+			unlock_kernel();
+#endif
 	}
 
       err_i1:

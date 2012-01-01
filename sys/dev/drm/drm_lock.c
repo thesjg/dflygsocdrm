@@ -117,8 +117,13 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 #else
 		tsleep_interlock((void *)&master->lock.lock_queue, PCATCH);
 //		DRM_UNLOCK();
+#ifdef DRM_NEWER_RATLOCK
+		ret = lksleep((void *)&master->lock.lock_queue, &drm_global_mutex,
+			     PCATCH | PINTERLOCKED, "drmlk2", 0);
+#else
 		ret = tsleep((void *)&master->lock.lock_queue,
 			     PCATCH | PINTERLOCKED, "drmlk2", 0);
+#endif
 //		DRM_LOCK();
 		if (ret != 0)
 			break;

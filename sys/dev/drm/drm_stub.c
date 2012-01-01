@@ -591,6 +591,9 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 #endif /* !DRM_NEWER_IRQSYNCH */
 #endif /* __linux__ */
 
+#ifdef DRM_NEWER_RATLOCK
+	mutex_lock(&drm_global_mutex);
+#endif
 	if ((ret = drm_fill_in_dev(dev, kdev, idlist, dev->driver))) {
 		printk(KERN_ERR "DRM: Fill_in_dev failed.\n");
 		goto err_g2;
@@ -639,7 +642,9 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 		dev->driver->name, dev->driver->major,
 		dev->driver->minor, dev->driver->patchlevel,
 		dev->driver->date, device_get_desc(kdev), dev->unit);
-
+#ifdef DRM_NEWER_RATLOCK
+	mutex_unlock(&drm_global_mutex);
+#endif
 	return 0;
 
 err_g4:
@@ -652,6 +657,9 @@ err_g2:
 	pci_disable_device(pdev);
 err_g1:
 #endif /* __linux__ */
+#ifdef DRM_NEWER_RATLOCK
+	mutex_unlock(&drm_global_mutex);
+#endif
 	return ret;
 }
 EXPORT_SYMBOL(drm_get_dev);

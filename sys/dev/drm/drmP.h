@@ -1373,6 +1373,7 @@ int	drm_attach(device_t kdev, DRM_PCI_DEVICE_ID *idlist);
 int	drm_detach(device_t kdev);
 
 				/* Device support (drm_fops.h) */
+extern struct mutex drm_global_mutex;
 extern int drm_open(struct inode *inode, struct file *filp);
 extern int drm_stub_open(struct inode *inode, struct file *filp);
 extern int drm_fasync(int fd, struct file *filp, int on);

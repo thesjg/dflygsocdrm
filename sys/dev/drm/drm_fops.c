@@ -65,6 +65,10 @@ struct drm_file *drm_find_file_by_proc(struct drm_device *dev, DRM_STRUCTPROC *p
 static struct kqinfo drm_kqevent;
 #endif /* !__linux__ */
 
+/* from BKL pushdown: note that nothing else serializes idr_find() */
+DEFINE_MUTEX(drm_global_mutex);
+EXPORT_SYMBOL(drm_global_mutex);
+
 #ifdef __linux__
 static int drm_open_helper(struct inode *inode, struct file *filp,
 			   struct drm_device * dev);
@@ -212,18 +216,24 @@ int drm_open_legacy(DRM_OPEN_ARGS)
 #endif
 	if (!retcode) {
 		atomic_inc(&dev->counts[_DRM_STAT_OPENS]);
+#ifndef DRM_NEWER_NOCOUNT
 		spin_lock(&dev->count_lock);
+#endif
 
 #ifndef __linux__ /* legacy BSD change balanced in drm_close_legacy */
 		device_busy(dev->device);
 #endif
 
 		if (!dev->open_count++) {
+#ifndef DRM_NEWER_NOCOUNT
 			spin_unlock(&dev->count_lock);
+#endif
 			retcode = drm_setup(dev);
 			goto out;
 		}
+#ifndef DRM_NEWER_NOCOUNT
 		spin_unlock(&dev->count_lock);
+#endif
 	}
 out:
 #ifdef __linux__ /* UNIMPLEMENTED */
@@ -266,8 +276,7 @@ int drm_stub_open(struct inode *inode, struct file *filp)
 
 	DRM_DEBUG("\n");
 
-	/* BKL pushdown: note that nothing else serializes idr_find() */
-	lock_kernel();
+	mutex_lock(&drm_global_mutex);
 	minor = idr_find(&drm_minors_idr, minor_id);
 	if (!minor)
 		goto out;
@@ -288,7 +297,7 @@ int drm_stub_open(struct inode *inode, struct file *filp)
 	fops_put(old_fops);
 
 out:
-	unlock_kernel();
+	mutex_unlock(&drm_global_mutex);
 	return err;
 }
 
@@ -686,7 +695,11 @@ int drm_close_legacy(struct dev_close_args *ap)
 #endif /* __linux__ */
 	int retcode = 0;
 
+#ifdef DRM_NEWER_RATLOCK
+	mutex_lock(&drm_global_mutex);
+#else
 	lock_kernel();
+#endif
 
 	DRM_DEBUG("open_count = %d\n", dev->open_count);
 
@@ -828,7 +841,9 @@ done:
 	spin_unlock(&dev->file_priv_lock);
 #endif
 	atomic_inc(&dev->counts[_DRM_STAT_CLOSES]);
+#ifndef DRM_NEWER_NOCOUNT
 	spin_lock(&dev->count_lock);
+#endif /* !DRM_NEWER_NOCOUNT */
 #ifndef __linux__
 	device_unbusy(dev->device);
 #endif
@@ -836,17 +851,37 @@ done:
 		if (atomic_read(&dev->ioctl_count)) {
 			DRM_ERROR("Device busy: %d\n",
 				  atomic_read(&dev->ioctl_count));
+#ifdef DRM_NEWER_RATLOCK
+#ifndef DRM_NEWER_NOCOUNT
+			spin_unlock(&dev->count_lock);
+#endif /* !DRM_NEWER_NOCOUNT */
+			mutex_unlock(&drm_global_mutex);
+#else
 			spin_unlock(&dev->count_lock);
 			unlock_kernel();
+#endif /* DRM_NEWER_RATLOCK */
 			return EBUSY;
 		}
+#ifdef DRM_NEWER_RATLOCK
+#ifndef DRM_NEWER_NOCOUNT
+		spin_unlock(&dev->count_lock);
+#endif /* !DRM_NEWER_NOCOUNT */
+		mutex_unlock(&drm_global_mutex);
+#else
 		spin_unlock(&dev->count_lock);
 		unlock_kernel();
+#endif
 		return drm_lastclose(dev);
 	}
+#ifdef DRM_NEWER_RATLOCK
+#ifndef DRM_NEWER_NOCOUNT
 	spin_unlock(&dev->count_lock);
-
+#endif /* !DRM_NEWER_NOCOUNT */
+	mutex_unlock(&drm_global_mutex);
+#else
+	spin_unlock(&dev->count_lock);
 	unlock_kernel();
+#endif
 
 	return retcode;
 }

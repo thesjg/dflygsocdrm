@@ -934,6 +934,12 @@ int drm_wait_vblank(struct drm_device *dev, void *data,
 		       vblwait->request.sequence) <= (1 << 23)) ||
 		     !dev->irq_enabled));
 #else
+#ifdef DRM_NEWER_RATLOCK
+	DRM_WAIT_ON(ret, dev->vbl_queue[crtc], 3 * DRM_HZ,
+		    (((drm_vblank_count(dev, crtc) -
+		       vblwait->request.sequence) <= (1 << 23)) ||
+		     !dev->irq_enabled));
+#else
 	for ( ret = 0 ; !ret && !(((drm_vblank_count(dev, crtc) -
 	    vblwait->request.sequence) <= (1 << 23)) ||
 	    !dev->irq_enabled) ; ) {
@@ -946,6 +952,7 @@ int drm_wait_vblank(struct drm_device *dev, void *data,
 			    3 * DRM_HZ);
 		lwkt_serialize_exit(&dev->irq_lock);
 	}
+#endif /* DRM_NEWER_RATLOCK */
 #endif
 
 	if ((ret != EINTR) && (ret != ERESTART)) {

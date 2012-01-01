@@ -745,6 +745,24 @@ drm_write_flags(unsigned long flags) {
 #define mutex_unlock(u)             lockmgr(u, LK_RELEASE)
 #define mutex_is_locked(l)          lockstatus(l, NULL)
 
+/*
+ * Combines lock_init() from kern/kern_lock.c
+ * and spin_init() from sys/spinlock2.h
+ */
+#define DEFINE_MUTEX(mut) struct lock mut = {  \
+	.lk_spinlock = {                       \
+		.counta = 0,                   \
+                .countb = 0,                   \
+	},                                     \
+	.lk_flags = 0,                         \
+	.lk_sharecount = 0,                    \
+	.lk_waitcount = 0,                     \
+	.lk_exclusivecount = 0,                \
+	.lk_wmesg = "drmglo",                  \
+	.lk_timo = 0,                          \
+	.lk_lockholder = LK_NOTHREAD,          \
+}
+
 /********************************************************************
  * READER WRITER SPINLOCKS                                          *
  ********************************************************************/
@@ -1149,6 +1167,9 @@ waitqueue_active(wait_queue_head_t *wqh) {
 
 /* Instead of sleeping potentially forever wait 1/10 seconds */
 #define DRM_NEWER_RATLOCK 1
+#if 0
+#define DRM_NEWER_NOCOUNT 1
+#endif
 #define DRM_TIMEOUT  (HZ / 10)
 
 /*
@@ -1168,7 +1189,38 @@ waitqueue_active(wait_queue_head_t *wqh) {
  */
 /* Returns -errno to shared code */
 
+#if 1
 #ifdef DRM_NEWER_RATLOCK
+#define DRM_WAIT_ON( ret, queue, timeout, condition )                      \
+do {                                                                       \
+	int _end = jiffies + (timeout);                                    \
+	int _wait = ((HZ / 100) > 1) ? (HZ / 100) : 2;                     \
+	lwkt_serialize_enter(&dev->irq_lock);                              \
+	ret = 0;                                                           \
+	for (;;) {                                                         \
+		if (!(condition)) {					   \
+	        	tsleep_interlock(&(queue), PCATCH);                \
+			mutex_unlock(&drm_global_mutex);                   \
+	            	ret = -zsleep(&(queue), &dev->irq_lock,            \
+				PCATCH | PINTERLOCKED, "drmwtq", (_wait)); \
+			mutex_lock(&drm_global_mutex);                     \
+			if ((ret == -ERESTART) || (ret == -EINTR)) {       \
+				ret = -EINTR;                              \
+				break;                                     \
+			} else if (time_after(jiffies, _end)) {            \
+				ret = -EBUSY;                              \
+				break;                                     \
+			}                                                  \
+		}                                                          \
+		else {                                                     \
+			ret = 0;                                           \
+			break;                                             \
+		}                                                          \
+	}                                                                  \
+	lwkt_serialize_exit(&dev->irq_lock);                               \
+}                                                                          \
+while (0)
+#else
 #define DRM_WAIT_ON( ret, queue, timeout, condition )                   \
 do {                                                                    \
 	int _end = jiffies + (timeout);                                 \
@@ -1200,6 +1252,7 @@ do {                                                                    \
 	lwkt_serialize_exit(&dev->irq_lock);                            \
 }                                                                       \
 while (0)
+#endif
 #else
 #define DRM_WAIT_ON( ret, queue, timeout, condition )		\
 for ( ret = 0 ; !ret && !(condition) ; ) {			\
