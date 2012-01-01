@@ -592,7 +592,8 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 #ifdef __linux__
 	char stack_kdata[128];
 	char *kdata = NULL;
-#else /* !__linux__ */
+#endif
+#if 0 /* !__linux__ */
 	int is_driver_ioctl = 0;
 #endif /* __linux__ */
 
@@ -641,11 +642,12 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 	if ((nr >= DRM_CORE_IOCTL_COUNT) &&
 	    ((nr < DRM_COMMAND_BASE) || (nr >= DRM_COMMAND_END)))
 		goto err_i1;
-#ifdef __linux__
+#if 1 /* __linux__ */
 	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
 	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls))
 		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
-#else
+#endif
+#if 0 /* !__linux__ */
 	if ((nr >= DRM_COMMAND_BASE) && (nr < DRM_COMMAND_END) &&
 	    (nr < DRM_COMMAND_BASE + dev->driver->num_ioctls)) {
 		ioctl = &dev->driver->ioctls[nr - DRM_COMMAND_BASE];
@@ -654,15 +656,16 @@ int drm_ioctl_legacy(struct dev_ioctl_args *ap)
 #endif
 	else if ((nr >= DRM_COMMAND_END) || (nr < DRM_COMMAND_BASE)) {
 		ioctl = &drm_ioctls[nr];
-#ifdef __linux__  /* UNIMPLEMENTED */
-		cmd = ioctl->cmd;
-#else /* !__linux__ */
+#ifndef __linux__
 		if ((unsigned int)cmd != (unsigned int)ioctl->cmd) {
 			DRM_ERROR("cmd (%d) != ioctrl->cmd (%d)\n",
 				(unsigned int)cmd,
 				(unsigned int)ioctl->cmd);
 		}
 #endif /* !__linux__ */
+#if 1 /* __linux__  */
+		cmd = ioctl->cmd;
+#endif
 	} else
 		goto err_i1;
 #if 0 /* !DRM_NEWER_IOCTL */
