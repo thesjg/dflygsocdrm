@@ -138,7 +138,12 @@ int vmw_fallback_wait(struct vmw_private *dev_priv,
 			break;
 		}
 		if (lazy)
+#ifdef __linux__
 			schedule_timeout(1);
+#else
+			ret = -tsleep(&dev_priv->fence_queue,
+				(interruptible) ? PCATCH : 0, "vmfall", 1);
+#endif
 		else if ((++count & 0x0F) == 0) {
 			/**
 			 * FIXME: Use schedule_hr_timeout here for

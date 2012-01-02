@@ -135,6 +135,51 @@ list_move_tail(struct list_head *entry, struct list_head *toadd) {
 
 #define list_first_entry(ptr, type, member) list_entry(((ptr)->next), type, member)
 
+/** list_splice - splice list at head of another list
+ * @newp:	list whose elements are to be spliced in
+ * @head:	list at whose head new list is to be spliced into
+ */
+static __inline__ void
+list_splice(struct list_head* newp, struct list_head* head) {
+	if (!list_empty(newp)) {
+		(head)->next->prev = (newp)->prev;
+		(newp)->prev->next = (head)->next;
+		(newp)->next->prev = (head);
+		(head)->next = (newp)->next;
+	}
+}
+
+/** list_splice_init - splice list at head of another list and empty
+ * @newp:	list whose elements are to be spliced in then emptied
+ * @head:	list at whose head new list is to be spliced into
+ */
+static __inline__ void
+list_splice_init(struct list_head* newp, struct list_head* head) {
+	list_splice(newp, head);
+	list_empty(newp);
+}
+
+/* Extension of function in drm_linux_list.h */
+#define list_for_each_entry_reverse(pos, head, member)			\
+	for (pos = list_entry((head)->prev, __typeof(*pos), member);	\
+	    &pos->member != (head);					\
+	    pos = list_entry(pos->member.prev, __typeof(*pos), member))
+
+/** list_cut_position
+ * @store - list presumed empty that will receive removed entries
+ * @head - list from whose some initial segment is to be removed
+ * @entry - entry marking end of segment to be removed, inclusive
+ */
+static __inline__ void
+list_cut_position(struct list_head *list, struct list_head *head, struct list_head *entry) {
+	(list)->next = (head)->next;
+	(list)->prev = (entry);
+	(head)->next = (entry)->next;
+	(entry)->next->prev = (head);
+	(head)->next->prev = (list);
+	(entry)->next = (list);
+}
+
 /** list_sort - sort list using the crudest algorithm possible 
  * @priv:	to be passed to the comparison function	
  * @head:	list to be sorted

@@ -48,6 +48,19 @@ schedule_timeout(signed long timo) {
 	return result;
 }
 
+int
+schedule_timeout_uninterruptible(signed long timo) {
+	int tosleep = (int)timo;
+	int result = EINVAL;
+	if (curproc != NULL) {
+		result = tsleep(&tosleep, 0, "schtiu", tosleep);
+		if (result == EWOULDBLOCK) {
+			return 0;
+		}
+	}
+	return result;
+}
+
 void
 msleep(unsigned int millis) {
 	int tosleep = (int)msecs_to_jiffies(millis);

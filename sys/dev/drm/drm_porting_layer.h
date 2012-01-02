@@ -263,12 +263,11 @@ typedef boolean_t bool;
  * Endian considerations
  */
 
-/* vmwgfx */
+/* For DragonFly BSD on i386 or x86_64 assume little endian */
 #ifndef __le32
 #define __le32 uint32_t
 #endif
 
-/* file drm_edid.h, struct detailed_data_monitor_range */
 #ifndef __le16
 #define __le16 uint16_t
 #endif
@@ -276,18 +275,14 @@ typedef boolean_t bool;
 #define cpu_to_le32(x) htole32(x)
 #define le32_to_cpu(x) le32toh(x)
 
-/* file drm_edid.c, function drm_mode_detailed() */
 /* On DragonFly sys/endian.h */
 #define le16_to_cpu(x) le16toh(x)
 
 /* file drm_edid.c, function drm_mode_detailed() */
 #define cpu_to_le16(x) htole16(x)
 
-/* drmP.h struct drm_local_map */
-/* file drm_bufs.c, function drm_get_resource_start() */
 typedef unsigned long resource_size_t;
 
-/* file drm_bufs.c, function drm_map_handle() */
 #ifdef __x86_64__
 #define BITS_PER_LONG  64
 #else
@@ -321,6 +316,16 @@ hweight16(uint16_t mask) {
 	}
 	return num_bits;
 }
+
+/*
+ * Alignment
+ * Safest is to use memcpy(void *dst, void*src, size_t num);
+ */
+
+/*
+ * file radeon/atom.c, function 
+ * get_unaligned_le32()
+ */
 
 /**********************************************************
  * C LIBRARY equivalents                                  *
@@ -639,6 +644,13 @@ schedule(void) {
 int
 schedule_timeout(signed long timo);
 
+/* have current process sleep in HZ,
+ * sleep cannot be interrupted by signal
+ * return 0 if successful sleep for full time 
+ */
+int
+schedule_timeout_interruptible(signed long timo);
+
 /* noninterruptible process sleep in milliseconds */
 void
 msleep(unsigned int millis);
@@ -813,30 +825,30 @@ typedef struct lock rwlock_t;
 
 /* Obviously this is not a rw-semaphore */
 /* but all downs seem to be matched with ups */
-typedef struct lock DRM_RWSEMAPHORE;
+#define rw_semaphore lock
 
 static __inline__ void
-init_rwsem(DRM_RWSEMAPHORE *rwlock) {
+init_rwsem(struct rw_semaphore *rwlock) {
 	lockinit(rwlock, "lrwsem", 0, LK_CANRECURSE);
 }
 
 static __inline__ void
-down_read(DRM_RWSEMAPHORE *sem) {
+down_read(struct rw_semaphore *sem) {
 	lockmgr(sem, LK_SHARED | LK_RETRY);
 }
 
 static __inline__ void
-up_read(DRM_RWSEMAPHORE *sem) {
+up_read(struct rw_semaphore *sem) {
 	lockmgr(sem, LK_RELEASE);
 }
 
 static __inline__ void
-down_write(DRM_RWSEMAPHORE *rwlock) {
+down_write(struct rw_semaphore *rwlock) {
 	lockmgr(rwlock, LK_EXCLUSIVE | LK_RETRY);
 }
 
 static __inline__ void
-up_write(DRM_RWSEMAPHORE *rwlock) {
+up_write(struct rw_semaphore *rwlock) {
 	lockmgr(rwlock, LK_RELEASE);
 }
 
@@ -882,44 +894,12 @@ typedef int			irqreturn_t;
  * Lists
  */
 
-/* file i915_gem.c */
+/* LIST_HEAD already defined in DragonFly */
 #define DRM_LIST_HEAD(arg)  struct list_head arg
 
 /* file ttm/ttm_page_alloc.c, function ttm_page_pool_free() */
+/* acts on member list lru of struct page */
 #define __list_del(entry, list) /* UNIMPLEMENTED */
-
-/* Extension of function in drm_linux_list.h */
-#define list_for_each_entry_reverse(pos, head, member)			\
-	for (pos = list_entry((head)->prev, __typeof(*pos), member);	\
-	    &pos->member != (head);					\
-	    pos = list_entry(pos->member.prev, __typeof(*pos), member))
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_pool_filled_lock() */
-static __inline__ void
-list_splice(struct list_head* newp, struct list_head* head) {
-	if (!list_empty(newp)) {
-		(head)->next->prev = (newp)->prev;
-		(newp)->prev->next = (head)->next;
-		(newp)->next->prev = (head)->next;
-		(head)->next = (newp)->next;
-	}
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_pool_get_pages() */
-static __inline__ void
-list_splice_init(struct list_head* newp, struct list_head* head) {
-	list_splice(newp, head);
-	list_empty(newp);
-}
-
-/* file ttm/ttm_page_alloc.c, function ttm_page_pool_get_pages() */
-static __inline__ void
-list_cut_position(struct list_head *pages, struct list_head *list, struct list_head *p) {
-	pages->next = list->next;
-	list->next->prev = p;
-	pages->prev = p;
-	p->next = list->next;
-}
 
 /**********************************************************
  * RED-BLACK TREES                                        *
@@ -1094,9 +1074,9 @@ ida_destroy(struct ida *pida);
 
 typedef struct thread *DRM_CURRENT_T;
 
-/**********************************************************
- * PERMISSIONS AND CREDENTIALS                            *
- **********************************************************/
+/********************************************************************
+ * PERMISSIONS AND CREDENTIALS                                      *
+ ********************************************************************/
 
 /*
  * File mode permissions
@@ -1112,10 +1092,7 @@ typedef struct thread *DRM_CURRENT_T;
  */
 #define S_IRUGO  S_IRUSR|S_IRGRP|S_IROTH
 
-/* file drm_vm.c, function drm_vm_open_locked() */
-/* Need to find pid associated with current, current->pid */
-
-/* file drm_fops.c, function drm_open_helper() */
+/* equivalent to DRM_CURRENTPID */
 static __inline__ pid_t
 task_pid_nr(DRM_CURRENT_T cur) {
 	if (cur->td_proc) {
@@ -1160,16 +1137,18 @@ init_waitqueue_head(wait_queue_head_t *wqh) {
 	;
 }
 
+/* UNIMPLEMENTED no real way to tell with this implementation */
 static __inline__ int
 waitqueue_active(wait_queue_head_t *wqh) {
 	return 0;
 }
 
-/* Instead of sleeping potentially forever wait 1/10 seconds */
 #define DRM_NEWER_RATLOCK 1
 #if 0
 #define DRM_NEWER_NOCOUNT 1
 #endif
+
+/* Instead of sleeping potentially forever, wait 1/10 seconds */
 #define DRM_TIMEOUT  (HZ / 10)
 
 /*
@@ -1354,6 +1333,7 @@ static __inline__ void
 wake_up_interruptible_all(void *wqh) {
 	wakeup(wqh);
 }
+
 /* file drm_fops.c, function drm_cpu_valid() */
 /* boot_cpu_data.x86 appears to be an int sometimes 3 */
 
@@ -2038,7 +2018,7 @@ unmap_mapping_range(
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
 struct mm_struct {
-	DRM_RWSEMAPHORE mmap_sem;
+	struct rw_semaphore mmap_sem;
 };
 
 /* file ttm/ttm_tt.c, function ttm_tt_set_user() */
