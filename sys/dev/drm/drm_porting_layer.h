@@ -1144,9 +1144,8 @@ waitqueue_active(wait_queue_head_t *wqh) {
 }
 
 #define DRM_NEWER_RATLOCK 1
-#if 0
 #define DRM_NEWER_NOCOUNT 1
-#endif
+#define DRM_NEWER_TOTLOCK 1
 
 /* Instead of sleeping potentially forever, wait 1/10 seconds */
 #define DRM_TIMEOUT  (HZ / 10)
@@ -1170,6 +1169,35 @@ waitqueue_active(wait_queue_head_t *wqh) {
 
 #if 1
 #ifdef DRM_NEWER_RATLOCK
+#ifdef DRM_NEWER_TOTLOCK
+#define DRM_WAIT_ON( ret, queue, timeout, condition )                      \
+do {                                                                       \
+	int _end = jiffies + (timeout);                                    \
+	int _wait = ((HZ / 100) > 1) ? (HZ / 100) : 2;                     \
+	ret = 0;                                                           \
+	for (;;) {                                                         \
+		if (!(condition)) {					   \
+	        	tsleep_interlock(&(queue), PCATCH);                \
+			mutex_unlock(&drm_global_mutex);                   \
+	            	ret = -tsleep(&(queue),                            \
+				PCATCH | PINTERLOCKED, "drmwtq", (_wait)); \
+			mutex_lock(&drm_global_mutex);                     \
+			if ((ret == -ERESTART) || (ret == -EINTR)) {       \
+				ret = -EINTR;                              \
+				break;                                     \
+			} else if (time_after(jiffies, _end)) {            \
+				ret = -EBUSY;                              \
+				break;                                     \
+			}                                                  \
+		}                                                          \
+		else {                                                     \
+			ret = 0;                                           \
+			break;                                             \
+		}                                                          \
+	}                                                                  \
+}                                                                          \
+while (0)
+#else /* !DRM_NEWER_TOTLOCK */
 #define DRM_WAIT_ON( ret, queue, timeout, condition )                      \
 do {                                                                       \
 	int _end = jiffies + (timeout);                                    \
@@ -1199,6 +1227,7 @@ do {                                                                       \
 	lwkt_serialize_exit(&dev->irq_lock);                               \
 }                                                                          \
 while (0)
+#endif /* DRM_NEWER_TOTLOCK */
 #else
 #define DRM_WAIT_ON( ret, queue, timeout, condition )                   \
 do {                                                                    \

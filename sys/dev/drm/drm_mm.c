@@ -85,7 +85,7 @@ static struct drm_mm_node *drm_mm_kmalloc(struct drm_mm *mm, int atomic)
 #ifdef __linux__
 		child = kmalloc(sizeof(*child), GFP_ATOMIC);
 #else
-		child = malloc(sizeof(*child), DRM_MEM_DRIVER, M_NOWAIT);
+		child = malloc(sizeof(*child), DRM_MEM_DRIVER, M_INTWAIT);
 #endif
 	else
 #ifdef __linux__
