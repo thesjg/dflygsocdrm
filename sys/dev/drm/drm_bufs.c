@@ -639,7 +639,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	map->handle = (void *)(unsigned long)maplist->user_token;
 #else
 	if (map->type != _DRM_SHM) {
-		map->handle = (void *)map->offset;
+		map->handle = (void *)(maplist->map->offset);
 	}
 	else {
 		map->handle =  maplist->map->handle;
