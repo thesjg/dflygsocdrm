@@ -188,7 +188,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 	    (drm_radeon_private_t *) dev->dev_private;
 	u32 stat;
 	u32 r500_disp_int;
-#ifndef DRM_NEWER_RADSYNC
+#if 0 /* DRM_NEWER_RADSYNC */
 	u32 tmp;
 #endif
 
@@ -220,7 +220,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 		if (stat & RADEON_CRTC2_VBLANK_STAT)
 			drm_handle_vblank(dev, 1);
 	}
-#ifndef DRM_NEWER_RADSYNC
+#if 0 /* DRM_NEWER_RADSYNC */
 	if (dev->msi_enabled) {
 		switch(dev_priv->flags & RADEON_FAMILY_MASK) {
 			case CHIP_RS400:

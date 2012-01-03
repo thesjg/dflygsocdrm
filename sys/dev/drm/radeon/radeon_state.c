@@ -2652,7 +2652,7 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
-#ifndef DRM_NEWER_RADSYNC /* probably UNNECESSARY */
+#if 0 /* DRM_NEWER_RADSYNC */ /* probably UNNECESSARY */
 	if (!dev_priv) {
 		DRM_ERROR("called with no initialization\n");
 		return -EINVAL;
@@ -3307,9 +3307,10 @@ static int radeon_cp_cmdbuf(struct drm_device *dev, void *data,
 #else /* !DRM_NEWER_RCMD */
 	while (cmdbuf->bufsz >= sizeof(header)) {
 
-#ifdef DRM_NEWER_RADSYNC
+#if 1 /* DRM_NEWER_RADSYNC */
 		memcpy(&header, cmdbuf->buf, sizeof(header));
-#else
+#endif
+#if 0
 		header.i = *(int *)cmdbuf->buf;
 #endif
 		cmdbuf->buf += sizeof(header);
@@ -3457,9 +3458,10 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 			value = 0;
 		else
-#ifdef DRM_NEWER_RADSYNC
+#if 1 /* DRM_NEWER_RADSYNC */
 			value = drm_dev_to_irq(dev);
-#else
+#endif
+#if 0
 			value = dev->irq;
 #endif
 		break;

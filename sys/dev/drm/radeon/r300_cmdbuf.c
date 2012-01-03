@@ -844,12 +844,13 @@ static __inline__ int r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
 			return -EINVAL;
 		}
 
-#ifdef DRM_NEWER_RADSYNC
+#if 1 /* DRM_NEWER_RADSYNC */
 #if 0
 		header = *(drm_r300_cmd_header_t *)cmdbuf->buf;
 #endif
 		memcpy(&header, cmdbuf->buf, sizeof(header));
-#else
+#endif
+#if 0
 		header.u = *(unsigned int *)cmdbuf->buf;
 #endif
 
@@ -1247,7 +1248,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 #else
 	u32 i, buf_idx, h_pending;
 #endif
-#ifdef DRM_NEWER_RADSYNC
+#if 1 /* DRM_NEWER_RADSYNC */
 	uint64_t temp_u64;
 #endif
 	RING_LOCALS;
@@ -1279,7 +1280,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 	ref_age_base = (u32 *)(unsigned long)temp_u64;
 #endif /* !__linux__ */
 #else /* !DRM_NEWER_RCMD */
-#ifdef DRM_NEWER_RADSYNC
+#if 1 /* DRM_NEWER_RADSYNC */
 	memcpy(&temp_u64, cmdbuf->buf, sizeof(uint64_t));
 	ref_age_base = (u32 *)(unsigned long)temp_u64;
 #else
@@ -1603,7 +1604,7 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 		int idx;
 		drm_r300_cmd_header_t header;
 
-#ifdef DRM_NEWER_RADSYNC
+#if 1 /* DRM_NEWER_RADSYNC */
 		memcpy(&header, cmdbuf->buf, sizeof(header));
 #else
 		header.u = *(unsigned int *)cmdbuf->buf;

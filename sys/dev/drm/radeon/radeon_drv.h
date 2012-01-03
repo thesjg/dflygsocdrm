@@ -39,7 +39,7 @@
 
 #define DRM_NEWER_RADEON_H 1
 
-#define DRM_NEWER_RADSYNC 1
+/* #define DRM_NEWER_RADSYNC 1 */
 
 #define DRM_NEWER_PRESAREA 1
 
@@ -495,12 +495,13 @@ extern void radeon_set_ring_head(drm_radeon_private_t *dev_priv, u32 val);
 static __inline__ int radeon_check_offset(drm_radeon_private_t *dev_priv,
 					  u64 off)
 {
-#ifdef DRM_NEWER_RADEON_H
+#if 1 /* DRM_NEWER_RADEON_H */
 	u32 fb_start = dev_priv->fb_location;
 	u32 fb_end = fb_start + dev_priv->fb_size - 1;
 	u32 gart_start = dev_priv->gart_vm_start;
 	u32 gart_end = gart_start + dev_priv->gart_size - 1;
-#else
+#endif
+#if 0
 	u64 fb_start = dev_priv->fb_location;
 	u64 fb_end = fb_start + dev_priv->fb_size - 1;
 	u64 gart_start = dev_priv->gart_vm_start;
@@ -2093,7 +2094,7 @@ do {									\
  * Engine control helper macros
  */
 
-#ifdef DRM_NEWER_RADEON_H
+#if 1 /* DRM_NEWER_RADEON_H */
 
 #define RADEON_WAIT_UNTIL_2D_IDLE() do {				\
 	OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );			\
@@ -2119,7 +2120,8 @@ do {									\
 	OUT_RING( RADEON_WAIT_CRTC_PFLIP );				\
 } while (0)
 
-#else /* !DRM_NEWER_RADEON_H */
+#endif
+#if 0 /* !DRM_NEWER_RADEON_H */
 
 #define RADEON_WAIT_UNTIL_2D_IDLE() do {				\
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)        \
