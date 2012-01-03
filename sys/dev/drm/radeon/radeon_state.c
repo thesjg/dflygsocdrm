@@ -126,7 +126,7 @@ static __inline__ int radeon_check_and_fixup_packets(drm_radeon_private_t *
 			return -EINVAL;
 		}
 #endif
-#ifdef DRM_NEWER_SCREEN
+#if 1 /* DRM_NEWER_SCREEN */
 		dev_priv->have_z_offset = 1;
 #endif
 		break;
@@ -1063,7 +1063,7 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 			flags |= RADEON_FRONT;
 	}
 
-#ifdef DRM_NEWER_SCREEN
+#if 1 /* DRM_NEWER_SCREEN */
 	if (flags & (RADEON_DEPTH|RADEON_STENCIL)) {
 		if (!dev_priv->have_z_offset) {
 #ifdef __linux__

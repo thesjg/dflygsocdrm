@@ -190,27 +190,16 @@ int r600_page_table_init(struct drm_device *dev)
 {
 	drm_radeon_private_t *dev_priv = dev->dev_private;
 	struct drm_ati_pcigart_info *gart_info = &dev_priv->gart_info;
-#if 1
 	struct drm_local_map *map = &gart_info->mapping;
-#endif
 	struct drm_sg_mem *entry = dev->sg;
 	int ret = 0;
 	int i, j;
-#if 1
 	int pages;
 	u64 page_base;
-#endif
-#if 0
-	int max_pages, pages;
-	u64 *pci_gart, page_base;
-#endif
 	dma_addr_t entry_addr;
-#if 1
 	int max_ati_pages, max_real_pages, gart_idx;
-#endif
 
 	/* okay page table is available - lets rock */
-#if 1
 	max_ati_pages = (gart_info->table_size / sizeof(u64));
 	max_real_pages = max_ati_pages / (PAGE_SIZE / ATI_PCIGART_PAGE_SIZE);
 
@@ -221,20 +210,8 @@ int r600_page_table_init(struct drm_device *dev)
 	DRM_INFO("r600_page_table_init(): memset_io of map->handle (%016lx)\n", (unsigned long)map->handle);
 #endif
 	memset_io((void __iomem *)map->handle, 0, max_ati_pages * sizeof(u64));
-#endif
-#if 0
-	/* PTEs are 64-bits */
-	pci_gart = (u64 *)gart_info->addr;
 
-	max_pages = (gart_info->table_size / sizeof(u64));
-	pages = (entry->pages <= max_pages) ? entry->pages : max_pages;
-
-	memset(pci_gart, 0, max_pages * sizeof(u64));
-#endif /* !DRM_NEWER_PCIGART */
-
-#if 1
 	gart_idx = 0;
-#endif
 	for (i = 0; i < pages; i++) {
 #ifdef __linux__
 		entry->busaddr[i] = pci_map_page(dev->pdev,
@@ -253,7 +230,6 @@ int r600_page_table_init(struct drm_device *dev)
 			page_base |= R600_PTE_VALID | R600_PTE_SYSTEM | R600_PTE_SNOOPED;
 			page_base |= R600_PTE_READABLE | R600_PTE_WRITEABLE;
 
-#if 1
 			DRM_WRITE64(map, gart_idx * sizeof(u64), page_base);
 
 			gart_idx++;
@@ -261,15 +237,6 @@ int r600_page_table_init(struct drm_device *dev)
 			if ((i % 128) == 0)
 				DRM_DEBUG("page entry %d: 0x%016llx\n",
 				    i, (unsigned long long)page_base);
-#endif
-#if 0 /* !DRM_NEWER_PCIGART */
-			*pci_gart = page_base;
-
-			if ((i % 128) == 0)
-				DRM_DEBUG("page entry %d: 0x%016llx\n",
-				    i, (unsigned long long)page_base);
-			pci_gart++;
-#endif /* !DRM_NEWER_PCIGART */
 			entry_addr += ATI_PCIGART_PAGE_SIZE;
 		}
 	}
@@ -2399,7 +2366,7 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
-#ifndef DRM_NEWER_PRESAREA
+#if 0 /* !DRM_NEWER_PRESAREA */
 	master_priv->sarea_priv =
 	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
 				    init->sarea_priv_offset);

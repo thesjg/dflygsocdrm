@@ -1331,7 +1331,7 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
-#ifndef DRM_NEWER_PRESAREA 
+#if 0 /* !DRM_NEWER_PRESAREA */
 #if 0
 	unsigned long old_sarea_priv = (unsigned long)master_priv->sarea_priv;
 #endif
@@ -1660,7 +1660,7 @@ static int radeon_do_resume_cp(struct drm_device *dev, struct drm_file *file_pri
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
-#ifdef DRM_NEWER_SCREEN
+#if 1 /* DRM_NEWER_SCREEN */
 	dev_priv->have_z_offset = 0;
 #endif
 	radeon_do_engine_reset(dev);
@@ -2177,7 +2177,7 @@ error:
 int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 {
 	struct drm_radeon_master_private *master_priv;
-#ifdef DRM_NEWER_PRESAREA
+#if 1 /* DRM_NEWER_PRESAREA */
 	unsigned long sareapage;
 	int ret;
 #endif
@@ -2186,7 +2186,7 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return -ENOMEM;
 
-#ifdef DRM_NEWER_PRESAREA
+#if 1 /* DRM_NEWER_PRESAREA */
 	/* prebuild the SAREA */
 	sareapage = max_t(unsigned long, SAREA_MAX, PAGE_SIZE);
 	ret = drm_addmap(dev, 0, sareapage, _DRM_SHM, _DRM_CONTAINS_LOCK,
@@ -2211,7 +2211,7 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return;
 
-#ifdef DRM_NEWER_PRESAREA
+#if 1 /* DRM_NEWER_PRESAREA */
 	if (master_priv->sarea_priv &&
 	    master_priv->sarea_priv->pfCurrentPage != 0)
 		radeon_cp_dispatch_flip(dev, master);
