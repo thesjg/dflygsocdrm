@@ -344,7 +344,7 @@ static int
 ngt_input(int c, struct tty *tp)
 {
 	const sc_p sc = (sc_p) tp->t_sc;
-	const node_p node = sc->node;
+	const node_p node = sc ? sc->node : NULL;
 	struct mbuf *m;
 	int error = 0;
 
@@ -675,6 +675,7 @@ ngt_mod_event(module_t mod, int event, void *data)
 			crit_exit();
 			log(LOG_ERR, "%s: can't register line discipline",
 			    __func__);
+			lwkt_reltoken(&tty_token);
 			return (EIO);
 		}
 		crit_exit();
