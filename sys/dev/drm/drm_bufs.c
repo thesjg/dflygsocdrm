@@ -258,9 +258,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	unsigned long user_token;
 	int ret;
 
-	struct drm_local_map *map_entry;
-	struct drm_local_map *map_free;
-	struct drm_map_list *list_entry;
 	int align;
 
 	if ((offset & PAGE_MASK) || (size & PAGE_MASK)) {
@@ -306,12 +303,9 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 	if (map->type == _DRM_SHM)
 		map->size = PAGE_ALIGN(map->size);
 
-#if __linux__
+#if __linux__ /* QUESTION: required -1? */
 	map->mtrr = -1;
 #else /* legacy BSD drm test for map->mtrr >= 0 */
-	map->mtrr = 0;
-#endif
-#if 0
 	map->mtrr = 0;
 #endif
 	map->handle = NULL;
@@ -360,10 +354,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 				if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) >= 0)
 					map->mtrr = 1;
 #endif
-#if 0
-				if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
-					map->mtrr = 1;
-#endif
 			}
 		}
 
@@ -374,14 +364,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 				return -ENOMEM;
 			}
 		}
-
-#if 0
-		if (map->type == _DRM_FRAME_BUFFER ||
-		    (map->flags & _DRM_WRITE_COMBINING)) {
-			if (drm_mtrr_add(map->offset, map->size, DRM_MTRR_WC) == 0)
-				map->mtrr = 1;
-		}
-#endif
 
 		break;
 	case _DRM_SHM:
@@ -479,7 +461,6 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 			return -EINVAL;
 		}
 		map->offset += (unsigned long)dev->sg->virtual;
-
 		break;
 	case _DRM_CONSISTENT:
 		/* dma_addr_t is 64bit on i386 with CONFIG_HIGHMEM64G,
@@ -635,6 +616,39 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 
 #else /* !DRM_NEWER_USER_TOKEN */
 
+#if 1
+	struct drm_map *map = data;
+	struct drm_map_list *maplist;
+	int err;
+
+#ifndef __linux__
+	if (!(dev->flags & (FREAD|FWRITE)))
+		return -EPERM; /* Require read/write */
+#endif
+	if (!(capable(CAP_SYS_ADMIN) || map->type == _DRM_AGP || map->type == _DRM_SHM))
+		return -EPERM;
+
+	err = drm_addmap_core(dev, map->offset, map->size, map->type,
+			      map->flags, &maplist);
+
+	if (err)
+		return err;
+
+#ifdef __linux__
+	/* avoid a warning on 64-bit, this casting isn't very nice, but the API is set so too late */
+	map->handle = (void *)(unsigned long)maplist->user_token;
+#else
+	if (map->type != _DRM_SHM) {
+		map->handle = (void *)map->offset;
+	}
+	else {
+		map->handle =  maplist->map->handle;
+	}
+	map->mtrr = maplist->map->mtrr;
+#endif
+	return 0;
+
+#else
 	struct drm_map *request = data;
 	drm_local_map_t *map;
 	int err;
@@ -661,6 +675,7 @@ int drm_addmap_ioctl(struct drm_device *dev, void *data,
 	if (request->type != _DRM_SHM) {
 		request->handle = (void *)request->offset;
 	}
+#endif
 
 #endif /* DRM_NEWER_USER_TOKEN */
 
