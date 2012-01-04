@@ -37,8 +37,6 @@
 #include <linux/platform_device.h>
 #endif
 
-#define DRM_NEWER_RCMD 1
-
 #include "radeon_family.h"
 
 /* General customization:
@@ -457,11 +455,7 @@ struct drm_buffer;
 
 typedef struct drm_radeon_kcmd_buffer {
 	int bufsz;
-#ifdef DRM_NEWER_RCMD
 	struct drm_buffer *buffer;
-#else
-	char *buf;
-#endif
 	int nbox;
 	struct drm_clip_rect __user *boxes;
 } drm_radeon_kcmd_buffer_t;
