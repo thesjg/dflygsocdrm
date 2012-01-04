@@ -37,7 +37,7 @@
 #include <linux/platform_device.h>
 #endif
 
-/* #define DRM_NEWER_RCMD 1 */
+#define DRM_NEWER_RCMD 1
 
 #include "radeon_family.h"
 
