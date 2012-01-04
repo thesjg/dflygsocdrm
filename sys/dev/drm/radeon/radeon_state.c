@@ -126,9 +126,7 @@ static __inline__ int radeon_check_and_fixup_packets(drm_radeon_private_t *
 			return -EINVAL;
 		}
 #endif
-#if 1 /* DRM_NEWER_SCREEN */
 		dev_priv->have_z_offset = 1;
-#endif
 		break;
 
 	case RADEON_EMIT_PP_CNTL:
@@ -413,6 +411,7 @@ static __inline__ int radeon_check_and_fixup_packet3(drm_radeon_private_t *
 
 	case RADEON_3D_LOAD_VBPNTR:
 #ifndef DRM_NEWER_RCMD
+/* RADEON_CP_PACKET_COUNT_MASK defined as 0x3fff0000 in radeon_drv.h */
 		count = (cmd[0] >> 16) & 0x3fff;
 #endif
 
@@ -1063,7 +1062,6 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 			flags |= RADEON_FRONT;
 	}
 
-#if 1 /* DRM_NEWER_SCREEN */
 	if (flags & (RADEON_DEPTH|RADEON_STENCIL)) {
 		if (!dev_priv->have_z_offset) {
 #ifdef __linux__
@@ -1075,7 +1073,6 @@ static void radeon_cp_dispatch_clear(struct drm_device * dev,
 			flags &= ~(RADEON_DEPTH | RADEON_STENCIL);
 		}
 	}
-#endif
 
 	if (flags & (RADEON_FRONT | RADEON_BACK)) {
 
@@ -2652,13 +2649,6 @@ static int radeon_cp_indirect(struct drm_device *dev, void *data, struct drm_fil
 
 	LOCK_TEST_WITH_RETURN(dev, file_priv);
 
-#if 0 /* DRM_NEWER_RADSYNC */ /* probably UNNECESSARY */
-	if (!dev_priv) {
-		DRM_ERROR("called with no initialization\n");
-		return -EINVAL;
-	}
-#endif
-
 	DRM_DEBUG("idx=%d s=%d e=%d d=%d\n",
 		  indirect->idx, indirect->start, indirect->end,
 		  indirect->discard);
@@ -3307,12 +3297,7 @@ static int radeon_cp_cmdbuf(struct drm_device *dev, void *data,
 #else /* !DRM_NEWER_RCMD */
 	while (cmdbuf->bufsz >= sizeof(header)) {
 
-#if 1 /* DRM_NEWER_RADSYNC */
 		memcpy(&header, cmdbuf->buf, sizeof(header));
-#endif
-#if 0
-		header.i = *(int *)cmdbuf->buf;
-#endif
 		cmdbuf->buf += sizeof(header);
 		cmdbuf->bufsz -= sizeof(header);
 
@@ -3458,12 +3443,7 @@ static int radeon_cp_getparam(struct drm_device *dev, void *data, struct drm_fil
 		if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 			value = 0;
 		else
-#if 1 /* DRM_NEWER_RADSYNC */
 			value = drm_dev_to_irq(dev);
-#endif
-#if 0
-			value = dev->irq;
-#endif
 		break;
 	case RADEON_PARAM_GART_BASE:
 		value = dev_priv->gart_vm_start;

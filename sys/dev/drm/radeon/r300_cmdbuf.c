@@ -240,16 +240,8 @@ void r300_init_reg_flags(struct drm_device *dev)
 	ADD_RANGE_MARK(R300_ZB_DEPTHOFFSET, 1, MARK_CHECK_OFFSET);	/* check offset */
 	ADD_RANGE(R300_ZB_DEPTHPITCH, 1);
 	ADD_RANGE(R300_ZB_DEPTHCLEARVALUE, 1);
-#if 1 /* DRM_NEWER_SCREEN */
 	ADD_RANGE(R300_ZB_ZMASK_OFFSET, 13);
 	ADD_RANGE(R300_ZB_ZPASS_DATA, 2); /* ZB_ZPASS_DATA, ZB_ZPASS_ADDR */
-#else
-	ADD_RANGE(R300_ZB_ZMASK_OFFSET, 5);
-	ADD_RANGE(R300_ZB_HIZ_OFFSET, 5);
-	ADD_RANGE(R300_ZB_ZPASS_DATA, 1);
-	ADD_RANGE_MARK(R300_ZB_ZPASS_ADDR, 1, MARK_CHECK_OFFSET);       /* check offset */
-	ADD_RANGE(R300_ZB_DEPTHXY_OFFSET, 1)
-#endif
 
 	ADD_RANGE(R300_TX_FILTER_0, 16);
 	ADD_RANGE(R300_TX_FILTER1_0, 16);
@@ -844,15 +836,10 @@ static __inline__ int r300_emit_draw_indx_2(drm_radeon_private_t *dev_priv,
 			return -EINVAL;
 		}
 
-#if 1 /* DRM_NEWER_RADSYNC */
-#if 0
+#if 0 /* QUESTION: use memcpy or use casts assuming little endian */
 		header = *(drm_r300_cmd_header_t *)cmdbuf->buf;
 #endif
 		memcpy(&header, cmdbuf->buf, sizeof(header));
-#endif
-#if 0
-		header.u = *(unsigned int *)cmdbuf->buf;
-#endif
 
 		cmdbuf->buf += sizeof(header);
 		cmdbuf->bufsz -= sizeof(header);
@@ -1248,7 +1235,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 #else
 	u32 i, buf_idx, h_pending;
 #endif
-#if 1 /* DRM_NEWER_RADSYNC */
+#if 1 /* QUESTION: use memcpy for unaligned? */
 	uint64_t temp_u64;
 #endif
 	RING_LOCALS;
@@ -1280,7 +1267,7 @@ static int r300_scratch(drm_radeon_private_t *dev_priv,
 	ref_age_base = (u32 *)(unsigned long)temp_u64;
 #endif /* !__linux__ */
 #else /* !DRM_NEWER_RCMD */
-#if 1 /* DRM_NEWER_RADSYNC */
+#if 1 /* QUESTION: use memcpy? */
 	memcpy(&temp_u64, cmdbuf->buf, sizeof(uint64_t));
 	ref_age_base = (u32 *)(unsigned long)temp_u64;
 #else
@@ -1604,11 +1591,7 @@ int r300_do_cp_cmdbuf(struct drm_device *dev,
 		int idx;
 		drm_r300_cmd_header_t header;
 
-#if 1 /* DRM_NEWER_RADSYNC */
 		memcpy(&header, cmdbuf->buf, sizeof(header));
-#else
-		header.u = *(unsigned int *)cmdbuf->buf;
-#endif
 
 		cmdbuf->buf += sizeof(header);
 		cmdbuf->bufsz -= sizeof(header);

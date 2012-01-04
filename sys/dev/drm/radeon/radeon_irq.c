@@ -188,9 +188,6 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 	    (drm_radeon_private_t *) dev->dev_private;
 	u32 stat;
 	u32 r500_disp_int;
-#if 0 /* DRM_NEWER_RADSYNC */
-	u32 tmp;
-#endif
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)
 		return IRQ_NONE;
@@ -220,7 +217,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 		if (stat & RADEON_CRTC2_VBLANK_STAT)
 			drm_handle_vblank(dev, 1);
 	}
-#if 0 /* DRM_NEWER_RADSYNC */
+#if 0 /* QUESTION: legacy BSD drm MSI? */
 	if (dev->msi_enabled) {
 		switch(dev_priv->flags & RADEON_FAMILY_MASK) {
 			case CHIP_RS400:
@@ -249,7 +246,7 @@ irqreturn_t radeon_driver_irq_handler(DRM_IRQ_ARGS)
 				break;
 		}
 	}
-#endif /* !DRM_NEWER_RADSYNC */
+#endif
 	return IRQ_HANDLED;
 }
 

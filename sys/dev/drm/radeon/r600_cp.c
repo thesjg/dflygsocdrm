@@ -70,8 +70,6 @@ void r600_cs_legacy_init(void);
 
 #include "r600_microcode.h"
 
-#define DRM_NEWER_RADEON_CP 1
-
 #endif /* !__linux__ */
 
 # define ATI_PCIGART_PAGE_SIZE		4096	/**< PCI GART page size */
@@ -982,8 +980,6 @@ static void r600_gfx_init(struct drm_device *dev,
 
 	gb_tiling_config |= R600_BANK_SWAPS(1);
 
-#ifdef DRM_NEWER_RADEON_CP
-
 	cc_rb_backend_disable = RADEON_READ(R600_CC_RB_BACKEND_DISABLE) & 0x00ff0000;
 	cc_rb_backend_disable |=
 		R600_BACKEND_DISABLE((R6XX_MAX_BACKENDS_MASK << dev_priv->r600_max_backends) & R6XX_MAX_BACKENDS_MASK);
@@ -1001,27 +997,10 @@ static void r600_gfx_init(struct drm_device *dev,
 							(cc_rb_backend_disable >> 16));
 	gb_tiling_config |= R600_BACKEND_MAP(backend_map);
 
-#else /* !DRM_NEWER_RADEON_CP */
-	backend_map = r600_get_tile_pipe_to_backend_map(dev_priv->r600_max_tile_pipes,
-							dev_priv->r600_max_backends,
-							(0xff << dev_priv->r600_max_backends) & 0xff);
-	gb_tiling_config |= R600_BACKEND_MAP(backend_map);
-
-	cc_gc_shader_pipe_config =
-		R600_INACTIVE_QD_PIPES((R6XX_MAX_PIPES_MASK << dev_priv->r600_max_pipes) & R6XX_MAX_PIPES_MASK);
-	cc_gc_shader_pipe_config |=
-		R600_INACTIVE_SIMDS((R6XX_MAX_SIMDS_MASK << dev_priv->r600_max_simds) & R6XX_MAX_SIMDS_MASK);
-
-	cc_rb_backend_disable =
-		R600_BACKEND_DISABLE((R6XX_MAX_BACKENDS_MASK << dev_priv->r600_max_backends) & R6XX_MAX_BACKENDS_MASK);
-
-#endif /* !DRM_NEWER_RADEON_CP */
-
 	RADEON_WRITE(R600_GB_TILING_CONFIG,      gb_tiling_config);
 	RADEON_WRITE(R600_DCP_TILING_CONFIG,    (gb_tiling_config & 0xffff));
 	RADEON_WRITE(R600_HDP_TILING_CONFIG,    (gb_tiling_config & 0xffff));
 
-#ifdef DRM_NEWER_RADEON_CP
 	if (gb_tiling_config & 0xc0) {
 		dev_priv->r600_group_size = 512;
 	} else {
@@ -1033,19 +1012,13 @@ static void r600_gfx_init(struct drm_device *dev,
 	} else {
 		dev_priv->r600_nbanks = 4;
 	}
-#endif /* DRM_NEWER_RADEON_CP */
 
 	RADEON_WRITE(R600_CC_RB_BACKEND_DISABLE,      cc_rb_backend_disable);
 	RADEON_WRITE(R600_CC_GC_SHADER_PIPE_CONFIG,   cc_gc_shader_pipe_config);
 	RADEON_WRITE(R600_GC_USER_SHADER_PIPE_CONFIG, cc_gc_shader_pipe_config);
 
-#ifdef DRM_NEWER_RADEON_CP
 	num_qd_pipes =
 		R6XX_MAX_PIPES - r600_count_pipe_bits((cc_gc_shader_pipe_config & R600_INACTIVE_QD_PIPES_MASK) >> 8);
-#else
-	num_qd_pipes =
-		R6XX_MAX_BACKENDS - r600_count_pipe_bits(cc_gc_shader_pipe_config & R600_INACTIVE_QD_PIPES_MASK);
-#endif
 	RADEON_WRITE(R600_VGT_OUT_DEALLOC_CNTL, (num_qd_pipes * 4) & R600_DEALLOC_DIST_MASK);
 	RADEON_WRITE(R600_VGT_VERTEX_REUSE_BLOCK_CNTL, ((num_qd_pipes * 4) - 2) & R600_VTX_REUSE_DEPTH_MASK);
 
@@ -1317,16 +1290,10 @@ static void r600_gfx_init(struct drm_device *dev,
 
 }
 
-#ifdef DRM_NEWER_RADEON_CP
 static u32 r700_get_tile_pipe_to_backend_map(drm_radeon_private_t *dev_priv,
 					     u32 num_tile_pipes,
 					     u32 num_backends,
 					     u32 backend_disable_mask)
-#else
-static u32 r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes,
-					     u32 num_backends,
-					     u32 backend_disable_mask)
-#endif
 {
 	u32 backend_map = 0;
 	u32 enabled_backends_mask;
@@ -1335,9 +1302,7 @@ static u32 r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes,
 	u32 swizzle_pipe[R7XX_MAX_PIPES];
 	u32 cur_backend;
 	u32 i;
-#ifdef DRM_NEWER_RADEON_CP
 	bool force_no_swizzle;
-#endif
 
 	if (num_tile_pipes > R7XX_MAX_PIPES)
 		num_tile_pipes = R7XX_MAX_PIPES;
@@ -1367,7 +1332,6 @@ static u32 r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes,
 	if (enabled_backends_count != num_backends)
 		num_backends = enabled_backends_count;
 
-#ifdef DRM_NEWER_RADEON_CP
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
 	case CHIP_RV770:
 	case CHIP_RV730:
@@ -1379,7 +1343,6 @@ static u32 r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes,
 		force_no_swizzle = true;
 		break;
 	}
-#endif
 
 	memset((uint8_t *)&swizzle_pipe[0], 0, sizeof(u32) * R7XX_MAX_PIPES);
 	switch (num_tile_pipes) {
@@ -1390,8 +1353,6 @@ static u32 r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes,
 		swizzle_pipe[0] = 0;
 		swizzle_pipe[1] = 1;
 		break;
-#ifdef DRM_NEWER_RADEON_CP
-
 	case 3:
 		if (force_no_swizzle) {
 			swizzle_pipe[0] = 0;
@@ -1488,57 +1449,6 @@ static u32 r700_get_tile_pipe_to_backend_map(u32 num_tile_pipes,
 			swizzle_pipe[7] = 5;
 		}
 		break;
-
-#else /* !DRM_NEWER_RADEON_CP */
-
-	case 3:
-		swizzle_pipe[0] = 0;
-		swizzle_pipe[1] = 2;
-		swizzle_pipe[2] = 1;
-		break;
-	case 4:
-		swizzle_pipe[0] = 0;
-		swizzle_pipe[1] = 2;
-		swizzle_pipe[2] = 3;
-		swizzle_pipe[3] = 1;
-		break;
-	case 5:
-		swizzle_pipe[0] = 0;
-		swizzle_pipe[1] = 2;
-		swizzle_pipe[2] = 4;
-		swizzle_pipe[3] = 1;
-		swizzle_pipe[4] = 3;
-		break;
-	case 6:
-		swizzle_pipe[0] = 0;
-		swizzle_pipe[1] = 2;
-		swizzle_pipe[2] = 4;
-		swizzle_pipe[3] = 5;
-		swizzle_pipe[4] = 3;
-		swizzle_pipe[5] = 1;
-		break;
-	case 7:
-		swizzle_pipe[0] = 0;
-		swizzle_pipe[1] = 2;
-		swizzle_pipe[2] = 4;
-		swizzle_pipe[3] = 6;
-		swizzle_pipe[4] = 3;
-		swizzle_pipe[5] = 1;
-		swizzle_pipe[6] = 5;
-		break;
-	case 8:
-		swizzle_pipe[0] = 0;
-		swizzle_pipe[1] = 2;
-		swizzle_pipe[2] = 4;
-		swizzle_pipe[3] = 6;
-		swizzle_pipe[4] = 3;
-		swizzle_pipe[5] = 1;
-		swizzle_pipe[6] = 7;
-		swizzle_pipe[7] = 5;
-		break;
-
-#endif /* !DRM_NEWER_RADEON_CP */
-
 	}
 
 	cur_backend = 0;
@@ -1558,14 +1468,10 @@ static void r700_gfx_init(struct drm_device *dev,
 			  drm_radeon_private_t *dev_priv)
 {
 	int i, j, num_qd_pipes;
-#ifdef DRM_NEWER_RADEON_CP
 	u32 ta_aux_cntl;
-#endif
 	u32 sx_debug_1;
 	u32 smx_dc_ctl0;
-#ifdef DRM_NEWER_RADEON_CP
 	u32 db_debug3;
-#endif
 	u32 num_gs_verts_per_thread;
 	u32 vgt_gs_per_es;
 	u32 gs_prim_buffer_depth = 0;
@@ -1729,8 +1635,6 @@ static void r700_gfx_init(struct drm_device *dev,
 
 	gb_tiling_config |= R600_BANK_SWAPS(1);
 
-#ifdef DRM_NEWER_RADEON_CP
-
 	cc_rb_backend_disable = RADEON_READ(R600_CC_RB_BACKEND_DISABLE) & 0x00ff0000;
 	cc_rb_backend_disable |=
 		R600_BACKEND_DISABLE((R7XX_MAX_BACKENDS_MASK << dev_priv->r600_max_backends) & R7XX_MAX_BACKENDS_MASK);
@@ -1752,27 +1656,9 @@ static void r700_gfx_init(struct drm_device *dev,
 								(cc_rb_backend_disable >> 16));
 	gb_tiling_config |= R600_BACKEND_MAP(backend_map);
 
-#else /* !DRM_NEWER_RADEON_CP */
-	backend_map = r700_get_tile_pipe_to_backend_map(dev_priv->r600_max_tile_pipes,
-							dev_priv->r600_max_backends,
-							(0xff << dev_priv->r600_max_backends) & 0xff);
-	gb_tiling_config |= R600_BACKEND_MAP(backend_map);
-
-	cc_gc_shader_pipe_config =
-		R600_INACTIVE_QD_PIPES((R7XX_MAX_PIPES_MASK << dev_priv->r600_max_pipes) & R7XX_MAX_PIPES_MASK);
-	cc_gc_shader_pipe_config |=
-		R600_INACTIVE_SIMDS((R7XX_MAX_SIMDS_MASK << dev_priv->r600_max_simds) & R7XX_MAX_SIMDS_MASK);
-
-	cc_rb_backend_disable =
-		R600_BACKEND_DISABLE((R7XX_MAX_BACKENDS_MASK << dev_priv->r600_max_backends) & R7XX_MAX_BACKENDS_MASK);
-
-#endif /* !DRM_NEWER_RADEON_CP */
-
 	RADEON_WRITE(R600_GB_TILING_CONFIG,      gb_tiling_config);
 	RADEON_WRITE(R600_DCP_TILING_CONFIG,    (gb_tiling_config & 0xffff));
 	RADEON_WRITE(R600_HDP_TILING_CONFIG,    (gb_tiling_config & 0xffff));
-
-#ifdef DRM_NEWER_RADEON_CP
 	if (gb_tiling_config & 0xc0) {
 		dev_priv->r600_group_size = 512;
 	} else {
@@ -1784,7 +1670,6 @@ static void r700_gfx_init(struct drm_device *dev,
 	} else {
 		dev_priv->r600_nbanks = 4;
 	}
-#endif
 
 	RADEON_WRITE(R600_CC_RB_BACKEND_DISABLE,      cc_rb_backend_disable);
 	RADEON_WRITE(R600_CC_GC_SHADER_PIPE_CONFIG,   cc_gc_shader_pipe_config);
@@ -1796,13 +1681,8 @@ static void r700_gfx_init(struct drm_device *dev,
 	RADEON_WRITE(R700_CGTS_USER_SYS_TCC_DISABLE, 0);
 	RADEON_WRITE(R700_CGTS_USER_TCC_DISABLE, 0);
 
-#ifdef DRM_NEWER_RADEON_CP
 	num_qd_pipes =
 		R7XX_MAX_PIPES - r600_count_pipe_bits((cc_gc_shader_pipe_config & R600_INACTIVE_QD_PIPES_MASK) >> 8);
-#else
-	num_qd_pipes =
-		R7XX_MAX_BACKENDS - r600_count_pipe_bits(cc_gc_shader_pipe_config & R600_INACTIVE_QD_PIPES_MASK);
-#endif
 	RADEON_WRITE(R600_VGT_OUT_DEALLOC_CNTL, (num_qd_pipes * 4) & R600_DEALLOC_DIST_MASK);
 	RADEON_WRITE(R600_VGT_VERTEX_REUSE_BLOCK_CNTL, ((num_qd_pipes * 4) - 2) & R600_VTX_REUSE_DEPTH_MASK);
 
@@ -1812,15 +1692,8 @@ static void r700_gfx_init(struct drm_device *dev,
 
 	RADEON_WRITE(R600_CP_MEQ_THRESHOLDS, R700_STQ_SPLIT(0x30));
 
-#ifdef DRM_NEWER_RADEON_CP
 	ta_aux_cntl = RADEON_READ(R600_TA_CNTL_AUX);
 	RADEON_WRITE(R600_TA_CNTL_AUX, ta_aux_cntl | R600_DISABLE_CUBE_ANISO);
-#else
-	RADEON_WRITE(R600_TA_CNTL_AUX, (R600_DISABLE_CUBE_ANISO |
-					R600_SYNC_GRADIENT |
-					R600_SYNC_WALKER |
-					R600_SYNC_ALIGNER));
-#endif
 
 	sx_debug_1 = RADEON_READ(R700_SX_DEBUG_1);
 	sx_debug_1 |= R700_ENABLE_NEW_SMX_ADDRESS;
@@ -1830,8 +1703,6 @@ static void r700_gfx_init(struct drm_device *dev,
 	smx_dc_ctl0 &= ~R700_CACHE_DEPTH(0x1ff);
 	smx_dc_ctl0 |= R700_CACHE_DEPTH((dev_priv->r700_sx_num_of_sets * 64) - 1);
 	RADEON_WRITE(R600_SMX_DC_CTL0, smx_dc_ctl0);
-
-#ifdef DRM_NEWER_RADEON_CP
 
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) != CHIP_RV740)
 		RADEON_WRITE(R700_SMX_EVENT_CTL, (R700_ES_FLUSH_CTL(4) |
@@ -1860,23 +1731,6 @@ static void r700_gfx_init(struct drm_device *dev,
 		RADEON_WRITE(RV700_DB_DEBUG4, db_debug4);
 	}
 
-#else /* !DRM_NEWER_RADEON_CP */
-
-	RADEON_WRITE(R700_SMX_EVENT_CTL, (R700_ES_FLUSH_CTL(4) |
-					  R700_GS_FLUSH_CTL(4) |
-					  R700_ACK_FLUSH_CTL(3) |
-					  R700_SYNC_FLUSH_CTL));
-
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) == CHIP_RV770)
-		RADEON_WRITE(R700_DB_DEBUG3, R700_DB_CLK_OFF_DELAY(0x1f));
-	else {
-		db_debug4 = RADEON_READ(RV700_DB_DEBUG4);
-		db_debug4 |= RV700_DISABLE_TILE_COVERED_FOR_PS_ITER;
-		RADEON_WRITE(RV700_DB_DEBUG4, db_debug4);
-	}
-
-#endif /* !DRM_NEWER_RADEON_CP */
-
 	RADEON_WRITE(R600_SX_EXPORT_BUFFER_SIZES, (R600_COLOR_BUFFER_SIZE((dev_priv->r600_sx_max_export_size / 4) - 1) |
 						   R600_POSITION_BUFFER_SIZE((dev_priv->r600_sx_max_export_pos_size / 4) - 1) |
 						   R600_SMX_BUFFER_SIZE((dev_priv->r600_sx_max_export_smx_size / 4) - 1)));
@@ -1899,7 +1753,6 @@ static void r700_gfx_init(struct drm_device *dev,
 			    R600_DONE_FIFO_HIWATER(0xe0) |
 			    R600_ALU_UPDATE_FIFO_HIWATER(0x8));
 	switch (dev_priv->flags & RADEON_FAMILY_MASK) {
-#ifdef DRM_NEWER_RADEON_CP
 	case CHIP_RV770:
 	case CHIP_RV730:
 	case CHIP_RV710:
@@ -1909,17 +1762,6 @@ static void r700_gfx_init(struct drm_device *dev,
 	default:
 		sq_ms_fifo_sizes |= R600_FETCH_FIFO_HIWATER(0x4);
 		break;
-#else
-	case CHIP_RV770:
-		sq_ms_fifo_sizes |= R600_FETCH_FIFO_HIWATER(0x1);
-		break;
-	case CHIP_RV740:
-	case CHIP_RV730:
-	case CHIP_RV710:
-	default:
-		sq_ms_fifo_sizes |= R600_FETCH_FIFO_HIWATER(0x4);
-		break;
-#endif
 	}
 	RADEON_WRITE(R600_SQ_MS_FIFO_SIZES, sq_ms_fifo_sizes);
 
@@ -2366,16 +2208,6 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
-#if 0 /* !DRM_NEWER_PRESAREA */
-	master_priv->sarea_priv =
-	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
-				    init->sarea_priv_offset);
-	DRM_INFO("r600_do_init_cp(): sarea_priv = 0x%016lx, handle (%016lx) + sarea_priv_offset (0x%016lx)\n",
-		(unsigned long)master_priv->sarea_priv,
-		(unsigned long)master_priv->sarea->handle,
-		init->sarea_priv_offset);
-#endif /* !DRM_NEWER_PRESAREA */
-
 #if __OS_HAS_AGP
 	/* XXX */
 	if (dev_priv->flags & RADEON_IS_AGP) {
@@ -2392,19 +2224,11 @@ int r600_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 	} else
 #endif
 	{
-#ifdef DRM_NEWER_RADEON_CP
 		dev_priv->cp_ring->handle = (void *)(unsigned long)dev_priv->cp_ring->offset;
 		dev_priv->ring_rptr->handle =
 			(void *)(unsigned long)dev_priv->ring_rptr->offset;
 		dev->agp_buffer_map->handle =
 			(void *)(unsigned long)dev->agp_buffer_map->offset;
-#else
-		dev_priv->cp_ring->handle = (void *)dev_priv->cp_ring->offset;
-		dev_priv->ring_rptr->handle =
-		    (void *)dev_priv->ring_rptr->offset;
-		dev->agp_buffer_map->handle =
-		    (void *)dev->agp_buffer_map->offset;
-#endif
 
 		DRM_DEBUG("dev_priv->cp_ring->handle %p\n",
 			  dev_priv->cp_ring->handle);

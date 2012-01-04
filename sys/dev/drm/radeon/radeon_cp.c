@@ -1331,19 +1331,6 @@ static int radeon_do_init_cp(struct drm_device *dev, drm_radeon_init_t *init,
 		}
 	}
 
-#if 0 /* !DRM_NEWER_PRESAREA */
-#if 0
-	unsigned long old_sarea_priv = (unsigned long)master_priv->sarea_priv;
-#endif
-	master_priv->sarea_priv =
-	    (drm_radeon_sarea_t *) ((u8 *) master_priv->sarea->handle +
-				    init->sarea_priv_offset);
-	DRM_INFO("radeon_do_init_cp(): sarea_priv = 0x%016lx, handle (%016lx) + sarea_priv_offset (0x%016lx)\n",
-		(unsigned long)master_priv->sarea_priv,
-		(unsigned long)master_priv->sarea->handle,
-		init->sarea_priv_offset);
-#endif /* !DRM_NEWER_PRESAREA */
-
 #if __OS_HAS_AGP
 	if (dev_priv->flags & RADEON_IS_AGP) {
 		drm_core_ioremap_wc(dev_priv->cp_ring, dev);
@@ -1660,9 +1647,7 @@ static int radeon_do_resume_cp(struct drm_device *dev, struct drm_file *file_pri
 	radeon_cp_load_microcode(dev_priv);
 	radeon_cp_init_ring_buffer(dev, dev_priv, file_priv);
 
-#if 1 /* DRM_NEWER_SCREEN */
 	dev_priv->have_z_offset = 0;
-#endif
 	radeon_do_engine_reset(dev);
 	radeon_irq_set_state(dev, RADEON_SW_INT_ENABLE, 1);
 
@@ -2177,16 +2162,13 @@ error:
 int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 {
 	struct drm_radeon_master_private *master_priv;
-#if 1 /* DRM_NEWER_PRESAREA */
 	unsigned long sareapage;
 	int ret;
-#endif
 
 	master_priv = malloc(sizeof(*master_priv), DRM_MEM_DRIVER, M_WAITOK | M_ZERO);
 	if (!master_priv)
 		return -ENOMEM;
 
-#if 1 /* DRM_NEWER_PRESAREA */
 	/* prebuild the SAREA */
 	sareapage = max_t(unsigned long, SAREA_MAX, PAGE_SIZE);
 	ret = drm_addmap(dev, 0, sareapage, _DRM_SHM, _DRM_CONTAINS_LOCK,
@@ -2198,7 +2180,6 @@ int radeon_master_create(struct drm_device *dev, struct drm_master *master)
 	}
 	master_priv->sarea_priv = master_priv->sarea->handle + sizeof(struct drm_sarea);
 	master_priv->sarea_priv->pfCurrentPage = 0;
-#endif /* DRM_NEWER_PRESAREA */
 
 	master->driver_priv = master_priv;
 	return 0;
@@ -2211,7 +2192,6 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	if (!master_priv)
 		return;
 
-#if 1 /* DRM_NEWER_PRESAREA */
 	if (master_priv->sarea_priv &&
 	    master_priv->sarea_priv->pfCurrentPage != 0)
 		radeon_cp_dispatch_flip(dev, master);
@@ -2219,7 +2199,6 @@ void radeon_master_destroy(struct drm_device *dev, struct drm_master *master)
 	master_priv->sarea_priv = NULL;
 	if (master_priv->sarea)
 		drm_rmmap_locked(dev, master_priv->sarea);
-#endif /* DRM_NEWER_PRESAREA */
 
 	free(master_priv, DRM_MEM_DRIVER);
 

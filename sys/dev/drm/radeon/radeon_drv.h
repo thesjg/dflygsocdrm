@@ -37,17 +37,7 @@
 #include <linux/platform_device.h>
 #endif
 
-#define DRM_NEWER_RADEON_H 1
-
-/* #define DRM_NEWER_RADSYNC 1 */
-
-/* #define DRM_NEWER_PRESAREA 1 */
-
 /* #define DRM_NEWER_RCMD 1 */
-
-#define DRM_NEWER_SCREEN 1
-
-/* #define DRM_NEWER_PCIGART 1 */
 
 #include "radeon_family.h"
 
@@ -59,9 +49,6 @@
 #define DRIVER_NAME		"radeon"
 #define DRIVER_DESC		"ATI Radeon"
 #define DRIVER_DATE		"20080528"
-#if 0
-#define DRIVER_DATE		"20080613"
-#endif
 
 /* Interface history:
  *
@@ -495,18 +482,10 @@ extern void radeon_set_ring_head(drm_radeon_private_t *dev_priv, u32 val);
 static __inline__ int radeon_check_offset(drm_radeon_private_t *dev_priv,
 					  u64 off)
 {
-#if 1 /* DRM_NEWER_RADEON_H */
 	u32 fb_start = dev_priv->fb_location;
 	u32 fb_end = fb_start + dev_priv->fb_size - 1;
 	u32 gart_start = dev_priv->gart_vm_start;
 	u32 gart_end = gart_start + dev_priv->gart_size - 1;
-#endif
-#if 0
-	u64 fb_start = dev_priv->fb_location;
-	u64 fb_end = fb_start + dev_priv->fb_size - 1;
-	u64 gart_start = dev_priv->gart_vm_start;
-	u64 gart_end = gart_start + dev_priv->gart_size - 1;
-#endif
 
 	return ((off >= fb_start && off <= fb_end) ||
 		(off >= gart_start && off <= gart_end));
@@ -2094,8 +2073,6 @@ do {									\
  * Engine control helper macros
  */
 
-#if 1 /* DRM_NEWER_RADEON_H */
-
 #define RADEON_WAIT_UNTIL_2D_IDLE() do {				\
 	OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );			\
 	OUT_RING( (RADEON_WAIT_2D_IDLECLEAN |				\
@@ -2119,47 +2096,6 @@ do {									\
 	OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );			\
 	OUT_RING( RADEON_WAIT_CRTC_PFLIP );				\
 } while (0)
-
-#endif
-#if 0 /* !DRM_NEWER_RADEON_H */
-
-#define RADEON_WAIT_UNTIL_2D_IDLE() do {				\
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)        \
-		OUT_RING( CP_PACKET0( R600_WAIT_UNTIL, 0 ) );           \
-	else                                                            \
-		OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );         \
-	OUT_RING( (RADEON_WAIT_2D_IDLECLEAN |				\
-		   RADEON_WAIT_HOST_IDLECLEAN) );			\
-} while (0)
-
-#define RADEON_WAIT_UNTIL_3D_IDLE() do {				\
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)        \
-		OUT_RING( CP_PACKET0( R600_WAIT_UNTIL, 0 ) );           \
-	else                                                            \
-		OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );         \
-	OUT_RING( (RADEON_WAIT_3D_IDLECLEAN |				\
-		   RADEON_WAIT_HOST_IDLECLEAN) );			\
-} while (0)
-
-#define RADEON_WAIT_UNTIL_IDLE() do {					\
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)        \
-		OUT_RING( CP_PACKET0( R600_WAIT_UNTIL, 0 ) );           \
-	else                                                            \
-		OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );         \
-	OUT_RING( (RADEON_WAIT_2D_IDLECLEAN |				\
-		   RADEON_WAIT_3D_IDLECLEAN |				\
-		   RADEON_WAIT_HOST_IDLECLEAN) );			\
-} while (0)
-
-#define RADEON_WAIT_UNTIL_PAGE_FLIPPED() do {				\
-	if ((dev_priv->flags & RADEON_FAMILY_MASK) >= CHIP_R600)        \
-		OUT_RING( CP_PACKET0( R600_WAIT_UNTIL, 0 ) );           \
-	else                                                            \
-		OUT_RING( CP_PACKET0( RADEON_WAIT_UNTIL, 0 ) );         \
-	OUT_RING( RADEON_WAIT_CRTC_PFLIP );				\
-} while (0)
-
-#endif /* !DRM_NEWER_RADEON_H */
 
 #define RADEON_FLUSH_CACHE() do {					\
 	if ((dev_priv->flags & RADEON_FAMILY_MASK) <= CHIP_RV280) {	\
