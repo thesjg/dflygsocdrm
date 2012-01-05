@@ -1363,6 +1363,62 @@ wake_up_interruptible_all(void *wqh) {
 	wakeup(wqh);
 }
 
+/* file i915_gem.c, function i915_gem_wait_for_pending_flip() */
+
+#define TASK_RUNNABLE		0x01
+#define TASK_INTERRUPTIBLE	0x02
+
+struct DRM_WAIT_STRUCT {
+	int placeholder;
+};
+
+typedef struct DRM_WAIT_STRUCT	DRM_WAIT_T;
+
+#define DEFINE_WAIT(wait)	struct DRM_WAIT_STRUCT wait = {0};
+
+static __inline__ void
+prepare_to_wait(
+	wait_queue_head_t *queue,
+	DRM_WAIT_T *wait,
+	int flags
+) {
+	;
+}
+
+static __inline__ void
+finish_wait(
+	wait_queue_head_t *queue,
+	DRM_WAIT_T *wait
+) {
+	;
+}
+
+/********************************************************************
+ * SIGNALS                                                          *
+ ********************************************************************/
+
+/*
+ * Third argument of send_sig is always 0 in drm
+ * Alternative to ksignal() may be kern_kill()
+ */
+static __inline__ void
+send_sig(uint32_t signal, DRM_CURRENT_T cur, uint32_t flags) {
+	if (cur->td_proc) {
+		ksignal(cur->td_proc, signal);
+	}
+}
+
+#if 0
+typedef struct proc *DRM_PROCESS_T;
+
+/* file ttm/ttm_lock.c, function __ttm_read_lock() */
+static __inline__ void
+DRM_SEND_SIG(uint32_t signal, DRM_PROCESS_T proc, uint32_t flags) {
+	if (proc != NULL)
+		ksignal(proc, signal);
+}
+#endif
+
 /* file drm_fops.c, function drm_cpu_valid() */
 /* boot_cpu_data.x86 appears to be an int sometimes 3 */
 
@@ -1374,27 +1430,6 @@ wake_up_interruptible_all(void *wqh) {
 
 /* file drm_drv.c, function drm_ioctl() */
 #define _IOC_SIZE(cmd) sizeof(unigned long)
-
-/* Appears to be used nowhere */
-struct sigset_t {
-	int placeholder;
-};
-
-/* file ttm/ttm_lock.c, function __ttm_read_lock() */
-/* UNIMPLEMENTED */
-static __inline__ void
-send_sig(uint32_t signal, DRM_CURRENT_T cur, uint32_t flags) {
-	;
-}
-
-typedef struct proc *DRM_PROCESS_T;
-
-/* file ttm/ttm_lock.c, function __ttm_read_lock() */
-static __inline__ void
-DRM_SEND_SIG(uint32_t signal, DRM_PROCESS_T proc, uint32_t flags) {
-	if (proc != NULL)
-		ksignal(proc, signal);
-}
 
 /* file ttm/ttm_tt.c, function ttm_tt_swapin.c */
 static __inline__ void
@@ -1525,36 +1560,6 @@ kobject_uevent_env(struct kobject *kobj, uint32_t flags, char *event[]) {
 /*
  * Tasks
  */
-
-/* file i915_gem.c, function i915_gem_wait_for_pending_flip() */
-
-#define TASK_RUNNABLE		0x01
-#define TASK_INTERRUPTIBLE	0x02
-
-struct DRM_WAIT_STRUCT {
-	int placeholder;
-};
-
-typedef struct DRM_WAIT_STRUCT	DRM_WAIT_T;
-
-#define DEFINE_WAIT(wait)	struct DRM_WAIT_STRUCT wait = {0};
-
-static __inline__ void
-prepare_to_wait(
-	wait_queue_head_t *queue,
-	DRM_WAIT_T *wait,
-	int flags
-) {
-	;
-}
-
-static __inline__ void
-finish_wait(
-	wait_queue_head_t *queue,
-	DRM_WAIT_T *wait
-) {
-	;
-}
 
 struct work_struct {
 	struct task task;

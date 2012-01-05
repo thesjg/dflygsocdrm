@@ -92,9 +92,8 @@ int drm_lock(struct drm_device *dev, void *data, struct drm_file *file_priv)
 			DRM_INFO("drm_lock pid (%d) hw_lock == 0 device unregistered\n",
 				DRM_CURRENTPID);
 			/* Device has been unregistered */
-#ifdef __linux__
 			send_sig(SIGTERM, current, 0);
-#else
+#if 0
 			kern_kill(SIGTERM, DRM_CURRENTPID, -1);
 #endif
 			ret = -EINTR;
