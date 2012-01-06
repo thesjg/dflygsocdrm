@@ -1074,6 +1074,94 @@ ida_destroy(struct ida *pida);
 
 typedef struct thread *DRM_CURRENT_T;
 
+
+/**********************************************************
+ * SYNCHRONIZATION                                        *
+ **********************************************************/
+
+/* DragonFly BSD only runs so far on i386 and x64_86 */
+#define CONFIG_X86 1
+
+#if 0
+/* 
+ * get giant kernel lock
+ */
+static __inline__ void
+lock_kernel(void) {
+	get_mplock();
+}
+
+/* 
+ * release giant kernel lock
+ */
+static __inline__ void
+unlock_kernel(void) {
+	rel_mplock();
+}
+#endif
+
+/* file drm_cache.c, function drm_cache_flush_clflush() */
+/* Previous version of drmP.h for DRM_MEMORYBARRIER() */
+#if 0
+#if defined(__i386__)
+#define mb()				__asm __volatile( \
+					"lock; addl $0,0(%%esp)" : : : "memory");
+#elif defined(__alpha__)
+#define mb()				alpha_mb();
+#elif defined(__x86_64__)
+#define mb()				__asm __volatile( \
+					"lock; addl $0,0(%%rsp)" : : : "memory");
+#endif
+#endif
+
+/*
+ * strong read and write ordering
+ */
+#ifndef mb
+#define mb()   cpu_mfence()
+#endif
+
+/*
+ * strong write ordering for writes issued before instruction
+ * if_mxge_var.h: apparently sfence was used FreeBSD pre version 800053
+ */
+#ifndef wmb
+#define wmb()  cpu_sfence()
+#endif
+
+#if 0 /* implemented in FreeBSD */
+static __inline__ void
+clflush(uint32_t location) {
+	;
+}
+#endif
+
+/* file drm_cache.c, function drm_clflush_pages() */
+#define cpu_has_clflush 1
+
+/* file drm_cache.c, function drm_clflush_pages() */
+/* UNIMPLEMENTED */
+static __inline__ int
+on_each_cpu(void (*handler)(void *data), void *data, uint32_t flags) {
+	return 1;
+}
+
+/********************************************************************
+ * CRITICAL SECTION                                                 *
+ ********************************************************************/
+
+/* enter critical section */
+static __inline__ void
+preempt_disable(void) {
+	crit_enter();
+}
+
+/* exit critical section */
+static __inline__ void
+preempt_enable(void) {
+	crit_exit();
+}
+
 /********************************************************************
  * PERMISSIONS AND CREDENTIALS                                      *
  ********************************************************************/
@@ -1408,14 +1496,85 @@ send_sig(uint32_t signal, DRM_CURRENT_T cur, uint32_t flags) {
 	}
 }
 
-#if 0
-typedef struct proc *DRM_PROCESS_T;
+/********************************************************************
+ * TIMER                                                            *
+ ********************************************************************/
 
-/* file ttm/ttm_lock.c, function __ttm_read_lock() */
+#define timer_list callout
+
+/*
+ * There is a problem that a callout requires void * arguments
+ * whereas a Linux timer_list requires unsigned long arguments
+ * (arguments which are then cast to pointers)
+ */
+
+#if 0
+/* Only used for dev->timer that in turn appears unused in drm */
 static __inline__ void
-DRM_SEND_SIG(uint32_t signal, DRM_PROCESS_T proc, uint32_t flags) {
-	if (proc != NULL)
-		ksignal(proc, signal);
+init_timer(struct timer_list *timer){
+	;
+}
+#endif
+
+#if 0
+/* file drm_irq.c, function drm_vblank_init() */
+/* CHANGE vblank_disable_fn() in drm_irq.c to void * arg */
+/* CHANGE i915_hangcheck_elapsed() in i915_irq.c to void * arg */
+/* CHANGE r600_audio_update_hdmi() in r600_audio.c to void * arg */
+/* CHANGE intel_gpu_idle_timer() in intel_display.c to void * arg */
+/* CHANGE intel_crtc_idle_timer() in intel_display.c to void * arg */
+/* CHANGE via_dmablit_timer() in via_dmablit.c to void * arg */
+static __inline__ void
+setup_timer(
+	struct timer_list *timer,
+	void (*func)(void *arg),
+	void *arg
+){
+	;
+}
+#endif
+
+#if 0
+static __inline__ void
+mod_timer(struct timer_list *timer, unsigned long delta){
+	;
+}
+#endif
+
+#if 0
+/* disable timer */
+static __inline__ void
+del_timer(struct timer_list *timer){
+	;
+}
+#endif
+
+#if 0
+/*
+ * disable timer,
+ * returns only after callout function not running anywhere
+ * potential use of this function is why all callout function
+ * state structs should have a flag to tell the callout function
+ * to not reset itself for re-running
+ */
+/*
+ * For now same as del_timer with sync provided by
+ * adding a lock to the callout struct
+ * and locking, unlocking around callout_stop,
+ * and adding to the callout function the checks
+ * lock;
+ * if (callout_pending(&timer)) { unlock; return; }
+ * if (!callout_active(&timer)) { unlock; return; }
+ * callout_deactivate(&timer);
+ * ... callout function body
+ * unlock;
+ * Another untested option is using locks with
+ * callout_terminate() in DragonFly BSD or
+ * callout_drain() in FreeBSD
+ */
+static __inline__ void
+del_timer_sync(struct timer_list *timer){
+	;
 }
 #endif
 
@@ -1430,17 +1589,6 @@ DRM_SEND_SIG(uint32_t signal, DRM_PROCESS_T proc, uint32_t flags) {
 
 /* file drm_drv.c, function drm_ioctl() */
 #define _IOC_SIZE(cmd) sizeof(unigned long)
-
-/* file ttm/ttm_tt.c, function ttm_tt_swapin.c */
-static __inline__ void
-preempt_disable(void) {
-	;
-}
-
-static __inline__ void
-preempt_enable(void) {
-	;
-}
 
 /**********************************************************
  * kref reference counting                                *
@@ -2168,125 +2316,6 @@ struct sysinfo {
 /* file ttm/ttm_memory.c, function ttm_mem_global_init() */
 static __inline__ void
 si_meminfo(struct sysinfo *si) {
-	;
-}
-/**********************************************************
- * SYNCHRONIZATION                                        *
- **********************************************************/
-
-/* file drm_cache.c, function drm_cache_flush_clflush() */
-/* DragonFly BSD only runs so far on i386 and x64_86 */
-#define CONFIG_X86 1
-
-/* file drm_fops.c, function drm_stub_open() */
-static __inline__ void
-lock_kernel(void) {
-	get_mplock();
-}
-
-/* file drm_fops.c, function drm_stub_open() */
-static __inline__ void
-unlock_kernel(void) {
-	rel_mplock();
-}
-
-/* file drm_cache.c, function drm_cache_flush_clflush() */
-/* Previous version of drmP.h for DRM_MEMORYBARRIER() */
-#if 0
-#if defined(__i386__)
-#define mb()				__asm __volatile( \
-					"lock; addl $0,0(%%esp)" : : : "memory");
-#elif defined(__alpha__)
-#define mb()				alpha_mb();
-#elif defined(__x86_64__)
-#define mb()				__asm __volatile( \
-					"lock; addl $0,0(%%rsp)" : : : "memory");
-#endif
-#endif
-
-/* file vmwgfx_fifo.c, function vmw_fifo_init() */
-#ifndef mb
-#define mb()   cpu_mfence()
-#endif
-
-/* file vmwgfx_fifo.c, function vmw_fifo_init() */
-#ifndef wmb
-#define wmb()  cpu_sfence()
-#endif
-
-#if 0
-/* file drm_cache.c, function drm_clflush_pages() */
-#define wbinvd()	__asm __volatile( \
-			"wbinvd");
-#endif
-
-#if 0
-/* file drm_cache.c, function drm_clflush_pages() */
-static __inline__ void
-clflush(uint32_t location) {
-	;
-}
-#endif
-
-/* file drm_cache.c, function drm_clflush_pages() */
-#define cpu_has_clflush 1
-
-/* file drm_cache.c, function drm_clflush_pages() */
-static __inline__ int
-on_each_cpu(void (*handler)(void *data), void *data, uint32_t flags) {
-	return 1;
-}
-
-/**********************************************************
- * timer                                                  *
- **********************************************************/
-
-/*
- * There is a problem that a callout requires void * arguments
- * whereas a Linux timer_list requires unsigned long arguments
- * (arguments which are then cast to pointers)
- */
-
-/* &dev->vblank_disable_timer is being used in drm_irq.c */
-#define timer_list callout
-
-/* file drm_drv.c, function drm_lastclose() */
-static __inline__ void
-init_timer(struct timer_list *timer){
-	;
-}
-
-/* file drm_irq.c, function drm_vblank_init() */
-/* CHANGE vblank_disable_fn() in drm_irq.c to void * arg */
-/* CHANGE i915_hangcheck_elapsed() in i915_irq.c to void * arg */
-/* CHANGE r600_audio_update_hdmi() in r600_audio.c to void * arg */
-/* CHANGE intel_gpu_idle_timer() in intel_display.c to void * arg */
-/* CHANGE intel_crtc_idle_timer() in intel_display.c to void * arg */
-/* CHANGE via_dmablit_timer() in via_dmablit.c to void * arg */
-static __inline__ void
-setup_timer(
-	struct timer_list *timer,
-	void (*func)(void *arg),
-	void *arg
-){
-	;
-}
-
-/* file drm_irq.c, function drm_vblank_put() */
-static __inline__ void
-mod_timer(struct timer_list *timer, unsigned long delta){
-	;
-}
-
-/* file drm_drv.c, function drm_lastclose() */
-static __inline__ void
-del_timer(struct timer_list *timer){
-	;
-}
-
-/* file i915/intel_display.c */
-static __inline__ void
-del_timer_sync(struct timer_list *timer){
 	;
 }
 

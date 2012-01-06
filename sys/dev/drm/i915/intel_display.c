@@ -3921,12 +3921,30 @@ static void intel_gpu_idle_timer(void *arg)
 {
 	struct drm_device *dev = (struct drm_device *)arg;
 	drm_i915_private_t *dev_priv = dev->dev_private;
+#ifndef __linux__
+	DRM_SPINLOCK(&dev_priv->idle_lock);
+
+	if (callout_pending(&dev_priv->idle_timer)) {
+		/* callout was reset */
+		DRM_SPINUNLOCK(&dev_priv->idle_lock);
+		return;
+	}
+	if (!callout_active(&dev_priv->idle_timer)) {
+		/* callout was stopped */
+		DRM_SPINUNLOCK(&dev_priv->idle_lock);
+		return;
+	}
+	callout_deactivate(&dev_priv->idle_timer);
+#endif
 
 	DRM_DEBUG_DRIVER("idle timer fired, downclocking\n");
 
 	dev_priv->busy = false;
 
 	queue_work(dev_priv->wq, &dev_priv->idle_work);
+#ifndef __linux__
+	DRM_SPINUNLOCK(&dev_priv->idle_lock);
+#endif
 }
 
 #define CRTC_IDLE_TIMEOUT 1000 /* ms */
@@ -3940,12 +3958,30 @@ static void intel_crtc_idle_timer(void *arg)
 	struct intel_crtc *intel_crtc = (struct intel_crtc *)arg;
 	struct drm_crtc *crtc = &intel_crtc->base;
 	drm_i915_private_t *dev_priv = crtc->dev->dev_private;
+#ifndef __linux__
+	DRM_SPINLOCK(&dev_priv->crtc_lock);
+
+	if (callout_pending(&intel_crtc->idle_timer)) {
+		/* callout was reset */
+		DRM_SPINUNLOCK(&dev_priv->crtc_lock);
+		return;
+	}
+	if (!callout_active(&intel_crtc->idle_timer)) {
+		/* callout was stopped */
+		DRM_SPINUNLOCK(&dev_priv->crtc_lock);
+		return;
+	}
+	callout_deactivate(&intel_crtc->idle_timer);
+#endif
 
 	DRM_DEBUG_DRIVER("idle timer fired, downclocking\n");
 
 	intel_crtc->busy = false;
 
 	queue_work(dev_priv->wq, &dev_priv->idle_work);
+#ifndef __linux__
+	DRM_SPINUNLOCK(&dev_priv->crtc_lock);
+#endif
 }
 
 static void intel_increase_pllclock(struct drm_crtc *crtc, bool schedule)
@@ -4432,6 +4468,7 @@ static void intel_crtc_init(struct drm_device *dev, int pipe)
 	setup_timer(&intel_crtc->idle_timer, intel_crtc_idle_timer,
 		    (void *)intel_crtc);
 #else
+	DRM_SPININIT(&dev_priv->crtc_lock, "drmcrt");
 	callout_init(&intel_crtc->idle_timer);
 #endif
 }
@@ -5014,6 +5051,7 @@ void intel_modeset_init(struct drm_device *dev)
 	setup_timer(&dev_priv->idle_timer, intel_gpu_idle_timer,
 		    (unsigned long)dev);
 #else
+	DRM_SPININIT(&dev_priv->idle_lock, "drmidl");
 	callout_init(&dev_priv->idle_timer);
 #endif
 

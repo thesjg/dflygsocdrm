@@ -1877,6 +1877,8 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 
 #ifdef DRM_NEWER_IGEM
 	i915_gem_load(dev);
+#else /* At least initialize as list empty */
+	INIT_LIST_HEAD(&dev_priv->mm.request_list);
 #endif
 	/* Init HWS */
 	if (!I915_NEED_GFX_HWS(dev)) {
@@ -1949,6 +1951,7 @@ int i915_driver_load(struct drm_device *dev, unsigned long flags)
 	setup_timer(&dev_priv->hangcheck_timer, i915_hangcheck_elapsed,
 		    (unsigned long) dev);
 #else
+	DRM_SPININIT(&dev_priv->hangcheck_lock, "drmhac");
 	callout_init(&dev_priv->hangcheck_timer);
 #endif
 
@@ -1985,9 +1988,6 @@ free_priv:
 int i915_driver_unload(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
-#ifndef __linux__
-	int pending = 0;
-#endif
 
 #ifdef __linux__
 	i915_destroy_error_state(dev);
@@ -1998,7 +1998,9 @@ int i915_driver_unload(struct drm_device *dev)
 	del_timer_sync(&dev_priv->hangcheck_timer);
 #else
 	destroy_workqueue(dev_priv->wq);
-	pending = callout_stop(&dev_priv->hangcheck_timer);
+	DRM_SPINLOCK(&dev_priv->hangcheck_lock);
+	callout_stop(&dev_priv->hangcheck_timer);
+	DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
 #endif
 
 #ifdef __linux__
@@ -2080,6 +2082,9 @@ int i915_driver_unload(struct drm_device *dev)
 	kfree(dev->dev_private);
 #else
 	DRM_SPINUNINIT(&dev_priv->user_irq_lock);
+	DRM_SPINUNINIT(&dev_priv->hangcheck_lock);
+	DRM_SPINUNINIT(&dev_priv->idle_lock);
+	DRM_SPINUNINIT(&dev_priv->crtc_lock);
 
 	drm_free(dev->dev_private, sizeof(drm_i915_private_t),
 		 DRM_MEM_DRIVER);
@@ -2102,6 +2107,9 @@ int i915_driver_open(struct drm_device *dev, struct drm_file *file_priv)
 	file_priv->driver_priv = i915_file_priv;
 
 	INIT_LIST_HEAD(&i915_file_priv->mm.request_list);
+#ifndef __linux__
+	DRM_INFO("mm.request_list");
+#endif
 
 	return 0;
 }

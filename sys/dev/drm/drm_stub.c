@@ -310,7 +310,9 @@ static int drm_fill_in_dev(struct drm_device *dev, device_t kdev,
 	spin_lock_init(&dev->count_lock);
 	DRM_SPININIT(&dev->drw_lock, "drmdrw");
 	spin_lock_init(&dev->event_lock);
+#if 0 /* UNUSED? */
 	init_timer(&dev->timer);
+#endif
 	mutex_init(&dev->struct_mutex);
 	mutex_init(&dev->ctxlist_mutex);
 

@@ -674,6 +674,10 @@ typedef struct drm_i915_private {
 
 	struct drm_mm_node *compressed_fb;
 	struct drm_mm_node *compressed_llb;
+/* other OS DRM */
+	DRM_SPINTYPE hangcheck_lock;
+	DRM_SPINTYPE idle_lock;
+	DRM_SPINTYPE crtc_lock;
 } drm_i915_private_t;
 
 /** driver private structure attached to each drm_gem_object */

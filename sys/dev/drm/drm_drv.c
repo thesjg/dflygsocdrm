@@ -222,7 +222,9 @@ int drm_lastclose(struct drm_device * dev)
 
 	/* Free drawable information memory */
 	drm_drawable_free_all(dev);
+#if 0 /* UNUSED? */
 	del_timer(&dev->timer);
+#endif
 
 	/* Clear AGP information */
 	if (drm_core_has_AGP(dev) && dev->agp &&

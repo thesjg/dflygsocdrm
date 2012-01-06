@@ -1356,9 +1356,30 @@ void i915_hangcheck_elapsed(void *data)
 	drm_i915_private_t *dev_priv = dev->dev_private;
 	uint32_t acthd;
 
+	DRM_SPINLOCK(&dev_priv->hangcheck_lock);
+
+	if (callout_pending(&dev_priv->hangcheck_timer)) {
+		/* callout was reset */
+		DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
+		return;
+	}
+	if (!callout_active(&dev_priv->hangcheck_timer)) {
+		/* callout was stopped */
+		DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
+		return;
+	}
+	callout_deactivate(&dev_priv->hangcheck_timer);
+
 	/* No reset support on this chip yet. */
+#ifdef __linux__
 	if (IS_GEN6(dev))
 		return;
+#else
+	if (IS_GEN6(dev)) {
+		DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
+		return;
+	}
+#endif
 
 	if (!IS_I965G(dev))
 		acthd = I915_READ(ACTHD);
@@ -1370,11 +1391,13 @@ void i915_hangcheck_elapsed(void *data)
 	if (list_empty(&dev_priv->mm.request_list) ||
 		       i915_seqno_passed(i915_get_gem_seqno(dev), i915_get_tail_request(dev)->seqno)) {
 		dev_priv->hangcheck_count = 0;
+		DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
 		return;
 	}
 #else
 	if (list_empty(&dev_priv->mm.request_list)) {
 		dev_priv->hangcheck_count = 0;
+		DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
 		return;
 	}
 #endif /* __linux__ */
@@ -1382,6 +1405,7 @@ void i915_hangcheck_elapsed(void *data)
 	if (dev_priv->last_acthd == acthd && dev_priv->hangcheck_count > 0) {
 		DRM_ERROR("Hangcheck timer elapsed... GPU hung\n");
 		i915_handle_error(dev, true);
+		DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
 		return;
 	} 
 
@@ -1399,6 +1423,7 @@ void i915_hangcheck_elapsed(void *data)
 		dev_priv->hangcheck_count++;
 
 	dev_priv->last_acthd = acthd;
+	DRM_SPINUNLOCK(&dev_priv->hangcheck_lock);
 }
 
 /* drm_dma.h hooks
