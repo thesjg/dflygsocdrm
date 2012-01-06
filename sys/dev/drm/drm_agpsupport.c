@@ -556,9 +556,12 @@ struct drm_agp_head *drm_agp_init(struct drm_device *dev)
 	head->page_mask = head->agp_info.page_mask;
 	head->base = head->agp_info.aper_base;
 #ifndef __linux__
-	DRM_INFO("drm_agp_init(): AGP at 0x%08lx %dMB\n",
+	DRM_INFO("drm_agp_init(): AGP at 0x%08lx, %dMB, mode 0x%08lx, vendor 0x%4x, device 0x%4x\n",
 		 (long)head->agp_info.aper_base,
-		 (int)(head->agp_info.aper_size));
+		 (int)(head->agp_info.aper_size),
+		 head->agp_info.mode,
+		 head->agp_info.id_vendor,
+		 head->agp_info.id_device);
 #endif
 	return head;
 }

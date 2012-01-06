@@ -1578,6 +1578,150 @@ del_timer_sync(struct timer_list *timer){
 }
 #endif
 
+/********************************************************************
+ * COPY TO and COPY FROM USER SPACE                                 *
+ ********************************************************************/
+
+#define VERIFY_READ  VM_PROT_READ
+#define VERIFY_WRITE VM_PROT_WRITE
+
+/* older other OS drmP.h DRM_VERIFYAREA_READ */
+static __inline__ int
+access_ok(int flags, void *ptr, int size) {
+	return useracc(__DECONST(caddr_t, ptr), size, flags);
+}
+
+#define get_user(dest, src)    copyin(&dest, src, sizeof(dest))
+
+#define __get_user(dest, src)  copyin(&dest, src, sizeof(dest))
+
+#define put_user(src, dest)    copyout(&src, dest, sizeof(src))
+
+#define __put_user(src, dest)  copyout(&src, dest, sizeof(src))
+
+/* older other OS drmP.h DRM_COPY_FROM_USER() */
+static __inline__ int
+copy_from_user(
+	void *kaddr,
+	const void __user *uaddr,
+	size_t iosize
+) {
+	return copyin(uaddr, kaddr, iosize);
+}
+
+/* older other OS drmP.h DRM_COPY_TO_USER() */
+static __inline__ int
+copy_to_user(
+	void *uaddr,
+	const void *kaddr,
+	size_t iosize
+) {
+	return copyout(kaddr, uaddr, iosize);
+}
+
+static __inline__ int
+__copy_to_user_inatomic(
+	void *uaddr,
+	void *kaddr,
+	int iosize
+) {
+	return copyout(kaddr, uaddr, iosize);
+}
+
+static __inline__ int
+__copy_from_user_inatomic_nocache(
+	void *kaddr,
+	void *uaddr,
+	int iosize
+) {
+	return copyin(uaddr, kaddr, iosize);
+}
+
+static __inline__ int
+__copy_from_user_inatomic(
+	void *kaddr,
+	void *uaddr,
+	int iosize
+) {
+	return copyin(uaddr, kaddr, iosize);
+}
+
+/********************************************************************
+ * MEMORY MAPPED IO                                                 *
+ ********************************************************************/
+
+/* directive __iomem */
+static __inline__ void
+memset_io(void * handle, uint32_t value, int size) {
+	memset(handle, value, size);
+}
+
+/* QUESTION: is dst src guaranteed non-overlapping for memcpy? */
+static __inline__ void
+memcpy_fromio(void *dst, void *src, unsigned long size) {
+	memcpy(dst, src, size);
+}
+
+/* QUESTION: is dst src guaranteed non-overlapping for memcpy? */
+static __inline__ void
+memcpy_toio(void *dst, void *src, unsigned long size) {
+	memcpy(dst, src, size);
+}
+
+/********************************************************************
+ * MTRR                                                             *
+ ********************************************************************/
+
+/* It appears that DRM_MTRR_WC is always used as the flag */
+#define MTRR_TYPE_WRCOMB  MDF_WRITECOMBINE
+
+static __inline__ int
+mtrr_add(
+	unsigned long offset,
+	unsigned long size,
+	unsigned int flags,
+	boolean_t flagsOne
+) {
+	int act;
+	struct mem_range_desc mrdesc;
+	int error;
+
+	mrdesc.mr_base = offset;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = flags;
+	act = MEMRANGE_SET_UPDATE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	error = mem_range_attr_set(&mrdesc, &act);
+	if (error) {
+		kprintf("mtrr_add FAILED for offset (%016lx), size (%016lx), error (%d)\n", offset, size, error);
+		if (error > 0) {
+			return -error;
+		}
+		else {
+			return error;
+		}
+	}
+	kprintf("mtrr_add SUCCESS for offset (%016lx), size (%016lx)\n", offset, size);
+	return error;
+}
+
+static __inline__ int
+mtrr_del(
+	int reg, /*unused */
+	unsigned long base,
+	unsigned long size
+) {
+	int act;
+	struct mem_range_desc mrdesc;
+
+	mrdesc.mr_base = base;
+	mrdesc.mr_len = size;
+	mrdesc.mr_flags = MDF_WRITECOMBINE;
+	act = MEMRANGE_SET_REMOVE;
+	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
+	return mem_range_attr_set(&mrdesc, &act);
+}
+
 /* file drm_fops.c, function drm_cpu_valid() */
 /* boot_cpu_data.x86 appears to be an int sometimes 3 */
 
@@ -2440,135 +2584,6 @@ io_mapping_unmap_atomic(
 	kfree(vaddr, M_TEMP);
 #endif
 }
-
-/*
- * Kernel to / from user
- */
-
-#define VERIFY_READ  VM_PROT_READ
-#define VERIFY_WRITE VM_PROT_WRITE
-
-/* file drm_ioc32.c, function compat_drm_version() */
-/* Allocate on user stack? */
-static __inline__ void *
-compat_alloc_user_space(size_t size) {
-	return NULL;
-}
-
-/* file i915_gem.c, function i915_gem_gtt_pwrite_fast() */
-static __inline__ int
-access_ok(int flags, void *ptr, int size) {
-	return useracc(__DECONST(caddr_t, ptr), size, flags);
-}
-
-/* file drm_crtc.c, function drm_mode_setcrtc() */
-#define get_user(dest, src)  copyin(&dest, src, sizeof(dest))
-
-/* file drm_crtc.c, function drm_mode_setcrtc() */
-#define __get_user(dest, src)  copyin(&dest, src, sizeof(dest))
-
-/* file drm_crtc.c, function drm_mode_getresources() */
-#define put_user(src, dest)  copyout(&src, dest, sizeof(src))
-
-/* file drm_ioc32.c, function compat_drm_version() */
-#define __put_user(src, dest)  copyout(&src, dest, sizeof(src))
-
-/* file ttm/ttm_bo_vm.c, function ttm_bo_io() */
-/* file drm_bufs.c, function drm_freebufs() */
-/* legacy drmP.h DRM_COPY_FROM_USER() */
-/* file drm_crtc.c, function drm_mode_gamma_set_ioctl() */
-static __inline__ int
-copy_from_user(
-	void *kaddr,
-	const void __user *uaddr,
-	size_t iosize
-) {
-	return copyin(uaddr, kaddr, iosize);
-}
-
-/* file ttm/ttm_bo_vm.c, function ttm_bo_io() */
-/* file drm_bufs.c, function drm_mapbufs() */
-/* legacy drmP.h DRM_COPY_TO_USER() */
-/* file drm_crtc.c, function drm_mode_getblob_ioctl() */
-static __inline__ int
-copy_to_user(
-	void *uaddr,
-	const void *kaddr,
-	size_t iosize
-) {
-	return copyout(kaddr, uaddr, iosize);
-}
-
-/* file i915_gem.c, function fast_shmem_read() */
-static __inline__ int
-__copy_to_user_inatomic(
-	void *uaddr,
-	void *kaddr,
-	int iosize
-) {
-	return copyout(kaddr, uaddr, iosize);
-}
-
-/* file i915_gem.c, function slow_kernel_write() */
-static __inline__ int
-__copy_from_user_inatomic_nocache(
-	void *kaddr,
-	void *uaddr,
-	int iosize
-) {
-	return copyin(uaddr, kaddr, iosize);
-}
-
-/* file i915_gem.c, function slow_kernel_write() */
-static __inline__ int
-__copy_from_user_inatomic(
-	void *kaddr,
-	void *uaddr,
-	int iosize
-) {
-	return copyin(uaddr, kaddr, iosize);
-}
-
-/* file drm_bufs.c, function drm_addbufs_agp() */
-/* memset() declared in sys/libkern.h on DragonFly */
-#if 0
-static __inline__ void
-memset(void * handle, uint32_t zero, int size) {
-	;
-}
-#endif
-
-/* file drm_bufs.c, function drm_addbufs_pci() */
-/* memcpy() declared in sys/systm.h on DragonFly */
-#if 0
-static __inline__ void *
-memcpy(void *src, void *dst, size_t size) {
-	return NULL;
-}
-#endif
-
-/* file ati_pcigart.c, function drm_ati_pcigart_init() */
-/* directive __iomem */
-static __inline__ void
-memset_io(void * handle, uint32_t value, int size) {
-	memset(handle, value, size);
-}
-
-/* vmwgfx_fifo.c, function vmw_fifo_res_copy() */
-/* QUESTION: is dst src guaranteed non-overlapping for memcpy? */
-static __inline__ void
-memcpy_fromio(void *dst, void *src, unsigned long size) {
-	memcpy(dst, src, size);
-}
-
-/* file ttm/ttm_bo_util.c, function ttm_copy_io_page() */
-/* vmwgfx_fifo.c, function vmw_fifo_res_copy() */
-/* QUESTION: is dst src guaranteed non-overlapping for memcpy? */
-static __inline__ void
-memcpy_toio(void *dst, void *src, unsigned long size) {
-	memcpy(dst, src, size);
-}
-
 /*
  * I/O and virtual memory
  */
@@ -2686,104 +2701,6 @@ page_count(struct page *page) {
 	return 0;
 }
 
-/*
- * MTRR
- */
-
-/* It appears that DRM_MTRR_WC is always used as the flag */
-#define MTRR_TYPE_WRCOMB MDF_WRITECOMBINE
-
-#if 0
-static inline int mtrr_cookie(struct mem_range_desc *mrd) {
-	int nd = 0;
-	int ndesc;
-	int error;
-	struct mem_range_desc *md;
-	struct mem_range_desc *cand;
-	int match = -1;
-	int i;
-
-	error = mem_range_attr_get(mrd, &nd);
-	if (error) {
-		kprintf("ERROR (%d) mem_range_attr_get ZERO mtrr regions configured\n", error);
-		return -error;
-	}
-	ndesc = nd;
-	if (ndesc <= 0) {
-		kprintf("ERROR (%d) mem_range_attr_get claimed (%d) mtrr regions configured\n", error, ndesc);
-		return -1;
-	}
-	md = kmalloc(ndesc * sizeof(struct mem_range_desc), M_TEMP, M_WAITOK);
-	if (!md) {
-		return -ENOMEM;
-	}
-	error = mem_range_attr_get(md, &nd);
-	if (error) {
-		kprintf("ERROR (%d) mem_range_attr_get for offset (%016lx), size (%016lx)\n", error, mrd->mr_base, mrd->mr_len);
-		kfree(md, M_TEMP);
-		return -error;
-	}
-	cand = md;
-	for (i = 0; i < ndesc; i++, cand++) {
-		if ((mrd->mr_base == cand->mr_base) && (mrd->mr_len == cand->mr_len)) {
-			match = i;
-		}
-	}
-	kfree(md, M_TEMP);
-	kprintf("mtrr_add reg (%d) for offset (%016lx), size (%016lx)\n", match, mrd->mr_base, mrd->mr_len);
-	if (match < 0) {
-		return match;
-	}
-	return match;
-}
-#endif
-
-static __inline__ int
-mtrr_add(
-	unsigned long offset,
-	unsigned long size,
-	unsigned int flags,
-	boolean_t flagsOne
-) {
-	int act;
-	struct mem_range_desc mrdesc;
-	int error;
-
-	mrdesc.mr_base = offset;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = flags;
-	act = MEMRANGE_SET_UPDATE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	error = mem_range_attr_set(&mrdesc, &act);
-	if (error) {
-		kprintf("mtrr_add FAILED for offset (%016lx), size (%016lx), error (%d)\n", offset, size, error);
-		if (error > 0) {
-			return -error;
-		}
-		else {
-			return error;
-		}
-	}
-	kprintf("mtrr_add SUCCESS for offset (%016lx), size (%016lx)\n", offset, size);
-	return error;
-}
-
-static __inline__ int
-mtrr_del(
-	int reg, /*unused */
-	unsigned long base,
-	unsigned long size
-) {
-	int act;
-	struct mem_range_desc mrdesc;
-
-	mrdesc.mr_base = base;
-	mrdesc.mr_len = size;
-	mrdesc.mr_flags = MDF_WRITECOMBINE;
-	act = MEMRANGE_SET_REMOVE;
-	strlcpy(mrdesc.mr_owner, "drm", sizeof(mrdesc.mr_owner));
-	return mem_range_attr_set(&mrdesc, &act);
-}
 
 /*
  * mmap
@@ -2840,17 +2757,17 @@ iounmap(void *virtual) {
 }
 
 /* nouveau_drv.h */
-#define ioread8(reg) (readb(reg))
+#define ioread8(reg)         (readb(reg))
 
 /* nouveau_drv.h */
-#define ioread16(reg) (readw(reg))
+#define ioread16(reg)        (readw(reg))
 
 /* file vmwgfx_fifo.c, function vmw_fifo_is_full() */
 /* file vmwgfx_irq.c, function vmw_fence_signaled() */
 #define ioread32(reg) (readl(reg))
 
 /* nouveau_drv.h */
-#define iowrite8(value, reg) writeb(reg, value)
+#define iowrite8(value, reg)  writeb(reg, value)
 
 /* nouveau_drv.h */
 #define iowrite16(value, reg) writew(reg, value)
@@ -3151,38 +3068,12 @@ device_remove_file(
  * DMA                                                    *
  **********************************************************/
 
-typedef bus_addr_t dma_addr_t;
+typedef bus_addr_t  dma_addr_t;
 
-/* From legacy older version of drmP.h */
+/* From older other OS drmP.h */
 
 #ifndef DMA_BIT_MASK
 #define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
-#endif
-
-#if 0
-/* file drm_pci.c, function __drm_pci_free() */
-/* UNIMPLEMENTED */
-static __inline__ void *
-dma_alloc_coherent(
-	struct device *dev,
-	size_t size,
-	dma_addr_t *busaddr,
-	gfp_t flag
-) {
-	return NULL;
-}
-
-/* file drm_pci.c, function __drm_pci_free() */
-/* UNIMPLEMENTED */
-static __inline__ void
-dma_free_coherent(
-	struct device *dev,
-	size_t size,
-	void *vaddr,
-	dma_addr_t busaddr
-) {
-	;
-}
 #endif
 
 /**********************************************************
@@ -3191,15 +3082,15 @@ dma_free_coherent(
 
 /* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
 /* file radeon_gart.c, function radeon_gart_unbind() */
-#define PCI_DMA_BIDIRECTIONAL 0x0001
+#define PCI_DMA_BIDIRECTIONAL   0x0001
 
 /* file drm_vm.c, function drm_mmap_locked() */
-#define PCI_VENDOR_ID_APPLE 0x0001
+#define PCI_VENDOR_ID_APPLE     0x0001
 
 /* i915_drv.c */
-#define PCI_ANY_ID            0xffff
-#define PCI_CLASS_DISPLAY_VGA 0x0000
-#define PCI_D3hot             0x0002
+#define PCI_ANY_ID              0xffff
+#define PCI_CLASS_DISPLAY_VGA   0x0000
+#define PCI_D3hot               0x0002
 
 /* drmP.h drm_stub.h */
 /* file drm_drv.c, function drm_init() */
