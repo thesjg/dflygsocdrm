@@ -79,7 +79,7 @@
  * are those of the authors and should not be interpreted as representing
  * official policies,either expressed or implied, of the FreeBSD Project.
  *
- * $FreeBSD: src/sys/dev/mfi/mfi.c,v 1.57 2011/07/14 20:20:33 jhb Exp $
+ * $FreeBSD: src/sys/dev/mfi/mfi.c,v 1.62 2011/11/09 21:53:49 delphij Exp $
  */
 
 #include "opt_mfi.h"
@@ -102,6 +102,8 @@
 #include <sys/mplock2.h>
 
 #include <bus/cam/scsi/scsi_all.h>
+
+#include <bus/pci/pcivar.h>
 
 #include <dev/raid/mfi/mfireg.h>
 #include <dev/raid/mfi/mfi_ioctl.h>
@@ -167,6 +169,9 @@ static int	mfi_max_cmds = 128;
 TUNABLE_INT("hw.mfi.max_cmds", &mfi_max_cmds);
 SYSCTL_INT(_hw_mfi, OID_AUTO, max_cmds, CTLFLAG_RD, &mfi_max_cmds,
 	   0, "Max commands");
+
+static int	mfi_msi_enable = 1;
+TUNABLE_INT("hw.mfi.msi.enable", &mfi_msi_enable);
 
 /* Management interface */
 static d_open_t		mfi_open;
@@ -371,6 +376,7 @@ mfi_attach(struct mfi_softc *sc)
 	uint32_t status;
 	int error, commsz, framessz, sensesz;
 	int frames, unit, max_fw_sge;
+	u_int irq_flags;
 
 	device_printf(sc->mfi_dev, "Megaraid SAS driver Ver 3.981\n");
 
@@ -571,8 +577,10 @@ mfi_attach(struct mfi_softc *sc)
 	 * mfi_pci.c
 	 */
 	sc->mfi_irq_rid = 0;
+	sc->mfi_irq_type = pci_alloc_1intr(sc->mfi_dev, mfi_msi_enable,
+	    &sc->mfi_irq_rid, &irq_flags);
 	if ((sc->mfi_irq = bus_alloc_resource_any(sc->mfi_dev, SYS_RES_IRQ,
-	    &sc->mfi_irq_rid, RF_SHAREABLE | RF_ACTIVE)) == NULL) {
+	    &sc->mfi_irq_rid, irq_flags)) == NULL) {
 		device_printf(sc->mfi_dev, "Cannot allocate interrupt\n");
 		return (EINVAL);
 	}
@@ -632,7 +640,7 @@ mfi_attach(struct mfi_softc *sc)
 	bus_generic_attach(sc->mfi_dev);
 
 	/* Start the timeout watchdog */
-	callout_init(&sc->mfi_watchdog_callout);
+	callout_init_mp(&sc->mfi_watchdog_callout);
 	callout_reset(&sc->mfi_watchdog_callout, MFI_CMD_TIMEOUT * hz,
 	    mfi_timeout, sc);
 
@@ -971,7 +979,8 @@ mfi_free(struct mfi_softc *sc)
 	if (sc->mfi_irq != NULL)
 		bus_release_resource(sc->mfi_dev, SYS_RES_IRQ, sc->mfi_irq_rid,
 		    sc->mfi_irq);
-
+	if (sc->mfi_irq_type == PCI_INTR_TYPE_MSI)
+		pci_release_msi(sc->mfi_dev);
 	if (sc->mfi_sense_busaddr != 0)
 		bus_dmamap_unload(sc->mfi_sense_dmat, sc->mfi_sense_dmamap);
 	if (sc->mfi_sense != NULL)
@@ -1005,15 +1014,12 @@ mfi_free(struct mfi_softc *sc)
 		sysctl_ctx_free(&sc->mfi_sysctl_ctx);
 
 #if 0 /* XXX swildner: not sure if we need something like mtx_initialized() */
-
-	if (mtx_initialized(&sc->mfi_io_lock)) {
-		lockuninit(&sc->mfi_io_lock);
-		sx_destroy(&sc->mfi_config_lock);
-	}
+	if (mtx_initialized(&sc->mfi_io_lock))
 #endif
-
+	{
 	lockuninit(&sc->mfi_io_lock);
 	lockuninit(&sc->mfi_config_lock);
+	}
 
 	return;
 }
@@ -1048,6 +1054,12 @@ mfi_intr(void *arg)
 
 	if (sc->mfi_check_clear_intr(sc))
 		return;
+
+	/*
+	 * Do a dummy read to flush the interrupt ACK that we just performed,
+	 * ensuring that everything is really, truly consistent.
+	 */
+	(void)sc->mfi_read_fw_status(sc);
 
 	pi = sc->mfi_comms->hw_pi;
 	ci = sc->mfi_comms->hw_ci;
@@ -1867,7 +1879,7 @@ mfi_data_cb(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
 	struct mfi_command *cm;
 	union mfi_sgl *sgl;
 	struct mfi_softc *sc;
-	int i, dir;
+	int i, j, first, dir;
 	int sgl_mapped = 0;
 	int sge_size = 0;
 
@@ -1903,22 +1915,37 @@ mfi_data_cb(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
 		sge_size = sizeof(struct mfi_sg_skinny);
 	}
 	if (!sgl_mapped) {
+		j = 0;
+		if (cm->cm_frame->header.cmd == MFI_CMD_STP) {
+			first = cm->cm_stp_len;
+			if ((sc->mfi_flags & MFI_FLAGS_SG64) == 0) {
+				sgl->sg32[j].addr = segs[0].ds_addr;
+				sgl->sg32[j++].len = first;
+			} else {
+				sgl->sg64[j].addr = segs[0].ds_addr;
+				sgl->sg64[j++].len = first;
+			}
+		} else
+			first = 0;
 		if ((sc->mfi_flags & MFI_FLAGS_SG64) == 0) {
 			for (i = 0; i < nsegs; i++) {
-				sgl->sg32[i].addr = segs[i].ds_addr;
-				sgl->sg32[i].len = segs[i].ds_len;
+				sgl->sg32[j].addr = segs[i].ds_addr + first;
+				sgl->sg32[j++].len = segs[i].ds_len - first;
+				first = 0;
 			}
 			sge_size = sizeof(struct mfi_sg32);
 		} else {
 			for (i = 0; i < nsegs; i++) {
-				sgl->sg64[i].addr = segs[i].ds_addr;
-				sgl->sg64[i].len = segs[i].ds_len;
+				sgl->sg64[j].addr = segs[i].ds_addr + first;
+				sgl->sg64[j++].len = segs[i].ds_len - first;
+				first = 0;
 			}
 			hdr->flags |= MFI_FRAME_SGL64;
 			sge_size = sizeof(struct mfi_sg64);
 		}
-	}
-	hdr->sg_count = nsegs;
+		hdr->sg_count = j;
+	} else
+		hdr->sg_count = nsegs;
 
 	dir = 0;
 	if (cm->cm_flags & MFI_CMD_DATAIN) {
@@ -1929,6 +1956,8 @@ mfi_data_cb(void *arg, bus_dma_segment_t *segs, int nsegs, int error)
 		dir |= BUS_DMASYNC_PREWRITE;
 		hdr->flags |= MFI_FRAME_DIR_WRITE;
 	}
+	if (cm->cm_frame->header.cmd == MFI_CMD_STP)
+		dir |= BUS_DMASYNC_PREWRITE;
 	bus_dmamap_sync(sc->mfi_buffer_dmat, cm->cm_dmamap, dir);
 	cm->cm_flags |= MFI_CMD_MAPPED;
 
@@ -2004,7 +2033,8 @@ mfi_complete(struct mfi_softc *sc, struct mfi_command *cm)
 
 	if ((cm->cm_flags & MFI_CMD_MAPPED) != 0) {
 		dir = 0;
-		if (cm->cm_flags & MFI_CMD_DATAIN)
+		if ((cm->cm_flags & MFI_CMD_DATAIN) ||
+		    (cm->cm_frame->header.cmd == MFI_CMD_STP))
 			dir |= BUS_DMASYNC_POSTREAD;
 		if (cm->cm_flags & MFI_CMD_DATAOUT)
 			dir |= BUS_DMASYNC_POSTWRITE;
@@ -2495,7 +2525,8 @@ mfi_ioctl(struct dev_ioctl_args *ap)
 	struct mfi_command *cm = NULL;
 	uint32_t context;
 	union mfi_sense_ptr sense_ptr;
-	uint8_t *data = NULL, *temp, skip_pre_post = 0;
+	uint8_t *data = NULL, *temp, *addr, skip_pre_post = 0;
+	size_t len;
 	int i;
 	struct mfi_ioc_passthru *iop = (struct mfi_ioc_passthru *)arg;
 #ifdef __x86_64__
@@ -2594,6 +2625,21 @@ mfi_ioctl(struct dev_ioctl_args *ap)
 		if (cm->cm_flags == 0)
 			cm->cm_flags |= MFI_CMD_DATAIN | MFI_CMD_DATAOUT;
 		cm->cm_len = cm->cm_frame->header.data_len;
+		if (cm->cm_frame->header.cmd == MFI_CMD_STP) {
+#ifdef __x86_64__
+			if (cmd == MFI_CMD) {
+#endif
+				/* Native */
+				cm->cm_stp_len = ioc->mfi_sgl[0].iov_len;
+#ifdef __x86_64__
+			} else {
+				/* 32bit on 64bit */
+				ioc32 = (struct mfi_ioc_packet32 *)ioc;
+				cm->cm_stp_len = ioc32->mfi_sgl[0].iov_len;
+			}
+#endif
+			cm->cm_len += cm->cm_stp_len;
+		}
 		if (cm->cm_len &&
 		    (cm->cm_flags & (MFI_CMD_DATAIN | MFI_CMD_DATAOUT))) {
 			cm->cm_data = data = kmalloc(cm->cm_len, M_MFIBUF,
@@ -2610,35 +2656,30 @@ mfi_ioctl(struct dev_ioctl_args *ap)
 		cm->cm_frame->header.context = context;
 
 		temp = data;
-		if (cm->cm_flags & MFI_CMD_DATAOUT) {
+		if ((cm->cm_flags & MFI_CMD_DATAOUT) ||
+		    (cm->cm_frame->header.cmd == MFI_CMD_STP)) {
 			for (i = 0; i < ioc->mfi_sge_count; i++) {
 #ifdef __x86_64__
 				if (cmd == MFI_CMD) {
-					/* Native */
-					error = copyin(ioc->mfi_sgl[i].iov_base,
-					       temp,
-					       ioc->mfi_sgl[i].iov_len);
-				} else {
-					void *temp_convert;
-					/* 32bit */
-					ioc32 = (struct mfi_ioc_packet32 *)ioc;
-					temp_convert =
-					    PTRIN(ioc32->mfi_sgl[i].iov_base);
-					error = copyin(temp_convert,
-					       temp,
-					       ioc32->mfi_sgl[i].iov_len);
-				}
-#else
-				error = copyin(ioc->mfi_sgl[i].iov_base,
-				       temp,
-				       ioc->mfi_sgl[i].iov_len);
 #endif
+					/* Native */
+					addr = ioc->mfi_sgl[i].iov_base;
+					len = ioc->mfi_sgl[i].iov_len;
+#ifdef __x86_64__
+				} else {
+					/* 32bit on 64bit */
+					ioc32 = (struct mfi_ioc_packet32 *)ioc;
+					addr = PTRIN(ioc32->mfi_sgl[i].iov_base);
+					len = ioc32->mfi_sgl[i].iov_len;
+				}
+#endif
+				error = copyin(addr, temp, len);
 				if (error != 0) {
 					device_printf(sc->mfi_dev,
 					    "Copy in failed\n");
 					goto out;
 				}
-				temp = &temp[ioc->mfi_sgl[i].iov_len];
+				temp = &temp[len];
 			}
 		}
 
@@ -2679,42 +2720,36 @@ mfi_ioctl(struct dev_ioctl_args *ap)
 		lockmgr(&sc->mfi_io_lock, LK_RELEASE);
 
 		temp = data;
-		if (cm->cm_flags & MFI_CMD_DATAIN) {
+		if ((cm->cm_flags & MFI_CMD_DATAIN) ||
+		    (cm->cm_frame->header.cmd == MFI_CMD_STP)) {
 			for (i = 0; i < ioc->mfi_sge_count; i++) {
 #ifdef __x86_64__
 				if (cmd == MFI_CMD) {
-					/* Native */
-					error = copyout(temp,
-						ioc->mfi_sgl[i].iov_base,
-						ioc->mfi_sgl[i].iov_len);
-				} else {
-					void *temp_convert;
-					/* 32bit */
-					ioc32 = (struct mfi_ioc_packet32 *)ioc;
-					temp_convert =
-					    PTRIN(ioc32->mfi_sgl[i].iov_base);
-					error = copyout(temp,
-						temp_convert,
-						ioc32->mfi_sgl[i].iov_len);
-				}
-#else
-				error = copyout(temp,
-					ioc->mfi_sgl[i].iov_base,
-					ioc->mfi_sgl[i].iov_len);
 #endif
+					/* Native */
+					addr = ioc->mfi_sgl[i].iov_base;
+					len = ioc->mfi_sgl[i].iov_len;
+#ifdef __x86_64__
+				} else {
+					/* 32bit on 64bit */
+					ioc32 = (struct mfi_ioc_packet32 *)ioc;
+					addr = PTRIN(ioc32->mfi_sgl[i].iov_base);
+					len = ioc32->mfi_sgl[i].iov_len;
+				}
+#endif
+				error = copyout(temp, addr, len);
 				if (error != 0) {
 					device_printf(sc->mfi_dev,
 					    "Copy out failed\n");
 					goto out;
 				}
-				temp = &temp[ioc->mfi_sgl[i].iov_len];
+				temp = &temp[len];
 			}
 		}
 
 		if (ioc->mfi_sense_len) {
 			/* get user-space sense ptr then copy out sense */
-			bcopy(&((struct mfi_ioc_packet*)arg)
-			    ->mfi_frame.raw[ioc->mfi_sense_off],
+			bcopy(&ioc->mfi_frame.raw[ioc->mfi_sense_off],
 			    &sense_ptr.sense_ptr_data[0],
 			    sizeof(sense_ptr.sense_ptr_data));
 #ifdef __x86_64__
