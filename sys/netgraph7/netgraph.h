@@ -50,10 +50,9 @@
 #endif
 
 #include <sys/queue.h>
-#include <sys/lock.h>
 #include <sys/malloc.h>
 #include <sys/module.h>
-/*#include <sys/mutex.h>*/
+#include <sys/mutex2.h>
 #include "dragonfly.h"
 
 #ifdef HAVE_KERNEL_OPTION_HEADERS
@@ -1144,7 +1143,7 @@ int 	ng_send_fn2(node_p node, hook_p hook, item_p pitem, ng_item_fn2 *fn,
 int	ng_uncallout(struct callout *c, node_p node);
 int	ng_callout(struct callout *c, node_p node, hook_p hook, int ticks,
 	    ng_item_fn *fn, void * arg1, int arg2);
-#define	ng_callout_init(c)	callout_init(c, CALLOUT_MPSAFE)
+#define	ng_callout_init(c)	callout_init(c)
 
 /* Flags for netgraph functions. */
 #define	NG_NOFLAGS	0x00000000	/* no special options */

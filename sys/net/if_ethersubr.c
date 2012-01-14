@@ -101,8 +101,7 @@ int (*ef_outputp)(struct ifnet *ifp, struct mbuf **mp, struct sockaddr *dst,
 
 /* netgraph node hooks for ng_ether(4) */
 void	(*ng_ether_input_p)(struct ifnet *ifp, struct mbuf **mp);
-void	(*ng_ether_input_orphan_p)(struct ifnet *ifp,
-		struct mbuf *m, const struct ether_header *eh);
+void	(*ng_ether_input_orphan_p)(struct ifnet *ifp, struct mbuf *m);
 int	(*ng_ether_output_p)(struct ifnet *ifp, struct mbuf **mp);
 void	(*ng_ether_attach_p)(struct ifnet *ifp);
 void	(*ng_ether_detach_p)(struct ifnet *ifp);
@@ -988,7 +987,7 @@ ether_demux_oncpu(struct ifnet *ifp, struct mbuf *m)
 
 	M_ASSERTPKTHDR(m);
 	KASSERT(m->m_len >= ETHER_HDR_LEN,
-		("ether header is no contiguous!\n"));
+		("ether header is not contiguous!\n"));
 
 	eh = mtod(m, struct ether_header *);
 
@@ -1199,11 +1198,22 @@ post_stats:
 #endif
 		if (ng_ether_input_orphan_p != NULL) {
 			/*
+			 * Put back the ethernet header so netgraph has a
+			 * consistent view of inbound packets.
+			 */
+			M_PREPEND(m, ETHER_HDR_LEN, MB_DONTWAIT);
+			if (m == NULL) {
+				/*
+				 * M_PREPEND frees the mbuf in case of failure.
+				 */
+				return;
+			}
+			/*
 			 * Hold BGL and recheck ng_ether_input_orphan_p
 			 */
 			get_mplock();
 			if (ng_ether_input_orphan_p != NULL) {
-				ng_ether_input_orphan_p(ifp, m, eh);
+				ng_ether_input_orphan_p(ifp, m);
 				rel_mplock();
 				return;
 			}

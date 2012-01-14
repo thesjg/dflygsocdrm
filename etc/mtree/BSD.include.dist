@@ -205,6 +205,62 @@
         vjc
         ..
     ..
+   netgraph7
+        UI
+        ..
+        async
+        ..
+        atmllc
+        ..
+        bpf
+        ..
+        bridge
+        ..
+        cisco
+        ..
+        deflate
+        ..
+        echo
+        ..
+        etf
+        ..
+        ether
+        ..
+        frame_relay
+        ..
+        hole
+        ..
+        hub
+        ..
+        iface
+        ..
+        ksocket
+        ..
+        l2tp
+        ..
+        lmi
+        ..
+        mppc
+        ..
+        one2many
+        ..
+        ppp
+        ..
+        pppoe
+        ..
+        pptpgre
+        ..
+        rfc1490
+        ..
+        socket
+        ..
+        tcpmss
+        ..
+        tee
+        ..
+        vjc
+        ..
+    ..
     netinet
     ..
     netinet6
