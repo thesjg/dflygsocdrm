@@ -2033,8 +2033,10 @@ int i915_driver_unload(struct drm_device *dev)
 			dev_priv->child_dev_num = 0;
 		}
 		drm_irq_uninstall(dev);
+#ifdef __linux__ /* UNIMPLEMENTED */
 		vga_switcheroo_unregister_client(dev->pdev);
 		vga_client_register(dev->pdev, NULL, NULL, NULL);
+#endif
 	}
 #endif
 
@@ -2130,7 +2132,7 @@ void i915_driver_lastclose(struct drm_device * dev)
 {
 	drm_i915_private_t *dev_priv = dev->dev_private;
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	if (!dev_priv || drm_core_check_feature(dev, DRIVER_MODESET)) {
 		drm_fb_helper_restore();
 		vga_switcheroo_process_delayed_switch();

@@ -24,6 +24,26 @@
  *
  */
 
+/* For drm_pci_rom_map and drm_pci_rom_unmap to access pci extension bios */
+/*	$OpenBSD: sti_pci.c,v 1.7 2009/02/06 22:51:04 miod Exp $	*/
+
+/*
+ * Copyright (c) 2006, 2007 Miodrag Vallat.
+ *
+ * Permission to use, copy, modify, and distribute this software for any
+ * purpose with or without fee is hereby granted, provided that the above
+ * copyright notice, this permission notice, and the disclaimer below
+ * appear in all copies.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
+ * WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
+ * ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
+ * WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
+ * ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
+ * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+ */
+
 #include "dev/drm/drm_porting_layer.h"
 
 #include <sys/tree.h>
@@ -624,6 +644,41 @@ ida_destroy(struct ida *pida) {
 	if (var != NULL) {
 		free(var, DRM_MEM_IDR);
 	}
+}
+
+/********************************************************************
+ * PCI                                                              *
+ ********************************************************************/
+
+struct resource *
+drm_pci_map_rom(device_t ddev, size_t *psize)
+{
+	uint32_t addr;
+	uint32_t mask;
+	uint32_t romsize = 1;
+	uint32_t rstart;
+	uint32_t rend;
+	struct resource *res;
+	int rid = PCIR_BIOS;
+
+	rstart = pci_read_config(ddev, PCIR_BIOS, 4);
+	pci_write_config(ddev, PCIR_BIOS, ~PCIM_BIOS_ENABLE, 4);
+	mask = pci_read_config(ddev, PCIR_BIOS, 4);
+	addr = rstart | PCIM_BIOS_ENABLE;
+	pci_write_config(ddev, PCIR_BIOS, addr, 4);
+	while ((romsize & mask) == 0) {
+		romsize >>= 1;
+	}
+	rend = rstart + romsize;
+	res = bus_alloc_resource(ddev, SYS_RES_MEMORY, &rid, rstart, rend, 1, RF_ACTIVE);
+	*psize = romsize;
+	return res;
+}
+
+void
+drm_pci_unmap_rom(device_t ddev, struct resource *res)
+{
+	bus_release_resource(ddev, SYS_RES_MEMORY, PCIR_BIOS, res);
 }
 
 /**********************************************************

@@ -315,6 +315,9 @@ struct radeon_gart {
 	struct page			**pages;
 	dma_addr_t			*pages_addr;
 	bool				ready;
+#ifndef __linux__
+	struct drm_dma_handle		*table_handle;
+#endif
 };
 
 int radeon_gart_table_ram_alloc(struct radeon_device *rdev);

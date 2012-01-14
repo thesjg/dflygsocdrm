@@ -120,11 +120,15 @@ int radeon_irq_kms_init(struct radeon_device *rdev)
 	if ((rdev->family >= CHIP_RV380) &&
 	    (!(rdev->flags & RADEON_IS_IGP)) &&
 	    (!(rdev->flags & RADEON_IS_AGP))) {
+#ifdef __linux__ /* UNIMPLEMENTED */
 		int ret = pci_enable_msi(rdev->pdev);
 		if (!ret) {
 			rdev->msi_enabled = 1;
 			dev_info(rdev->dev, "radeon: using MSI.\n");
 		}
+#else
+		;
+#endif
 	}
 	rdev->irq.installed = true;
 	r = drm_irq_install(rdev->ddev);
@@ -142,8 +146,10 @@ void radeon_irq_kms_fini(struct radeon_device *rdev)
 	if (rdev->irq.installed) {
 		drm_irq_uninstall(rdev->ddev);
 		rdev->irq.installed = false;
+#ifdef __linux__ /* UNIMPLEMENTED */
 		if (rdev->msi_enabled)
 			pci_disable_msi(rdev->pdev);
+#endif
 	}
 }
 

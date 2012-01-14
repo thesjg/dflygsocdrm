@@ -141,7 +141,11 @@ int radeon_driver_firstopen_kms(struct drm_device *dev)
 
 void radeon_driver_lastclose_kms(struct drm_device *dev)
 {
+#ifdef __linux__ /* UNIMPLEMENTED */
 	vga_switcheroo_process_delayed_switch();
+#else
+	;
+#endif
 }
 
 int radeon_driver_open_kms(struct drm_device *dev, struct drm_file *file_priv)

@@ -418,7 +418,7 @@ int drm_irq_install(struct drm_device *dev)
 		return ret;
 	}
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		vga_client_register(dev->pdev, (void *)dev, drm_irq_vgaarb_nokms, NULL);
 #endif /* __linux__ */
@@ -481,7 +481,7 @@ int drm_irq_uninstall(struct drm_device * dev)
 
 	DRM_DEBUG("irq=%d\n", dev->irq);
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 	if (!drm_core_check_feature(dev, DRIVER_MODESET))
 		vga_client_register(dev->pdev, NULL, NULL, NULL);
 #endif /* __linux__ */

@@ -295,7 +295,9 @@ int radeonfb_create(struct drm_device *dev,
 	rfbdev->rdev = rdev;
 
 	mutex_unlock(&rdev->ddev->struct_mutex);
+#ifdef __linux__ /* UNIMPLEMENTED */
 	vga_switcheroo_client_fb_set(rdev->ddev->pdev, info);
+#endif
 	return 0;
 
 out_unref:

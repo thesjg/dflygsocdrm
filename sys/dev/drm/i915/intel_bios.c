@@ -520,16 +520,28 @@ bool
 intel_init_bios(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
+#ifdef __linux__ /* UNIMPLEMENTED */
 	struct pci_dev *pdev = dev->pdev;
+#endif
 	struct vbt_header *vbt = NULL;
 	struct bdb_header *bdb;
 	u8 __iomem *bios;
 	size_t size;
 	int i;
+#ifndef __linux__
+	struct resource *biosres;
+#endif
 
+#ifdef __linux__
 	bios = pci_map_rom(pdev, &size);
 	if (!bios)
 		return -1;
+#else
+	biosres = drm_pci_map_rom(dev->device, &size);
+	if (!biosres)
+		return -1;
+	bios = rman_get_virtual(biosres);
+#endif
 
 	/* Scour memory looking for the VBT signature */
 	for (i = 0; i + 4 < size; i++) {
@@ -541,7 +553,11 @@ intel_init_bios(struct drm_device *dev)
 
 	if (!vbt) {
 		DRM_ERROR("VBT signature missing\n");
+#ifdef __linux__
 		pci_unmap_rom(pdev, bios);
+#else
+		drm_pci_unmap_rom(dev->device, biosres);
+#endif
 		return -1;
 	}
 
@@ -557,7 +573,11 @@ intel_init_bios(struct drm_device *dev)
 	parse_driver_features(dev_priv, bdb);
 	parse_edp(dev_priv, bdb);
 
+#ifdef __linux__
 	pci_unmap_rom(pdev, bios);
+#else
+	drm_pci_unmap_rom(dev->device, biosres);
+#endif
 
 	return 0;
 }

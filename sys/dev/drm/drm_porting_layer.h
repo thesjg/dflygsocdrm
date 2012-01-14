@@ -1722,6 +1722,7 @@ mtrr_del(
 	return mem_range_attr_set(&mrdesc, &act);
 }
 
+
 /* file drm_fops.c, function drm_cpu_valid() */
 /* boot_cpu_data.x86 appears to be an int sometimes 3 */
 
@@ -1734,9 +1735,9 @@ mtrr_del(
 /* file drm_drv.c, function drm_ioctl() */
 #define _IOC_SIZE(cmd) sizeof(unigned long)
 
-/**********************************************************
- * kref reference counting                                *
- **********************************************************/
+/********************************************************************
+ * kref reference counting                                          *
+ ********************************************************************/
 
 /* file ttm_object.c, function ttm_object_file() */
 struct kref {
@@ -1848,6 +1849,289 @@ static __inline__ void
 kobject_uevent_env(struct kobject *kobj, uint32_t flags, char *event[]) {
 	;
 }
+
+/********************************************************************
+ * DEVICE                                                           *
+ ********************************************************************/
+
+struct device_type {
+	char *name;
+};
+
+struct device {
+	struct kobject kobj;
+	struct device_type *type;
+	void (*release)(struct device *dev);
+	struct device *parent;
+};
+
+static __inline__ int
+device_is_registered(struct device *dev) {
+	return 0;
+}
+
+/********************************************************************
+ * DMA                                                              *
+ ********************************************************************/
+
+typedef bus_addr_t  dma_addr_t;
+
+/* From older other OS drmP.h */
+
+#ifndef DMA_BIT_MASK
+#define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
+#endif
+
+/********************************************************************
+ * PCI                                                              *
+ ********************************************************************/
+
+#define PCI_VENDOR_ID_APPLE     0x106b
+#define PCI_VENDOR_ID_INTEL     0x8086
+#define PCI_VENDOR_ID_ATI       0x1002
+#define PCI_VENDOR_ID_IBM       0x1014
+#define PCI_VENDOR_ID_DELL      0x1028
+#define PCI_VENDOR_ID_HP        0x103c
+#define PCI_VENDOR_ID_ASUSTEK   0x1043
+#define PCI_VENDOR_ID_SONY      0x104d
+#define PCI_VENDOR_ID_NVIDIA    0x10de
+#define PCI_VENDOR_ID_VIA       0x1106
+
+#define PCI_ANY_ID              0xffff /* illegal vendor id */
+
+#define PCI_CLASS_DISPLAY_VGA   0x03  /* PCIC_DISPLAY in pcireg.h */
+
+/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
+/* file radeon_gart.c, function radeon_gart_unbind() */
+#define PCI_DMA_BIDIRECTIONAL   0x0001
+
+/* i915_drv.c */
+#define PCI_D3hot               0x0002
+
+/* drmP.h drm_stub.h */
+/* file drm_drv.c, function drm_init() */
+struct pci_device_id {
+	int vendor;
+	int device;
+	int subvendor;
+	int subdevice;
+	uint32_t class;
+	uint32_t class_mask;
+/* file drm_stub.c, function drm_get_dev() */
+	unsigned long driver_data;
+};
+
+/* file drm_drv.c, function drm_init() */
+struct pci_driver {
+	struct pci_device_id *id_table;
+/* file drm_info.c, function drm_name_info() */
+	char *name;
+};
+
+struct pci_dev {
+/* drmP.h, return value from drm_dev_to_irq() */
+	struct device dev;
+	int irq;
+/* file drm_drv.c, function drm_init() */
+	uint32_t class;
+	uint32_t vendor;
+	uint32_t device;
+	void *devfn;
+};
+
+#if 0
+void *
+pci_get_drvdata(struct pci_dev *pdev);
+
+void
+pci_set_drvdata(struct pci_dev *pdev, void *data);
+#endif
+
+/* file radeon_pm.c, function radeon_get_pm_method() */
+#define to_pci_dev(dev) container_of(dev, struct pci_dev, dev)
+
+/* UNIMPLEMENTED
+ * Increment a reference count
+ */
+#if 0
+void
+pci_dev_get(struct pci_dev *pdev);
+#endif
+
+/* UNIMPLEMENTED
+ * Search for pci device using vendor, device, subvendor, subdevice
+ */
+#if 0
+struct pci_dev *
+pci_get_subsys(
+	uint32_t vendor,
+	uint32_t device,
+	uint32_t subvendor,
+	uint32_t subdevice
+);
+#endif
+
+#if 0
+/* UNIMPLEMENTED
+ * Find next pci device of a certain class starting search
+ * at previous device or at NULL to start from the beginning
+ */
+struct pci_dev *
+pci_get_class(uint32_t class, struct pci_dev *from);
+#endif
+
+#if 0
+/*
+ * pci_get_slot(device_t)
+ */
+int
+PCI_SLOT(void *devfn);
+#endif
+
+#if 0
+/*
+ * pci_get_function(device_t)
+ */
+int
+PCI_FUNC(void *devfn);
+#endif
+
+/*
+ * device_get_desc(device_t)
+ */
+#if 0
+char *
+pci_name(struct pci_dev *pdev);
+#endif
+
+#if 0
+static __inline__ int
+pci_register_driver(struct pci_driver *driver) {
+	return -1;
+}
+
+static __inline__ int
+pci_unregister_driver(struct pci_driver *driver) {
+	return -1;
+}
+#endif
+
+#if 0
+int
+pci_enable_device(struct pci_dev *pdev);
+
+int
+pci_disable_device(struct pci_dev *pdev);
+#endif
+
+/*
+ * pci_enable_busmaster(device_t)
+ */
+#if 0
+void
+pci_set_master(struct pci_dev *pdev);
+#endif
+
+struct resource *
+drm_pci_map_rom(device_t ddev, size_t *psize);
+
+#if 0
+u8 __iomem*
+pci_map_rom(
+	struct pci_dev *pdev,
+	size_t *psize
+);
+#endif
+
+void
+drm_pci_unmap_rom(device_t ddev, struct resource *res);
+
+#if 0
+void
+pci_unmap_rom(
+	struct pci_dev *pdev,
+	u8 *bios
+);
+#endif
+#if 0
+/* UNIMPLEMENTED
+ * Map page so that pci device can use for dma
+ */
+dma_addr_t
+pci_map_page(
+	struct pci_dev *pdev,
+	struct page *page,
+	unsigned long offset,
+	unsigned long pagesize,
+	uint32_t flags
+);
+#endif
+
+#if 0
+/* UNIMPLEMENTED
+ * Unmap page from pci device
+ */
+int
+pci_unmap_page(
+	struct pci_dev *pdev,
+	dma_addr_t pages_addr,
+	unsigned long pagesize,
+	uint32_t flags
+);
+#endif
+
+#if 0
+void *
+pci_alloc_consistent(
+	struct pci_dev *dev,
+	unsigned table_size,
+	dma_addr_t table_addr
+);
+#endif
+
+#if 0
+void
+pci_free_consistent(
+	struct pci_dev *dev,
+	unsigned table_size,
+	dma_addr_t table_addr
+);
+#endif
+
+#if 0
+void
+pci_save_state(struct pci_dev *pdev);
+#endif
+
+#if 0
+void
+pci_set_power_state(struct pci_dev *pdev, uint32_t flag);
+#endif
+
+/* UNIMPLEMENTED */
+#if 0
+int
+pci_set_dma_mask(struct pci_dev *pdev, dma_addr_t table_mask);
+#endif
+
+
+#if 0 /* UNIMPLEMENTED */
+int
+pci_dma_mapping_error(struct pci_dev *pdev, dma_addr_t pages_addr);
+#endif
+
+/********************************************************************
+ * MSI                                                              *
+ ********************************************************************/
+
+/* UNIMPLEMENTED */
+#if 0
+int
+pci_enable_msi(struct pci_dev *pdev);
+
+int
+pci_disable_msi(struct pci_dev *pdev);
+#endif
 
 /*
  * Tasks
@@ -2966,29 +3250,6 @@ vm_get_page_prot(uint32_t flags){
 	return 0;
 }
 
-/*
- * General device abstraction
- */
-
-/* file ttm_module.c, struct ttm_drm_class_device */
-
-struct device_type {
-    char *name;
-};
-
-struct device {
-	struct kobject kobj;
-	struct device_type *type;
-	void (*release)(struct device *dev);
-	struct device *parent;
-};
-
-/* file i915/intel_sdvo.c, function intel_sdvo_output_setup() */
-static __inline__ int
-device_is_registered(struct device *dev) {
-	return 0;
-}
-
 /* file drm_edid.c, function do_get_edid() */
 /*
  * Function actually takes
@@ -3065,236 +3326,6 @@ device_remove_file(
  **********************************************************/
 
 /**********************************************************
- * DMA                                                    *
- **********************************************************/
-
-typedef bus_addr_t  dma_addr_t;
-
-/* From older other OS drmP.h */
-
-#ifndef DMA_BIT_MASK
-#define DMA_BIT_MASK(n) (((n) == 64) ? ~0ULL : (1ULL<<(n)) - 1)
-#endif
-
-/**********************************************************
- * PCI                                                    *
- **********************************************************/
-
-/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
-/* file radeon_gart.c, function radeon_gart_unbind() */
-#define PCI_DMA_BIDIRECTIONAL   0x0001
-
-/* file drm_vm.c, function drm_mmap_locked() */
-#define PCI_VENDOR_ID_APPLE     0x0001
-
-/* i915_drv.c */
-#define PCI_ANY_ID              0xffff
-#define PCI_CLASS_DISPLAY_VGA   0x0000
-#define PCI_D3hot               0x0002
-
-/* drmP.h drm_stub.h */
-/* file drm_drv.c, function drm_init() */
-struct pci_device_id {
-	int vendor;
-	int device;
-	int subvendor;
-	int subdevice;
-	uint32_t class;
-	uint32_t class_mask;
-/* file drm_stub.c, function drm_get_dev() */
-	unsigned long driver_data;
-};
-
-/* file drm_drv.c, function drm_init() */
-struct pci_driver {
-	struct pci_device_id *id_table;
-/* file drm_info.c, function drm_name_info() */
-	char *name;
-};
-
-struct pci_dev {
-/* drmP.h, return value from drm_dev_to_irq() */
-	struct device dev;
-	int irq;
-/* file drm_drv.c, function drm_init() */
-	uint32_t class;
-	uint32_t vendor;
-	uint32_t device;
-	void *devfn;
-};
-
-/* file ati_pcigart.c, function drm_ati_pcigart_init() */
-/* file radeon_device.c, function radeon_device_init() */
-/* UNIMPLEMENTED */
-static __inline__ int
-pci_set_dma_mask(struct pci_dev *pdev, dma_addr_t table_mask) {
-	return 0;
-}
-
-/* file ati_pcigart.c, function drm_ati_pcigart_init() */
-/* file radeon_gart.c, function radeon_gart_bind() */
-/* UNIMPLEMENTED */
-static __inline__ dma_addr_t
-pci_map_page(
-	struct pci_dev *pdev,
-	struct page *page,
-	unsigned long offset,
-	unsigned long pagesize,
-	uint32_t flags
-) {
-	return 0;
-}
-
-/* file ati_pcigart.c, function drm_ati_pcigart_cleanup() */
-/* file radeon_gart.c, function radeon_gart_unbind() */
-/* UNIMPLEMENTED */
-static __inline__ int
-pci_unmap_page(
-	struct pci_dev *pdev,
-	dma_addr_t pages_addr,
-	unsigned long pagesize,
-	uint32_t flags
-) {
-	return 0;
-}
-
-/* file radeon_gart.c, function radeon_gart_table_ram_alloc() */
-static __inline__ void *
-pci_alloc_consistent(
-	struct pci_dev *dev,
-	unsigned table_size,
-	dma_addr_t table_addr
-) {
-	return (void *)NULL;
-}
-
-/* file radeon_gart.c, function radeon_gart_table_ram_alloc() */
-static __inline__ void
-pci_free_consistent(
-	struct pci_dev *dev,
-	unsigned table_size,
-	dma_addr_t table_addr
-) {
-	return;
-}
-
-/* file radeon_pm.c, function radeon_get_pm_method() */
-static __inline__ void *
-pci_get_drvdata(struct pci_dev *pdev) {
-	return NULL;
-}
-
-/* file radeon_pm.c, function radeon_get_pm_method() */
-#define to_pci_dev(dev) container_of(dev, struct pci_dev, dev)
-
-/* file drm_drv.c, function drm_init() */
-static __inline__ int
-pci_register_driver(struct pci_driver *driver) {
-	return -1;
-}
-
-/* file drm_drv.c, function drm_init() */
-static __inline__ int
-pci_unregister_driver(struct pci_driver *driver) {
-	return -1;
-}
-
-/* file drm_drv.c, function drm_init() */
-static __inline__ void
-pci_dev_get(struct pci_dev *pdev) {
-	;
-}
-
-/* file drm_drv.c, function drm_init() */
-static __inline__ struct pci_dev *
-pci_get_subsys(
-	uint32_t vendor,
-	uint32_t device,
-	uint32_t subvendor,
-	uint32_t subdevice
-) {
-	return NULL;
-}
-
-/* file drm_stub.c, function drm_get_dev() */
-static __inline__ int
-pci_enable_device(struct pci_dev *pdev) {
-	return 0;
-}
-
-/* file drm_stub.c, function drm_get_dev() */
-static __inline__ int
-pci_disable_device(struct pci_dev *pdev) {
-	return 0;
-}
-
-/* file drm_drv.c, function drm_init() */
-static __inline__ void
-pci_set_master(struct pci_dev *pdev) {
-	;
-}
-
-/* file drm_stub.c, function drm_get_dev() */
-static __inline__ void
-pci_set_drvdata(struct pci_dev *pdev, void *data) {
-	;
-}
-
-/* file drm_stub.c, function drm_get_dev() */
-static __inline__ char *
-pci_name(struct pci_dev *pdev) {
-	return "0";
-}
-
-/* file i915_drv.c, function i915_drm_freeze() */
-static __inline__ void
-pci_save_state(struct pci_dev *pdev) {
-	;
-}
-
-/* file intel_bios.c, function intel_init_bios() */
-static __inline__ u8 __iomem*
-pci_map_rom(
-	struct pci_dev *pdev,
-	size_t *psize
-) {
-	return NULL;
-}
-
-/* file intel_bios.c, function intel_init_bios() */
-static __inline__ void
-pci_unmap_rom(
-	struct pci_dev *pdev,
-	u8 *bios
-) {
-	;
-}
-
-/* file i915_drv.c, function i915_suspend() */
-static __inline__ void
-pci_set_power_state(struct pci_dev *pdev, uint32_t flag) {
-	;
-}
-
-/* file radeon_gart.c, function radeon_gart_bind() */
-static __inline__ int
-pci_dma_mapping_error(struct pci_dev *pdev, dma_addr_t pages_addr) {
-	return 0;
-}
-
-/* file drm_irq.c, function drm_irq_by_busid() */
-static __inline__ int
-PCI_SLOT(void *devfn) {
-	return 0;
-}
-
-/* file drm_irq.c, function drm_irq_by_busid() */
-static __inline__ int
-PCI_FUNC(void *devfn) {
-	return 0;
-}
-
-/**********************************************************
  * AGP                                                    *
  **********************************************************/
 
@@ -3329,64 +3360,69 @@ struct agp_bridge_data {
 	int placeholder;
 };
 
-/* file ttm/ttm_agp_backend.c, function ttm_agp_populate() */
-/* UNIMPLEMENTED */
-static __inline__ struct agp_memory *
+#if 0
+/*
+ * Use agp_alloc_memory() by calling drm_agp_allocate_memory()
+ */
+struct agp_memory *
 agp_allocate_memory(
 	struct agp_bridge_data *bridge,
 	size_t pages,
 	uint32_t type
-){
-	return (struct agp_memory *)NULL;
-}
-
-/* file ttm/ttm_agp_backend.c, function ttm_agp_bind() */
-/* file drm_agpsupport.c, function drm_agp_bind_memory */
-
-/* On DragonFly BSD already defined in dev/agp/agpvar.h */
-#if 0
-static __inline__ int
-agp_bind_memory(struct agp_memory *handle, off_t start) {
-	return 0;
-}
-
-/* file ttm/ttm_agp_backend.c, function ttm_agp_unbind() */
-static __inline__ int
-agp_unbind_memory(struct agp_memory *handle) {
-	return 0;
-}
-
-/* file ttm/ttm_agp_backend.c, function ttm_agp_clear() */
-static __inline__ int
-agp_free_memory(struct agp_memory *handle) {
-	return 0;
-}
-
-/* file drm_agpsupport.c, function drm_agp_enable() */
-static __inline__ void
-agp_enable(struct agp_bridge_data *bridge, unsigned long mode) {
-	;
-}
-
+);
 #endif
 
-/* file drm_agpsupport.c, function drm_agp_init() */
-static __inline__ struct agp_bridge_data *
-agp_find_bridge(struct pci_dev *pdev) {
-	return (struct agp_bridge_data *)NULL;
-}
+/* On DragonFly BSD already defined in dev/agp/agpvar.h */
 
-/* file drm_agpsupport.c, function drm_agp_acquire() */
-static __inline__ struct agp_bridge_data *
-agp_backend_acquire(struct pci_dev *pdev) {
-	return (struct agp_bridge_data *)NULL;
-}
+#if 0
+/*
+ * Use agp_bind_memory() in drm_agp_bind_memory()
+ */
+int
+agp_bind_memory(struct agp_memory *handle, off_t start);
 
-/* file drm_agpsupport.c, function drm_agp_acquire() */
-static __inline__ void
-agp_backend_release(struct agp_bridge_data *bridge) {
-	;
-}
+/*
+ * Use agp_unbind_memory() in drm_agp_unbind_memory()
+ */
+int
+agp_unbind_memory(struct agp_memory *handle);
+
+/*
+ * Use agp_free_memory() in drm_agp_free_memory()
+ */
+int
+agp_free_memory(struct agp_memory *handle);
+
+/*
+ * Use agp_enable() in drm_agp_enable()
+ */
+void
+agp_enable(struct agp_bridge_data *bridge, unsigned long mode);
+#endif
+
+#if 0
+/*
+ * Use agp_find_device()
+ */
+struct agp_bridge_data *
+agp_find_bridge(struct pci_dev *pdev);
+#endif
+
+#if 0
+/*
+ * Use agp_acquire()
+ */
+struct agp_bridge_data *
+agp_backend_acquire(struct pci_dev *pdev);
+#endif
+
+#if 0
+/*
+ * Use agp_release()
+ */
+void
+agp_backend_release(struct agp_bridge_data *bridge);
+#endif
 
 /* legacy drm drm_agpsupport.c gets information from
  * agp_info
@@ -3466,62 +3502,50 @@ map_page_into_agp(struct page *page) {
 	;
 }
 
-/**********************************************************
- * VGA                                                    *
- **********************************************************/
+/********************************************************************
+ * VGA                                                              *
+ ********************************************************************/
 
 enum vga_switcheroo_state {
 	VGA_SWITCHEROO_ON
 };
 
-/* file drm_irq.c, function drm_irq_install() */
-/* file i915/i915_dma.c, function i915_load_modeset_init() */
-static __inline__ int
+/* UNIMPLEMENTED */
+
+#if 0
+int
 vga_client_register(
 	struct pci_dev *pdev,
 	void *cookie,
 	void (*func)(void *cookie, bool state),
 	unsigned (*decode)(void *cookie, bool state)
-) {
-	return 0;
-}
+);
 
-/* file i915/i915_dma.c, function i915_load_modeset_init() */
-static __inline__ int
+int
 vga_switcheroo_register_client(
 	struct pci_dev *pdev,
 	void (*set_state)(struct pci_dev *pdev, enum vga_switcheroo_state state),
 	bool (*can_switch)(struct pci_dev *pdev)
-) {
-	return 0;
-}
+);
 
-/* file i915/i915_dma.c, function i915_driver_unload() */
-static __inline__ void 
+void 
 vga_switcheroo_unregister_client(
 	struct pci_dev *pdev
-) {
-	;
-}
+);
 
-/* file i915/i915_dma.c, function i915_driver_lastclose() */
-/* file radeon_kms.c, function radeon_driver_firstopen_kms() */
-static __inline__ int
-vga_switcheroo_process_delayed_switch(void) {
-	return 0;
-}
+int
+vga_switcheroo_process_delayed_switch(void);
+#endif
 
 struct fb_info;
 
-/* file intel_fb.c, function intelfb_create() */
-static __inline__ void
+#if 0
+void
 vga_switcheroo_client_fb_set(
 	struct pci_dev *pdev,
 	struct fb_info *info
-) {
-	;
-}
-
+);
+#endif
 
 /**********************************************************
  * POWER MANAGEMENT                                       *
@@ -4022,23 +4046,6 @@ i2c_del_adapter(struct i2c_adapter *adapter) {
 /* file drm_encoder_slave.h, function drm_i2c_encoder_unregister() */
 static __inline__ int
 i2c_del_driver(struct i2c_driver *driver) {
-	return 0;
-}
-
-/**********************************************************
- * MSI                                                    *
- **********************************************************/
-
-/* file i915_dma.c, function () */
-/* file radeon_irq_kms.c, function radeon_irq_kms_init() */
-static __inline__ int
-pci_enable_msi(struct pci_dev *pdev) {
-	return 0;
-}
-
-/* file radeon_irq_kms.c, function radeon_irq_kms_fini() */
-static __inline__ int
-pci_disable_msi(struct pci_dev *pdev) {
 	return 0;
 }
 

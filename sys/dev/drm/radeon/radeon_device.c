@@ -376,6 +376,7 @@ int radeon_dummy_page_init(struct radeon_device *rdev)
 	rdev->dummy_page.page = alloc_page(GFP_DMA32 | GFP_KERNEL | __GFP_ZERO);
 	if (rdev->dummy_page.page == NULL)
 		return -ENOMEM;
+#ifdef __linux__ /* UNIMPLEMENTED */
 	rdev->dummy_page.addr = pci_map_page(rdev->pdev, rdev->dummy_page.page,
 					0, PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
 	if (!rdev->dummy_page.addr) {
@@ -383,6 +384,7 @@ int radeon_dummy_page_init(struct radeon_device *rdev)
 		rdev->dummy_page.page = NULL;
 		return -ENOMEM;
 	}
+#endif
 	return 0;
 }
 
@@ -390,10 +392,12 @@ void radeon_dummy_page_fini(struct radeon_device *rdev)
 {
 	if (rdev->dummy_page.page == NULL)
 		return;
+#ifdef __linux__ /* UNIMPLEMENTED */
 	pci_unmap_page(rdev->pdev, rdev->dummy_page.addr,
 			PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
 	__free_page(rdev->dummy_page.page);
 	rdev->dummy_page.page = NULL;
+#endif
 }
 
 
@@ -601,6 +605,7 @@ void radeon_check_arguments(struct radeon_device *rdev)
 	}
 }
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 static void radeon_switcheroo_set_state(struct pci_dev *pdev, enum vga_switcheroo_state state)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
@@ -629,6 +634,7 @@ static bool radeon_switcheroo_can_switch(struct pci_dev *pdev)
 	spin_unlock(&dev->count_lock);
 	return can_switch;
 }
+#endif /* __linux__ */
 
 
 int radeon_device_init(struct radeon_device *rdev,
@@ -708,10 +714,12 @@ int radeon_device_init(struct radeon_device *rdev,
 		rdev->need_dma32 = true;
 
 	dma_bits = rdev->need_dma32 ? 32 : 40;
+#ifdef __linux__ /* UNIMPLEMENTED */
 	r = pci_set_dma_mask(rdev->pdev, DMA_BIT_MASK(dma_bits));
 	if (r) {
 		printk(KERN_WARNING "radeon: No suitable DMA available.\n");
 	}
+#endif
 
 	/* Registers mapping */
 	/* TODO: block userspace mapping of io register */
@@ -727,10 +735,12 @@ int radeon_device_init(struct radeon_device *rdev,
 	/* if we have > 1 VGA cards, then disable the radeon VGA resources */
 	/* this will fail for cards that aren't VGA class devices, just
 	 * ignore it */
+#ifdef __linux__ /* UNIMPLEMENTED */
 	vga_client_register(rdev->pdev, rdev, NULL, radeon_vga_set_decode);
 	vga_switcheroo_register_client(rdev->pdev,
 				       radeon_switcheroo_set_state,
 				       radeon_switcheroo_can_switch);
+#endif
 
 	r = radeon_init(rdev);
 	if (r)
@@ -762,8 +772,10 @@ void radeon_device_fini(struct radeon_device *rdev)
 	rdev->shutdown = true;
 	radeon_fini(rdev);
 	destroy_workqueue(rdev->wq);
+#ifdef __linux__ /* UNIMPLEMENTED */
 	vga_switcheroo_unregister_client(rdev->pdev);
 	vga_client_register(rdev->pdev, NULL, NULL, NULL);
+#endif
 	iounmap(rdev->rmmio);
 	rdev->rmmio = NULL;
 }
@@ -819,6 +831,7 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 
 	radeon_agp_suspend(rdev);
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 	pci_save_state(dev->pdev);
 	if (state.event == PM_EVENT_SUSPEND) {
 		/* Shut down the device */
@@ -828,6 +841,7 @@ int radeon_suspend_kms(struct drm_device *dev, pm_message_t state)
 	acquire_console_sem();
 	fb_set_suspend(rdev->fbdev_info, 1);
 	release_console_sem();
+#endif
 	return 0;
 }
 
@@ -838,6 +852,7 @@ int radeon_resume_kms(struct drm_device *dev)
 	if (rdev->powered_down)
 		return 0;
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 	acquire_console_sem();
 	pci_set_power_state(dev->pdev, PCI_D0);
 	pci_restore_state(dev->pdev);
@@ -846,6 +861,7 @@ int radeon_resume_kms(struct drm_device *dev)
 		return -1;
 	}
 	pci_set_master(dev->pdev);
+#endif
 	/* resume AGP if in use */
 	radeon_agp_resume(rdev);
 	radeon_resume(rdev);

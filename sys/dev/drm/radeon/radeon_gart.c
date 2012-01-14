@@ -35,6 +35,7 @@
  */
 int radeon_gart_table_ram_alloc(struct radeon_device *rdev)
 {
+#ifdef __linux__
 	void *ptr;
 
 	ptr = pci_alloc_consistent(rdev->pdev, rdev->gart.table_size,
@@ -42,14 +43,31 @@ int radeon_gart_table_ram_alloc(struct radeon_device *rdev)
 	if (ptr == NULL) {
 		return -ENOMEM;
 	}
+#else
+	rdev->gart.table_handle = drm_pci_alloc(rdev->ddev, rdev->gart.table_size,
+						PAGE_SIZE);
+	if (rdev->gart.table_handle == NULL) {
+		return -ENOMEM;
+	}
+#endif
+
 #ifdef CONFIG_X86
 	if (rdev->family == CHIP_RS400 || rdev->family == CHIP_RS480 ||
 	    rdev->family == CHIP_RS690 || rdev->family == CHIP_RS740) {
+#ifdef __linux__
 		set_memory_uc((unsigned long)ptr,
 			      rdev->gart.table_size >> PAGE_SHIFT);
+#else
+		set_memory_uc((unsigned long)(rdev->gart.table_handle->vaddr),
+			      rdev->gart.table_size >> PAGE_SHIFT);
+#endif
 	}
 #endif
+#ifdef __linux__
 	rdev->gart.table.ram.ptr = ptr;
+#else
+	rdev->gart.table.ram.ptr = rdev->gart.table_handle->vaddr;
+#endif
 	memset((void *)rdev->gart.table.ram.ptr, 0, rdev->gart.table_size);
 	return 0;
 }
@@ -66,9 +84,14 @@ void radeon_gart_table_ram_free(struct radeon_device *rdev)
 			      rdev->gart.table_size >> PAGE_SHIFT);
 	}
 #endif
+#ifdef __linux__
 	pci_free_consistent(rdev->pdev, rdev->gart.table_size,
 			    (void *)rdev->gart.table.ram.ptr,
 			    rdev->gart.table_addr);
+#else
+	drm_pci_free(rdev->ddev, rdev->gart.table_handle);
+	rdev->gart.table_handle = NULL;
+#endif
 	rdev->gart.table.ram.ptr = NULL;
 	rdev->gart.table_addr = 0;
 }
@@ -149,8 +172,10 @@ void radeon_gart_unbind(struct radeon_device *rdev, unsigned offset,
 	p = t / (PAGE_SIZE / RADEON_GPU_PAGE_SIZE);
 	for (i = 0; i < pages; i++, p++) {
 		if (rdev->gart.pages[p]) {
+#ifdef __linux__ /* UNIMPLEMENTED */
 			pci_unmap_page(rdev->pdev, rdev->gart.pages_addr[p],
 				       PAGE_SIZE, PCI_DMA_BIDIRECTIONAL);
+#endif
 			rdev->gart.pages[p] = NULL;
 			rdev->gart.pages_addr[p] = rdev->dummy_page.addr;
 			page_base = rdev->gart.pages_addr[p];
@@ -182,6 +207,7 @@ int radeon_gart_bind(struct radeon_device *rdev, unsigned offset,
 	for (i = 0; i < pages; i++, p++) {
 		/* we need to support large memory configurations */
 		/* assume that unbind have already been call on the range */
+#ifdef __linux__ /* UNIMPLEMENTED */
 		rdev->gart.pages_addr[p] = pci_map_page(rdev->pdev, pagelist[i],
 							0, PAGE_SIZE,
 							PCI_DMA_BIDIRECTIONAL);
@@ -190,6 +216,7 @@ int radeon_gart_bind(struct radeon_device *rdev, unsigned offset,
 			radeon_gart_unbind(rdev, offset, pages);
 			return -ENOMEM;
 		}
+#endif
 		rdev->gart.pages[p] = pagelist[i];
 		page_base = rdev->gart.pages_addr[p];
 		for (j = 0; j < (PAGE_SIZE / RADEON_GPU_PAGE_SIZE); j++, t++) {

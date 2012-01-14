@@ -220,7 +220,9 @@ static int i915_drm_freeze(struct drm_device *dev)
 {
 	struct drm_i915_private *dev_priv = dev->dev_private;
 
+#ifdef __linux__
 	pci_save_state(dev->pdev);
+#endif
 
 	/* If KMS is active, we do the leavevt stuff here */
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
@@ -253,18 +255,22 @@ int i915_suspend(struct drm_device *dev, pm_message_t state)
 		return -ENODEV;
 	}
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 	if (state.event == PM_EVENT_PRETHAW)
 		return 0;
+#endif
 
 	error = i915_drm_freeze(dev);
 	if (error)
 		return error;
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 	if (state.event == PM_EVENT_SUSPEND) {
 		/* Shut down the device */
 		pci_disable_device(dev->pdev);
 		pci_set_power_state(dev->pdev, PCI_D3hot);
 	}
+#endif
 
 	return 0;
 }
@@ -299,10 +305,12 @@ static int i915_drm_thaw(struct drm_device *dev)
 
 int i915_resume(struct drm_device *dev)
 {
+#ifdef __linux__ /* UNIMPLEMENTED */
 	if (pci_enable_device(dev->pdev))
 		return -EIO;
 
 	pci_set_master(dev->pdev);
+#endif
 
 	return i915_drm_thaw(dev);
 }
@@ -440,7 +448,7 @@ int i965_reset(struct drm_device *dev, u8 flags)
 	return 0;
 }
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 static int __devinit
 i915_pci_probe(struct pci_dev *pdev, const struct pci_device_id *ent)
 {
@@ -456,6 +464,7 @@ i915_pci_remove(struct pci_dev *pdev)
 }
 #endif /* __linux__ */
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 static int i915_pm_suspend(struct device *dev)
 {
 	struct pci_dev *pdev = to_pci_dev(dev);
@@ -471,8 +480,10 @@ static int i915_pm_suspend(struct device *dev)
 	if (error)
 		return error;
 
+#ifdef __linux__ /* UNIMPLEMENTED */
 	pci_disable_device(pdev);
 	pci_set_power_state(pdev, PCI_D3hot);
+#endif
 
 	return 0;
 }
@@ -522,6 +533,7 @@ const struct dev_pm_ops i915_pm_ops = {
      .poweroff = i915_pm_poweroff,
      .restore = i915_pm_resume,
 };
+#endif /* __linux__ */
 
 static struct vm_operations_struct i915_gem_vm_ops = {
 	.fault = i915_gem_fault,

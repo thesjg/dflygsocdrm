@@ -53,6 +53,7 @@ int drm_name_info(struct seq_file *m, void *data)
 	if (!master)
 		return 0;
 
+#if __linux__ /* UNIMPLEMENTED */
 	if (master->unique) {
 		seq_printf(m, "%s %s %s\n",
 			   dev->driver->pci_driver.name,
@@ -61,6 +62,7 @@ int drm_name_info(struct seq_file *m, void *data)
 		seq_printf(m, "%s %s\n", dev->driver->pci_driver.name,
 			   pci_name(dev->pdev));
 	}
+#endif
 
 	return 0;
 }

@@ -538,21 +538,26 @@ int drm_get_dev(struct pci_dev *pdev, const struct pci_device_id *ent,
 int drm_get_dev(DRM_GET_DEV_ARGS)
 #endif
 {
-	int unit;
-
 	struct drm_device *dev;
 	int ret;
 
+#ifdef __linux__
+	DRM_DEBUG("\n");
+
+	dev = kzalloc(sizeof(*dev), GFP_KERNEL);
+#else
 #if 0
 	int msicount;
 #endif
-
-	unit = device_get_unit(kdev);
+	int unit = device_get_unit(kdev);
 	dev = device_get_softc(kdev);
-	dev->device = kdev;
-
+#endif
 	if (!dev)
 		return -ENOMEM;
+
+#ifndef __linux__
+	dev->device = kdev;
+#endif
 
 #ifdef __linux__
 	ret = pci_enable_device(pdev);
@@ -582,6 +587,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 #endif
 		}
 
+/* QUESTION: Should RF_ACTIVE be added? */
 		dev->irqr = bus_alloc_resource_any(dev->device, SYS_RES_IRQ,
 		    &dev->irqrid, RF_SHAREABLE);
 		if (!dev->irqr) {
@@ -602,7 +608,7 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 	}
 
 	if (drm_core_check_feature(dev, DRIVER_MODESET)) {
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 		pci_set_drvdata(pdev, dev);
 #endif
 		ret = drm_get_minor(dev, &dev->control, DRM_MINOR_CONTROL);
@@ -640,10 +646,16 @@ int drm_get_dev(DRM_GET_DEV_ARGS)
 				DRM_DEV_MODE, "dri/card%d", unit);
 #endif /* __linux__ */
 
+#ifdef __linux__
+	DRM_INFO("Initialized %s %d.%d.%d %s for %s on minor %d\n",
+		 driver->name, driver->major, driver->minor, driver->patchlevel,
+		 driver->date, pci_name(pdev), dev->primary->index);
+#else
 	DRM_INFO("Initialized %s %d.%d.%d %s for %s on minor %d\n",
 		dev->driver->name, dev->driver->major,
 		dev->driver->minor, dev->driver->patchlevel,
 		dev->driver->date, device_get_desc(kdev), dev->unit);
+#endif
 #ifdef DRM_NEWER_RATLOCK
 	mutex_unlock(&drm_global_mutex);
 #endif

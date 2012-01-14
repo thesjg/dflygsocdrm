@@ -646,13 +646,14 @@ static void vmw_master_drop(struct drm_device *dev,
 	vmw_fb_on(dev_priv);
 }
 
-
+#ifdef __linux__ /* UNIMPLEMENTED */
 static void vmw_remove(struct pci_dev *pdev)
 {
 	struct drm_device *dev = pci_get_drvdata(pdev);
 
 	drm_put_dev(dev);
 }
+#endif
 
 static int vmwgfx_pm_notifier(struct notifier_block *nb, unsigned long val,
 			      void *ptr)
@@ -692,17 +693,23 @@ static int vmwgfx_pm_notifier(struct notifier_block *nb, unsigned long val,
 
 int vmw_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
+#ifdef __linux__ /* UNIMPLEMENTED */
 	pci_save_state(pdev);
 	pci_disable_device(pdev);
 	pci_set_power_state(pdev, PCI_D3hot);
+#endif
 	return 0;
 }
 
 int vmw_pci_resume(struct pci_dev *pdev)
 {
+#ifdef __linux__ /* UNIMPLEMENTED */
 	pci_set_power_state(pdev, PCI_D0);
 	pci_restore_state(pdev);
 	return pci_enable_device(pdev);
+#else
+	return 0;
+#endif
 }
 
 static void vmw_configure(struct drm_device *dev)
@@ -774,6 +781,7 @@ static struct drm_driver driver = {
 	.master_drop = vmw_master_drop,
 	.open = vmw_driver_open,
 	.postclose = vmw_postclose,
+#ifdef __linux__
 	.fops = {
 		 .owner = THIS_MODULE,
 		 .open = drm_open,
@@ -794,6 +802,7 @@ static struct drm_driver driver = {
 		       .suspend = vmw_pci_suspend,
 		       .resume = vmw_pci_resume
 		       },
+#endif /* __linux__ */
 	.name = VMWGFX_DRIVER_NAME,
 	.desc = VMWGFX_DRIVER_DESC,
 	.date = VMWGFX_DRIVER_DATE,

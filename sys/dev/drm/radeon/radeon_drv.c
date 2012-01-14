@@ -296,7 +296,7 @@ static struct drm_driver driver_old = {
 	.patchlevel = DRIVER_PATCHLEVEL,
 };
 
-#ifdef __linux__
+#ifdef __linux__ /* UNIMPLEMENTED */
 static struct drm_driver kms_driver;
 
 static int __devinit
