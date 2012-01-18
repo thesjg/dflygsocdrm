@@ -538,7 +538,11 @@ int intel_opregion_init(struct drm_device *dev, int resume)
 	return 0;
 
 err_out:
+#ifdef __linux__
 	iounmap(opregion->header);
+#else
+	drm_iounmap(opregion->header, OPREGION_SZ);
+#endif
 	opregion->header = NULL;
 	return err;
 }
@@ -560,7 +564,11 @@ void intel_opregion_free(struct drm_device *dev, int suspend)
 	unregister_acpi_notifier(&intel_opregion_notifier);
 
 	/* just clear all opregion memory pointers now */
+#ifdef __linux__
 	iounmap(opregion->header);
+#else
+	drm_iounmap(opregion->header, OPREGION_SZ);
+#endif
 	opregion->header = NULL;
 	opregion->acpi = NULL;
 	opregion->swsci = NULL;

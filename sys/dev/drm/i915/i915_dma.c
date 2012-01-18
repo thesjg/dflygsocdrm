@@ -1392,7 +1392,7 @@ static unsigned long i915_gtt_to_phys(struct drm_device *dev,
 #ifdef __linux__
 		iounmap(gtt);
 #else
-		ioremapfree(gtt, gtt_size);
+		drm_iounmap(gtt, gtt_size);
 #endif
 		return 0;
 	}
@@ -1402,7 +1402,7 @@ static unsigned long i915_gtt_to_phys(struct drm_device *dev,
 #ifdef __linux__
 		iounmap(gtt);
 #else
-		ioremapfree(gtt, gtt_size);
+		drm_iounmap(gtt, gtt_size);
 #endif
 		return 0;
 	}
@@ -1410,7 +1410,7 @@ static unsigned long i915_gtt_to_phys(struct drm_device *dev,
 #ifdef __linux__
 	iounmap(gtt);
 #else
-	ioremapfree(gtt, gtt_size);
+	drm_iounmap(gtt, gtt_size);
 #endif
 
 	phys =(entry & PTE_ADDRESS_MASK) |
@@ -1976,7 +1976,10 @@ out_iomapfree:
 	drm_io_mapping_free(dev->agp->base,
 			    dev->agp->agp_info.aper_size * 1024*1024);
 out_rmmap:
+#if 0
 	pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
+#endif
+	drm_iounmap(dev_priv->regs, dev_priv->regs_size);
 put_bridge:
 	;
 free_priv:
@@ -2049,7 +2052,7 @@ int i915_driver_unload(struct drm_device *dev)
 #ifdef __linux__
 		iounmap(dev_priv->regs);
 #else
-		pmap_unmapdev((vm_offset_t)dev_priv->regs, dev_priv->regs_size);
+		drm_iounmap(dev_priv->regs, dev_priv->regs_size);
 #endif
 
 #ifdef DRM_NEWER_MODESET 

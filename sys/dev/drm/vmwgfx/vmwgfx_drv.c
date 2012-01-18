@@ -377,7 +377,11 @@ out_no_device:
 out_no_irq:
 	ttm_object_device_release(&dev_priv->tdev);
 out_err4:
+#ifdef __linux__
 	iounmap(dev_priv->mmio_virt);
+#else
+	drm_iounmap(dev_priv->mmio_virt, dev_priv->mmio_size);
+#endif
 out_err3:
 	drm_mtrr_del(dev_priv->mmio_mtrr, dev_priv->mmio_start,
 		     dev_priv->mmio_size, DRM_MTRR_WC);
@@ -417,7 +421,11 @@ static int vmw_driver_unload(struct drm_device *dev)
 	if (dev->devname == vmw_devname)
 		dev->devname = NULL;
 	ttm_object_device_release(&dev_priv->tdev);
+#ifdef __linux__
 	iounmap(dev_priv->mmio_virt);
+#else
+	drm_iounmap(dev_priv->mmio_virt, dev_priv->mmio_size);
+#endif
 	drm_mtrr_del(dev_priv->mmio_mtrr, dev_priv->mmio_start,
 		     dev_priv->mmio_size, DRM_MTRR_WC);
 	(void)ttm_bo_clean_mm(&dev_priv->bdev, TTM_PL_VRAM);

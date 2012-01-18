@@ -131,10 +131,17 @@ struct radeon_device;
 bool radeon_atrm_supported(struct pci_dev *pdev);
 int radeon_atrm_get_bios_chunk(uint8_t *bios, int offset, int len);
 #else
+#ifdef __linux__
 static inline bool radeon_atrm_supported(struct pci_dev *pdev)
 {
 	return false;
 }
+#else /* !__linux__ */
+static inline bool radeon_atrm_supported(DRM_DEVICE_T pdev)
+{
+	return false;
+}
+#endif /* __linux__ */
 
 static inline int radeon_atrm_get_bios_chunk(uint8_t *bios, int offset, int len){
 	return -EINVAL;

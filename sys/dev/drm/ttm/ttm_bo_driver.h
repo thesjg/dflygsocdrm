@@ -890,6 +890,9 @@ extern pgprot_t ttm_io_prot(uint32_t caching_flags, pgprot_t tmp);
 #define TTM_HAS_AGP
 #include <linux/agp_backend.h>
 #endif
+#else /* !__linux__ */
+#define TTM_HAS_AGP
+#endif /* __linux__ */
 
 /**
  * ttm_agp_backend_init
@@ -901,8 +904,12 @@ extern pgprot_t ttm_io_prot(uint32_t caching_flags, pgprot_t tmp);
  * for TT memory. This function uses the linux agpgart interface to
  * bind and unbind memory backing a ttm_tt.
  */
+#ifdef __linux__
 extern struct ttm_backend *ttm_agp_backend_init(struct ttm_bo_device *bdev,
 						struct agp_bridge_data *bridge);
+#else
+extern struct ttm_backend *ttm_agp_backend_init(struct ttm_bo_device *bdev,
+						DRM_AGP_BRIDGE_DATA_T bridge);
 #endif
 
 #endif

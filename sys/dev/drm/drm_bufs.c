@@ -492,7 +492,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 #ifdef __linux__
 			iounmap(map->handle);
 #else
-			drm_ioremapfree(map);
+			drm_iounmap(map->handle, map->size);
 #endif
 		free(map, DRM_MEM_MAPS);
 		return -EINVAL;
@@ -513,7 +513,7 @@ static int drm_addmap_core(struct drm_device * dev, resource_size_t offset,
 #ifdef __linux__
 			iounmap(map->handle);
 #else
-			drm_ioremapfree(map);
+			drm_iounmap(map->handle, map->size);
 #endif
 		free(map, DRM_MEM_MAPS);
 		free(list, DRM_MEM_MAPS);
@@ -756,7 +756,11 @@ int drm_rmmap_locked(struct drm_device *dev, struct drm_local_map *map)
 
 	switch (map->type) {
 	case _DRM_REGISTERS:
-		drm_ioremapfree(map);
+#ifdef __linux__
+		iounmap(map->handle);
+#else
+		drm_iounmap(map->handle, map->size);
+#endif
 		/* FALLTHROUGH */
 	case _DRM_FRAME_BUFFER:
 #if __linux__

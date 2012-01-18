@@ -278,6 +278,9 @@ struct ttm_bo_kmap_obj {
 		ttm_bo_map_kmap         = 3,
 		ttm_bo_map_premapped    = 4 | TTM_BO_MAP_IOMEM_MASK,
 	} bo_kmap_type;
+#ifndef __linux__
+	unsigned long size;
+#endif
 };
 
 /**

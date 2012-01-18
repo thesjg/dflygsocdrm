@@ -87,8 +87,13 @@ int ttm_bo_move_ttm(struct ttm_buffer_object *bo,
 }
 EXPORT_SYMBOL(ttm_bo_move_ttm);
 
+#ifdef __linux__
 int ttm_mem_reg_ioremap(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem,
 			void **virtual)
+#else
+int ttm_mem_reg_ioremap(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem,
+			void **virtual, unsigned long *size)
+#endif
 {
 	struct ttm_mem_type_manager *man = &bdev->man[mem->mem_type];
 	unsigned long bus_offset;
@@ -113,18 +118,30 @@ int ttm_mem_reg_ioremap(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem,
 			return -ENOMEM;
 	}
 	*virtual = addr;
+#ifndef __linux__
+	*size = bus_size;
+#endif
 	return 0;
 }
 
+#ifdef __linux__
 void ttm_mem_reg_iounmap(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem,
 			 void *virtual)
+#else
+void ttm_mem_reg_iounmap(struct ttm_bo_device *bdev, struct ttm_mem_reg *mem,
+			 void *virtual, unsigned long size)
+#endif
 {
 	struct ttm_mem_type_manager *man;
 
 	man = &bdev->man[mem->mem_type];
 
 	if (virtual && (man->flags & TTM_MEMTYPE_FLAG_NEEDS_IOREMAP))
+#ifdef __linux__
 		iounmap(virtual);
+#else
+		drm_iounmap(virtual, size);
+#endif
 }
 
 static int ttm_copy_io_page(void *dst, void *src, unsigned long page)
@@ -228,11 +245,22 @@ int ttm_bo_move_memcpy(struct ttm_buffer_object *bo,
 	unsigned long page;
 	unsigned long add = 0;
 	int dir;
+#ifndef __linux__
+	unsigned long size;
+#endif
 
+#ifdef __linux__
 	ret = ttm_mem_reg_ioremap(bdev, old_mem, &old_iomap);
+#else
+	ret = ttm_mem_reg_ioremap(bdev, old_mem, &old_iomap, &size);
+#endif
 	if (ret)
 		return ret;
+#ifdef __linux__
 	ret = ttm_mem_reg_ioremap(bdev, new_mem, &new_iomap);
+#else
+	ret = ttm_mem_reg_ioremap(bdev, new_mem, &new_iomap, &size);
+#endif
 	if (ret)
 		goto out;
 
@@ -282,9 +310,17 @@ out2:
 	}
 
 out1:
+#ifdef __linux__
 	ttm_mem_reg_iounmap(bdev, new_mem, new_iomap);
+#else
+	ttm_mem_reg_iounmap(bdev, new_mem, new_iomap, size);
+#endif
 out:
+#ifdef __linux__
 	ttm_mem_reg_iounmap(bdev, &old_copy, old_iomap);
+#else
+	ttm_mem_reg_iounmap(bdev, &old_copy, old_iomap, size);
+#endif
 	return ret;
 }
 EXPORT_SYMBOL(ttm_bo_move_memcpy);
@@ -406,6 +442,10 @@ static int ttm_bo_ioremap(struct ttm_buffer_object *bo,
 			map->virtual = ioremap_nocache(bus_base + bus_offset,
 						       bus_size);
 	}
+#ifndef __linux__
+	if (map->virtual)
+		map->size = bus_size;
+#endif
 	return (!map->virtual) ? -ENOMEM : 0;
 }
 
@@ -492,7 +532,11 @@ void ttm_bo_kunmap(struct ttm_bo_kmap_obj *map)
 		return;
 	switch (map->bo_kmap_type) {
 	case ttm_bo_map_iomap:
+#ifdef __linux__
 		iounmap(map->virtual);
+#else
+		drm_iounmap(map->virtual, map->size);
+#endif
 		break;
 	case ttm_bo_map_vmap:
 		vunmap(map->virtual);

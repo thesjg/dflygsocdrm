@@ -776,7 +776,11 @@ void radeon_device_fini(struct radeon_device *rdev)
 	vga_switcheroo_unregister_client(rdev->pdev);
 	vga_client_register(rdev->pdev, NULL, NULL, NULL);
 #endif
+#ifdef __linux__
 	iounmap(rdev->rmmio);
+#else
+	drm_iounmap(rdev->rmmio, rdev->rmmio_size);
+#endif
 	rdev->rmmio = NULL;
 }
 

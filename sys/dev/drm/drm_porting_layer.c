@@ -647,6 +647,30 @@ ida_destroy(struct ida *pida) {
 }
 
 /********************************************************************
+ * MEMORY MAPPED IO                                                 *
+ ********************************************************************/
+
+void *
+ioremap(unsigned long offset, unsigned long size) {
+	return pmap_mapdev(offset, size);
+}
+
+void *
+ioremap_wc(unsigned long offset, unsigned long size) {
+	return pmap_mapdev(offset, size);
+}
+
+void *
+ioremap_nocache(unsigned long offset, unsigned long size) {
+	return pmap_mapdev(offset, size);
+}
+
+void drm_iounmap(void *handle, unsigned long size)
+{
+	pmap_unmapdev((vm_offset_t)handle, size);
+}
+
+/********************************************************************
  * PCI                                                              *
  ********************************************************************/
 

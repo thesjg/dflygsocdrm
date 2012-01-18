@@ -505,7 +505,11 @@ static void drm_vm_shm_close(struct vm_area_struct *vma)
 							   map->size);
 					DRM_DEBUG("mtrr_del = %d\n", retcode);
 				}
+#ifdef __linux__
 				iounmap(map->handle);
+#else
+				drm_iounmap(map->handle, map->size);
+#endif
 				break;
 			case _DRM_SHM:
 				vfree(map->handle);

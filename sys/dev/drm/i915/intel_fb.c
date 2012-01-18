@@ -288,7 +288,11 @@ int intelfb_remove(struct drm_device *dev, struct drm_framebuffer *fb)
 	if (info) {
 		struct intelfb_par *par = info->par;
 		unregister_framebuffer(info);
+#ifdef __linux__
 		iounmap(info->screen_base);
+#else
+		drm_iounmap(info->screen_base, info->screen_size);
+#endif
 		if (info->par)
 			drm_fb_helper_free(&par->helper);
 		framebuffer_release(info);

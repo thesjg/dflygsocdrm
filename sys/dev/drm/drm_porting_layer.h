@@ -24,6 +24,40 @@
  *
  */
 
+/*
+ * From Linux 2.6.34.7 include/linux/agp_backend.h
+ * AGP_USER_MEMORY and AGP_USER_CACHED_MEMORY definitions
+ */
+
+/*
+ * AGPGART backend specific includes. Not for userspace consumption.
+ *
+ * Copyright (C) 2004 Silicon Graphics, Inc.
+ * Copyright (C) 2002-2003 Dave Jones
+ * Copyright (C) 1999 Jeff Hartmann
+ * Copyright (C) 1999 Precision Insight, Inc.
+ * Copyright (C) 1999 Xi Graphics, Inc.
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a
+ * copy of this software and associated documentation files (the "Software"),
+ * to deal in the Software without restriction, including without limitation
+ * the rights to use, copy, modify, merge, publish, distribute, sublicense,
+ * and/or sell copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included
+ * in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
+ * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.  IN NO EVENT SHALL
+ * JEFF HARTMANN, OR ANY OTHER CONTRIBUTORS BE LIABLE FOR ANY CLAIM, 
+ * DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR 
+ * OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE 
+ * OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+ *
+ */
+
 #ifndef _DRM_PORTING_LAYER_H_
 #define _DRM_PORTING_LAYER_H_
 
@@ -1650,6 +1684,25 @@ __copy_from_user_inatomic(
  * MEMORY MAPPED IO                                                 *
  ********************************************************************/
 
+void *
+ioremap(unsigned long offset, unsigned long size);
+
+void *
+ioremap_wc(unsigned long offset, unsigned long size);
+
+void *
+ioremap_nocache(unsigned long offset, unsigned long size);
+
+void drm_iounmap(void *handle, unsigned long size);
+
+#if 0
+/*
+ * DragonFly BSD requires size to be specified to pmap_unmapdev()
+ */
+void
+iounmap(void *virtual);
+#endif
+
 /* directive __iomem */
 static __inline__ void
 memset_io(void * handle, uint32_t value, int size) {
@@ -2131,6 +2184,154 @@ pci_enable_msi(struct pci_dev *pdev);
 
 int
 pci_disable_msi(struct pci_dev *pdev);
+#endif
+
+/********************************************************************
+ * AGP                                                              *
+ ********************************************************************/
+
+/* From Linux 2.6.34.7, include/linux/agp_backend.h */
+
+#ifndef AGP_USER_TYPES
+#define AGP_USER_TYPES (1 << 16)
+#endif
+
+#ifndef AGP_USER_MEMORY
+#define AGP_USER_MEMORY (AGP_USER_TYPES)
+#endif
+
+#ifndef AGP_USER_CACHED_MEMORY
+#define AGP_USER_CACHED_MEMORY (AGP_USER_TYPES + 1)
+#endif
+
+struct DRM_AGP_VERSION {
+	int major;
+	int minor;
+};
+
+struct DRM_AGP_DEVICE {
+	unsigned short vendor;
+	unsigned short device;
+};
+
+typedef struct DRM_AGP_KERN {
+	struct DRM_AGP_VERSION version;
+	unsigned long mode;
+	unsigned long aper_base;
+/* DIFFERENCE units of 1024 x 1024 bytes */
+	unsigned long aper_size;
+/* units of pages */
+	unsigned long max_memory;
+/* changed implementation */
+	uint16_t id_vendor;
+	uint16_t id_device;
+/* units of pages */
+	unsigned long current_memory;
+	int cant_use_aperture;
+	unsigned long page_mask;
+} DRM_AGP_KERN;
+
+/* DragonFly BSD already has defined a struct agp_memory */
+/* UNIMPLEMENTED 
+ *     void *key since cast (unsigned long)memory->key
+ */
+typedef struct DRM_AGP_MEM {
+	struct agp_memory *memory;
+	unsigned long page_count;
+	bool is_flushed;
+	struct page **pages;
+	int key;
+	uint32_t physical;
+	device_t bridge;
+	vm_object_t object;
+#if __linux__ /* Use memory->am_is_bound */
+	int is_bound;
+#endif
+	int type;
+} DRM_AGP_MEM;
+
+#ifdef __linux__
+typedef struct agp_bridge_data *DRM_AGP_BRIDGE_DATA_T;
+#else
+typedef device_t                DRM_AGP_BRIDGE_DATA_T;
+#endif
+
+#if 0
+/*
+ * Use agp_alloc_memory() by calling drm_agp_allocate_memory()
+ */
+struct agp_memory *
+agp_allocate_memory(
+	struct agp_bridge_data *bridge,
+	size_t pages,
+	uint32_t type
+);
+#endif
+
+/* On DragonFly BSD already defined in dev/agp/agpvar.h */
+
+#if 0
+/*
+ * Use agp_bind_memory() in drm_agp_bind_memory()
+ */
+int
+agp_bind_memory(struct agp_memory *handle, off_t start);
+
+/*
+ * Use agp_unbind_memory() in drm_agp_unbind_memory()
+ */
+int
+agp_unbind_memory(struct agp_memory *handle);
+
+/*
+ * Use agp_free_memory() in drm_agp_free_memory()
+ */
+int
+agp_free_memory(struct agp_memory *handle);
+
+/*
+ * Use agp_enable() in drm_agp_enable()
+ */
+void
+agp_enable(struct agp_bridge_data *bridge, unsigned long mode);
+#endif
+
+#if 0
+/*
+ * Use agp_find_device()
+ */
+struct agp_bridge_data *
+agp_find_bridge(struct pci_dev *pdev);
+#endif
+
+#if 0
+/*
+ * Use agp_acquire()
+ */
+struct agp_bridge_data *
+agp_backend_acquire(struct pci_dev *pdev);
+#endif
+
+#if 0
+/*
+ * Use agp_release()
+ */
+void
+agp_backend_release(struct agp_bridge_data *bridge);
+#endif
+
+#if 0
+/*
+ * Use agp_get_info() in drm_agp_copy_info()
+ */
+void
+agp_copy_info(struct agp_bridge_data *bridge, DRM_AGP_KERN * agp_info);
+
+/*
+ * Use wbinvd() in drm_agp_flush_chipset()
+ */
+void
+agp_flush_chipset(struct agp_bridge_data *bridge);
 #endif
 
 /*
@@ -3005,41 +3206,6 @@ do_mmap(
 	return 0;
 }
 
-/*
- * I/O and memory
- */
-
-/* file drm_bufs.c, function drm_addmap_core() */
-static __inline__ void *
-ioremap(unsigned long offset, unsigned long size) {
-	return pmap_mapdev(offset, size);
-}
-
-/* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
-/* file i915_gem.c, function i915_gtt_to_phys() */
-static __inline__ void *
-ioremap_wc(unsigned long offset, unsigned long size) {
-	return pmap_mapdev(offset, size);
-}
-
-/* file ttm/ttm_bo_util.c, function ttm_mem_reg_ioremap() */
-static __inline__ void *
-ioremap_nocache(unsigned long offset, unsigned long size) {
-	return pmap_mapdev(offset, size);
-}
-
-static __inline__ void ioremapfree(void *handle, unsigned long size)
-{
-	pmap_unmapdev((vm_offset_t)handle, size);
-}
-
-/* file ttm/ttm_bo_util.c, function ttm_mem_reg_iounmap() */
-/* file drm_bufs.c, function drm_rmmap_locked() */
-static __inline__ void
-iounmap(void *virtual) {
-	;
-}
-
 /* nouveau_drv.h */
 #define ioread8(reg)         (readb(reg))
 
@@ -3324,171 +3490,6 @@ device_remove_file(
 /**********************************************************
  * BUS AND DEVICE CLASSES                                 *
  **********************************************************/
-
-/**********************************************************
- * AGP                                                    *
- **********************************************************/
-
-/* file ttm/ttm_agp_backend.c, function ttm_agp_populate() */
-/* file drm_agpsupport.c, function drm_agp_allocate_memory() */
-enum agp_memory_type {
-	AGP_USER_CACHED_MEMORY,
-	AGP_USER_MEMORY
-};
-
-/* ttm/ttm_agp_backend.c */
-/* DragonFly BSD already has defined a struct agp_memory */
-#if 0
-struct agp_memory {
-	unsigned long page_count;
-	bool is_flushed;
-	bool is_bound;
-	enum agp_memory_type type;
-	struct page *pages[];
-};
-#endif
-
-struct agp_memory;
-
-#ifdef __linux__
-typedef struct agp_bridge_data *DRM_AGP_BRIDGE_DATA_T;
-#else
-typedef device_t                DRM_AGP_BRIDGE_DATA_T;
-#endif
-
-struct agp_bridge_data {
-	int placeholder;
-};
-
-#if 0
-/*
- * Use agp_alloc_memory() by calling drm_agp_allocate_memory()
- */
-struct agp_memory *
-agp_allocate_memory(
-	struct agp_bridge_data *bridge,
-	size_t pages,
-	uint32_t type
-);
-#endif
-
-/* On DragonFly BSD already defined in dev/agp/agpvar.h */
-
-#if 0
-/*
- * Use agp_bind_memory() in drm_agp_bind_memory()
- */
-int
-agp_bind_memory(struct agp_memory *handle, off_t start);
-
-/*
- * Use agp_unbind_memory() in drm_agp_unbind_memory()
- */
-int
-agp_unbind_memory(struct agp_memory *handle);
-
-/*
- * Use agp_free_memory() in drm_agp_free_memory()
- */
-int
-agp_free_memory(struct agp_memory *handle);
-
-/*
- * Use agp_enable() in drm_agp_enable()
- */
-void
-agp_enable(struct agp_bridge_data *bridge, unsigned long mode);
-#endif
-
-#if 0
-/*
- * Use agp_find_device()
- */
-struct agp_bridge_data *
-agp_find_bridge(struct pci_dev *pdev);
-#endif
-
-#if 0
-/*
- * Use agp_acquire()
- */
-struct agp_bridge_data *
-agp_backend_acquire(struct pci_dev *pdev);
-#endif
-
-#if 0
-/*
- * Use agp_release()
- */
-void
-agp_backend_release(struct agp_bridge_data *bridge);
-#endif
-
-/* legacy drm drm_agpsupport.c gets information from
- * agp_info
- */
-
-/* file drm_agpsupport.c, function drm_agp_info() */
-struct DRM_AGP_VERSION {
-	int major;
-	int minor;
-};
-
-/* file drm_agpsupport.c, function drm_agp_info() */
-struct DRM_AGP_DEVICE {
-	unsigned short vendor;
-	unsigned short device;
-};
-
-/* file drm_agpsupport.c, function drm_agp_info() */
-typedef struct DRM_AGP_KERN {
-	struct DRM_AGP_VERSION version;
-	unsigned long mode;
-	unsigned long aper_base;
-/* DIFFERENCE units of 1024 x 1024 bytes */
-	unsigned long aper_size;
-/* units of pages */
-	unsigned long max_memory;
-/* changed implementation */
-	uint16_t id_vendor;
-	uint16_t id_device;
-/* units of pages */
-	unsigned long current_memory;
-	int cant_use_aperture;
-	unsigned long page_mask;
-} DRM_AGP_KERN;
-
-/* file drm_agpsupport.c, function drm_agp_alloc() */
-/* agp_memory_info() argument */
-typedef struct DRM_AGP_MEM {
-	struct agp_memory *memory;
-/* file drm_agpsupport.c, function drm_agp_bind_pages() */
-	unsigned long page_count;
-	bool is_flushed;
-	struct page **pages;
-	int key;
-	uint32_t physical;
-	device_t bridge;
-	vm_object_t object;
-} DRM_AGP_MEM;
-
-/* file drm_agpsupport.c, function drm_agp_alloc() */
-/* DRM_AGP_MEM should also have some extra members
- *     void *key since cast (unsigned long)memory->key
- *     unsigned long physical
- */
-
-/* file drm_agpsupport.c, function drm_agp_init() */
-static __inline__ void
-agp_copy_info(struct agp_bridge_data *bridge, DRM_AGP_KERN * agp_info) {
-	;
-}
-
-/* file drm_agpsupport.c, function drm_agp_chipset_flush() */
-static __inline__ void
-agp_flush_chipset(struct agp_bridge_data *bridge) {
-	;
-}
 
 /* file ttm/ttm_page_alloc.c, function set_pages_array_wb() */
 static __inline__ void

@@ -94,8 +94,8 @@ int drm_mem_info(char *buf, char **start, off_t offset,
 	return 0;
 }
 
-/* newer UNIMPLEMENTED agp_remap, probably not needed */
 #if __OS_HAS_AGP
+#ifdef __linux__ /* UNIMPLEMENTED */
 static void *agp_remap(unsigned long offset, unsigned long size,
 		       struct drm_device * dev)
 {
@@ -138,6 +138,7 @@ static void *agp_remap(unsigned long offset, unsigned long size,
 
 	return addr;
 }
+#endif /* __linux__ */
 
 /** Wrapper around agp_allocate_memory() */
 DRM_AGP_MEM *drm_alloc_agp(struct drm_device * dev, int pages, u32 type)
@@ -166,15 +167,17 @@ int drm_unbind_agp(DRM_AGP_MEM * handle)
 EXPORT_SYMBOL(drm_unbind_agp);
 
 #else  /*  __OS_HAS_AGP  */
+#ifdef __linux__
 static inline void *agp_remap(unsigned long offset, unsigned long size,
 			      struct drm_device * dev)
 {
 	return NULL;
 }
+#endif /* __linux__ */
 
 #endif				/* agp */
 
-/* legacy API */
+#ifndef __linux__
 
 void *drm_ioremap_wc(struct drm_device *dev, drm_local_map_t *map)
 {
@@ -194,23 +197,52 @@ void drm_ioremapfree(drm_local_map_t *map)
 	pmap_unmapdev((vm_offset_t) map->handle, map->size);
 }
 
-/* IMPLEMENTED newer API */
+#endif /* !__linux__ */
 
 void drm_core_ioremap(struct drm_local_map *map, struct drm_device *dev)
 {
+#ifdef __linux__
+	if (drm_core_has_AGP(dev) &&
+	    dev->agp && dev->agp->cant_use_aperture && map->type == _DRM_AGP)
+		map->handle = agp_remap(map->offset, map->size, dev);
+	else
+		map->handle = ioremap(map->offset, map->size);
+#else
 	map->handle = drm_ioremap(dev, map);
+#endif
 }
+EXPORT_SYMBOL(drm_core_ioremap);
 
 void drm_core_ioremap_wc(struct drm_local_map *map, struct drm_device *dev)
 {
+#ifdef __linux__
+	if (drm_core_has_AGP(dev) &&
+	    dev->agp && dev->agp->cant_use_aperture && map->type == _DRM_AGP)
+		map->handle = agp_remap(map->offset, map->size, dev);
+	else
+		map->handle = ioremap_wc(map->offset, map->size);
+#else
 	map->handle = drm_ioremap_wc(dev, map);
+#endif
 }
+EXPORT_SYMBOL(drm_core_ioremap_wc);
 
 void drm_core_ioremapfree(struct drm_local_map *map, struct drm_device *dev)
 {
-	if ( map->handle && map->size )
-		drm_ioremapfree(map);
+	if (!map->handle || !map->size)
+		return;
+
+#ifdef __linux__
+	if (drm_core_has_AGP(dev) &&
+	    dev->agp && dev->agp->cant_use_aperture && map->type == _DRM_AGP)
+		vunmap(map->handle);
+	else
+		iounmap(map->handle);
+#else
+	drm_ioremapfree(map);
+#endif
 }
+EXPORT_SYMBOL(drm_core_ioremapfree);
 
 /* NO-OPS */
 void drm_mem_init(void)
