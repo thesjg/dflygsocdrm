@@ -291,6 +291,8 @@ static void vmw_fb_dirty_mark(struct vmw_fb_par *par,
 	spin_unlock_irqrestore(&par->dirty.lock, flags);
 }
 
+#ifdef __linux__
+/* UNIMPLEMENTED iterate through a list of pages */
 static void vmw_deferred_io(struct fb_info *info,
 			    struct list_head *pagelist)
 {
@@ -323,11 +325,15 @@ static void vmw_deferred_io(struct fb_info *info,
 
 	vmw_fb_dirty_flush(par);
 };
+#endif
 
+#ifdef __linux__
+/* UNIMPLEMENTED deferred io to the framebuffer */
 struct fb_deferred_io vmw_defio = {
 	.delay		= VMW_DIRTY_DELAY,
 	.deferred_io	= vmw_deferred_io,
 };
+#endif
 
 /*
  * Draw code
@@ -573,7 +579,9 @@ int vmw_fb_init(struct vmw_private *vmw_priv)
 	par->dirty.y1 = par->dirty.y1 = 0;
 	par->dirty.active = true;
 	spin_lock_init(&par->dirty.lock);
+#ifdef __linux__
 	info->fbdefio = &vmw_defio;
+#endif
 	fb_deferred_io_init(info);
 
 	ret = register_framebuffer(info);

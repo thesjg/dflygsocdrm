@@ -2239,7 +2239,7 @@ typedef struct DRM_AGP_MEM {
 	struct agp_memory *memory;
 	unsigned long page_count;
 	bool is_flushed;
-	struct page **pages;
+	struct vm_page **pages;
 	int key;
 	uint32_t physical;
 	device_t bridge;
@@ -2638,10 +2638,14 @@ typedef unsigned long	pgoff_t;
  * Are zones the number of pages divided by 2^10?
  */
 
+#define page  vm_page
+
+#if 0
 struct page {
 /* file ttm/ttm_page_alloc.c, function ttm_handle_caching_state() */
 	struct list_head lru;
 };
+#endif
 
 typedef vm_page_t	DRM_PAGE_T;
 
@@ -3827,6 +3831,20 @@ struct fb_deferred_io {
 	unsigned long delay;
 	void (*deferred_io)(struct fb_info *info, struct list_head *pagelist);
 };
+
+/* file vmwgfx_fb.c, function vmw_fb_init() */
+static __inline__ void
+fb_deferred_io_cleanup(struct fb_info *info)
+{
+	;
+}
+
+/* file vmwgfx_fb.c, function vmw_fb_init() */
+static __inline__ void
+fb_deferred_io_init(struct fb_info *info)
+{
+	;
+}
 
 /*
  * Framebuffer global variables
