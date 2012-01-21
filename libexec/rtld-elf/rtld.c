@@ -147,7 +147,7 @@ static void ld_utrace_log(int, void *, void *, size_t, int, const char *);
 static void rtld_fill_dl_phdr_info(const Obj_Entry *obj,
     struct dl_phdr_info *phdr_info);
 
-void r_debug_state(struct r_debug *, struct link_map *);
+void r_debug_state(struct r_debug *, struct link_map *) __noinline;
 
 /*
  * Data declarations.
@@ -1024,8 +1024,8 @@ digest_dynamic(Obj_Entry *obj, int early)
 		    obj->textrel = true;
 		if (dynp->d_un.d_val & DF_BIND_NOW)
 		    obj->bind_now = true;
-		if (dynp->d_un.d_val & DF_STATIC_TLS)
-		    ;
+		/*if (dynp->d_un.d_val & DF_STATIC_TLS)
+		    ;*/
 	    break;
 
 	case DT_FLAGS_1:
@@ -1033,8 +1033,8 @@ digest_dynamic(Obj_Entry *obj, int early)
 		    obj->z_noopen = true;
 		if ((dynp->d_un.d_val & DF_1_ORIGIN) && trust)
 		    obj->z_origin = true;
-		if (dynp->d_un.d_val & DF_1_GLOBAL)
-			/* XXX */;
+		/*if (dynp->d_un.d_val & DF_1_GLOBAL)
+		    XXX ;*/
 		if (dynp->d_un.d_val & DF_1_BIND_NOW)
 		    obj->bind_now = true;
 		if (dynp->d_un.d_val & DF_1_NODELETE)
@@ -1130,6 +1130,11 @@ digest_phdr(const Elf_Phdr *phdr, int phnum, caddr_t entry, const char *path)
 	    obj->tlsalign = ph->p_align;
 	    obj->tlsinitsize = ph->p_filesz;
 	    obj->tlsinit = (void*)(ph->p_vaddr + obj->relocbase);
+	    break;
+
+	case PT_GNU_RELRO:
+	    obj->relro_page = obj->relocbase + trunc_page(ph->p_vaddr);
+	    obj->relro_size = round_page(ph->p_memsz);
 	    break;
 	}
     }
@@ -1638,6 +1643,7 @@ load_object(const char *name, const Obj_Entry *refobj, int flags)
     }
     if (flags & RTLD_LO_NOLOAD) {
 	free(path);
+	close(fd);
 	return (NULL);
     }
 
@@ -1944,6 +1950,8 @@ relocate_objects(Obj_Entry *first, bool bind_now, Obj_Entry *rtldobj)
 	    if (reloc_jmpslots(obj) == -1)
 		return -1;
 
+	/* Set the special PLT or GOT entries. */
+	init_pltgot(obj);
 
 	/*
 	 * Set up the magic number and version in the Obj_Entry.  These
@@ -1953,11 +1961,20 @@ relocate_objects(Obj_Entry *first, bool bind_now, Obj_Entry *rtldobj)
 	obj->magic = RTLD_MAGIC;
 	obj->version = RTLD_VERSION;
 
-	/* Set the special PLT or GOT entries. */
-	init_pltgot(obj);
+	/*
+	 * Set relocated data to read-only status if protection specified
+	 */
+
+	if (obj->relro_size) {
+	    if (mprotect(obj->relro_page, obj->relro_size, PROT_READ) == -1) {
+		_rtld_error("%s: Cannot enforce relro relocation: %s",
+		  obj->path, strerror(errno));
+		return -1;
+	    }
+	}
     }
 
-    return 0;
+    return (0);
 }
 
 /*
@@ -2305,9 +2322,9 @@ do_dlsym(void *handle, const char *name, void *retaddr, const Ver_Entry *ve,
 	 * the relocated value of the symbol.
 	 */
 	if (ELF_ST_TYPE(def->st_info) == STT_FUNC)
-	    return make_function_pointer(def, defobj);
+	    return (make_function_pointer(def, defobj));
 	else
-	    return defobj->relocbase + def->st_value;
+	    return (defobj->relocbase + def->st_value);
     }
 
     _rtld_error("Undefined symbol \"%s\"", name);
@@ -2723,6 +2740,14 @@ linkmap_delete(Obj_Entry *obj)
 void
 r_debug_state(struct r_debug* rd, struct link_map *m)
 {
+    /*
+     * The following is a hack to force the compiler to emit calls to
+     * this function, even when optimizing.  If the function is empty,
+     * the compiler is not obliged to emit any code for calls to it,
+     * even when marked __noinline.  However, gdb depends on those
+     * calls being made.
+     */
+    __asm __volatile("" : : : "memory");
 }
 
 /*
@@ -3266,7 +3291,7 @@ tls_get_addr_common(Elf_Addr** dtvp, int index, size_t offset)
 	newdtv[1] = tls_max_index;
 	free(dtv);
 	lock_release(rtld_bind_lock, &lockstate);
-	*dtvp = newdtv;
+	dtv = *dtvp = newdtv;
     }
 
     /* Dynamically allocate module TLS if necessary */

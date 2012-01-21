@@ -120,22 +120,23 @@ METHOD int alloc_msi {
 	int		cpuid;
 };
 
-METHOD int alloc_msix {
-	device_t	dev;
-	device_t	child;
-	int		*count;
-};
-
-METHOD int remap_msix {
-	device_t	dev;
-	device_t	child;
-	int		count;
-	const u_int	*vectors;
-};
-
 METHOD int release_msi {
 	device_t	dev;
 	device_t	child;
+};
+
+METHOD int alloc_msix_vector {
+	device_t	dev;
+	device_t	child;
+	u_int		vector;
+	int		*rid;
+	int		cpuid;
+};
+
+METHOD int release_msix_vector {
+	device_t	dev;
+	device_t	child;
+	int		rid;
 };
 
 METHOD int msi_count {

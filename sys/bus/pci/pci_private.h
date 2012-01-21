@@ -52,7 +52,8 @@ int		pci_write_ivar(device_t dev, device_t child, int which,
 		    uintptr_t value);
 int		pci_setup_intr(device_t dev, device_t child,
 		    struct resource *irq, int flags,
-		    driver_intr_t *intr, void *arg, void **cookiep, lwkt_serialize_t serializer);
+		    driver_intr_t *intr, void *arg, void **cookiep,
+		    lwkt_serialize_t serializer, const char *desc);
 int		pci_teardown_intr(device_t dev, device_t child,
 		    struct resource *irq, void *cookie);
 int		pci_get_vpd_ident_method(device_t dev, device_t child,
@@ -73,10 +74,9 @@ int		pci_disable_io_method(device_t dev, device_t child, int space);
 int		pci_find_extcap_method(device_t dev, device_t child,
 		    int capability, int *capreg);
 int		pci_alloc_msi_method(device_t dev, device_t child, int *rid, int count, int cpuid);
-int		pci_alloc_msix_method(device_t dev, device_t child, int *count);
-int		pci_remap_msix_method(device_t dev, device_t child,
-		    int count, const u_int *vectors);
+int		pci_alloc_msix_vector_method(device_t dev, device_t child, u_int vector, int *rid, int cpuid);
 int		pci_release_msi_method(device_t dev, device_t child);
+int		pci_release_msix_vector_method(device_t dev, device_t child, int rid);
 int		pci_msi_count_method(device_t dev, device_t child);
 int		pci_msix_count_method(device_t dev, device_t child);
 struct resource	*pci_alloc_resource(device_t dev, device_t child, 

@@ -49,7 +49,6 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  *
  * $OpenBSD: atascsi.c,v 1.64 2009/02/16 21:19:06 miod Exp $
- * $DragonFly$
  */
 /*
  * Implement each SATA port as its own SCSI bus on CAM.  This way we can
@@ -146,8 +145,8 @@ sili_cam_attach(struct sili_port *ap)
 /*
  * The state of the port has changed.
  *
- * If at is NULL the physical port has changed state.
- * If at is non-NULL a particular target behind a PM has changed state.
+ * If atx is NULL the physical port has changed state.
+ * If atx is non-NULL a particular target behind a PM has changed state.
  *
  * If found is -1 the target state must be queued to a non-interrupt context.
  * (only works with at == NULL).
@@ -808,7 +807,7 @@ sili_xpt_action(struct cam_sim *sim, union ccb *ccb)
 	 * probed.
 	 *
 	 * Calculate at and atx.  at is always non-NULL.  atx is only
-	 * non-NULL for direct-attached devices.  It will be NULL for
+	 * NULL for direct-attached devices.  It will be non-NULL for
 	 * devices behind a port multiplier.
 	 *
 	 * XXX What do we do with a LUN wildcard?

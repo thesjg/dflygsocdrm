@@ -33,10 +33,8 @@
 #ifdef DBG
 int hpt_iop_dbg_level = 0;
 #define KdPrint(x)  do { if (hpt_iop_dbg_level) kprintf x; } while (0)
-#define HPT_ASSERT(x) assert(x)
 #else
 #define KdPrint(x)
-#define HPT_ASSERT(x)
 #endif
 
 #define HPT_SRB_MAX_REQ_SIZE                600
@@ -292,7 +290,6 @@ struct hpt_iop_hba {
 	u_int32_t             msg_done;
 
 	device_t              pcidev;
-	u_int32_t             pciunit;
 	ioctl_dev_t           ioctl_dev;
 
 	bus_dma_tag_t         parent_dmat;

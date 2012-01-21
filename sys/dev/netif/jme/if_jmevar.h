@@ -53,6 +53,10 @@
 #define JME_NRXRING_MIN		JME_NRXRING_1
 #define JME_NRXRING_MAX		JME_NRXRING_4
 
+#define JME_NSERIALIZE		(JME_NRXRING_MAX + 2)
+
+#define JME_NMSIX		(JME_NRXRING_MAX + 1)
+
 /*
  * Tx/Rx descriptor queue base should be 16bytes aligned and
  * should not cross 4G bytes boundary on the 64bits address
@@ -125,10 +129,18 @@ struct jme_rxdesc {
 	struct jme_desc		*rx_desc;
 };
 
+struct jme_softc;
+
 /*
  * RX ring/descs
  */
 struct jme_rxdata {
+	struct lwkt_serialize	jme_rx_serialize;
+	struct jme_softc	*jme_sc;
+	uint32_t		jme_rx_coal;
+	uint32_t		jme_rx_comp;
+	uint32_t		jme_rx_empty;
+	int			jme_rx_idx;
 	bus_dma_tag_t		jme_rx_tag;	/* RX mbuf tag */
 	bus_dmamap_t		jme_rx_sparemap;
 	struct jme_rxdesc	*jme_rxdesc;
@@ -163,6 +175,8 @@ struct jme_chain_data {
 	/*
 	 * TX ring/descs
 	 */
+	struct lwkt_serialize	jme_tx_serialize;
+	struct jme_softc	*jme_sc;
 	bus_dma_tag_t		jme_tx_tag;	/* TX mbuf tag */
 	struct jme_txdesc	*jme_txdesc;
 
@@ -176,6 +190,20 @@ struct jme_chain_data {
 	int			jme_tx_cnt;
 
 	struct jme_rxdata	jme_rx_data[JME_NRXRING_MAX];
+};
+
+struct jme_msix_data {
+	int			jme_msix_rid;
+	int			jme_msix_cpuid;
+	u_int			jme_msix_vector;
+	uint32_t		jme_msix_intrs;
+	struct resource		*jme_msix_res;
+	void			*jme_msix_handle;
+	struct lwkt_serialize	*jme_msix_serialize;
+	char			jme_msix_desc[64];
+
+	driver_intr_t		*jme_msix_func;
+	void			*jme_msix_arg;
 };
 
 #define JME_TX_RING_SIZE(sc)	\
@@ -200,6 +228,9 @@ struct jme_softc {
 	int			jme_irq_rid;
 	struct resource		*jme_irq_res;
 	void			*jme_irq_handle;
+	struct jme_msix_data	jme_msix[JME_NMSIX];
+	int			jme_msix_cnt;
+	uint32_t		jme_msinum[JME_MSINUM_CNT];
 
 	device_t		jme_miibus;
 	int			jme_phyaddr;
@@ -226,6 +257,10 @@ struct jme_softc {
 #define	JME_FLAG_MSIX		0x0002
 #define	JME_FLAG_DETACH		0x0004
 #define	JME_FLAG_LINK		0x0008
+
+	struct lwkt_serialize	jme_serialize;
+	struct lwkt_serialize	*jme_serialize_arr[JME_NSERIALIZE];
+	int			jme_serialize_cnt;
 
 	struct callout		jme_tick_ch;
 	struct jme_chain_data	jme_cdata;

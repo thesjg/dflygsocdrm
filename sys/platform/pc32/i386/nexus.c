@@ -98,8 +98,8 @@ static	int nexus_release_resource(device_t, device_t, int, int,
 static	int nexus_config_intr(device_t, device_t, int, enum intr_trigger,
 			      enum intr_polarity);
 static	int nexus_setup_intr(device_t, device_t, struct resource *, int flags,
-			     void (*)(void *), void *, 
-			     void **, lwkt_serialize_t);
+		void (*)(void *), void *, void **, lwkt_serialize_t,
+		const char *);
 static	int nexus_teardown_intr(device_t, device_t, struct resource *,
 				void *);
 static	int nexus_set_resource(device_t, device_t, int, int, u_long, u_long,
@@ -110,6 +110,8 @@ static void nexus_delete_resource(device_t, device_t, int, int);
 static	int nexus_alloc_msi(device_t, device_t, int, int, int *, int);
 static	int nexus_release_msi(device_t, device_t, int, int *, int);
 static	int nexus_map_msi(device_t, device_t, int, uint64_t *, uint32_t *, int);
+static	int nexus_alloc_msix(device_t, device_t, int *, int);
+static	int nexus_release_msix(device_t, device_t, int, int);
 
 /*
  * The device_identify method will cause nexus to automatically associate
@@ -144,6 +146,8 @@ static device_method_t nexus_methods[] = {
 	DEVMETHOD(pcib_alloc_msi,	nexus_alloc_msi),
 	DEVMETHOD(pcib_release_msi,	nexus_release_msi),
 	DEVMETHOD(pcib_map_msi,		nexus_map_msi),
+	DEVMETHOD(pcib_alloc_msix,	nexus_alloc_msix),
+	DEVMETHOD(pcib_release_msix,	nexus_release_msix),
 
 	{ 0, 0 }
 };
@@ -486,8 +490,8 @@ nexus_config_intr(device_t bus, device_t chile, int irq,
  */
 static int
 nexus_setup_intr(device_t bus, device_t child, struct resource *irq,
-		 int flags, void (*ihand)(void *), void *arg,
-		 void **cookiep, lwkt_serialize_t serializer)
+    int flags, void (*ihand)(void *), void *arg, void **cookiep,
+    lwkt_serialize_t serializer, const char *desc)
 {
 	int	error, icflags;
 
@@ -507,14 +511,17 @@ nexus_setup_intr(device_t bus, device_t child, struct resource *irq,
 	if (error)
 		return (error);
 
+	/* Use device name, if description is not specified */
+	if (desc == NULL)
+		desc = device_get_nameunit(child);
+
 	/*
 	 * XXX cast the interrupt handler function to an inthand2_t.  The
 	 * difference is that an additional frame argument is passed which
 	 * we do not currently want to expose the BUS subsystem to.
 	 */
 	*cookiep = register_int(irq->r_start, (inthand2_t *)ihand, arg,
-				device_get_nameunit(child), serializer,
-				icflags, rman_get_cpuid(irq));
+				desc, serializer, icflags, rman_get_cpuid(irq));
 	if (*cookiep == NULL)
 		error = EINVAL;
 	return (error);
@@ -595,5 +602,22 @@ nexus_map_msi(device_t dev, device_t child, int irq, uint64_t *addr,
 {
 	KKASSERT(lapic_enable);
 	MachIntrABI.msi_map(irq, addr, data, cpuid);
+	return 0;
+}
+
+static int
+nexus_alloc_msix(device_t dev, device_t child, int *irq, int cpuid)
+{
+	if (!lapic_enable)
+		return ENODEV;
+
+	return MachIntrABI.msix_alloc(irq, cpuid);
+}
+
+static int
+nexus_release_msix(device_t dev, device_t child, int irq, int cpuid)
+{
+	KKASSERT(lapic_enable);
+	MachIntrABI.msix_release(irq, cpuid);
 	return 0;
 }

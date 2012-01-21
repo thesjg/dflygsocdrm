@@ -83,6 +83,8 @@ map_object(int fd, const char *path, const struct stat *sb)
     Elf_Addr bss_vaddr;
     Elf_Addr bss_vlimit;
     caddr_t bss_addr;
+    Elf_Addr relro_page;
+    size_t relro_size;
 
     hdr = get_elf_header(fd, path);
     if (hdr == NULL)
@@ -99,6 +101,8 @@ map_object(int fd, const char *path, const struct stat *sb)
     nsegs = -1;
     phdyn = phinterp = phtls = NULL;
     phdr_vaddr = 0;
+    relro_page = 0;
+    relro_size = 0;
     segs = alloca(sizeof(segs[0]) * hdr->e_phnum);
     while (phdr < phlimit) {
 	switch (phdr->p_type) {
@@ -127,6 +131,11 @@ map_object(int fd, const char *path, const struct stat *sb)
 
 	case PT_TLS:
 	    phtls = phdr;
+	    break;
+
+	case PT_GNU_RELRO:
+	    relro_page = phdr->p_vaddr;
+	    relro_size = phdr->p_memsz;
 	    break;
 	}
 
@@ -190,12 +199,11 @@ map_object(int fd, const char *path, const struct stat *sb)
 
 	    if ((nclear = data_vlimit - clear_vaddr) > 0) {
 		/* Make sure the end of the segment is writable */
-		if ((data_prot & PROT_WRITE) == 0) {
-		    if (mprotect(clear_page, PAGE_SIZE, data_prot|PROT_WRITE) < 0) {
+		if ((data_prot & PROT_WRITE) == 0 && -1 ==
+		     mprotect(clear_page, PAGE_SIZE, data_prot|PROT_WRITE)) {
 			_rtld_error("%s: mprotect failed: %s", path,
 			    strerror(errno));
 			return NULL;
-		    }
 		}
 
 		memset(clear_addr, 0, nclear);
@@ -215,8 +223,9 @@ map_object(int fd, const char *path, const struct stat *sb)
 	    bss_vlimit = round_page(segs[i]->p_vaddr + segs[i]->p_memsz);
 	    bss_addr = mapbase +  (bss_vaddr - base_vaddr);
 	    if (bss_vlimit > bss_vaddr) {	/* There is something to do */
-		if (mprotect(bss_addr, bss_vlimit - bss_vaddr, data_prot) == -1) {
-		    _rtld_error("%s: mprotect of bss failed: %s", path,
+		if (mmap(bss_addr, bss_vlimit - bss_vaddr, data_prot,
+		    data_flags | MAP_ANON, -1, 0) == (caddr_t)-1) {
+		    _rtld_error("%s: mmap of bss failed: %s", path,
 			strerror(errno));
 		    return NULL;
 		}
@@ -266,6 +275,11 @@ map_object(int fd, const char *path, const struct stat *sb)
 	obj->tlsalign = phtls->p_align;
 	obj->tlsinitsize = phtls->p_filesz;
 	obj->tlsinit = mapbase + phtls->p_vaddr;
+    }
+
+    if (relro_size) {
+        obj->relro_page = obj->relocbase + trunc_page(relro_page);
+        obj->relro_size = round_page(relro_size);
     }
     return obj;
 }

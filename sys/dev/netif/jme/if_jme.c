@@ -40,6 +40,7 @@
 #include <sys/proc.h>
 #include <sys/rman.h>
 #include <sys/serialize.h>
+#include <sys/serialize2.h>
 #include <sys/socket.h>
 #include <sys/sockio.h>
 #include <sys/sysctl.h>
@@ -105,14 +106,31 @@ static int	jme_mediachange(struct ifnet *);
 #ifdef DEVICE_POLLING
 static void	jme_poll(struct ifnet *, enum poll_cmd, int);
 #endif
+static void	jme_serialize(struct ifnet *, enum ifnet_serialize);
+static void	jme_deserialize(struct ifnet *, enum ifnet_serialize);
+static int	jme_tryserialize(struct ifnet *, enum ifnet_serialize);
+#ifdef INVARIANTS
+static void	jme_serialize_assert(struct ifnet *, enum ifnet_serialize,
+		    boolean_t);
+#endif
 
 static void	jme_intr(void *);
+static void	jme_msix_tx(void *);
+static void	jme_msix_rx(void *);
 static void	jme_txeof(struct jme_softc *);
 static void	jme_rxeof(struct jme_softc *, int);
 static int	jme_rxeof_chain(struct jme_softc *, int,
 				struct mbuf_chain *, int);
 static void	jme_rx_intr(struct jme_softc *, uint32_t);
 
+static int	jme_msix_setup(device_t);
+static void	jme_msix_teardown(device_t, int);
+static int	jme_intr_setup(device_t);
+static void	jme_intr_teardown(device_t);
+static void	jme_msix_try_alloc(device_t);
+static void	jme_msix_free(device_t);
+static int	jme_intr_alloc(device_t);
+static void	jme_intr_free(device_t);
 static int	jme_dma_alloc(struct jme_softc *);
 static void	jme_dma_free(struct jme_softc *);
 static int	jme_init_rx_ring(struct jme_softc *, int);
@@ -127,6 +145,7 @@ static int	jme_rxbuf_dma_alloc(struct jme_softc *, int);
 static void	jme_tick(void *);
 static void	jme_stop(struct jme_softc *);
 static void	jme_reset(struct jme_softc *);
+static void	jme_set_msinum(struct jme_softc *);
 static void	jme_set_vlan(struct jme_softc *);
 static void	jme_set_filter(struct jme_softc *);
 static void	jme_stop_tx(struct jme_softc *);
@@ -205,22 +224,29 @@ DRIVER_MODULE(miibus, jme, miibus_driver, miibus_devclass, NULL, NULL);
 static const struct {
 	uint32_t	jme_coal;
 	uint32_t	jme_comp;
+	uint32_t	jme_empty;
 } jme_rx_status[JME_NRXRING_MAX] = {
-	{ INTR_RXQ0_COAL | INTR_RXQ0_COAL_TO, INTR_RXQ0_COMP },
-	{ INTR_RXQ1_COAL | INTR_RXQ1_COAL_TO, INTR_RXQ1_COMP },
-	{ INTR_RXQ2_COAL | INTR_RXQ2_COAL_TO, INTR_RXQ2_COMP },
-	{ INTR_RXQ3_COAL | INTR_RXQ3_COAL_TO, INTR_RXQ3_COMP }
+	{ INTR_RXQ0_COAL | INTR_RXQ0_COAL_TO, INTR_RXQ0_COMP,
+	  INTR_RXQ0_DESC_EMPTY },
+	{ INTR_RXQ1_COAL | INTR_RXQ1_COAL_TO, INTR_RXQ1_COMP,
+	  INTR_RXQ1_DESC_EMPTY },
+	{ INTR_RXQ2_COAL | INTR_RXQ2_COAL_TO, INTR_RXQ2_COMP,
+	  INTR_RXQ2_DESC_EMPTY },
+	{ INTR_RXQ3_COAL | INTR_RXQ3_COAL_TO, INTR_RXQ3_COMP,
+	  INTR_RXQ3_DESC_EMPTY }
 };
 
 static int	jme_rx_desc_count = JME_RX_DESC_CNT_DEF;
 static int	jme_tx_desc_count = JME_TX_DESC_CNT_DEF;
 static int	jme_rx_ring_count = JME_NRXRING_DEF;
 static int	jme_msi_enable = 1;
+static int	jme_msix_enable = 1;
 
 TUNABLE_INT("hw.jme.rx_desc_count", &jme_rx_desc_count);
 TUNABLE_INT("hw.jme.tx_desc_count", &jme_tx_desc_count);
 TUNABLE_INT("hw.jme.rx_ring_count", &jme_rx_ring_count);
 TUNABLE_INT("hw.jme.msi.enable", &jme_msi_enable);
+TUNABLE_INT("hw.jme.msix.enable", &jme_msix_enable);
 
 /*
  *	Read a PHY register on the MII of the JMC250.
@@ -306,7 +332,7 @@ jme_miibus_statchg(device_t dev)
 	bus_addr_t paddr;
 	int i, r;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	if ((ifp->if_flags & IFF_RUNNING) == 0)
 		return;
@@ -439,7 +465,7 @@ jme_mediastatus(struct ifnet *ifp, struct ifmediareq *ifmr)
 	struct jme_softc *sc = ifp->if_softc;
 	struct mii_data *mii = device_get_softc(sc->jme_miibus);
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	mii_pollstat(mii);
 	ifmr->ifm_status = mii->mii_media_status;
@@ -456,7 +482,7 @@ jme_mediachange(struct ifnet *ifp)
 	struct mii_data *mii = device_get_softc(sc->jme_miibus);
 	int error;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	if (mii->mii_instance != 0) {
 		struct mii_softc *miisc;
@@ -610,9 +636,15 @@ jme_attach(device_t dev)
 	uint32_t reg;
 	uint16_t did;
 	uint8_t pcie_ptr, rev;
-	int error = 0;
+	int error = 0, i, j;
 	uint8_t eaddr[ETHER_ADDR_LEN];
-	u_int irq_flags;
+
+	lwkt_serialize_init(&sc->jme_serialize);
+	lwkt_serialize_init(&sc->jme_cdata.jme_tx_serialize);
+	for (i = 0; i < JME_NRXRING_MAX; ++i) {
+		lwkt_serialize_init(
+		    &sc->jme_cdata.jme_rx_data[i].jme_rx_serialize);
+	}
 
 	sc->jme_rx_desc_cnt = roundup(jme_rx_desc_count, JME_NDESC_ALIGN);
 	if (sc->jme_rx_desc_cnt > JME_NDESC_MAX)
@@ -636,6 +668,27 @@ jme_attach(device_t dev)
 	else if (sc->jme_rx_ring_cnt >= JME_NRXRING_2)
 		sc->jme_rx_ring_cnt = JME_NRXRING_2;
 	sc->jme_rx_ring_inuse = sc->jme_rx_ring_cnt;
+
+	i = 0;
+	sc->jme_serialize_arr[i++] = &sc->jme_serialize;
+	sc->jme_serialize_arr[i++] = &sc->jme_cdata.jme_tx_serialize;
+	for (j = 0; j < sc->jme_rx_ring_cnt; ++j) {
+		sc->jme_serialize_arr[i++] =
+		    &sc->jme_cdata.jme_rx_data[j].jme_rx_serialize;
+	}
+	KKASSERT(i <= JME_NSERIALIZE);
+	sc->jme_serialize_cnt = i;
+
+	sc->jme_cdata.jme_sc = sc;
+	for (i = 0; i < sc->jme_rx_ring_cnt; ++i) {
+		struct jme_rxdata *rdata = &sc->jme_cdata.jme_rx_data[i];
+
+		rdata->jme_sc = sc;
+		rdata->jme_rx_coal = jme_rx_status[i].jme_coal;
+		rdata->jme_rx_comp = jme_rx_status[i].jme_comp;
+		rdata->jme_rx_empty = jme_rx_status[i].jme_empty;
+		rdata->jme_rx_idx = i;
+	}
 
 	sc->jme_dev = dev;
 	sc->jme_lowaddr = BUS_SPACE_MAXADDR;
@@ -686,16 +739,9 @@ jme_attach(device_t dev)
 	/*
 	 * Allocate IRQ
 	 */
-	sc->jme_irq_type = pci_alloc_1intr(dev, jme_msi_enable,
-	    &sc->jme_irq_rid, &irq_flags);
-
-	sc->jme_irq_res = bus_alloc_resource_any(dev, SYS_RES_IRQ,
-	    &sc->jme_irq_rid, irq_flags);
-	if (sc->jme_irq_res == NULL) {
-		device_printf(dev, "can't allocate irq\n");
-		error = ENXIO;
+	error = jme_intr_alloc(dev);
+	if (error)
 		goto fail;
-	}
 
 	/*
 	 * Extract revisions
@@ -740,6 +786,9 @@ jme_attach(device_t dev)
 
 	/* Reset the ethernet controller. */
 	jme_reset(sc);
+
+	/* Map MSI/MSI-X vectors */
+	jme_set_msinum(sc);
 
 	/* Get station address. */
 	reg = CSR_READ_4(sc, JME_SMBCSR);
@@ -823,6 +872,12 @@ jme_attach(device_t dev)
 	ifp->if_poll = jme_poll;
 #endif
 	ifp->if_watchdog = jme_watchdog;
+	ifp->if_serialize = jme_serialize;
+	ifp->if_deserialize = jme_deserialize;
+	ifp->if_tryserialize = jme_tryserialize;
+#ifdef INVARIANTS
+	ifp->if_serialize_assert = jme_serialize_assert;
+#endif
 	ifq_set_maxlen(&ifp->if_snd, sc->jme_tx_desc_cnt - JME_TXD_RSVD);
 	ifq_set_ready(&ifp->if_snd);
 
@@ -883,16 +938,12 @@ jme_attach(device_t dev)
 	/* Tell the upper layer(s) we support long frames. */
 	ifp->if_data.ifi_hdrlen = sizeof(struct ether_vlan_header);
 
-	error = bus_setup_intr(dev, sc->jme_irq_res, INTR_MPSAFE, jme_intr, sc,
-			       &sc->jme_irq_handle, ifp->if_serializer);
+	error = jme_intr_setup(dev);
 	if (error) {
-		device_printf(dev, "could not set up interrupt handler.\n");
 		ether_ifdetach(ifp);
 		goto fail;
 	}
 
-	ifp->if_cpuid = rman_get_cpuid(sc->jme_irq_res);
-	KKASSERT(ifp->if_cpuid >= 0 && ifp->if_cpuid < ncpus);
 	return 0;
 fail:
 	jme_detach(dev);
@@ -907,10 +958,10 @@ jme_detach(device_t dev)
 	if (device_is_attached(dev)) {
 		struct ifnet *ifp = &sc->arpcom.ac_if;
 
-		lwkt_serialize_enter(ifp->if_serializer);
+		ifnet_serialize_all(ifp);
 		jme_stop(sc);
-		bus_teardown_intr(dev, sc->jme_irq_res, sc->jme_irq_handle);
-		lwkt_serialize_exit(ifp->if_serializer);
+		jme_intr_teardown(dev);
+		ifnet_deserialize_all(ifp);
 
 		ether_ifdetach(ifp);
 	}
@@ -922,12 +973,7 @@ jme_detach(device_t dev)
 		device_delete_child(dev, sc->jme_miibus);
 	bus_generic_detach(dev);
 
-	if (sc->jme_irq_res != NULL) {
-		bus_release_resource(dev, SYS_RES_IRQ, sc->jme_irq_rid,
-				     sc->jme_irq_res);
-	}
-	if (sc->jme_irq_type == PCI_INTR_TYPE_MSI)
-		pci_release_msi(dev);
+	jme_intr_free(dev);
 
 	if (sc->jme_mem_res != NULL) {
 		bus_release_resource(dev, SYS_RES_MEMORY, sc->jme_mem_rid,
@@ -1409,12 +1455,12 @@ jme_suspend(device_t dev)
 	struct jme_softc *sc = device_get_softc(dev);
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 
-	lwkt_serialize_enter(ifp->if_serializer);
+	ifnet_serialize_all(ifp);
 	jme_stop(sc);
 #ifdef notyet
 	jme_setwol(sc);
 #endif
-	lwkt_serialize_exit(ifp->if_serializer);
+	ifnet_deserialize_all(ifp);
 
 	return (0);
 }
@@ -1428,7 +1474,7 @@ jme_resume(device_t dev)
 	int pmc;
 #endif
 
-	lwkt_serialize_enter(ifp->if_serializer);
+	ifnet_serialize_all(ifp);
 
 #ifdef notyet
 	if (pci_find_extcap(sc->jme_dev, PCIY_PMG, &pmc) != 0) {
@@ -1446,7 +1492,7 @@ jme_resume(device_t dev)
 	if (ifp->if_flags & IFF_UP)
 		jme_init(sc);
 
-	lwkt_serialize_exit(ifp->if_serializer);
+	ifnet_deserialize_all(ifp);
 
 	return (0);
 }
@@ -1581,7 +1627,7 @@ jme_start(struct ifnet *ifp)
 	struct mbuf *m_head;
 	int enq = 0;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_SERIALIZED(&sc->jme_cdata.jme_tx_serialize);
 
 	if ((sc->jme_flags & JME_FLAG_LINK) == 0) {
 		ifq_purge(&ifp->if_snd);
@@ -1648,7 +1694,7 @@ jme_watchdog(struct ifnet *ifp)
 {
 	struct jme_softc *sc = ifp->if_softc;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	if ((sc->jme_flags & JME_FLAG_LINK) == 0) {
 		if_printf(ifp, "watchdog timeout (missed link)\n");
@@ -1681,7 +1727,7 @@ jme_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data, struct ucred *cr)
 	struct ifreq *ifr = (struct ifreq *)data;
 	int error = 0, mask;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	switch (cmd) {
 	case SIOCSIFMTU:
@@ -1879,7 +1925,7 @@ jme_intr(void *xsc)
 	uint32_t status;
 	int r;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_SERIALIZED(&sc->jme_serialize);
 
 	status = CSR_READ_4(sc, JME_INTR_REQ_STATUS);
 	if (status == 0 || status == 0xFFFFFFFF)
@@ -1924,9 +1970,11 @@ jme_intr(void *xsc)
 		}
 
 		if (status & (INTR_TXQ_COAL | INTR_TXQ_COAL_TO)) {
+			lwkt_serialize_enter(&sc->jme_cdata.jme_tx_serialize);
 			jme_txeof(sc);
 			if (!ifq_is_empty(&ifp->if_snd))
 				if_devstart(ifp);
+			lwkt_serialize_exit(&sc->jme_cdata.jme_tx_serialize);
 		}
 	}
 back:
@@ -2262,12 +2310,12 @@ jme_tick(void *xsc)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	struct mii_data *mii = device_get_softc(sc->jme_miibus);
 
-	lwkt_serialize_enter(ifp->if_serializer);
+	ifnet_serialize_all(ifp);
 
 	mii_tick(mii);
 	callout_reset(&sc->jme_tick_ch, hz, jme_tick, sc);
 
-	lwkt_serialize_exit(ifp->if_serializer);
+	ifnet_deserialize_all(ifp);
 }
 
 static void
@@ -2353,7 +2401,7 @@ jme_init(void *xsc)
 	uint32_t reg;
 	int error, r;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	/*
 	 * Cancel any pending I/O.
@@ -2364,6 +2412,11 @@ jme_init(void *xsc)
 	 * Reset the chip to a known state.
 	 */
 	jme_reset(sc);
+
+	/*
+	 * Setup MSI/MSI-X vectors to interrupts mapping
+	 */
+	jme_set_msinum(sc);
 
 	sc->jme_txd_spare =
 	howmany(ifp->if_mtu + sizeof(struct ether_vlan_header), MCLBYTES);
@@ -2584,7 +2637,7 @@ jme_stop(struct jme_softc *sc)
 	struct jme_rxdata *rdata;
 	int i, r;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	/*
 	 * Mark the interface down and cancel the watchdog timer.
@@ -2798,7 +2851,7 @@ jme_set_vlan(struct jme_softc *sc)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	uint32_t reg;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	reg = CSR_READ_4(sc, JME_RXMAC);
 	reg &= ~RXMAC_VLAN_ENB;
@@ -2816,7 +2869,7 @@ jme_set_filter(struct jme_softc *sc)
 	uint32_t mchash[2];
 	uint32_t rxcfg;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_IFNET_SERIALIZED_ALL(ifp);
 
 	rxcfg = CSR_READ_4(sc, JME_RXMAC);
 	rxcfg &= ~(RXMAC_BROADCAST | RXMAC_PROMISC | RXMAC_MULTICAST |
@@ -2874,7 +2927,7 @@ jme_sysctl_tx_coal_to(SYSCTL_HANDLER_ARGS)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	int error, v;
 
-	lwkt_serialize_enter(ifp->if_serializer);
+	ifnet_serialize_all(ifp);
 
 	v = sc->jme_tx_coal_to;
 	error = sysctl_handle_int(oidp, &v, 0, req);
@@ -2892,7 +2945,7 @@ jme_sysctl_tx_coal_to(SYSCTL_HANDLER_ARGS)
 			jme_set_tx_coal(sc);
 	}
 back:
-	lwkt_serialize_exit(ifp->if_serializer);
+	ifnet_deserialize_all(ifp);
 	return error;
 }
 
@@ -2903,7 +2956,7 @@ jme_sysctl_tx_coal_pkt(SYSCTL_HANDLER_ARGS)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	int error, v;
 
-	lwkt_serialize_enter(ifp->if_serializer);
+	ifnet_serialize_all(ifp);
 
 	v = sc->jme_tx_coal_pkt;
 	error = sysctl_handle_int(oidp, &v, 0, req);
@@ -2921,7 +2974,7 @@ jme_sysctl_tx_coal_pkt(SYSCTL_HANDLER_ARGS)
 			jme_set_tx_coal(sc);
 	}
 back:
-	lwkt_serialize_exit(ifp->if_serializer);
+	ifnet_deserialize_all(ifp);
 	return error;
 }
 
@@ -2932,7 +2985,7 @@ jme_sysctl_rx_coal_to(SYSCTL_HANDLER_ARGS)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	int error, v;
 
-	lwkt_serialize_enter(ifp->if_serializer);
+	ifnet_serialize_all(ifp);
 
 	v = sc->jme_rx_coal_to;
 	error = sysctl_handle_int(oidp, &v, 0, req);
@@ -2950,7 +3003,7 @@ jme_sysctl_rx_coal_to(SYSCTL_HANDLER_ARGS)
 			jme_set_rx_coal(sc);
 	}
 back:
-	lwkt_serialize_exit(ifp->if_serializer);
+	ifnet_deserialize_all(ifp);
 	return error;
 }
 
@@ -2961,7 +3014,7 @@ jme_sysctl_rx_coal_pkt(SYSCTL_HANDLER_ARGS)
 	struct ifnet *ifp = &sc->arpcom.ac_if;
 	int error, v;
 
-	lwkt_serialize_enter(ifp->if_serializer);
+	ifnet_serialize_all(ifp);
 
 	v = sc->jme_rx_coal_pkt;
 	error = sysctl_handle_int(oidp, &v, 0, req);
@@ -2979,7 +3032,7 @@ jme_sysctl_rx_coal_pkt(SYSCTL_HANDLER_ARGS)
 			jme_set_rx_coal(sc);
 	}
 back:
-	lwkt_serialize_exit(ifp->if_serializer);
+	ifnet_deserialize_all(ifp);
 	return error;
 }
 
@@ -3024,7 +3077,7 @@ jme_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 	uint32_t status;
 	int r, prog = 0;
 
-	ASSERT_SERIALIZED(ifp->if_serializer);
+	ASSERT_SERIALIZED(&sc->jme_serialize);
 
 	switch (cmd) {
 	case POLL_REGISTER:
@@ -3040,8 +3093,14 @@ jme_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 		status = CSR_READ_4(sc, JME_INTR_STATUS);
 
 		ether_input_chain_init(chain);
-		for (r = 0; r < sc->jme_rx_ring_inuse; ++r)
+		for (r = 0; r < sc->jme_rx_ring_inuse; ++r) {
+			struct jme_rxdata *rdata =
+			    &sc->jme_cdata.jme_rx_data[r];
+
+			lwkt_serialize_enter(&rdata->jme_rx_serialize);
 			prog += jme_rxeof_chain(sc, r, chain, count);
+			lwkt_serialize_exit(&rdata->jme_rx_serialize);
+		}
 		if (prog)
 			ether_input_dispatch(chain);
 
@@ -3051,9 +3110,11 @@ jme_poll(struct ifnet *ifp, enum poll_cmd cmd, int count)
 			    RXCSR_RX_ENB | RXCSR_RXQ_START);
 		}
 
+		lwkt_serialize_enter(&sc->jme_cdata.jme_tx_serialize);
 		jme_txeof(sc);
 		if (!ifq_is_empty(&ifp->if_snd))
 			if_devstart(ifp);
+		lwkt_serialize_exit(&sc->jme_cdata.jme_tx_serialize);
 		break;
 	}
 }
@@ -3153,8 +3214,14 @@ jme_rx_intr(struct jme_softc *sc, uint32_t status)
 
 	ether_input_chain_init(chain);
 	for (r = 0; r < sc->jme_rx_ring_inuse; ++r) {
-		if (status & jme_rx_status[r].jme_coal)
+		if (status & jme_rx_status[r].jme_coal) {
+			struct jme_rxdata *rdata =
+			    &sc->jme_cdata.jme_rx_data[r];
+
+			lwkt_serialize_enter(&rdata->jme_rx_serialize);
 			prog += jme_rxeof_chain(sc, r, chain, -1);
+			lwkt_serialize_exit(&rdata->jme_rx_serialize);
+		}
 	}
 	if (prog)
 		ether_input_dispatch(chain);
@@ -3212,4 +3279,521 @@ jme_disable_rss(struct jme_softc *sc)
 {
 	sc->jme_rx_ring_inuse = JME_NRXRING_1;
 	CSR_WRITE_4(sc, JME_RSSC, RSSC_DIS_RSS);
+}
+
+static void
+jme_serialize(struct ifnet *ifp, enum ifnet_serialize slz)
+{
+	struct jme_softc *sc = ifp->if_softc;
+
+	switch (slz) {
+	case IFNET_SERIALIZE_ALL:
+		lwkt_serialize_array_enter(sc->jme_serialize_arr,
+		    sc->jme_serialize_cnt, 0);
+		break;
+
+	case IFNET_SERIALIZE_MAIN:
+		lwkt_serialize_enter(&sc->jme_serialize);
+		break;
+
+	case IFNET_SERIALIZE_TX:
+		lwkt_serialize_enter(&sc->jme_cdata.jme_tx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(0):
+		lwkt_serialize_enter(
+		    &sc->jme_cdata.jme_rx_data[0].jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(1):
+		lwkt_serialize_enter(
+		    &sc->jme_cdata.jme_rx_data[1].jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(2):
+		lwkt_serialize_enter(
+		    &sc->jme_cdata.jme_rx_data[2].jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(3):
+		lwkt_serialize_enter(
+		    &sc->jme_cdata.jme_rx_data[3].jme_rx_serialize);
+		break;
+
+	default:
+		panic("%s unsupported serialize type\n", ifp->if_xname);
+	}
+}
+
+static void
+jme_deserialize(struct ifnet *ifp, enum ifnet_serialize slz)
+{
+	struct jme_softc *sc = ifp->if_softc;
+
+	switch (slz) {
+	case IFNET_SERIALIZE_ALL:
+		lwkt_serialize_array_exit(sc->jme_serialize_arr,
+		    sc->jme_serialize_cnt, 0);
+		break;
+
+	case IFNET_SERIALIZE_MAIN:
+		lwkt_serialize_exit(&sc->jme_serialize);
+		break;
+
+	case IFNET_SERIALIZE_TX:
+		lwkt_serialize_exit(&sc->jme_cdata.jme_tx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(0):
+		lwkt_serialize_exit(
+		    &sc->jme_cdata.jme_rx_data[0].jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(1):
+		lwkt_serialize_exit(
+		    &sc->jme_cdata.jme_rx_data[1].jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(2):
+		lwkt_serialize_exit(
+		    &sc->jme_cdata.jme_rx_data[2].jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(3):
+		lwkt_serialize_exit(
+		    &sc->jme_cdata.jme_rx_data[3].jme_rx_serialize);
+		break;
+
+	default:
+		panic("%s unsupported serialize type\n", ifp->if_xname);
+	}
+}
+
+static int
+jme_tryserialize(struct ifnet *ifp, enum ifnet_serialize slz)
+{
+	struct jme_softc *sc = ifp->if_softc;
+
+	switch (slz) {
+	case IFNET_SERIALIZE_ALL:
+		return lwkt_serialize_array_try(sc->jme_serialize_arr,
+		    sc->jme_serialize_cnt, 0);
+
+	case IFNET_SERIALIZE_MAIN:
+		return lwkt_serialize_try(&sc->jme_serialize);
+
+	case IFNET_SERIALIZE_TX:
+		return lwkt_serialize_try(&sc->jme_cdata.jme_tx_serialize);
+
+	case IFNET_SERIALIZE_RX(0):
+		return lwkt_serialize_try(
+		    &sc->jme_cdata.jme_rx_data[0].jme_rx_serialize);
+
+	case IFNET_SERIALIZE_RX(1):
+		return lwkt_serialize_try(
+		    &sc->jme_cdata.jme_rx_data[1].jme_rx_serialize);
+
+	case IFNET_SERIALIZE_RX(2):
+		return lwkt_serialize_try(
+		    &sc->jme_cdata.jme_rx_data[2].jme_rx_serialize);
+
+	case IFNET_SERIALIZE_RX(3):
+		return lwkt_serialize_try(
+		    &sc->jme_cdata.jme_rx_data[3].jme_rx_serialize);
+
+	default:
+		panic("%s unsupported serialize type\n", ifp->if_xname);
+	}
+}
+
+#ifdef INVARIANTS
+
+static void
+jme_serialize_assert(struct ifnet *ifp, enum ifnet_serialize slz,
+    boolean_t serialized)
+{
+	struct jme_softc *sc = ifp->if_softc;
+	struct jme_rxdata *rdata;
+	int i;
+
+	switch (slz) {
+	case IFNET_SERIALIZE_ALL:
+		if (serialized) {
+			for (i = 0; i < sc->jme_serialize_cnt; ++i)
+				ASSERT_SERIALIZED(sc->jme_serialize_arr[i]);
+		} else {
+			for (i = 0; i < sc->jme_serialize_cnt; ++i)
+				ASSERT_NOT_SERIALIZED(sc->jme_serialize_arr[i]);
+		}
+		break;
+
+	case IFNET_SERIALIZE_MAIN:
+		if (serialized)
+			ASSERT_SERIALIZED(&sc->jme_serialize);
+		else
+			ASSERT_NOT_SERIALIZED(&sc->jme_serialize);
+		break;
+
+	case IFNET_SERIALIZE_TX:
+		if (serialized)
+			ASSERT_SERIALIZED(&sc->jme_cdata.jme_tx_serialize);
+		else
+			ASSERT_NOT_SERIALIZED(&sc->jme_cdata.jme_tx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(0):
+		rdata = &sc->jme_cdata.jme_rx_data[0];
+		if (serialized)
+			ASSERT_SERIALIZED(&rdata->jme_rx_serialize);
+		else
+			ASSERT_NOT_SERIALIZED(&rdata->jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(1):
+		rdata = &sc->jme_cdata.jme_rx_data[1];
+		if (serialized)
+			ASSERT_SERIALIZED(&rdata->jme_rx_serialize);
+		else
+			ASSERT_NOT_SERIALIZED(&rdata->jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(2):
+		rdata = &sc->jme_cdata.jme_rx_data[2];
+		if (serialized)
+			ASSERT_SERIALIZED(&rdata->jme_rx_serialize);
+		else
+			ASSERT_NOT_SERIALIZED(&rdata->jme_rx_serialize);
+		break;
+
+	case IFNET_SERIALIZE_RX(3):
+		rdata = &sc->jme_cdata.jme_rx_data[3];
+		if (serialized)
+			ASSERT_SERIALIZED(&rdata->jme_rx_serialize);
+		else
+			ASSERT_NOT_SERIALIZED(&rdata->jme_rx_serialize);
+		break;
+
+	default:
+		panic("%s unsupported serialize type\n", ifp->if_xname);
+	}
+}
+
+#endif	/* INVARIANTS */
+
+static void
+jme_msix_try_alloc(device_t dev)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+	struct jme_msix_data *msix;
+	int error, i, r, msix_enable, msix_count;
+	char env[64];
+
+	msix_count = 1 + sc->jme_rx_ring_cnt;
+	KKASSERT(msix_count <= JME_NMSIX);
+
+	msix_enable = jme_msix_enable;
+	ksnprintf(env, sizeof(env), "hw.%s.msix.enable",
+	    device_get_nameunit(dev));
+	kgetenv_int(env, &msix_enable);
+
+	/*
+	 * We leave the 1st MSI-X vector unused, so we
+	 * actually need msix_count + 1 MSI-X vectors.
+	 */
+	if (!msix_enable || pci_msix_count(dev) < (msix_count + 1))
+		return;
+
+	for (i = 0; i < msix_count; ++i)
+		sc->jme_msix[i].jme_msix_rid = -1;
+
+	i = 0;
+
+	msix = &sc->jme_msix[i++];
+	msix->jme_msix_cpuid = 0;		/* XXX Put TX to cpu0 */
+	msix->jme_msix_arg = &sc->jme_cdata;
+	msix->jme_msix_func = jme_msix_tx;
+	msix->jme_msix_intrs = INTR_TXQ_COAL | INTR_TXQ_COAL_TO;
+	msix->jme_msix_serialize = &sc->jme_cdata.jme_tx_serialize;
+	ksnprintf(msix->jme_msix_desc, sizeof(msix->jme_msix_desc), "%s tx",
+	    device_get_nameunit(dev));
+
+	for (r = 0; r < sc->jme_rx_ring_cnt; ++r) {
+		struct jme_rxdata *rdata = &sc->jme_cdata.jme_rx_data[r];
+
+		msix = &sc->jme_msix[i++];
+		msix->jme_msix_cpuid = r;	/* XXX Put RX to cpuX */
+		msix->jme_msix_arg = rdata;
+		msix->jme_msix_func = jme_msix_rx;
+		msix->jme_msix_intrs = rdata->jme_rx_coal | rdata->jme_rx_empty;
+		msix->jme_msix_serialize = &rdata->jme_rx_serialize;
+		ksnprintf(msix->jme_msix_desc, sizeof(msix->jme_msix_desc),
+		    "%s rx%d", device_get_nameunit(dev), r);
+	}
+
+	KKASSERT(i == msix_count);
+
+	error = pci_setup_msix(dev);
+	if (error)
+		return;
+
+	/* Setup jme_msix_cnt early, so we could cleanup */
+	sc->jme_msix_cnt = msix_count;
+
+	for (i = 0; i < msix_count; ++i) {
+		msix = &sc->jme_msix[i];
+
+		msix->jme_msix_vector = i + 1;
+		error = pci_alloc_msix_vector(dev, msix->jme_msix_vector,
+		    &msix->jme_msix_rid, msix->jme_msix_cpuid);
+		if (error)
+			goto back;
+
+		msix->jme_msix_res = bus_alloc_resource_any(dev, SYS_RES_IRQ,
+		    &msix->jme_msix_rid, RF_ACTIVE);
+		if (msix->jme_msix_res == NULL) {
+			error = ENOMEM;
+			goto back;
+		}
+	}
+
+	for (i = 0; i < JME_INTR_CNT; ++i) {
+		uint32_t intr_mask = (1 << i);
+		int x;
+
+		if ((JME_INTRS & intr_mask) == 0)
+			continue;
+
+		for (x = 0; x < msix_count; ++x) {
+			msix = &sc->jme_msix[x];
+			if (msix->jme_msix_intrs & intr_mask) {
+				int reg, shift;
+
+				reg = i / JME_MSINUM_FACTOR;
+				KKASSERT(reg < JME_MSINUM_CNT);
+
+				shift = (i % JME_MSINUM_FACTOR) * 4;
+
+				sc->jme_msinum[reg] |=
+				    (msix->jme_msix_vector << shift);
+
+				break;
+			}
+		}
+	}
+
+	if (bootverbose) {
+		for (i = 0; i < JME_MSINUM_CNT; ++i) {
+			device_printf(dev, "MSINUM%d: %#x\n", i,
+			    sc->jme_msinum[i]);
+		}
+	}
+
+	pci_enable_msix(dev);
+	sc->jme_irq_type = PCI_INTR_TYPE_MSIX;
+
+back:
+	if (error)
+		jme_msix_free(dev);
+}
+
+static int
+jme_intr_alloc(device_t dev)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+	u_int irq_flags;
+
+	jme_msix_try_alloc(dev);
+
+	if (sc->jme_irq_type != PCI_INTR_TYPE_MSIX) {
+		sc->jme_irq_type = pci_alloc_1intr(dev, jme_msi_enable,
+		    &sc->jme_irq_rid, &irq_flags);
+
+		sc->jme_irq_res = bus_alloc_resource_any(dev, SYS_RES_IRQ,
+		    &sc->jme_irq_rid, irq_flags);
+		if (sc->jme_irq_res == NULL) {
+			device_printf(dev, "can't allocate irq\n");
+			return ENXIO;
+		}
+	}
+	return 0;
+}
+
+static void
+jme_msix_free(device_t dev)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+	int i;
+
+	KKASSERT(sc->jme_msix_cnt > 1);
+
+	for (i = 0; i < sc->jme_msix_cnt; ++i) {
+		struct jme_msix_data *msix = &sc->jme_msix[i];
+
+		if (msix->jme_msix_res != NULL) {
+			bus_release_resource(dev, SYS_RES_IRQ,
+			    msix->jme_msix_rid, msix->jme_msix_res);
+			msix->jme_msix_res = NULL;
+		}
+		if (msix->jme_msix_rid >= 0) {
+			pci_release_msix_vector(dev, msix->jme_msix_rid);
+			msix->jme_msix_rid = -1;
+		}
+	}
+	pci_teardown_msix(dev);
+}
+
+static void
+jme_intr_free(device_t dev)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+
+	if (sc->jme_irq_type != PCI_INTR_TYPE_MSIX) {
+		if (sc->jme_irq_res != NULL) {
+			bus_release_resource(dev, SYS_RES_IRQ, sc->jme_irq_rid,
+					     sc->jme_irq_res);
+		}
+		if (sc->jme_irq_type == PCI_INTR_TYPE_MSI)
+			pci_release_msi(dev);
+	} else {
+		jme_msix_free(dev);
+	}
+}
+
+static void
+jme_msix_tx(void *xcd)
+{
+	struct jme_chain_data *cd = xcd;
+	struct jme_softc *sc = cd->jme_sc;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+
+	ASSERT_SERIALIZED(&cd->jme_tx_serialize);
+
+	CSR_WRITE_4(sc, JME_INTR_STATUS,
+	    INTR_TXQ_COAL | INTR_TXQ_COAL_TO | INTR_TXQ_COMP);
+
+	if (ifp->if_flags & IFF_RUNNING) {
+		jme_txeof(sc);
+		if (!ifq_is_empty(&ifp->if_snd))
+			if_devstart(ifp);
+	}
+}
+
+static void
+jme_msix_rx(void *xrdata)
+{
+	struct jme_rxdata *rdata = xrdata;
+	struct jme_softc *sc = rdata->jme_sc;
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+	uint32_t status;
+
+	ASSERT_SERIALIZED(&rdata->jme_rx_serialize);
+
+	status = CSR_READ_4(sc, JME_INTR_STATUS);
+	status &= (rdata->jme_rx_coal | rdata->jme_rx_empty);
+
+	if (status & rdata->jme_rx_coal) {
+		status |= (rdata->jme_rx_coal | rdata->jme_rx_comp);
+		CSR_WRITE_4(sc, JME_INTR_STATUS, status);
+	}
+
+	if (ifp->if_flags & IFF_RUNNING) {
+		if (status & rdata->jme_rx_coal) {
+			struct mbuf_chain chain[MAXCPU];
+			int prog;
+
+			ether_input_chain_init(chain);
+
+			prog = jme_rxeof_chain(sc, rdata->jme_rx_idx,
+			    chain, -1);
+			if (prog)
+				ether_input_dispatch(chain);
+		}
+
+		if (status & rdata->jme_rx_empty) {
+			CSR_WRITE_4(sc, JME_RXCSR, sc->jme_rxcsr |
+			    RXCSR_RX_ENB | RXCSR_RXQ_START);
+		}
+	}
+}
+
+static void
+jme_set_msinum(struct jme_softc *sc)
+{
+	int i;
+
+	for (i = 0; i < JME_MSINUM_CNT; ++i)
+		CSR_WRITE_4(sc, JME_MSINUM(i), sc->jme_msinum[i]);
+}
+
+static int
+jme_intr_setup(device_t dev)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+	int error;
+
+	if (sc->jme_irq_type == PCI_INTR_TYPE_MSIX)
+		return jme_msix_setup(dev);
+
+	error = bus_setup_intr(dev, sc->jme_irq_res, INTR_MPSAFE,
+	    jme_intr, sc, &sc->jme_irq_handle, &sc->jme_serialize);
+	if (error) {
+		device_printf(dev, "could not set up interrupt handler.\n");
+		return error;
+	}
+
+	ifp->if_cpuid = rman_get_cpuid(sc->jme_irq_res);
+	KKASSERT(ifp->if_cpuid >= 0 && ifp->if_cpuid < ncpus);
+	return 0;
+}
+
+static void
+jme_intr_teardown(device_t dev)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+
+	if (sc->jme_irq_type == PCI_INTR_TYPE_MSIX)
+		jme_msix_teardown(dev, sc->jme_msix_cnt);
+	else
+		bus_teardown_intr(dev, sc->jme_irq_res, sc->jme_irq_handle);
+}
+
+static int
+jme_msix_setup(device_t dev)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+	struct ifnet *ifp = &sc->arpcom.ac_if;
+	int x;
+
+	for (x = 0; x < sc->jme_msix_cnt; ++x) {
+		struct jme_msix_data *msix = &sc->jme_msix[x];
+		int error;
+
+		error = bus_setup_intr_descr(dev, msix->jme_msix_res,
+		    INTR_MPSAFE, msix->jme_msix_func, msix->jme_msix_arg,
+		    &msix->jme_msix_handle, msix->jme_msix_serialize,
+		    msix->jme_msix_desc);
+		if (error) {
+			device_printf(dev, "could not set up %s "
+			    "interrupt handler.\n", msix->jme_msix_desc);
+			jme_msix_teardown(dev, x);
+			return error;
+		}
+	}
+	ifp->if_cpuid = 0; /* XXX */
+	return 0;
+}
+
+static void
+jme_msix_teardown(device_t dev, int msix_count)
+{
+	struct jme_softc *sc = device_get_softc(dev);
+	int x;
+
+	for (x = 0; x < msix_count; ++x) {
+		struct jme_msix_data *msix = &sc->jme_msix[x];
+
+		bus_teardown_intr(dev, msix->jme_msix_res,
+		    msix->jme_msix_handle);
+	}
 }

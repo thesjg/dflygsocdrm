@@ -58,7 +58,6 @@
 
 #include <sys/param.h>
 #include <sys/systm.h>
-#include <sys/bootmaj.h>
 #include <sys/kernel.h>
 #include <sys/buf.h>
 #include <sys/bus.h>
@@ -328,7 +327,7 @@ static	d_ioctl_t	fdioctl;
 static	d_strategy_t	fdstrategy;
 
 static struct dev_ops fd_ops = {
-	{ "fd", FD_CDEV_MAJOR, D_DISK },
+	{ "fd", 0, D_DISK },
 	.d_open =	Fdopen,
 	.d_close =	fdclose,
 	.d_read =	physread,
@@ -786,7 +785,7 @@ fdc_attach(device_t dev)
 	}
 	error = BUS_SETUP_INTR(device_get_parent(dev), dev, fdc->res_irq,
 			       0, fdc_intr, fdc,
-			       &fdc->fdc_intr, NULL);
+			       &fdc->fdc_intr, NULL, NULL);
 	if (error) {
 		device_printf(dev, "cannot setup interrupt\n");
 		return error;

@@ -145,6 +145,8 @@ typedef struct Struct_Obj_Entry {
     const Elf_Phdr *phdr;	/* Program header if it is mapped, else NULL */
     size_t phsize;		/* Size of program header in bytes */
     const char *interp;		/* Pathname of the interpreter, if any */
+    caddr_t relro_page; 	/* Address of first page of read-only data */
+    size_t relro_size;  	/* Size of relro page(s) in bytes */
 
     /* TLS information */
     int tlsindex;		/* Index in DTV for this module */
@@ -213,7 +215,7 @@ typedef struct Struct_Obj_Entry {
     Objlist dagmembers;		/* DAG has these members (%) */
     dev_t dev;			/* Object's filesystem's device */
     ino_t ino;			/* Object's inode number */
-    void *priv;			/* Platform-dependant */
+    void *priv;			/* Platform-dependent */
 } Obj_Entry;
 
 #define RTLD_MAGIC	0xd550b87a
@@ -221,7 +223,7 @@ typedef struct Struct_Obj_Entry {
 
 /* Flags to be passed into symlook_ family of functions. */
 #define SYMLOOK_IN_PLT	0x01	/* Lookup for PLT symbol */
-#define SYMLOOK_DLSYM	0x02	/* Return newes versioned symbol. Used by
+#define SYMLOOK_DLSYM	0x02	/* Return newest versioned symbol. Used by
 				   dlsym. */
 
 /* Flags for load_object(). */

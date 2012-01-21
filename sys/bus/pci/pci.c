@@ -108,10 +108,12 @@ static void		pci_read_vpd(device_t pcib, pcicfgregs *cfg);
 static void		pci_disable_msi(device_t dev);
 static void		pci_enable_msi(device_t dev, uint64_t address,
 			    uint16_t data);
-static void		pci_enable_msix(device_t dev, u_int index,
+static void		pci_setup_msix_vector(device_t dev, u_int index,
 			    uint64_t address, uint32_t data);
-static void		pci_mask_msix(device_t dev, u_int index);
-static void		pci_unmask_msix(device_t dev, u_int index);
+static void		pci_mask_msix_vector(device_t dev, u_int index);
+static void		pci_unmask_msix_vector(device_t dev, u_int index);
+static void		pci_mask_msix_allvectors(device_t dev);
+static struct msix_vector *pci_find_msix_vector(device_t dev, int rid);
 static int		pci_msi_blacklisted(void);
 static void		pci_resume_msi(device_t dev);
 static void		pci_resume_msix(device_t dev);
@@ -172,9 +174,9 @@ static device_method_t pci_methods[] = {
 	DEVMETHOD(pci_assign_interrupt,	pci_assign_interrupt_method),
 	DEVMETHOD(pci_find_extcap,	pci_find_extcap_method),
 	DEVMETHOD(pci_alloc_msi,	pci_alloc_msi_method),
-	DEVMETHOD(pci_alloc_msix,	pci_alloc_msix_method),
-	DEVMETHOD(pci_remap_msix,	pci_remap_msix_method),
 	DEVMETHOD(pci_release_msi,	pci_release_msi_method),
+	DEVMETHOD(pci_alloc_msix_vector, pci_alloc_msix_vector_method),
+	DEVMETHOD(pci_release_msix_vector, pci_release_msix_vector_method),
 	DEVMETHOD(pci_msi_count,	pci_msi_count_method),
 	DEVMETHOD(pci_msix_count,	pci_msix_count_method),
 
@@ -255,6 +257,9 @@ struct pci_quirk pci_quirks[] = {
 #define	PCI_MAPMEMP	0x02	/* prefetchable memory map */
 #define	PCI_MAPPORT	0x04	/* port map */
 
+#define PCI_MSIX_RID2VEC(rid)	((rid) - 1)	/* rid -> MSI-X vector # */
+#define PCI_MSIX_VEC2RID(vec)	((vec) + 1)	/* MSI-X vector # -> rid */
+
 struct devlist pci_devq;
 uint32_t pci_generation;
 uint32_t pci_numdevs = 0;
@@ -291,12 +296,10 @@ TUNABLE_INT("hw.pci.enable_msi", &pci_do_msi);
 SYSCTL_INT(_hw_pci, OID_AUTO, enable_msi, CTLFLAG_RW, &pci_do_msi, 1,
     "Enable support for MSI interrupts");
 
-static int pci_do_msix = 0;
-#if 0
+static int pci_do_msix = 1;
 TUNABLE_INT("hw.pci.enable_msix", &pci_do_msix);
 SYSCTL_INT(_hw_pci, OID_AUTO, enable_msix, CTLFLAG_RW, &pci_do_msix, 1,
     "Enable support for MSI-X interrupts");
-#endif
 
 static int pci_honor_msi_blacklist = 1;
 TUNABLE_INT("hw.pci.honor_msi_blacklist", &pci_honor_msi_blacklist);
@@ -680,6 +683,8 @@ pci_read_cap_msix(device_t pcib, int ptr, int nextptr, pcicfgregs *cfg)
 	val = REG(ptr + PCIR_MSIX_PBA, 4);
 	msix->msix_pba_bar = PCIR_BAR(val & PCIM_MSIX_BIR_MASK);
 	msix->msix_pba_offset = val & ~PCIM_MSIX_BIR_MASK;
+
+	TAILQ_INIT(&msix->msix_vectors);
 
 #undef REG
 }
@@ -1364,14 +1369,15 @@ pci_find_extcap_method(device_t dev, device_t child, int capability,
 /*
  * Support for MSI-X message interrupts.
  */
-void
-pci_enable_msix(device_t dev, u_int index, uint64_t address, uint32_t data)
+static void
+pci_setup_msix_vector(device_t dev, u_int index, uint64_t address,
+    uint32_t data)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	struct pcicfg_msix *msix = &dinfo->cfg.msix;
 	uint32_t offset;
 
-	KASSERT(msix->msix_table_len > index, ("bogus index"));
+	KASSERT(msix->msix_msgnum > index, ("bogus index"));
 	offset = msix->msix_table_offset + index * 16;
 	bus_write_4(msix->msix_table_res, offset, address & 0xffffffff);
 	bus_write_4(msix->msix_table_res, offset + 4, address >> 32);
@@ -1381,8 +1387,8 @@ pci_enable_msix(device_t dev, u_int index, uint64_t address, uint32_t data)
 	pci_ht_map_msi(dev, address);
 }
 
-void
-pci_mask_msix(device_t dev, u_int index)
+static void
+pci_mask_msix_vector(device_t dev, u_int index)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	struct pcicfg_msix *msix = &dinfo->cfg.msix;
@@ -1397,14 +1403,14 @@ pci_mask_msix(device_t dev, u_int index)
 	}
 }
 
-void
-pci_unmask_msix(device_t dev, u_int index)
+static void
+pci_unmask_msix_vector(device_t dev, u_int index)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	struct pcicfg_msix *msix = &dinfo->cfg.msix;
 	uint32_t offset, val;
 
-	KASSERT(msix->msix_table_len > index, ("bogus index"));
+	KASSERT(msix->msix_msgnum > index, ("bogus index"));
 	offset = msix->msix_table_offset + index * 16 + 12;
 	val = bus_read_4(msix->msix_table_res, offset);
 	if (val & PCIM_MSIX_VCTRL_MASK) {
@@ -1414,13 +1420,16 @@ pci_unmask_msix(device_t dev, u_int index)
 }
 
 int
-pci_pending_msix(device_t dev, u_int index)
+pci_pending_msix_vector(device_t dev, u_int index)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	struct pcicfg_msix *msix = &dinfo->cfg.msix;
 	uint32_t offset, bit;
 
-	KASSERT(msix->msix_table_len > index, ("bogus index"));
+	KASSERT(msix->msix_table_res != NULL && msix->msix_pba_res != NULL,
+	    ("MSI-X is not setup yet\n"));
+
+	KASSERT(msix->msix_msgnum > index, ("bogus index"));
 	offset = msix->msix_pba_offset + (index / 32) * 4;
 	bit = 1 << index % 32;
 	return (bus_read_4(msix->msix_pba_res, offset) & bit);
@@ -1436,23 +1445,22 @@ pci_resume_msix(device_t dev)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(dev);
 	struct pcicfg_msix *msix = &dinfo->cfg.msix;
-	struct msix_table_entry *mte;
-	struct msix_vector *mv;
-	int i;
 
-	if (msix->msix_alloc > 0) {
-		/* First, mask all vectors. */
-		for (i = 0; i < msix->msix_msgnum; i++)
-			pci_mask_msix(dev, i);
+	if (msix->msix_table_res != NULL) {
+		const struct msix_vector *mv;
 
-		/* Second, program any messages with at least one handler. */
-		for (i = 0; i < msix->msix_table_len; i++) {
-			mte = &msix->msix_table[i];
-			if (mte->mte_vector == 0 || mte->mte_handlers == 0)
+		pci_mask_msix_allvectors(dev);
+
+		TAILQ_FOREACH(mv, &msix->msix_vectors, mv_link) {
+			u_int vector;
+
+			if (mv->mv_address == 0)
 				continue;
-			mv = &msix->msix_vectors[mte->mte_vector - 1];
-			pci_enable_msix(dev, i, mv->mv_address, mv->mv_data);
-			pci_unmask_msix(dev, i);
+
+			vector = PCI_MSIX_RID2VEC(mv->mv_rid);
+			pci_setup_msix_vector(dev, vector,
+			    mv->mv_address, mv->mv_data);
+			pci_unmask_msix_vector(dev, vector);
 		}
 	}
 	pci_write_config(dev, msix->msix_location + PCIR_MSIX_CTRL,
@@ -1460,351 +1468,101 @@ pci_resume_msix(device_t dev)
 }
 
 /*
- * Attempt to allocate *count MSI-X messages.  The actual number allocated is
- * returned in *count.  After this function returns, each message will be
- * available to the driver as SYS_RES_IRQ resources starting at rid 1.
+ * Attempt to allocate one MSI-X message at the specified vector on cpuid.
+ *
+ * After this function returns, the MSI-X's rid will be saved in rid0.
  */
 int
-pci_alloc_msix_method(device_t dev, device_t child, int *count)
+pci_alloc_msix_vector_method(device_t dev, device_t child, u_int vector,
+    int *rid0, int cpuid)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(child);
-	pcicfgregs *cfg = &dinfo->cfg;
+	struct pcicfg_msix *msix = &dinfo->cfg.msix;
+	struct msix_vector *mv;
 	struct resource_list_entry *rle;
-	int actual, error, i, irq, max;
+	int error, irq, rid;
 
-	/* Don't let count == 0 get us into trouble. */
-	if (*count == 0)
-		return (EINVAL);
-
-	/* If rid 0 is allocated, then fail. */
-	rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, 0);
-	if (rle != NULL && rle->res != NULL)
-		return (ENXIO);
-
-	/* Already have allocated messages? */
-	if (cfg->msi.msi_alloc != 0 || cfg->msix.msix_alloc != 0)
-		return (ENXIO);
-
-	/* If MSI is blacklisted for this system, fail. */
-	if (pci_msi_blacklisted())
-		return (ENXIO);
-
-	/* MSI-X capability present? */
-	if (cfg->msix.msix_location == 0 || !pci_do_msix)
-		return (ENODEV);
-
-	/* Make sure the appropriate BARs are mapped. */
-	rle = resource_list_find(&dinfo->resources, SYS_RES_MEMORY,
-	    cfg->msix.msix_table_bar);
-	if (rle == NULL || rle->res == NULL ||
-	    !(rman_get_flags(rle->res) & RF_ACTIVE))
-		return (ENXIO);
-	cfg->msix.msix_table_res = rle->res;
-	if (cfg->msix.msix_pba_bar != cfg->msix.msix_table_bar) {
-		rle = resource_list_find(&dinfo->resources, SYS_RES_MEMORY,
-		    cfg->msix.msix_pba_bar);
-		if (rle == NULL || rle->res == NULL ||
-		    !(rman_get_flags(rle->res) & RF_ACTIVE))
-			return (ENXIO);
-	}
-	cfg->msix.msix_pba_res = rle->res;
-
-	if (bootverbose)
-		device_printf(child,
-		    "attempting to allocate %d MSI-X vectors (%d supported)\n",
-		    *count, cfg->msix.msix_msgnum);
-	max = min(*count, cfg->msix.msix_msgnum);
-	for (i = 0; i < max; i++) {
-		/* Allocate a message. */
-		error = PCIB_ALLOC_MSIX(device_get_parent(dev), child, &irq);
-		if (error)
-			break;
-		resource_list_add(&dinfo->resources, SYS_RES_IRQ, i + 1, irq,
-		    irq, 1, -1);
-	}
-	actual = i;
-
-	if (actual == 0) {
-		if (bootverbose) {
-			device_printf(child,
-			    "could not allocate any MSI-X vectors\n");
-		}
-		return  (ENXIO);
-	}
+	KASSERT(msix->msix_table_res != NULL &&
+	    msix->msix_pba_res != NULL, ("MSI-X is not setup yet\n"));
+	KASSERT(cpuid >= 0 && cpuid < ncpus, ("invalid cpuid %d\n", cpuid));
+	KASSERT(vector < msix->msix_msgnum,
+	    ("invalid MSI-X vector %u, total %d\n", vector, msix->msix_msgnum));
 
 	if (bootverbose) {
-		rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, 1);
-		if (actual == 1)
-			device_printf(child, "using IRQ %lu for MSI-X\n",
-			    rle->start);
-		else {
-			int run;
-
-			/*
-			 * Be fancy and try to print contiguous runs of
-			 * IRQ values as ranges.  'irq' is the previous IRQ.
-			 * 'run' is true if we are in a range.
-			 */
-			device_printf(child, "using IRQs %lu", rle->start);
-			irq = rle->start;
-			run = 0;
-			for (i = 1; i < actual; i++) {
-				rle = resource_list_find(&dinfo->resources,
-				    SYS_RES_IRQ, i + 1);
-
-				/* Still in a run? */
-				if (rle->start == irq + 1) {
-					run = 1;
-					irq++;
-					continue;
-				}
-
-				/* Finish previous range. */
-				if (run) {
-					kprintf("-%d", irq);
-					run = 0;
-				}
-
-				/* Start new range. */
-				kprintf(",%lu", rle->start);
-				irq = rle->start;
-			}
-
-			/* Unfinished range? */
-			if (run)
-				kprintf("-%d", irq);
-			kprintf(" for MSI-X\n");
-		}
+		device_printf(child,
+		    "attempting to allocate MSI-X #%u vector (%d supported)\n",
+		    vector, msix->msix_msgnum);
 	}
 
-	/* Mask all vectors. */
-	for (i = 0; i < cfg->msix.msix_msgnum; i++)
-		pci_mask_msix(child, i);
+	/* Set rid according to vector number */
+	rid = PCI_MSIX_VEC2RID(vector);
 
-	/* Allocate and initialize vector data and virtual table. */
-	cfg->msix.msix_vectors = kmalloc(sizeof(struct msix_vector) * actual,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
-	cfg->msix.msix_table = kmalloc(sizeof(struct msix_table_entry) * actual,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
-	for (i = 0; i < actual; i++) {
-		rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, i + 1);
-		cfg->msix.msix_vectors[i].mv_irq = rle->start;
-		cfg->msix.msix_table[i].mte_vector = i + 1;
+	/* Vector has already been allocated */
+	mv = pci_find_msix_vector(child, rid);
+	if (mv != NULL)
+		return EBUSY;
+
+	/* Allocate a message. */
+	error = PCIB_ALLOC_MSIX(device_get_parent(dev), child, &irq, cpuid);
+	if (error)
+		return error;
+	resource_list_add(&dinfo->resources, SYS_RES_IRQ, rid,
+	    irq, irq, 1, cpuid);
+
+	if (bootverbose) {
+		rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, rid);
+		device_printf(child, "using IRQ %lu for MSI-X on cpu%d\n",
+		    rle->start, cpuid);
 	}
-
-	/* Update control register to enable MSI-X. */
-	cfg->msix.msix_ctrl |= PCIM_MSIXCTRL_MSIX_ENABLE;
-	pci_write_config(child, cfg->msix.msix_location + PCIR_MSIX_CTRL,
-	    cfg->msix.msix_ctrl, 2);
 
 	/* Update counts of alloc'd messages. */
-	cfg->msix.msix_alloc = actual;
-	cfg->msix.msix_table_len = actual;
-	*count = actual;
-	return (0);
+	msix->msix_alloc++;
+
+	mv = kmalloc(sizeof(*mv), M_DEVBUF, M_WAITOK | M_ZERO);
+	mv->mv_rid = rid;
+	TAILQ_INSERT_TAIL(&msix->msix_vectors, mv, mv_link);
+
+	*rid0 = rid;
+	return 0;
 }
 
-/*
- * By default, pci_alloc_msix() will assign the allocated IRQ
- * resources consecutively to the first N messages in the MSI-X table.
- * However, device drivers may want to use different layouts if they
- * either receive fewer messages than they asked for, or they wish to
- * populate the MSI-X table sparsely.  This method allows the driver
- * to specify what layout it wants.  It must be called after a
- * successful pci_alloc_msix() but before any of the associated
- * SYS_RES_IRQ resources are allocated via bus_alloc_resource().
- *
- * The 'vectors' array contains 'count' message vectors.  The array
- * maps directly to the MSI-X table in that index 0 in the array
- * specifies the vector for the first message in the MSI-X table, etc.
- * The vector value in each array index can either be 0 to indicate
- * that no vector should be assigned to a message slot, or it can be a
- * number from 1 to N (where N is the count returned from a
- * succcessful call to pci_alloc_msix()) to indicate which message
- * vector (IRQ) to be used for the corresponding message.
- *
- * On successful return, each message with a non-zero vector will have
- * an associated SYS_RES_IRQ whose rid is equal to the array index +
- * 1.  Additionally, if any of the IRQs allocated via the previous
- * call to pci_alloc_msix() are not used in the mapping, those IRQs
- * will be kfreed back to the system automatically.
- *
- * For example, suppose a driver has a MSI-X table with 6 messages and
- * asks for 6 messages, but pci_alloc_msix() only returns a count of
- * 3.  Call the three vectors allocated by pci_alloc_msix() A, B, and
- * C.  After the call to pci_alloc_msix(), the device will be setup to
- * have an MSI-X table of ABC--- (where - means no vector assigned).
- * If the driver ten passes a vector array of { 1, 0, 1, 2, 0, 2 },
- * then the MSI-X table will look like A-AB-B, and the 'C' vector will
- * be kfreed back to the system.  This device will also have valid
- * SYS_RES_IRQ rids of 1, 3, 4, and 6.
- *
- * In any case, the SYS_RES_IRQ rid X will always map to the message
- * at MSI-X table index X - 1 and will only be valid if a vector is
- * assigned to that table entry.
- */
 int
-pci_remap_msix_method(device_t dev, device_t child, int count,
-    const u_int *vectors)
+pci_release_msix_vector_method(device_t dev, device_t child, int rid)
 {
 	struct pci_devinfo *dinfo = device_get_ivars(child);
 	struct pcicfg_msix *msix = &dinfo->cfg.msix;
 	struct resource_list_entry *rle;
-	int i, irq, j, *used;
+	struct msix_vector *mv;
+	int irq, cpuid;
 
-	/*
-	 * Have to have at least one message in the table but the
-	 * table can't be bigger than the actual MSI-X table in the
-	 * device.
-	 */
-	if (count == 0 || count > msix->msix_msgnum)
-		return (EINVAL);
+	KASSERT(msix->msix_table_res != NULL &&
+	    msix->msix_pba_res != NULL, ("MSI-X is not setup yet\n"));
+	KASSERT(msix->msix_alloc > 0, ("No MSI-X allocated\n"));
+	KASSERT(rid > 0, ("invalid rid %d\n", rid));
 
-	/* Sanity check the vectors. */
-	for (i = 0; i < count; i++)
-		if (vectors[i] > msix->msix_alloc)
-			return (EINVAL);
+	mv = pci_find_msix_vector(child, rid);
+	KASSERT(mv != NULL, ("MSI-X rid %d is not allocated\n", rid));
+	KASSERT(mv->mv_address == 0, ("MSI-X rid %d not teardown\n", rid));
 
-	/*
-	 * Make sure there aren't any holes in the vectors to be used.
-	 * It's a big pain to support it, and it doesn't really make
-	 * sense anyway.  Also, at least one vector must be used.
-	 */
-	used = kmalloc(sizeof(int) * msix->msix_alloc, M_DEVBUF, M_WAITOK |
-	    M_ZERO);
-	for (i = 0; i < count; i++)
-		if (vectors[i] != 0)
-			used[vectors[i] - 1] = 1;
-	for (i = 0; i < msix->msix_alloc - 1; i++)
-		if (used[i] == 0 && used[i + 1] == 1) {
-			kfree(used, M_DEVBUF);
-			return (EINVAL);
-		}
-	if (used[0] != 1) {
-		kfree(used, M_DEVBUF);
-		return (EINVAL);
-	}
-	
-	/* Make sure none of the resources are allocated. */
-	for (i = 0; i < msix->msix_table_len; i++) {
-		if (msix->msix_table[i].mte_vector == 0)
-			continue;
-		if (msix->msix_table[i].mte_handlers > 0)
-			return (EBUSY);
-		rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, i + 1);
-		KASSERT(rle != NULL, ("missing resource"));
-		if (rle->res != NULL)
-			return (EBUSY);
-	}
+	/* Make sure resource is no longer allocated. */
+	rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, rid);
+	KASSERT(rle != NULL, ("missing MSI-X resource, rid %d\n", rid));
+	KASSERT(rle->res == NULL,
+	    ("MSI-X resource is still allocated, rid %d\n", rid));
 
-	/* Free the existing resource list entries. */
-	for (i = 0; i < msix->msix_table_len; i++) {
-		if (msix->msix_table[i].mte_vector == 0)
-			continue;
-		resource_list_delete(&dinfo->resources, SYS_RES_IRQ, i + 1);
-	}
-
-	/*
-	 * Build the new virtual table keeping track of which vectors are
-	 * used.
-	 */
-	kfree(msix->msix_table, M_DEVBUF);
-	msix->msix_table = kmalloc(sizeof(struct msix_table_entry) * count,
-	    M_DEVBUF, M_WAITOK | M_ZERO);
-	for (i = 0; i < count; i++)
-		msix->msix_table[i].mte_vector = vectors[i];
-	msix->msix_table_len = count;
-
-	/* Free any unused IRQs and resize the vectors array if necessary. */
-	j = msix->msix_alloc - 1;
-	if (used[j] == 0) {
-		struct msix_vector *vec;
-
-		while (used[j] == 0) {
-			PCIB_RELEASE_MSIX(device_get_parent(dev), child,
-			    msix->msix_vectors[j].mv_irq);
-			j--;
-		}
-		vec = kmalloc(sizeof(struct msix_vector) * (j + 1), M_DEVBUF,
-		    M_WAITOK);
-		bcopy(msix->msix_vectors, vec, sizeof(struct msix_vector) *
-		    (j + 1));
-		kfree(msix->msix_vectors, M_DEVBUF);
-		msix->msix_vectors = vec;
-		msix->msix_alloc = j + 1;
-	}
-	kfree(used, M_DEVBUF);
-
-	/* Map the IRQs onto the rids. */
-	for (i = 0; i < count; i++) {
-		if (vectors[i] == 0)
-			continue;
-		irq = msix->msix_vectors[vectors[i]].mv_irq;
-		resource_list_add(&dinfo->resources, SYS_RES_IRQ, i + 1, irq,
-		    irq, 1, -1);
-	}
-
-	if (bootverbose) {
-		device_printf(child, "Remapped MSI-X IRQs as: ");
-		for (i = 0; i < count; i++) {
-			if (i != 0)
-				kprintf(", ");
-			if (vectors[i] == 0)
-				kprintf("---");
-			else
-				kprintf("%d",
-				    msix->msix_vectors[vectors[i]].mv_irq);
-		}
-		kprintf("\n");
-	}
-
-	return (0);
-}
-
-static int
-pci_release_msix(device_t dev, device_t child)
-{
-	struct pci_devinfo *dinfo = device_get_ivars(child);
-	struct pcicfg_msix *msix = &dinfo->cfg.msix;
-	struct resource_list_entry *rle;
-	int i;
-
-	/* Do we have any messages to release? */
-	if (msix->msix_alloc == 0)
-		return (ENODEV);
-
-	/* Make sure none of the resources are allocated. */
-	for (i = 0; i < msix->msix_table_len; i++) {
-		if (msix->msix_table[i].mte_vector == 0)
-			continue;
-		if (msix->msix_table[i].mte_handlers > 0)
-			return (EBUSY);
-		rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, i + 1);
-		KASSERT(rle != NULL, ("missing resource"));
-		if (rle->res != NULL)
-			return (EBUSY);
-	}
-
-	/* Update control register to disable MSI-X. */
-	msix->msix_ctrl &= ~PCIM_MSIXCTRL_MSIX_ENABLE;
-	pci_write_config(child, msix->msix_location + PCIR_MSIX_CTRL,
-	    msix->msix_ctrl, 2);
+	irq = rle->start;
+	cpuid = rle->cpuid;
 
 	/* Free the resource list entries. */
-	for (i = 0; i < msix->msix_table_len; i++) {
-		if (msix->msix_table[i].mte_vector == 0)
-			continue;
-		resource_list_delete(&dinfo->resources, SYS_RES_IRQ, i + 1);
-	}
-	kfree(msix->msix_table, M_DEVBUF);
-	msix->msix_table_len = 0;
+	resource_list_delete(&dinfo->resources, SYS_RES_IRQ, rid);
 
-	/* Release the IRQs. */
-	for (i = 0; i < msix->msix_alloc; i++)
-		PCIB_RELEASE_MSIX(device_get_parent(dev), child,
-		    msix->msix_vectors[i].mv_irq);
-	kfree(msix->msix_vectors, M_DEVBUF);
-	msix->msix_alloc = 0;
+	/* Release the IRQ. */
+	PCIB_RELEASE_MSIX(device_get_parent(dev), child, irq, cpuid);
+
+	TAILQ_REMOVE(&msix->msix_vectors, mv, mv_link);
+	kfree(mv, M_DEVBUF);
+
+	msix->msix_alloc--;
 	return (0);
 }
 
@@ -1823,6 +1581,137 @@ pci_msix_count_method(device_t dev, device_t child)
 	if (pci_do_msix && msix->msix_location != 0)
 		return (msix->msix_msgnum);
 	return (0);
+}
+
+int
+pci_setup_msix(device_t dev)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	pcicfgregs *cfg = &dinfo->cfg;
+	struct resource_list_entry *rle;
+	struct resource *table_res, *pba_res;
+
+	KASSERT(cfg->msix.msix_table_res == NULL &&
+	    cfg->msix.msix_pba_res == NULL, ("MSI-X has been setup yet\n"));
+
+	/* If rid 0 is allocated, then fail. */
+	rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, 0);
+	if (rle != NULL && rle->res != NULL)
+		return (ENXIO);
+
+	/* Already have allocated MSIs? */
+	if (cfg->msi.msi_alloc != 0)
+		return (ENXIO);
+
+	/* If MSI is blacklisted for this system, fail. */
+	if (pci_msi_blacklisted())
+		return (ENXIO);
+
+	/* MSI-X capability present? */
+	if (cfg->msix.msix_location == 0 || cfg->msix.msix_msgnum == 0 ||
+	    !pci_do_msix)
+		return (ENODEV);
+
+	KASSERT(cfg->msix.msix_alloc == 0 &&
+	    TAILQ_EMPTY(&cfg->msix.msix_vectors),
+	    ("MSI-X vector has been allocated\n"));
+
+	/* Make sure the appropriate BARs are mapped. */
+	rle = resource_list_find(&dinfo->resources, SYS_RES_MEMORY,
+	    cfg->msix.msix_table_bar);
+	if (rle == NULL || rle->res == NULL ||
+	    !(rman_get_flags(rle->res) & RF_ACTIVE))
+		return (ENXIO);
+	table_res = rle->res;
+	if (cfg->msix.msix_pba_bar != cfg->msix.msix_table_bar) {
+		rle = resource_list_find(&dinfo->resources, SYS_RES_MEMORY,
+		    cfg->msix.msix_pba_bar);
+		if (rle == NULL || rle->res == NULL ||
+		    !(rman_get_flags(rle->res) & RF_ACTIVE))
+			return (ENXIO);
+	}
+	pba_res = rle->res;
+
+	cfg->msix.msix_table_res = table_res;
+	cfg->msix.msix_pba_res = pba_res;
+
+	pci_mask_msix_allvectors(dev);
+
+	return 0;
+}
+
+void
+pci_teardown_msix(device_t dev)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	struct pcicfg_msix *msix = &dinfo->cfg.msix;
+
+	KASSERT(msix->msix_table_res != NULL &&
+	    msix->msix_pba_res != NULL, ("MSI-X is not setup yet\n"));
+	KASSERT(msix->msix_alloc == 0 && TAILQ_EMPTY(&msix->msix_vectors),
+	    ("MSI-X vector is still allocated\n"));
+
+	pci_mask_msix_allvectors(dev);
+
+	msix->msix_table_res = NULL;
+	msix->msix_pba_res = NULL;
+}
+
+void
+pci_enable_msix(device_t dev)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	struct pcicfg_msix *msix = &dinfo->cfg.msix;
+
+	KASSERT(msix->msix_table_res != NULL &&
+	    msix->msix_pba_res != NULL, ("MSI-X is not setup yet\n"));
+
+	/* Update control register to enable MSI-X. */
+	msix->msix_ctrl |= PCIM_MSIXCTRL_MSIX_ENABLE;
+	pci_write_config(dev, msix->msix_location + PCIR_MSIX_CTRL,
+	    msix->msix_ctrl, 2);
+}
+
+void
+pci_disable_msix(device_t dev)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	struct pcicfg_msix *msix = &dinfo->cfg.msix;
+
+	KASSERT(msix->msix_table_res != NULL &&
+	    msix->msix_pba_res != NULL, ("MSI-X is not setup yet\n"));
+
+	/* Disable MSI -> HT mapping. */
+	pci_ht_map_msi(dev, 0);
+
+	/* Update control register to disable MSI-X. */
+	msix->msix_ctrl &= ~PCIM_MSIXCTRL_MSIX_ENABLE;
+	pci_write_config(dev, msix->msix_location + PCIR_MSIX_CTRL,
+	    msix->msix_ctrl, 2);
+}
+
+static void
+pci_mask_msix_allvectors(device_t dev)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	u_int i;
+
+	for (i = 0; i < dinfo->cfg.msix.msix_msgnum; ++i)
+		pci_mask_msix_vector(dev, i);
+}
+
+static struct msix_vector *
+pci_find_msix_vector(device_t dev, int rid)
+{
+	struct pci_devinfo *dinfo = device_get_ivars(dev);
+	struct pcicfg_msix *msix = &dinfo->cfg.msix;
+	struct msix_vector *mv;
+
+	TAILQ_FOREACH(mv, &msix->msix_vectors, mv_link) {
+		if (mv->mv_rid == rid)
+			return mv;
+	}
+	return NULL;
 }
 
 /*
@@ -1845,7 +1734,7 @@ pci_ht_map_msi(device_t dev, uint64_t addr)
 		    ht->ht_msictrl, 2);
 	}
 
-	if (!addr && ht->ht_msictrl & PCIM_HTCMD_MSI_ENABLE) {
+	if (!addr && (ht->ht_msictrl & PCIM_HTCMD_MSI_ENABLE)) {
 		/* Disable MSI -> HT mapping. */
 		ht->ht_msictrl &= ~PCIM_HTCMD_MSI_ENABLE;
 		pci_write_config(dev, ht->ht_msimap + PCIR_HT_COMMAND,
@@ -1927,82 +1816,6 @@ pci_resume_msi(device_t dev)
 	}
 	pci_write_config(dev, msi->msi_location + PCIR_MSI_CTRL, msi->msi_ctrl,
 	    2);
-}
-
-int
-pci_remap_msi_irq(device_t dev, u_int irq)
-{
-	struct pci_devinfo *dinfo = device_get_ivars(dev);
-	pcicfgregs *cfg = &dinfo->cfg;
-	struct resource_list_entry *rle;
-	struct msix_table_entry *mte;
-	struct msix_vector *mv;
-	device_t bus;
-	uint64_t addr;
-	uint32_t data;	
-	int error, i, j;
-
-	bus = device_get_parent(dev);
-
-	/*
-	 * Handle MSI first.  We try to find this IRQ among our list
-	 * of MSI IRQs.  If we find it, we request updated address and
-	 * data registers and apply the results.
-	 */
-	if (cfg->msi.msi_alloc > 0) {
-
-		/* If we don't have any active handlers, nothing to do. */
-		if (cfg->msi.msi_handlers == 0)
-			return (0);
-		for (i = 0; i < cfg->msi.msi_alloc; i++) {
-			rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ,
-			    i + 1);
-			if (rle->start == irq) {
-				error = PCIB_MAP_MSI(device_get_parent(bus),
-				    dev, irq, &addr, &data, -1 /* XXX */);
-				if (error)
-					return (error);
-				pci_disable_msi(dev);
-				dinfo->cfg.msi.msi_addr = addr;
-				dinfo->cfg.msi.msi_data = data;
-				pci_enable_msi(dev, addr, data);
-				return (0);
-			}
-		}
-		return (ENOENT);
-	}
-
-	/*
-	 * For MSI-X, we check to see if we have this IRQ.  If we do,
-	 * we request the updated mapping info.  If that works, we go
-	 * through all the slots that use this IRQ and update them.
-	 */
-	if (cfg->msix.msix_alloc > 0) {
-		for (i = 0; i < cfg->msix.msix_alloc; i++) {
-			mv = &cfg->msix.msix_vectors[i];
-			if (mv->mv_irq == irq) {
-				error = PCIB_MAP_MSI(device_get_parent(bus),
-				    dev, irq, &addr, &data, -1 /* XXX */);
-				if (error)
-					return (error);
-				mv->mv_address = addr;
-				mv->mv_data = data;
-				for (j = 0; j < cfg->msix.msix_table_len; j++) {
-					mte = &cfg->msix.msix_table[j];
-					if (mte->mte_vector != i + 1)
-						continue;
-					if (mte->mte_handlers == 0)
-						continue;
-					pci_mask_msix(dev, j);
-					pci_enable_msix(dev, j, addr, data);
-					pci_unmask_msix(dev, j);
-				}
-			}
-		}
-		return (ENOENT);
-	}
-
-	return (ENOENT);
 }
 
 /*
@@ -2090,7 +1903,7 @@ pci_alloc_msi_method(device_t dev, device_t child, int *rid, int count,
 		return (ENXIO);
 
 	/* Already have allocated messages? */
-	if (cfg->msi.msi_alloc != 0 || cfg->msix.msix_alloc != 0)
+	if (cfg->msi.msi_alloc != 0 || cfg->msix.msix_table_res != NULL)
 		return (ENXIO);
 
 	/* If MSI is blacklisted for this system, fail. */
@@ -2098,7 +1911,8 @@ pci_alloc_msi_method(device_t dev, device_t child, int *rid, int count,
 		return (ENXIO);
 
 	/* MSI capability present? */
-	if (cfg->msi.msi_location == 0 || !pci_do_msi)
+	if (cfg->msi.msi_location == 0 || cfg->msi.msi_msgnum == 0 ||
+	    !pci_do_msi)
 		return (ENODEV);
 
 	KASSERT(count <= cfg->msi.msi_msgnum, ("large MSI count %d, max %d\n",
@@ -2196,12 +2010,7 @@ pci_release_msi_method(device_t dev, device_t child)
 	struct pci_devinfo *dinfo = device_get_ivars(child);
 	struct pcicfg_msi *msi = &dinfo->cfg.msi;
 	struct resource_list_entry *rle;
-	int error, i, irqs[32], cpuid = -1;
-
-	/* Try MSI-X first. */
-	error = pci_release_msix(dev, child);
-	if (error != ENODEV)
-		return (error);
+	int i, irqs[32], cpuid = -1;
 
 	/* Do we have any messages to release? */
 	if (msi->msi_alloc == 0)
@@ -3177,18 +2986,14 @@ pci_child_detached(device_t parent __unused, device_t child)
 
 int
 pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
-    driver_intr_t *intr, void *arg, void **cookiep, lwkt_serialize_t serializer)
+    driver_intr_t *intr, void *arg, void **cookiep,
+    lwkt_serialize_t serializer, const char *desc)
 {
-	struct pci_devinfo *dinfo;
-	struct msix_table_entry *mte;
-	struct msix_vector *mv;
-	uint64_t addr;
-	uint32_t data;
 	int rid, error;
 	void *cookie;
 
 	error = bus_generic_setup_intr(dev, child, irq, flags, intr,
-	    arg, &cookie, serializer);
+	    arg, &cookie, serializer, desc);
 	if (error)
 		return (error);
 
@@ -3203,6 +3008,10 @@ pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
 		/* Make sure that INTx is enabled */
 		pci_clear_command_bit(dev, child, PCIM_CMD_INTxDIS);
 	} else {
+		struct pci_devinfo *dinfo = device_get_ivars(child);
+		uint64_t addr;
+		uint32_t data;
+
 		/*
 		 * Check to see if the interrupt is MSI or MSI-X.
 		 * Ask our parent to map the MSI and give
@@ -3210,48 +3019,47 @@ pci_setup_intr(device_t dev, device_t child, struct resource *irq, int flags,
 		 * If we fail for some reason, teardown the
 		 * interrupt handler.
 		 */
-		dinfo = device_get_ivars(child);
 		if (dinfo->cfg.msi.msi_alloc > 0) {
-			if (dinfo->cfg.msi.msi_addr == 0) {
-				KASSERT(dinfo->cfg.msi.msi_handlers == 0,
+			struct pcicfg_msi *msi = &dinfo->cfg.msi;
+
+			if (msi->msi_addr == 0) {
+				KASSERT(msi->msi_handlers == 0,
 			    ("MSI has handlers, but vectors not mapped"));
 				error = PCIB_MAP_MSI(device_get_parent(dev),
 				    child, rman_get_start(irq), &addr, &data,
 				    rman_get_cpuid(irq));
 				if (error)
 					goto bad;
-				dinfo->cfg.msi.msi_addr = addr;
-				dinfo->cfg.msi.msi_data = data;
+				msi->msi_addr = addr;
+				msi->msi_data = data;
 				pci_enable_msi(child, addr, data);
 			}
-			dinfo->cfg.msi.msi_handlers++;
+			msi->msi_handlers++;
 		} else {
+			struct msix_vector *mv;
+			u_int vector;
+
 			KASSERT(dinfo->cfg.msix.msix_alloc > 0,
-			    ("No MSI or MSI-X interrupts allocated"));
-			KASSERT(rid <= dinfo->cfg.msix.msix_table_len,
-			    ("MSI-X index too high"));
-			mte = &dinfo->cfg.msix.msix_table[rid - 1];
-			KASSERT(mte->mte_vector != 0, ("no message vector"));
-			mv = &dinfo->cfg.msix.msix_vectors[mte->mte_vector - 1];
-			KASSERT(mv->mv_irq == rman_get_start(irq),
-			    ("IRQ mismatch"));
-			if (mv->mv_address == 0) {
-				KASSERT(mte->mte_handlers == 0,
-		    ("MSI-X table entry has handlers, but vector not mapped"));
-				error = PCIB_MAP_MSI(device_get_parent(dev),
-				    child, rman_get_start(irq), &addr, &data,
-				    rman_get_cpuid(irq));
-				if (error)
-					goto bad;
-				mv->mv_address = addr;
-				mv->mv_data = data;
-			}
-			if (mte->mte_handlers == 0) {
-				pci_enable_msix(child, rid - 1, mv->mv_address,
-				    mv->mv_data);
-				pci_unmask_msix(child, rid - 1);
-			}
-			mte->mte_handlers++;
+			    ("No MSI-X or MSI rid %d allocated\n", rid));
+
+			mv = pci_find_msix_vector(child, rid);
+			KASSERT(mv != NULL,
+			    ("MSI-X rid %d is not allocated\n", rid));
+			KASSERT(mv->mv_address == 0,
+			    ("MSI-X rid %d has been setup\n", rid));
+
+			error = PCIB_MAP_MSI(device_get_parent(dev),
+			    child, rman_get_start(irq), &addr, &data,
+			    rman_get_cpuid(irq));
+			if (error)
+				goto bad;
+			mv->mv_address = addr;
+			mv->mv_data = data;
+
+			vector = PCI_MSIX_RID2VEC(rid);
+			pci_setup_msix_vector(child, vector,
+			    mv->mv_address, mv->mv_data);
+			pci_unmask_msix_vector(child, vector);
 		}
 
 		/* Make sure that INTx is disabled if we are using MSI/MSIX */
@@ -3271,9 +3079,6 @@ int
 pci_teardown_intr(device_t dev, device_t child, struct resource *irq,
     void *cookie)
 {
-	struct msix_table_entry *mte;
-	struct resource_list_entry *rle;
-	struct pci_devinfo *dinfo;
 	int rid, error;
 
 	if (irq == NULL || !(rman_get_flags(irq) & RF_ACTIVE))
@@ -3288,35 +3093,40 @@ pci_teardown_intr(device_t dev, device_t child, struct resource *irq,
 		/* Mask INTx */
 		pci_set_command_bit(dev, child, PCIM_CMD_INTxDIS);
 	} else {
+		struct pci_devinfo *dinfo = device_get_ivars(child);
+
 		/*
 		 * Check to see if the interrupt is MSI or MSI-X.  If so,
 		 * decrement the appropriate handlers count and mask the
 		 * MSI-X message, or disable MSI messages if the count
 		 * drops to 0.
 		 */
-		dinfo = device_get_ivars(child);
-		rle = resource_list_find(&dinfo->resources, SYS_RES_IRQ, rid);
-		if (rle->res != irq)
-			return (EINVAL);
 		if (dinfo->cfg.msi.msi_alloc > 0) {
-			KASSERT(rid <= dinfo->cfg.msi.msi_alloc,
-			    ("MSI-X index too high"));
-			if (dinfo->cfg.msi.msi_handlers == 0)
-				return (EINVAL);
-			dinfo->cfg.msi.msi_handlers--;
-			if (dinfo->cfg.msi.msi_handlers == 0)
+			struct pcicfg_msi *msi = &dinfo->cfg.msi;
+
+			KASSERT(rid <= msi->msi_alloc,
+			    ("MSI-X index too high\n"));
+			KASSERT(msi->msi_handlers > 0,
+			    ("MSI rid %d is not setup\n", rid));
+
+			msi->msi_handlers--;
+			if (msi->msi_handlers == 0)
 				pci_disable_msi(child);
 		} else {
+			struct msix_vector *mv;
+
 			KASSERT(dinfo->cfg.msix.msix_alloc > 0,
-			    ("No MSI or MSI-X interrupts allocated"));
-			KASSERT(rid <= dinfo->cfg.msix.msix_table_len,
-			    ("MSI-X index too high"));
-			mte = &dinfo->cfg.msix.msix_table[rid - 1];
-			if (mte->mte_handlers == 0)
-				return (EINVAL);
-			mte->mte_handlers--;
-			if (mte->mte_handlers == 0)
-				pci_mask_msix(child, rid - 1);
+			    ("No MSI or MSI-X rid %d allocated", rid));
+
+			mv = pci_find_msix_vector(child, rid);
+			KASSERT(mv != NULL,
+			    ("MSI-X rid %d is not allocated\n", rid));
+			KASSERT(mv->mv_address != 0,
+			    ("MSI-X rid %d has not been setup\n", rid));
+
+			pci_mask_msix_vector(child, PCI_MSIX_RID2VEC(rid));
+			mv->mv_address = 0;
+			mv->mv_data = 0;
 		}
 	}
 	error = bus_generic_teardown_intr(dev, child, irq, cookie);

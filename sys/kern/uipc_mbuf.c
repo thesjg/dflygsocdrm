@@ -681,14 +681,12 @@ mbinit(void *dummy)
 	    &limit, 0,
 	    mbufjcluster_ctor, mbufcluster_dtor, NULL,
 	    objcache_malloc_alloc, objcache_malloc_free, &mbuf_malloc_args);
-	mb_limit += limit;
 
 	limit = nmbclusters;
 	mbufphdrjcluster_cache = objcache_create("mbuf pkt hdr + jcluster",
 	    &limit, nmbclusters / 16,
 	    mbufphdrjcluster_ctor, mbufcluster_dtor, NULL,
 	    objcache_malloc_alloc, objcache_malloc_free, &mbuf_malloc_args);
-	mb_limit += limit;
 
 	/*
 	 * Adjust backing kmalloc pools' limit
@@ -698,13 +696,14 @@ mbinit(void *dummy)
 	 */
 	cl_limit += cl_limit / 8;
 	kmalloc_raise_limit(mclmeta_malloc_args.mtype,
-			    mclmeta_malloc_args.objsize * cl_limit);
-	kmalloc_raise_limit(M_MBUFCL, MCLBYTES * cl_limit * 3/4 + MJUMPAGESIZE * cl_limit / 4);
-	/*kmalloc_raise_limit(M_MBUFCL, MCLBYTES * cl_limit);*/
+	    mclmeta_malloc_args.objsize * (size_t)cl_limit);
+	kmalloc_raise_limit(M_MBUFCL,
+	    ((MCLBYTES * (size_t)cl_limit * 3) / 4) +
+	    ((MJUMPAGESIZE * (size_t)cl_limit) / 4));
 
 	mb_limit += mb_limit / 8;
 	kmalloc_raise_limit(mbuf_malloc_args.mtype,
-			    mbuf_malloc_args.objsize * mb_limit);
+	    mbuf_malloc_args.objsize * (size_t)mb_limit);
 }
 
 /*
