@@ -26,9 +26,9 @@
 .\" (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
 .\" THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 .\"
-.\" $FreeBSD: src/libexec/rtld-elf/rtld.1 216695 2010-12-25 08:51:20Z kib $
+.\" $FreeBSD$
 .\"
-.Dd February 21, 2011
+.Dd January 20, 2012
 .Dt RTLD 1
 .Os
 .Sh NAME
@@ -220,6 +220,14 @@ If set,
 .Nm
 will log events such as the loading and unloading of shared objects via
 .Xr utrace 2 .
+.Pp
+.It Ev LD_LOADFLTR
+If set,
+.Nm
+will process the filtee dependencies of the loaded objects immediately,
+instead of postponing it until required.
+Normally, the filtees are opened at the time of the first symbol resolution
+from the filter object.
 .El
 .Pp
 If a shared object preloaded by the
@@ -281,7 +289,7 @@ If put in a file named
 .Pa ft.c
 and compiled with
 .Bd -literal -offset indent
-$ cc -shared ft.c -o ft.so
+$ cc -shared -fPIC ft.c -o ft.so
 .Ed
 .Pp
 setting

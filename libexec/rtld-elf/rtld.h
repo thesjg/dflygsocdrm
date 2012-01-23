@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/libexec/rtld-elf/rtld.h,v 1.50 2011/02/09 09:20:27 kib Exp $
+ * $FreeBSD$
  */
 
 #ifndef RTLD_H /* { */
@@ -34,6 +34,7 @@
 
 #include <elf-hints.h>
 #include <link.h>
+#include <stdarg.h>
 #include <setjmp.h>
 #include <stddef.h>
 
@@ -147,6 +148,7 @@ typedef struct Struct_Obj_Entry {
     const char *interp;		/* Pathname of the interpreter, if any */
     caddr_t relro_page; 	/* Address of first page of read-only data */
     size_t relro_size;  	/* Size of relro page(s) in bytes */
+    Elf_Word stack_flags;
 
     /* TLS information */
     int tlsindex;		/* Index in DTV for this module */
@@ -183,6 +185,8 @@ typedef struct Struct_Obj_Entry {
 
     char *rpath;		/* Search path specified in object */
     Needed_Entry *needed;	/* Shared objects needed by this one (%) */
+    Needed_Entry *needed_filtees;
+    Needed_Entry *needed_aux_filtees;
 
     STAILQ_HEAD(, Struct_Name_Entry) names; /* List of names for this object we
 					       know about. */
@@ -205,10 +209,14 @@ typedef struct Struct_Obj_Entry {
     bool z_origin : 1;		/* Process rpath and soname tokens */
     bool z_nodelete : 1;	/* Do not unload the object and dependencies */
     bool z_noopen : 1;		/* Do not load on dlopen */
+    bool z_loadfltr : 1;	/* Immediately load filtees */
     bool ref_nodel : 1;		/* Refcount increased to prevent dlclose */
     bool init_scanned: 1;	/* Object is already on init list. */
     bool on_fini_list: 1;	/* Object is already on fini list. */
     bool dag_inited : 1;	/* Object has its DAG initialized. */
+    bool filtees_loaded : 1;	/* Filtees loaded */
+    bool irelative : 1;		/* Object has R_MACHDEP_IRELATIVE relocs */
+    bool gnu_ifunc : 1;		/* Object has references to STT_GNU_IFUNC */
 
     struct link_map linkmap;	/* For GDB and dlinfo() */
     Objlist dldags;		/* Object belongs to these dlopened DAGs (%) */
@@ -221,6 +229,8 @@ typedef struct Struct_Obj_Entry {
 #define RTLD_MAGIC	0xd550b87a
 #define RTLD_VERSION	1
 
+#define RTLD_FUNCTRACE "_rtld_functrace"
+
 /* Flags to be passed into symlook_ family of functions. */
 #define SYMLOOK_IN_PLT	0x01	/* Lookup for PLT symbol */
 #define SYMLOOK_DLSYM	0x02	/* Return newest versioned symbol. Used by
@@ -229,8 +239,9 @@ typedef struct Struct_Obj_Entry {
 /* Flags for load_object(). */
 #define	RTLD_LO_NOLOAD	0x01	/* dlopen() specified RTLD_NOLOAD. */
 #define	RTLD_LO_DLOPEN	0x02	/* Load_object() called from dlopen(). */
-#define	RTLD_LO_TRACE		0x04	/* Only tracing. */
-#define	RTLD_LO_NODELETE	0x08	/* Loaded object cannot be closed. */
+#define	RTLD_LO_TRACE	0x04	/* Only tracing. */
+#define	RTLD_LO_NODELETE 0x08	/* Loaded object cannot be closed. */
+#define	RTLD_LO_FILTEES 0x10	/* Loading filtee. */
 
 /*
  * Symbol cache entry used during relocation to avoid multiple lookups
@@ -241,17 +252,39 @@ typedef struct Struct_SymCache {
     const Obj_Entry *obj;	/* Shared object which defines it */
 } SymCache;
 
+/*
+ * This structure provides a reentrant way to keep a list of objects and
+ * check which ones have already been processed in some way.
+ */
+typedef struct Struct_DoneList {
+    const Obj_Entry **objs;		/* Array of object pointers */
+    unsigned int num_alloc;		/* Allocated size of the array */
+    unsigned int num_used;		/* Number of array slots used */
+} DoneList;
+
 struct Struct_RtldLockState {
 	int lockstate;
 	sigjmp_buf env;
 };
+
+/*
+ * The pack of arguments and results for the symbol lookup functions.
+ */
+typedef struct Struct_SymLook {
+    const char *name;
+    unsigned long hash;
+    const Ver_Entry *ventry;
+    int flags;
+    const Obj_Entry *defobj_out;
+    const Elf_Sym *sym_out;
+    struct Struct_RtldLockState *lockstate;
+} SymLook;
 
 void _rtld_error(const char *, ...) __printflike(1, 2);
 Obj_Entry *map_object(int, const char *, const struct stat *);
 void *xcalloc(size_t);
 void *xmalloc(size_t);
 char *xstrdup(const char *);
-void *xrealloc(void *, size_t);
 extern Elf_Addr _GLOBAL_OFFSET_TABLE_[];
 
 void dump_relocations(Obj_Entry *);
@@ -265,14 +298,15 @@ void dump_Elf_Rela(Obj_Entry *, const Elf_Rela *, u_long);
 const char *basename(const char *);
 unsigned long elf_hash(const char *);
 const Elf_Sym *find_symdef(unsigned long, const Obj_Entry *,
-  const Obj_Entry **, int, SymCache *);
+  const Obj_Entry **, int, SymCache *, struct Struct_RtldLockState *);
 void init_pltgot(Obj_Entry *);
 void lockdflt_init(void);
 void obj_free(Obj_Entry *);
 Obj_Entry *obj_new(void);
 void _rtld_bind_start(void);
-const Elf_Sym	*symlook_obj(const char *, unsigned long, const Obj_Entry *,
-  const Ver_Entry *, int);
+void *rtld_resolve_ifunc(const Obj_Entry *obj, const Elf_Sym *def);
+void symlook_init(SymLook *, const char *);
+int symlook_obj(SymLook *, const Obj_Entry *);
 void *tls_get_addr_common(Elf_Addr** dtvp, int index, size_t offset);
 struct tls_tcb	*allocate_tls(Obj_Entry *);
 void free_tls(struct tls_tcb *);
@@ -285,9 +319,11 @@ const Ver_Entry *fetch_ventry(const Obj_Entry *obj, unsigned long);
  * MD function declarations.
  */
 int do_copy_relocations(Obj_Entry *);
-int reloc_non_plt(Obj_Entry *, Obj_Entry *);
+int reloc_non_plt(Obj_Entry *, Obj_Entry *, struct Struct_RtldLockState *);
 int reloc_plt(Obj_Entry *);
-int reloc_jmpslots(Obj_Entry *);
+int reloc_jmpslots(Obj_Entry *, struct Struct_RtldLockState *);
+int reloc_iresolve(Obj_Entry *, struct Struct_RtldLockState *);
+int reloc_gnu_ifunc(Obj_Entry *, struct Struct_RtldLockState *);
 void allocate_initial_tls(Obj_Entry *);
 
 #endif /* } */

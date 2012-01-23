@@ -29,9 +29,6 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * @(#)malloc.c	5.11 (Berkeley) 2/23/91
- * $FreeBSD: src/libexec/rtld-elf/malloc.c, svn 114625 2003/05/04 obrien Exp $
  */
 
 /*
@@ -46,7 +43,6 @@
  */
 
 #include <sys/types.h>
-#include <err.h>
 #include <paths.h>
 #include <stdarg.h>
 #include <stdio.h>
@@ -55,6 +51,7 @@
 #include <unistd.h>
 #include <sys/param.h>
 #include <sys/mman.h>
+#include "rtld_printf.h"
 #ifndef BSD
 #define MAP_COPY	MAP_PRIVATE
 #define MAP_FILE	0
@@ -67,7 +64,6 @@
 
 static void morecore();
 static int findbucket();
-static void xprintf(const char *, ...) __printflike(1, 2);
 
 /*
  * Pre-allocate mmap'ed pages
@@ -147,8 +143,7 @@ botch(s)
 #endif
 
 /* Debugging stuff */
-static void xprintf(const char *, ...);
-#define TRACE()	xprintf("TRACE %s:%d\n", __FILE__, __LINE__)
+#define TRACE()	rtld_printf("TRACE %s:%d\n", __FILE__, __LINE__)
 
 void *
 malloc(nbytes)
@@ -479,7 +474,8 @@ int	n;
 		caddr_t	addr = (caddr_t)
 			(((long)pagepool_start + pagesz - 1) & ~(pagesz - 1));
 		if (munmap(addr, pagepool_end - addr) != 0)
-			warn("morepages: munmap %p", addr);
+			rtld_fdprintf(STDERR_FILENO, "morepages: munmap %p",
+			    addr);
 	}
 
 	offset = (long)pagepool_start - ((long)pagepool_start & ~(pagesz - 1));
@@ -487,7 +483,7 @@ int	n;
 	if ((pagepool_start = mmap(0, n * pagesz,
 			PROT_READ|PROT_WRITE,
 			MAP_ANON|MAP_COPY, fd, 0)) == (caddr_t)-1) {
-		xprintf("Cannot map anonymous memory");
+		rtld_printf("Cannot map anonymous memory\n");
 		return 0;
 	}
 	pagepool_end = pagepool_start + n * pagesz;
@@ -497,19 +493,4 @@ int	n;
 	close(fd);
 #endif
 	return n;
-}
-
-/*
- * Non-mallocing printf, for use by malloc itself.
- */
-static void
-xprintf(const char *fmt, ...)
-{
-    char buf[256];
-    va_list ap;
-
-    va_start(ap, fmt);
-    vsprintf(buf, fmt, ap);
-    (void)write(STDOUT_FILENO, buf, strlen(buf));
-    va_end(ap);
 }

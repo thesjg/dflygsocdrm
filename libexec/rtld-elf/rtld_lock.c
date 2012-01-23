@@ -23,7 +23,7 @@
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
  *	from: FreeBSD: src/libexec/rtld-elf/sparc64/lockdflt.c,v 1.3 2002/10/09
- * $FreeBSD: src/libexec/rtld-elf/rtld_lock.c,v 1.11 2011/02/09 09:20:27 kib Exp $
+ * $FreeBSD$
  */
 
 /*
@@ -181,8 +181,6 @@ struct rtld_lock {
 rtld_lock_t	rtld_bind_lock = &rtld_locks[0];
 rtld_lock_t	rtld_libc_lock = &rtld_locks[1];
 rtld_lock_t	rtld_phdr_lock = &rtld_locks[2];
-
-#define print_ebp(str) do {register long ebp asm("ebp"); printf("%s 0x%0lx\n", str, ebp);} while (0)
 
 void
 rlock_acquire(rtld_lock_t lock, RtldLockState *lockstate)

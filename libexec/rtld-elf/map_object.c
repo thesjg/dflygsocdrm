@@ -22,7 +22,7 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
  * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  *
- * $FreeBSD: src/libexec/rtld-elf/map_object.c,v 1.25 2011/01/25 21:12:31 kib Exp $
+ * $FreeBSD$
  */
 
 #include <sys/param.h>
@@ -83,6 +83,7 @@ map_object(int fd, const char *path, const struct stat *sb)
     Elf_Addr bss_vaddr;
     Elf_Addr bss_vlimit;
     caddr_t bss_addr;
+    Elf_Word stack_flags;
     Elf_Addr relro_page;
     size_t relro_size;
 
@@ -104,6 +105,7 @@ map_object(int fd, const char *path, const struct stat *sb)
     relro_page = 0;
     relro_size = 0;
     segs = alloca(sizeof(segs[0]) * hdr->e_phnum);
+    stack_flags = RTLD_DEFAULT_STACK_PF_EXEC | PF_R | PF_W;
     while (phdr < phlimit) {
 	switch (phdr->p_type) {
 
@@ -131,6 +133,10 @@ map_object(int fd, const char *path, const struct stat *sb)
 
 	case PT_TLS:
 	    phtls = phdr;
+	    break;
+
+	case PT_GNU_STACK:
+	    stack_flags = phdr->p_flags;
 	    break;
 
 	case PT_GNU_RELRO:
@@ -276,7 +282,7 @@ map_object(int fd, const char *path, const struct stat *sb)
 	obj->tlsinitsize = phtls->p_filesz;
 	obj->tlsinit = mapbase + phtls->p_vaddr;
     }
-
+    obj->stack_flags = stack_flags;
     if (relro_size) {
         obj->relro_page = obj->relocbase + trunc_page(relro_page);
         obj->relro_size = round_page(relro_size);
