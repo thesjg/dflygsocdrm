@@ -17,20 +17,20 @@
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * sf-pcap.h - libpcap-file-format-specific routines
+ *	Extraction/creation by Jeffrey Mogul, DECWRL
+ *	Modified by Steve McCanne, LBL.
+ *
+ * Used to save the received packet headers, after filtering, to
+ * a file, and then read them later.
+ * The first record in the file contains saved values for the machine
+ * dependent values so we can print the dump file on any architecture.
  */
 
-#ifndef lint
-static const char rcsid[] _U_ =
-    "@(#) $Header: /tcpdump/master/tcpdump/pcap_dump_ftell.c,v 1.1 2005-06-03 22:08:52 guy Exp $ (LBL)";
+#ifndef sf_pcap_h
+#define	sf_pcap_h
+
+extern int pcap_check_header(pcap_t *, bpf_u_int32, FILE *, char *);
+
 #endif
-
-#include <stdio.h>
-#include <pcap.h>
-
-#include "pcap-missing.h"
-
-long
-pcap_dump_ftell(pcap_dumper_t *p)
-{
-	return (ftell((FILE *)p));
-}

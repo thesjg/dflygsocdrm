@@ -22,7 +22,7 @@
  */
 #ifndef lint
 static const char rcsid[] _U_ =
-    "@(#) $Header: /tcpdump/master/libpcap/grammar.y,v 1.99.2.2 2007/11/18 02:04:55 guy Exp $ (LBL)";
+    "@(#) $Header: /tcpdump/master/libpcap/grammar.y,v 1.101 2007-11-18 02:03:52 guy Exp $ (LBL)";
 #endif
 
 #ifdef HAVE_CONFIG_H
@@ -45,6 +45,7 @@ struct rtentry;
 #endif
 
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #endif /* WIN32 */
 
 #include <stdio.h>
@@ -54,11 +55,10 @@ struct rtentry;
 #include "gencode.h"
 #ifdef HAVE_NET_PFVAR_H
 #include <net/if.h>
-#include <net/if_var.h>
 #include <net/pf/pfvar.h>
 #include <net/pf/if_pflog.h>
 #endif
-#include <netproto/802_11/ieee80211.h>
+#include "ieee80211.h"
 #include <pcap/namedb.h>
 
 #ifdef HAVE_OS_PROTO_H
@@ -120,16 +120,16 @@ static const struct tok ieee80211_data_subtypes[] = {
 	{ IEEE80211_FC0_SUBTYPE_CF_POLL, "data-cf-poll" },
 	{ IEEE80211_FC0_SUBTYPE_CF_ACPL, "data-cf-ack-poll" },
 	{ IEEE80211_FC0_SUBTYPE_NODATA, "null" },
-	{ IEEE80211_FC0_SUBTYPE_CFACK, "cf-ack" },
-	{ IEEE80211_FC0_SUBTYPE_CFPOLL, "cf-poll"  },
-	{ IEEE80211_FC0_SUBTYPE_CF_ACK_CF_ACK, "cf-ack-poll" },
+	{ IEEE80211_FC0_SUBTYPE_NODATA_CF_ACK, "cf-ack" },
+	{ IEEE80211_FC0_SUBTYPE_NODATA_CF_POLL, "cf-poll"  },
+	{ IEEE80211_FC0_SUBTYPE_NODATA_CF_ACPL, "cf-ack-poll" },
 	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_DATA, "qos-data" },
 	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_CF_ACK, "qos-data-cf-ack" },
 	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_CF_POLL, "qos-data-cf-poll" },
 	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_CF_ACPL, "qos-data-cf-ack-poll" },
 	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_NODATA, "qos" },
-	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_CFPOLL, "qos-cf-poll" },
-	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_CF_ACK_CF_ACK, "qos-cf-ack-poll" },
+	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_NODATA_CF_POLL, "qos-cf-poll" },
+	{ IEEE80211_FC0_SUBTYPE_QOS|IEEE80211_FC0_SUBTYPE_NODATA_CF_ACPL, "qos-cf-ack-poll" },
 	{ 0, NULL }
 };
 struct type2tok {
@@ -272,12 +272,12 @@ pfaction_to_num(const char *action)
 
 %token  DST SRC HOST GATEWAY
 %token  NET NETMASK PORT PORTRANGE LESS GREATER PROTO PROTOCHAIN CBYTE
-%token  ARP RARP IP SCTP TCP UDP ICMP IGMP IGRP PIM VRRP
+%token  ARP RARP IP SCTP TCP UDP ICMP IGMP IGRP PIM VRRP CARP
 %token  ATALK AARP DECNET LAT SCA MOPRC MOPDL
 %token  TK_BROADCAST TK_MULTICAST
 %token  NUM INBOUND OUTBOUND
 %token  PF_IFNAME PF_RSET PF_RNR PF_SRNR PF_REASON PF_ACTION
-%token	TYPE SUBTYPE DIR ADDR1 ADDR2 ADDR3 ADDR4
+%token	TYPE SUBTYPE DIR ADDR1 ADDR2 ADDR3 ADDR4 RA TA
 %token  LINK
 %token	GEQ LEQ NEQ
 %token	ID EID HID HID6 AID
@@ -442,6 +442,8 @@ dqual:	  SRC			{ $$ = Q_SRC; }
 	| ADDR2			{ $$ = Q_ADDR2; }
 	| ADDR3			{ $$ = Q_ADDR3; }
 	| ADDR4			{ $$ = Q_ADDR4; }
+	| RA			{ $$ = Q_RA; }
+	| TA			{ $$ = Q_TA; }
 	;
 /* address type qualifiers */
 aqual:	  HOST			{ $$ = Q_HOST; }
@@ -464,6 +466,7 @@ pname:	  LINK			{ $$ = Q_LINK; }
 	| IGRP			{ $$ = Q_IGRP; }
 	| PIM			{ $$ = Q_PIM; }
 	| VRRP			{ $$ = Q_VRRP; }
+	| CARP 			{ $$ = Q_CARP; }
 	| ATALK			{ $$ = Q_ATALK; }
 	| AARP			{ $$ = Q_AARP; }
 	| DECNET		{ $$ = Q_DECNET; }

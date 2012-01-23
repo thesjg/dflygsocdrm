@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1995
+ * Copyright (c) 1993, 1994, 1995, 1996, 1997
  *	The Regents of the University of California.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -17,43 +17,15 @@
  * THIS SOFTWARE IS PROVIDED ``AS IS'' AND WITHOUT ANY EXPRESS OR IMPLIED
  * WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED WARRANTIES OF
  * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
+ *
+ * sf-pcap-ng.h - pcap-ng-file-format-specific routines
+ *
+ * Used to read pcap-ng savefiles.
  */
 
-#ifndef lint
-static const char rcsid[] _U_ =
-    "@(#) $Header: /tcpdump/master/tcpdump/vfprintf.c,v 1.6 2003-11-16 09:36:45 guy Exp $ (LBL)";
+#ifndef sf_pcap_ng_h
+#define	sf_pcap_ng_h
+
+extern int pcap_ng_check_header(pcap_t *, bpf_u_int32, FILE *, char *);
+
 #endif
-
-#ifdef HAVE_CONFIG_H
-#include "config.h"
-#endif
-
-#include <sys/types.h>
-
-#include <stdio.h>
-#include <stdarg.h>
-#include <stdlib.h>
-#include <unistd.h>
-
-#include "interface.h"
-
-/*
- * Stock 4.3 doesn't have vfprintf.
- * This routine is due to Chris Torek.
- */
-vfprintf(f, fmt, args)
-	FILE *f;
-	char *fmt;
-	va_list args;
-{
-	int ret;
-
-	if ((f->_flag & _IOWRT) == 0) {
-		if (f->_flag & _IORW)
-			f->_flag |= _IOWRT;
-		else
-			return EOF;
-	}
-	ret = _doprnt(fmt, args, f);
-	return ferror(f) ? EOF : ret;
-}
