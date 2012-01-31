@@ -26,8 +26,6 @@
  * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
  * OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
  * EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * $DragonFly: src/lib/libthread_xu/thread/thr_sem.c,v 1.6 2007/06/26 23:30:05 josepht Exp $
  */
 
 #include "namespace.h"
@@ -245,6 +243,27 @@ _sem_post(sem_t *sem)
 	return (0);
 }
 
+sem_t *
+_sem_open(__unused const char *name, __unused int oflag, ...)
+{
+	errno = ENOSYS;
+	return (SEM_FAILED);
+}
+
+int
+_sem_close(__unused sem_t *sem)
+{
+	errno = ENOSYS;
+	return (-1);
+}
+
+int
+_sem_unlink(__unused const char *name)
+{
+	errno = ENOSYS;
+	return (-1);
+}
+
 __strong_reference(_sem_destroy, sem_destroy);
 __strong_reference(_sem_getvalue, sem_getvalue);
 __strong_reference(_sem_init, sem_init);
@@ -254,4 +273,7 @@ __strong_reference(_sem_wait, sem_wait);
 __strong_reference(_sem_timedwait, sem_timedwait);
 #endif
 __strong_reference(_sem_post, sem_post);
+__strong_reference(_sem_open, sem_open);
+__strong_reference(_sem_close, sem_close);
+__strong_reference(_sem_unlink, sem_unlink);
 
