@@ -88,9 +88,10 @@
  * 201306 - Sync libm with FreeBSD-current libm (~50 new functions)
  * 300000 - 3.0 release
  * 300100 - 3.1 master
-*/
+ * 300101 - i4b (ISDN) removal
+ */
 #undef __DragonFly_version
-#define __DragonFly_version 300100	/* propagated to newvers */
+#define __DragonFly_version 300101	/* propagated to newvers */
 
 #include <sys/_null.h>
 
