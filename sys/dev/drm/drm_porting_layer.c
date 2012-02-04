@@ -49,6 +49,53 @@
 #include <sys/tree.h>
 
 /********************************************************************
+ * MODULES                                                          *
+ ********************************************************************/
+
+DRM_MODULE_T
+find_module(const char *name)
+{
+	return NULL;
+}
+
+int
+request_module(const char *modalias, ...)
+{
+	return 0;
+}
+
+int
+request_module_nowait(const char *modalias, ...)
+{
+	return 0;
+}
+
+int
+try_module_get(DRM_MODULE_T module)
+{
+	return 1;
+}
+
+int
+module_put(DRM_MODULE_T module)
+{
+	return 0;
+}
+
+/*
+ * The functions initialize a module's callback for load and unload.
+ * The callbacks for legacy BSD can instead be called in the
+ * module MOD_LOAD / MOD_UNLOAD handler.
+ */
+#if 0
+void
+module_init(int (*func)(void));
+
+void
+module_exit(void (*func)(void));
+#endif
+
+/********************************************************************
  * TIME                                                             *
  ********************************************************************/
 

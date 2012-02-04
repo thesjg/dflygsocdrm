@@ -70,96 +70,61 @@
 /* For current implementation of idr */
 #include <sys/tree.h>
 
-/* From previous version of drm.h */
+/********************************************************************
+ * MODULES                                                          *
+ ********************************************************************/
 
+/* From previous version of drm.h */
 #define EXPORT_SYMBOL(sym)
 
 /* substitute for struct module which has another definition */
-typedef void *DRM_MODULE_T;
-/* file drm_encoder_slave.h, function drm_i2c_encoder_register() */
-/* file drm_drv.c, struct drm_stub_fops */
-#if 0
-struct module {
-	int placeholder;
-};
-#endif
-
-/* file ttm/ttm_module.c, epilogue */
-/* file drm_stub.c */
-#define MODULE_AUTHOR(arg, ...)
-
-/* file drm_stub.c */
-#define MODULE_DESCRIPTION(arg, ...)
-
-/* file drm_stub.c */
-#define MODULE_LICENSE(arg, ...)
-
-/* file drm_stub.c */
-#define MODULE_PARM_DESC(arg, ...)
-
-/* file drm_stub.c */
-#define module_param_named(arg, ...)
-
-/* file i915_drv.c */
-#define MODULE_DEVICE_TABLE(arg, ...)
-
-/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
-static __inline__ int
-request_module(char *modalias) {
-	return 0;
-}
-
-/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
-static __inline__ int
-try_module_get(DRM_MODULE_T module) {
-	return 1;
-}
-
-/* file drm_encoder_slave.c, function drm_i2c_encoder_init() */
-static __inline__ int
-module_put(DRM_MODULE_T module) {
-	return 0;
-}
+typedef module_t  DRM_MODULE_T;
 
 #define THIS_MODULE (DRM_MODULE_T)NULL
 
-/* file _drv.c and ttm_module.c epilogue */
+#define MODULE_AUTHOR(arg, ...)
+
+#define MODULE_DESCRIPTION(arg, ...)
+
+#define MODULE_LICENSE(arg, ...)
+
+#define MODULE_PARM_DESC(arg, ...)
+
+#define module_param_named(arg, ...)
+
+#define MODULE_DEVICE_TABLE(arg, ...)
+
+DRM_MODULE_T
+find_module(const char *name);
+
+int
+request_module(const char *modalias, ...);
+
+int
+request_module_nowait(const char *modalias, ...);
+
+int
+try_module_get(DRM_MODULE_T module);
+
+int
+module_put(DRM_MODULE_T module);
+
+/********************************************************************
+ * ASSERTIONS                                                       *
+ ********************************************************************/
+
 /*
- * The functions initialize a module's callback for load and unload.
- * The callbacks for legacy BSD can instead be called in the
- * module MOD_LOAD / MOD_UNLOAD handler.
- */
-#if 0
-static __inline__ void
-module_init(int (*func)(void)) {
-	;
-}
-
-static __inline__ void
-module_exit(void (*func)(void)) {
-	;
-}
-#endif
-
-/* Called in drm_drawable.c, function drm_update_drawable_info().
- * Negative of error indicators sometimes assigned to (void *).
- * Tests return value from idr_replace().
- * Assume pointers are no more than 64-bit and
- * that the last page of possible virtual memory is unmapped.
+ * Negative of error indicators sometimes assigned to (void *) pointer.
+ * Assume that the last page of possible virtual memory is unmapped.
  */
 #define IS_ERR(ptr) (((uintptr_t)ptr) > ((uintptr_t)((intptr_t)(-0x0800))))
 
-/* file ttm/ttm_tt.c, function ttm_tt_swapout() */
 /* What else can it be but the actual error? */
-#define PTR_ERR(ptr) ((int)(-((intptr_t)ptr)))
+#define PTR_ERR(ptr)  ((int)(-((intptr_t)ptr)))
 
-/* drm_mm.c function drm_mm_takedown() */
-/* file ttm/ttm_global.c, function ttm_global_release() */
+#define BUG_ON(cond)  KKASSERT(!(cond))
 
-#define BUG_ON(cond) KKASSERT(!(cond))
-
-/* file ttm/ttm_bo.c, function ttm_bo_ref_bug() */
-#define BUG()  /* UNIMPLEMENTED */
+#define BUG()         BUG_ON(1)
 
 /*
  * Annotations

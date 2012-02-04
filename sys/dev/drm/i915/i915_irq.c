@@ -141,7 +141,7 @@ i915_pipestat(int pipe)
 		return PIPEASTAT;
 	if (pipe == 1)
 		return PIPEBSTAT;
-#ifdef __linux__
+#if 1 /*  __linux__ */
 	BUG();
 #else
 	return -EINVAL;
