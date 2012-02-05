@@ -973,7 +973,7 @@ static int drm_cvt_modes(struct drm_connector *connector,
 	const u8 empty[3] = { 0, 0, 0 };
 
 	for (i = 0; i < 4; i++) {
-#ifdef __linux__
+#if 1 /* __linux__ */
 		int uninitialized_var(width), height;
 #else
 		int width = 0;

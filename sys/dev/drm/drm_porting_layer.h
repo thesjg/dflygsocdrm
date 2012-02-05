@@ -81,33 +81,18 @@
 typedef module_t  DRM_MODULE_T;
 
 #define THIS_MODULE (DRM_MODULE_T)NULL
-
 #define MODULE_AUTHOR(arg, ...)
-
 #define MODULE_DESCRIPTION(arg, ...)
-
 #define MODULE_LICENSE(arg, ...)
-
 #define MODULE_PARM_DESC(arg, ...)
-
 #define module_param_named(arg, ...)
-
 #define MODULE_DEVICE_TABLE(arg, ...)
 
-DRM_MODULE_T
-find_module(const char *name);
-
-int
-request_module(const char *modalias, ...);
-
-int
-request_module_nowait(const char *modalias, ...);
-
-int
-try_module_get(DRM_MODULE_T module);
-
-int
-module_put(DRM_MODULE_T module);
+DRM_MODULE_T find_module(const char *name);
+int request_module(const char *modalias, ...);
+int request_module_nowait(const char *modalias, ...);
+int try_module_get(DRM_MODULE_T module);
+int module_put(DRM_MODULE_T module);
 
 /********************************************************************
  * ASSERTIONS                                                       *
@@ -134,14 +119,10 @@ module_put(DRM_MODULE_T module);
 #define __user
 #endif
 
-/* file ttm/ttm_module.c, function  ttm_init() */
-/* file drm_drv.c, function  drm_core_init */
 #ifndef __init
 #define __init
 #endif
 
-/* file ttm/ttm_module.c, function  ttm_init() */
-/* file drm_drv.c, function  drm_core_exit */
 #ifndef __exit
 #define __exit
 #endif
@@ -150,7 +131,6 @@ module_put(DRM_MODULE_T module);
 #define __iomem
 #endif
 
-/* file i915_drv.c, function i915_pci_probe() */
 #ifndef __devinit
 #define __devinit
 #endif
@@ -162,16 +142,14 @@ module_put(DRM_MODULE_T module);
 # define DEPRECATED
 #endif
 
-/* file drm_edid.c, function drm_cvt_modes() */
-#define unitialized_var(width)  width=0
+#ifndef uninitialized_var
+#define uninitialized_var(width)  width = 0
+#endif
 
-/* From legacy older version of drmP.h */
+/********************************************************************
+ * C declarations and extensions                                    *
+ ********************************************************************/
 
-/**********************************************************
- * C declarations and extensions                          *
- **********************************************************/
-
-/* radeon_cp.c, function */
 #define max_t(type, a, b) ((type)(a) > (type)(b)) ? (type)(a) : (type)(b)
 
 #ifndef ARRAY_SIZE
@@ -198,20 +176,16 @@ typedef u_int32_t u32;
 typedef u_int16_t u16;
 typedef u_int8_t  u8;
 
-/* typedef int32_t __s32 in drm.h */
-/* i915/i915.drv.h, struct drm_i915_error_buffer */
-typedef int32_t s32;
+typedef int32_t   s32;
 
 /* radeon_drm.h typedef drm_radeon_setparam_t, member value
  * Linux version has __s64
  * BSD version has int64_t
  */
 
+/* Used in previous version of drmP.h */
 #define upper_32_bits(n) ((u32)(((n) >> 16) >> 16))
 
-/* file drm_fixed.h, function dfixed_div,
- * extend interpretation of upper_32_bits */
-/* 2.6.34.7, file radeon_fixed.h, function rfixed_div() return value */
 #define lower_32_bits(n) ((uint32_t)((n) & 0xffffffff))
 
 /* file drm_fixed.h, function dfixed_div,
@@ -219,17 +193,17 @@ typedef int32_t s32;
 /* 2.6.34.7, file radeon_fixed.h, function rfixed_div() */
 #define do_div(a, b) (a = (uint64_t)(((uint64_t)(a)) / ((uint64_t)(b))))
 
-/* drmP.h, declaration of function drm_read() */
+#ifndef loff_t
 #define loff_t	off_t
+#endif
 
 /* evidently now defined in DragonFly in libprop/prop_object.h */
 #if 0
 typedef boolean_t bool;
 #endif
 
-/* file drm_agpsupport.c, function drm_agp_bind_pages() */
 #ifndef true
-#define true (bool)1
+#define true  (bool)1
 #endif
 
 #ifndef false
@@ -258,27 +232,20 @@ typedef boolean_t bool;
 #endif
 */
 
-/*
- * Endian considerations
- */
-
 /* For DragonFly BSD on i386 or x86_64 assume little endian */
 #ifndef __le32
-#define __le32 uint32_t
+#define __le32  uint32_t
 #endif
 
 #ifndef __le16
-#define __le16 uint16_t
+#define __le16  uint16_t
 #endif
 
-#define cpu_to_le32(x) htole32(x)
-#define le32_to_cpu(x) le32toh(x)
+#define cpu_to_le32(x)  htole32(x)
+#define le32_to_cpu(x)  le32toh(x)
 
-/* On DragonFly sys/endian.h */
-#define le16_to_cpu(x) le16toh(x)
-
-/* file drm_edid.c, function drm_mode_detailed() */
-#define cpu_to_le16(x) htole16(x)
+#define cpu_to_le16(x)  htole16(x)
+#define le16_to_cpu(x)  le16toh(x)
 
 typedef unsigned long resource_size_t;
 
