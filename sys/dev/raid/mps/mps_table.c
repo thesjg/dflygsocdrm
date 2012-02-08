@@ -23,11 +23,12 @@
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
  *
- * $FreeBSD: src/sys/dev/mps/mps_table.c,v 1.1 2010/09/10 15:03:56 ken Exp $
+ * $FreeBSD: src/sys/dev/mps/mps_table.c,v 1.2 2012/01/26 18:17:21 ken Exp $
  */
 
 /* Debugging tables for MPT2 */
 
+/* TODO Move headers to mpsvar */
 #include <sys/types.h>
 #include <sys/param.h>
 #include <sys/systm.h>
@@ -35,23 +36,30 @@
 #include <sys/module.h>
 #include <sys/bus.h>
 #include <sys/conf.h>
+#include <sys/eventhandler.h>
 #include <sys/bio.h>
 #include <sys/malloc.h>
 #include <sys/uio.h>
 #include <sys/sysctl.h>
+#include <sys/queue.h>
+#include <sys/kthread.h>
+#include <sys/taskqueue.h>
 
 #include <sys/rman.h>
-#include <sys/lock.h>
+
+#include <machine/inttypes.h>
 
 #include <bus/cam/scsi/scsi_all.h>
 
-#include <dev/disk/mps/mpi/mpi2_type.h>
-#include <dev/disk/mps/mpi/mpi2.h>
-#include <dev/disk/mps/mpi/mpi2_ioc.h>
-#include <dev/disk/mps/mpi/mpi2_cnfg.h>
-#include <dev/disk/mps/mpi/mpi2_init.h>
-#include <dev/disk/mps/mpsvar.h>
-#include <dev/disk/mps/mps_table.h>
+#include <dev/raid/mps/mpi/mpi2_type.h>
+#include <dev/raid/mps/mpi/mpi2.h>
+#include <dev/raid/mps/mpi/mpi2_ioc.h>
+#include <dev/raid/mps/mpi/mpi2_cnfg.h>
+#include <dev/raid/mps/mpi/mpi2_init.h>
+#include <dev/raid/mps/mpi/mpi2_tool.h>
+#include <dev/raid/mps/mps_ioctl.h>
+#include <dev/raid/mps/mpsvar.h>
+#include <dev/raid/mps/mps_table.h>
 
 char *
 mps_describe_table(struct mps_table_lookup *table, u_int code)
@@ -202,7 +210,7 @@ mps_print_iocfacts(struct mps_softc *sc, MPI2_IOC_FACTS_REPLY *facts)
 	MPS_PRINTFIELD(sc, facts, RequestCredit, %d);
 	MPS_PRINTFIELD(sc, facts, ProductID, 0x%x);
 	mps_dprint_field(sc, MPS_INFO, "IOCCapabilities: %b\n",
-	    (u_int)facts->IOCCapabilities, "\20" "\3ScsiTaskFull" "\4DiagTrace"
+	    facts->IOCCapabilities, "\20" "\3ScsiTaskFull" "\4DiagTrace"
 	    "\5SnapBuf" "\6ExtBuf" "\7EEDP" "\10BiDirTarg" "\11Multicast"
 	    "\14TransRetry" "\15IR" "\16EventReplay" "\17RaidAccel"
 	    "\20MSIXIndex" "\21HostDisc");
@@ -245,8 +253,7 @@ mps_print_event(struct mps_softc *sc, MPI2_EVENT_NOTIFICATION_REPLY *event)
 	MPS_EVENTFIELD(sc, event, AckRequired, %d);
 	mps_dprint_field(sc, MPS_EVENT, "Event: %s (0x%x)\n",
 	    mps_describe_table(mps_event_names, event->Event), event->Event);
-	mps_dprint_field(sc, MPS_EVENT, "EventContext: 0x%x\n",
-	    (u_int)event->EventContext);
+	MPS_EVENTFIELD(sc, event, EventContext, 0x%x);
 }
 
 void
@@ -263,8 +270,7 @@ mps_print_sasdev0(struct mps_softc *sc, MPI2_CONFIG_PAGE_SAS_DEV_0 *buf)
 	MPS_PRINTFIELD(sc, buf, DevHandle, 0x%x);
 	MPS_PRINTFIELD(sc, buf, AttachedPhyIdentifier, 0x%x);
 	MPS_PRINTFIELD(sc, buf, ZoneGroup, %d);
-	mps_dprint_field(sc, MPS_INFO, "DeviceInfo: %b,%s\n",
-	    (u_int)buf->DeviceInfo,
+	mps_dprint_field(sc, MPS_INFO, "DeviceInfo: %b,%s\n", buf->DeviceInfo,
 	    "\20" "\4SataHost" "\5SmpInit" "\6StpInit" "\7SspInit"
 	    "\10SataDev" "\11SmpTarg" "\12StpTarg" "\13SspTarg" "\14Direct"
 	    "\15LsiDev" "\16AtapiDev" "\17SepDev",
@@ -297,7 +303,7 @@ mps_print_evt_sas(struct mps_softc *sc, MPI2_EVENT_NOTIFICATION_REPLY *event)
 		    mps_describe_table(mps_sasdisc_reason, data->ReasonCode));
 		MPS_EVENTFIELD(sc, data, PhysicalPort, %d);
 		mps_dprint_field(sc, MPS_EVENT, "DiscoveryStatus: %b\n",
-		    (u_int)data->DiscoveryStatus,  "\20"
+		    data->DiscoveryStatus,  "\20"
 		    "\1Loop" "\2UnaddressableDev" "\3DupSasAddr" "\5SmpTimeout"
 		    "\6ExpRouteFull" "\7RouteIndexError" "\10SmpFailed"
 		    "\11SmpCrcError" "\12SubSubLink" "\13TableTableLink"
@@ -352,8 +358,7 @@ mps_print_evt_sas(struct mps_softc *sc, MPI2_EVENT_NOTIFICATION_REPLY *event)
 		MPS_EVENTFIELD(sc, data, PhysicalPort, %d);
 		MPS_EVENTFIELD(sc, data, NumSlots, %d);
 		MPS_EVENTFIELD(sc, data, StartSlot, %d);
-		mps_dprint_field(sc, MPS_EVENT, "PhyBits: 0x%x\n",
-		    (u_int)data->PhyBits);
+		MPS_EVENTFIELD(sc, data, PhyBits, 0x%x);
 		break;
 	}
 	case MPI2_EVENT_SAS_DEVICE_STATUS_CHANGE:
@@ -393,10 +398,9 @@ mps_print_expander1(struct mps_softc *sc, MPI2_CONFIG_PAGE_EXPANDER_1 *buf)
 	MPS_PRINTFIELD(sc, buf, AttachedDevHandle, 0x%04x);
 	mps_dprint_field(sc, MPS_INFO, "PhyInfo Reason: %s (0x%x)\n",
 	    mps_describe_table(mps_phyinfo_reason_names,
-	    (buf->PhyInfo >> 16) & 0xf), (u_int)buf->PhyInfo);
+	    (buf->PhyInfo >> 16) & 0xf), buf->PhyInfo);
 	mps_dprint_field(sc, MPS_INFO, "AttachedDeviceInfo: %b,%s\n",
-	    (u_int)buf->AttachedDeviceInfo,
-	    "\20" "\4SATAhost" "\5SMPinit" "\6STPinit"
+	    buf->AttachedDeviceInfo, "\20" "\4SATAhost" "\5SMPinit" "\6STPinit"
 	    "\7SSPinit" "\10SATAdev" "\11SMPtarg" "\12STPtarg" "\13SSPtarg"
 	    "\14Direct" "\15LSIdev" "\16ATAPIdev" "\17SEPdev",
 	    mps_describe_table(mps_sasdev0_devtype,
@@ -408,13 +412,11 @@ mps_print_expander1(struct mps_softc *sc, MPI2_CONFIG_PAGE_EXPANDER_1 *buf)
 	    buf->NegotiatedLinkRate & 0xf), buf->NegotiatedLinkRate);
 	MPS_PRINTFIELD(sc, buf, PhyIdentifier, %d);
 	MPS_PRINTFIELD(sc, buf, AttachedPhyIdentifier, %d);
-	mps_dprint_field(sc, MPS_INFO, "DiscoveryInfo: 0x%x\n",
-	    (u_int)buf->DiscoveryInfo);
-	mps_dprint_field(sc, MPS_INFO, "AttachedPhyInfo: 0x%x\n",
-	    (u_int)buf->AttachedPhyInfo);
+	MPS_PRINTFIELD(sc, buf, DiscoveryInfo, 0x%x);
+	MPS_PRINTFIELD(sc, buf, AttachedPhyInfo, 0x%x);
 	mps_dprint_field(sc, MPS_INFO, "AttachedPhyInfo Reason: %s (0x%x)\n",
 	    mps_describe_table(mps_phyinfo_reason_names,
-	    buf->AttachedPhyInfo & 0xf), (u_int)buf->AttachedPhyInfo);
+	    buf->AttachedPhyInfo & 0xf), buf->AttachedPhyInfo);
 	MPS_PRINTFIELD(sc, buf, ZoneGroup, %d);
 	MPS_PRINTFIELD(sc, buf, SelfConfigStatus, 0x%x);
 }
@@ -428,7 +430,7 @@ mps_print_sasphy0(struct mps_softc *sc, MPI2_CONFIG_PAGE_SAS_PHY_0 *buf)
 	MPS_PRINTFIELD(sc, buf, AttachedPhyIdentifier, %d);
 	mps_dprint_field(sc, MPS_INFO, "AttachedPhyInfo Reason: %s (0x%x)\n",
 	    mps_describe_table(mps_phyinfo_reason_names,
-	    buf->AttachedPhyInfo & 0xf), (u_int)buf->AttachedPhyInfo);
+	    buf->AttachedPhyInfo & 0xf), buf->AttachedPhyInfo);
 	mps_dprint_field(sc, MPS_INFO, "ProgrammedLinkRate: %s (0x%x)\n",
 	    mps_describe_table(mps_linkrate_names,
 	    (buf->ProgrammedLinkRate >> 4) & 0xf), buf->ProgrammedLinkRate);
@@ -439,7 +441,7 @@ mps_print_sasphy0(struct mps_softc *sc, MPI2_CONFIG_PAGE_SAS_PHY_0 *buf)
 	MPS_PRINTFIELD(sc, buf, Flags, 0x%x);
 	mps_dprint_field(sc, MPS_INFO, "PhyInfo Reason: %s (0x%x)\n",
 	    mps_describe_table(mps_phyinfo_reason_names,
-	    (buf->PhyInfo >> 16) & 0xf), (u_int)buf->PhyInfo);
+	    (buf->PhyInfo >> 16) & 0xf), buf->PhyInfo);
 	mps_dprint_field(sc, MPS_INFO, "NegotiatedLinkRate: %s (0x%x)\n",
 	    mps_describe_table(mps_linkrate_names,
 	    buf->NegotiatedLinkRate & 0xf), buf->NegotiatedLinkRate);
@@ -462,7 +464,7 @@ mps_print_sgl(struct mps_softc *sc, struct mps_command *cm, int offset)
 
 	while (frame != NULL) {
 		flags = sge->FlagsLength >> MPI2_SGE_FLAGS_SHIFT;
-		kprintf("seg%d flags=0x%x len=0x%lx addr=0x%jx\n", i, flags,
+		kprintf("seg%d flags=0x%x len=0x%x addr=0x%jx\n", i, flags,
 		    sge->FlagsLength & 0xffffff, mps_to_u64(&sge->Address));
 		if (flags & (MPI2_SGE_FLAGS_END_OF_LIST |
 		    MPI2_SGE_FLAGS_END_OF_BUFFER))
@@ -473,7 +475,7 @@ mps_print_sgl(struct mps_softc *sc, struct mps_command *cm, int offset)
 			sgc = (MPI2_SGE_CHAIN32 *)sge;
 			kprintf("chain flags=0x%x len=0x%x Offset=0x%x "
 			    "Address=0x%x\n", sgc->Flags, sgc->Length,
-			    sgc->NextChainOffset, (u_int)sgc->Address);
+			    sgc->NextChainOffset, sgc->Address);
 			if (chain == NULL)
 				chain = TAILQ_FIRST(&cm->cm_chain_list);
 			else
