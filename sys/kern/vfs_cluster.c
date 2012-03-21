@@ -217,9 +217,26 @@ cluster_readx(struct vnode *vp, off_t filesize, off_t loffset,
 		 */
 		if (i >= maxra)
 			return 0;
-		maxra -= i;
+
+		/*
+		 * Calculate where to start the read-ahead and how much
+		 * to do.  Generally speaking we want to read-ahead by
+		 * (maxra) when we've found a read-ahead mark.  We do
+		 * not want to reduce maxra here as it will cause
+		 * successive read-ahead I/O's to be smaller and smaller.
+		 *
+		 * However, we have to make sure we don't break the
+		 * filesize limitation for the clustered operation.
+		 */
 		loffset += i * blksize;
 		reqbp = bp = NULL;
+
+		if (loffset >= filesize)
+			return 0;
+		if (loffset + maxra * blksize > filesize) {
+			maxreq = filesize - loffset;
+			maxra = (int)(maxreq / blksize);
+		}
 	} else {
 		__debugvar off_t firstread = bp->b_loffset;
 		int nblks;
@@ -504,9 +521,11 @@ cluster_rbuild(struct vnode *vp, off_t filesize, off_t loffset, off_t doffset,
 			}
 
 			/*
-			 * Set a read-ahead mark as appropriate
+			 * Set a read-ahead mark as appropriate.  Always
+			 * set the read-ahead mark at (run - 1).  It is
+			 * unclear why we were also setting it at i == 1.
 			 */
-			if (i == 1 || i == (run - 1))
+			if (/*i == 1 ||*/ i == (run - 1))
 				cluster_setram(tbp);
 
 			/*
