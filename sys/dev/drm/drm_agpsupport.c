@@ -704,7 +704,9 @@ static DRM_AGP_MEM *drm_agp_alloc_given(DRM_AGP_BRIDGE_DATA_T bridge,
 
 /* QUESTION: Should one use PAGE_SHIFT or AGP_PAGE_SHIFT? */
 /* On DragonFly AGP_PAGE_SHIFT is defined to be 12 */
+#if 0 /* UNIMPLEMENTED */
 	handle->memory = agp_alloc_given(handle->bridge, type, pages << AGP_PAGE_SHIFT, object);
+#endif
 	return handle;
 }
 
