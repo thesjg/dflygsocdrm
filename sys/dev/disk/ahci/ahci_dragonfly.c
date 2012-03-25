@@ -257,7 +257,7 @@ ahci_os_start_port(struct ahci_port *ap)
 	char name[16];
 
 	atomic_set_int(&ap->ap_signal, AP_SIGF_INIT | AP_SIGF_THREAD_SYNC);
-	lockinit(&ap->ap_lock, "ahcipo", 0, 0);
+	lockinit(&ap->ap_lock, "ahcipo", 0, LK_CANRECURSE);
 	lockinit(&ap->ap_sim_lock, "ahcicam", 0, LK_CANRECURSE);
 	lockinit(&ap->ap_sig_lock, "ahport", 0, 0);
 	sysctl_ctx_init(&ap->sysctl_ctx);
@@ -321,8 +321,8 @@ ahci_os_signal_port_thread(struct ahci_port *ap, int mask)
 {
 	lockmgr(&ap->ap_sig_lock, LK_EXCLUSIVE);
 	atomic_set_int(&ap->ap_signal, mask);
-	wakeup(&ap->ap_thread);
 	lockmgr(&ap->ap_sig_lock, LK_RELEASE);
+	wakeup(&ap->ap_thread);
 }
 
 /*
@@ -396,15 +396,15 @@ ahci_port_thread(void *arg)
 	 */
 	mask = ap->ap_signal;
 	while ((mask & AP_SIGF_STOP) == 0) {
-		atomic_clear_int(&ap->ap_signal, mask);
 		ahci_port_thread_core(ap, mask);
 		lockmgr(&ap->ap_sig_lock, LK_EXCLUSIVE);
 		if (ap->ap_signal == 0) {
 			lksleep(&ap->ap_thread, &ap->ap_sig_lock, 0,
 				"ahport", 0);
 		}
-		lockmgr(&ap->ap_sig_lock, LK_RELEASE);
 		mask = ap->ap_signal;
+		atomic_clear_int(&ap->ap_signal, mask);
+		lockmgr(&ap->ap_sig_lock, LK_RELEASE);
 	}
 	ap->ap_thread = NULL;
 }
