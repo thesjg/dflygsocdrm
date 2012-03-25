@@ -71,8 +71,6 @@ enum {
 	CHIP_G33,	/* G33/Q33/Q35 */
 	CHIP_IGD,	/* G33 like IGD */
 	CHIP_G4X,	/* G45/Q45 */
-	CHIP_IRONLAKE,	/* Ironlake */
-	CHIP_GEN6,	/* Sandybridge */
 };
 
 /* The i810 through i855 have the registers at BAR 1, and the GATT gets
@@ -183,24 +181,6 @@ static const struct agp_i810_match {
 	    "Intel IGD SVGA controller"},
 	{0xA0118086, CHIP_IGD, 0x00010000,
 	    "Intel IGD SVGA controller"},
-	{0x00428086, CHIP_IRONLAKE, 0x00020000,
-	    "Intel Ironlake D SVGA controller"},
-	{0x00468086, CHIP_IRONLAKE, 0x00020000,
-	    "Intel Ironlake M SVGA controller"},
-	{0x01028086, CHIP_GEN6, 0x00020000,
-	    "Intel Sandybridge D SVGA controller"},
-	{0x01128086, CHIP_GEN6, 0x00020000,
-	    "Intel Sandybridge D SVGA controller"},
-	{0x01228086, CHIP_GEN6, 0x00020000,
-	    "Intel Sandybridge D SVGA controller"},
-	{0x01068086, CHIP_GEN6, 0x00020000,
-	    "Intel Sandybridge M SVGA controller"},
-	{0x01168086, CHIP_GEN6, 0x00020000,
-	    "Intel Sandybridge M SVGA controller"},
-	{0x01268086, CHIP_GEN6, 0x00020000,
-	    "Intel Sandybridge M SVGA controller"},
-	{0x010A8086, CHIP_GEN6, 0x00020000,
-	    "Intel Sandybridge D SVGA controller"},
 	{0, 0, 0, NULL}
 };
 
@@ -312,8 +292,6 @@ agp_i810_probe(device_t dev)
 	case CHIP_G33:
 	case CHIP_IGD:
 	case CHIP_G4X:
-	case CHIP_IRONLAKE:
-	case CHIP_GEN6:
 		deven = pci_read_config(bdev, AGP_I915_DEVEN, 4);
 		if ((deven & AGP_I915_DEVEN_D2F0) ==
 		    AGP_I915_DEVEN_D2F0_DISABLED) {
@@ -381,8 +359,6 @@ agp_i810_dump_regs(device_t dev)
 	case CHIP_G33:
 	case CHIP_IGD:
 	case CHIP_G4X:
-	case CHIP_IRONLAKE:
-	case CHIP_GEN6:
 		device_printf(dev, "AGP_I855_GCC1: 0x%02x\n",
 		    pci_read_config(sc->bdev, AGP_I855_GCC1, 1));
 		device_printf(dev, "AGP_I915_MSAC: 0x%02x\n",
@@ -423,8 +399,6 @@ agp_i810_attach(device_t dev)
 		break;
 	case CHIP_I965:
 	case CHIP_G4X:
-	case CHIP_IRONLAKE:
-	case CHIP_GEN6:
 		sc->sc_res_spec = agp_i965_res_spec;
 		agp_set_aperture_resource(dev, AGP_I915_GMADR);
 		break;
@@ -436,7 +410,6 @@ agp_i810_attach(device_t dev)
 
 	if (sc->chiptype != CHIP_I965 && sc->chiptype != CHIP_G33 &&
 	    sc->chiptype != CHIP_IGD && sc->chiptype != CHIP_G4X &&
-	    sc->chiptype != CHIP_IRONLAKE && sc->chiptype != CHIP_GEN6 &&
 	    ptoa((vm_paddr_t)Maxmem) > 0xfffffffful)
 	{
 		device_printf(dev, "agp_i810.c does not support physical "
@@ -526,8 +499,7 @@ agp_i810_attach(device_t dev)
 		gatt->ag_physical = pgtblctl & ~1;
 	} else if (sc->chiptype == CHIP_I855 || sc->chiptype == CHIP_I915 ||
 	    sc->chiptype == CHIP_I965 || sc->chiptype == CHIP_G33 ||
-	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X ||
-	    sc->chiptype == CHIP_IRONLAKE || sc->chiptype == CHIP_GEN6) {
+	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X) {
 		unsigned int gcc1, pgtblctl, stolen, gtt_size;
 
 		/* Stolen memory is set up at the beginning of the aperture by
@@ -591,8 +563,6 @@ agp_i810_attach(device_t dev)
 			break;
 		case CHIP_IGD:
 		case CHIP_G4X:
-		case CHIP_IRONLAKE:
-		case CHIP_GEN6:
 			gtt_size = 0;
 			break;
 		default:
@@ -627,9 +597,7 @@ agp_i810_attach(device_t dev)
 			    sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 48 * 1024;
 			} else {
 				stolen = 0;
@@ -640,9 +608,7 @@ agp_i810_attach(device_t dev)
 			    sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 64 * 1024;
 			} else {
 				stolen = 0;
@@ -652,9 +618,7 @@ agp_i810_attach(device_t dev)
 			if (sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 128 * 1024;
 			} else {
 				stolen = 0;
@@ -664,9 +628,7 @@ agp_i810_attach(device_t dev)
 			if (sc->chiptype == CHIP_I965 ||
 			    sc->chiptype == CHIP_G33 ||
 			    sc->chiptype == CHIP_IGD ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 256 * 1024;
 			} else {
 				stolen = 0;
@@ -674,9 +636,7 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_96M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 96 * 1024;
 			} else {
 				stolen = 0;
@@ -684,9 +644,7 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_160M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 160 * 1024;
 			} else {
 				stolen = 0;
@@ -694,9 +652,7 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_224M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 224 * 1024;
 			} else {
 				stolen = 0;
@@ -704,9 +660,7 @@ agp_i810_attach(device_t dev)
 			break;
 		case AGP_G4X_GCC1_GMS_STOLEN_352M:
 			if (sc->chiptype == CHIP_I965 ||
-			    sc->chiptype == CHIP_G4X ||
-			    sc->chiptype == CHIP_IRONLAKE ||
-			    sc->chiptype == CHIP_GEN6) {
+			    sc->chiptype == CHIP_G4X) {
 				stolen = 352 * 1024;
 			} else {
 				stolen = 0;
@@ -844,8 +798,6 @@ agp_i810_set_aperture(device_t dev, u_int32_t aperture)
 	case CHIP_G33:
 	case CHIP_IGD:
 	case CHIP_G4X:
-	case CHIP_IRONLAKE:
-	case CHIP_GEN6:
 		return agp_generic_set_aperture(dev, aperture);
 	}
 
@@ -865,8 +817,7 @@ agp_i810_write_gtt_entry(device_t dev, int offset, vm_offset_t physical,
 
 	pte = (u_int32_t)physical | 1;
 	if (sc->chiptype == CHIP_I965 || sc->chiptype == CHIP_G33 ||
-	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X ||
-	    sc->chiptype == CHIP_IRONLAKE || sc->chiptype == CHIP_GEN6) {
+	    sc->chiptype == CHIP_IGD || sc->chiptype == CHIP_G4X) {
 		pte |= (physical & 0x0000000f00000000ull) >> 28;
 	} else {
 		/* If we do actually have memory above 4GB on an older system,
@@ -895,8 +846,6 @@ agp_i810_write_gtt_entry(device_t dev, int offset, vm_offset_t physical,
 		    (offset >> AGP_PAGE_SHIFT) * 4 + (512 * 1024), pte);
 		break;
 	case CHIP_G4X:
-	case CHIP_IRONLAKE:
-	case CHIP_GEN6:
 		bus_write_4(sc->sc_res[0],
 		    (offset >> AGP_PAGE_SHIFT) * 4 + (2 * 1024 * 1024), pte);
 		break;
@@ -1021,88 +970,6 @@ agp_i810_alloc_memory(device_t dev, int type, vm_size_t size)
 			m = vm_page_grab(mem->am_obj, 0, VM_ALLOC_NORMAL |
 							 VM_ALLOC_ZERO |
 							 VM_ALLOC_RETRY);
-			vm_page_wire(m);
-			mem->am_physical = VM_PAGE_TO_PHYS(m);
-			vm_page_wakeup(m);
-		} else {
-			/* Our allocation is already nicely wired down for us.
-			 * Just grab the physical address.
-			 */
-			mem->am_physical = vtophys(sc->argb_cursor);
-		}
-	} else {
-		mem->am_physical = 0;
-	}
-
-	mem->am_offset = 0;
-	mem->am_is_bound = 0;
-	TAILQ_INSERT_TAIL(&sc->agp.as_memory, mem, am_link);
-	sc->agp.as_allocated += size;
-
-	return mem;
-}
-
-static struct agp_memory *
-agp_i810_alloc_given(device_t dev, int type, vm_size_t size, void *handle)
-{
-	struct agp_i810_softc *sc = device_get_softc(dev);
-	struct agp_memory *mem;
-
-	if ((size & (AGP_PAGE_SIZE - 1)) != 0)
-		return 0;
-
-	if (sc->agp.as_allocated + size > sc->agp.as_maxmem)
-		return 0;
-
-	if (type == 1) {
-		/*
-		 * Mapping local DRAM into GATT.
-		 */
-		if ( sc->chiptype != CHIP_I810 )
-			return 0;
-		if (size != sc->dcache_size)
-			return 0;
-	} else if (type == 2) {
-		/*
-		 * Type 2 is the contiguous physical memory type, that hands
-		 * back a physical address.  This is used for cursors on i810.
-		 * Hand back as many single pages with physical as the user
-		 * wants, but only allow one larger allocation (ARGB cursor)
-		 * for simplicity.
-		 */
-		if (size != AGP_PAGE_SIZE) {
-			if (sc->argb_cursor != NULL)
-				return 0;
-
-			/* Allocate memory for ARGB cursor, if we can. */
-			sc->argb_cursor = contigmalloc(size, M_AGP,
-			   0, 0, ~0, PAGE_SIZE, 0);
-			if (sc->argb_cursor == NULL)
-				return 0;
-		}
-	}
-
-	mem = kmalloc(sizeof *mem, M_AGP, M_INTWAIT);
-	mem->am_id = sc->agp.as_nextid++;
-	mem->am_size = size;
-	mem->am_type = type;
-	if (type != 1 && (type != 2 || size == AGP_PAGE_SIZE))
-		mem->am_obj = (vm_object_t)handle; 
-	else
-		mem->am_obj = 0;
-
-	if (type == 2) {
-		if (size == AGP_PAGE_SIZE) {
-			/*
-			 * Allocate and wire down the page now so that we can
-			 * get its physical address.
-			 */
-			vm_page_t m;
-	
-			m = vm_page_grab(mem->am_obj, 0, 
-					 VM_ALLOC_NORMAL|VM_ALLOC_ZERO|VM_ALLOC_RETRY);
-			if ((m->flags & PG_ZERO) == 0)
-				vm_page_zero_fill(m);
 			vm_page_wire(m);
 			mem->am_physical = VM_PAGE_TO_PHYS(m);
 			vm_page_wakeup(m);
@@ -1260,7 +1127,6 @@ static device_method_t agp_i810_methods[] = {
 	DEVMETHOD(agp_flush_tlb,	agp_i810_flush_tlb),
 	DEVMETHOD(agp_enable,		agp_i810_enable),
 	DEVMETHOD(agp_alloc_memory,	agp_i810_alloc_memory),
-	DEVMETHOD(agp_alloc_given,	agp_i810_alloc_given),
 	DEVMETHOD(agp_free_memory,	agp_i810_free_memory),
 	DEVMETHOD(agp_bind_memory,	agp_i810_bind_memory),
 	DEVMETHOD(agp_unbind_memory,	agp_i810_unbind_memory),

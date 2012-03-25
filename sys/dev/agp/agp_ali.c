@@ -249,7 +249,6 @@ static device_method_t agp_ali_methods[] = {
 	DEVMETHOD(agp_flush_tlb,	agp_ali_flush_tlb),
 	DEVMETHOD(agp_enable,		agp_generic_enable),
 	DEVMETHOD(agp_alloc_memory,	agp_generic_alloc_memory),
-	DEVMETHOD(agp_alloc_given,	agp_generic_alloc_given),
 	DEVMETHOD(agp_free_memory,	agp_generic_free_memory),
 	DEVMETHOD(agp_bind_memory,	agp_generic_bind_memory),
 	DEVMETHOD(agp_unbind_memory,	agp_generic_unbind_memory),

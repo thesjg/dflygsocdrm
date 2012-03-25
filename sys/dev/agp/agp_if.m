@@ -106,25 +106,6 @@ METHOD struct agp_memory * alloc_memory {
 };
 
 #
-# Allocate memory of a given type. The type is a chipset-specific
-# code which is used by certain integrated agp graphics chips
-# (basically just the i810 for now) to access special features of
-# the chipset. An opaque handle representing the memory region is
-# returned and can be used as an argument to free_memory, bind_memory 
-# and unbind_memory.
-#
-# The size is specified in bytes but must be a multiple of the AGP
-# page size.
-#
-# This method used by drm allows specifying a pre-allocated vm_object.
-METHOD struct agp_memory * alloc_given {
-	device_t	dev;
-	int		type;
-	vm_size_t	size;
-	void		*handle;
-};
-
-#
 # Free a memory region previously allocated with alloc_memory. Return
 # EBUSY if the memory is bound.
 #

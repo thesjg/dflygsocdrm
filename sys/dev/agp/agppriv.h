@@ -102,8 +102,6 @@ int			agp_generic_set_aperture(device_t dev,
 int			agp_generic_enable(device_t dev, u_int32_t mode);
 struct agp_memory      *agp_generic_alloc_memory(device_t dev, int type,
 						 vm_size_t size);
-struct agp_memory      *agp_generic_alloc_given(device_t dev, int type,
-						 vm_size_t size, void *handle);
 int			agp_generic_free_memory(device_t dev,
 						struct agp_memory *mem);
 int			agp_generic_bind_memory(device_t dev,

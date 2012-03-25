@@ -482,38 +482,6 @@ agp_generic_alloc_memory(device_t dev, int type, vm_size_t size)
 	return mem;
 }
 
-struct agp_memory *
-agp_generic_alloc_given(device_t dev, int type, vm_size_t size, void *handle)
-{
-	struct agp_softc *sc = device_get_softc(dev);
-	struct agp_memory *mem;
-
-	if ((size & (AGP_PAGE_SIZE - 1)) != 0)
-		return 0;
-
-	if (sc->as_allocated + size > sc->as_maxmem)
-		return 0;
-
-	if (type != 0) {
-		kprintf("agp_generic_alloc_memory: unsupported type %d\n",
-			type);
-		return 0;
-	}
-
-	mem = kmalloc(sizeof *mem, M_AGP, M_INTWAIT);
-	mem->am_id = sc->as_nextid++;
-	mem->am_size = size;
-	mem->am_type = 0;
-	mem->am_obj = (vm_object_t)handle;
-	mem->am_physical = 0;
-	mem->am_offset = 0;
-	mem->am_is_bound = 0;
-	TAILQ_INSERT_TAIL(&sc->as_memory, mem, am_link);
-	sc->as_allocated += size;
-
-	return mem;
-}
-
 int
 agp_generic_free_memory(device_t dev, struct agp_memory *mem)
 {
@@ -947,11 +915,6 @@ agp_enable(device_t dev, u_int32_t mode)
 void *agp_alloc_memory(device_t dev, int type, vm_size_t bytes)
 {
 	return  (void *) AGP_ALLOC_MEMORY(dev, type, bytes);
-}
-
-void *agp_alloc_given(device_t dev, int type, vm_size_t bytes, void *handle)
-{
-	return  (void *) AGP_ALLOC_GIVEN(dev, type, bytes, handle);
 }
 
 void agp_free_memory(device_t dev, void *handle)
