@@ -49,7 +49,6 @@ extern	u_int	via_feature_rng;
 extern	u_int	via_feature_xcrypt;
 extern	u_int	amd_feature;
 extern	u_int	amd_feature2;
-extern	u_int	cpu_clflush_line_size;
 extern	u_int	cpu_fxsr;
 extern	u_int	cpu_high;
 extern	u_int	cpu_id;
@@ -102,9 +101,5 @@ void	syscall2 (struct trapframe *);
 void    minidumpsys(struct dumperinfo *);
 void	dump_add_page(vm_paddr_t);
 void	dump_drop_page(vm_paddr_t);
-#if 0
-void	initializecpu(void);
-#endif
-void	initializecpucache(void);
 
 #endif /* !_MACHINE_MD_VAR_H_ */

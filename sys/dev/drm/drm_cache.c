@@ -60,7 +60,8 @@ drm_clflush_page(DRM_PAGE_T page)
 #ifdef __linux__
 	for (i = 0; i < PAGE_SIZE; i += boot_cpu_data.x86_clflush_size)
 		clflush(page_virtual + i);
-#else
+#endif
+#if 0 /* UNIMPLEMENTED */
 	for (i = 0; i < PAGE_SIZE; i += cpu_clflush_line_size)
 		clflush((unsigned long)(page_virtual + i));
 #endif
@@ -108,7 +109,8 @@ drm_clflush_pages(DRM_PAGE_T pages[], unsigned long num_pages)
 		drm_cache_flush_clflush(pages, num_pages);
 		return;
 	}
-#else
+#endif
+#if 0 /* UNIMPLEMENTED */
 	if (cpu_feature & CPUID_CLFSH) {
 		drm_cache_flush_clflush(pages, num_pages);
 		return;

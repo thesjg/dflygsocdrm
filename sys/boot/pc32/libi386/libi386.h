@@ -96,8 +96,6 @@ extern vm_offset_t	memtop;
 
 void	biosacpi_detect(void);
 
-void	smbios_detect(void);
-
 void	gateA20(void);
 
 int	i386_autoload(void);

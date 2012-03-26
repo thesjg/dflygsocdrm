@@ -240,9 +240,6 @@ main(void)
     /* detect ACPI for future reference */
     biosacpi_detect();
 
-    /* detect SMBIOS for future reference */
-    smbios_detect();
-
     /* enable EHCI */
     setenv("ehci_load", "YES", 1);
 

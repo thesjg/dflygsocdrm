@@ -1874,7 +1874,6 @@ opencrypto/skipjack.c			optional crypto
 opencrypto/xform.c			optional crypto
 dev/crypto/hifn/hifn7751.c		optional hifn
 dev/crypto/ubsec/ubsec.c		optional ubsec
-#dev/drm/drmtest/drmtest_drv.c		optional drmtest drm
 dev/drm/drm_porting_layer.c		optional drm
 dev/drm/drm_porting_subr_hash.c		optional drm
 dev/drm/ttm/ttm_agp_backend.c		optional ttmdrm drm
