@@ -167,11 +167,6 @@ int tcp_aggregate_acks = 1;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, aggregate_acks, CTLFLAG_RW,
     &tcp_aggregate_acks, 0, "Aggregate built-up acks into one ack");
 
-int tcp_do_rfc3390 = 1;
-SYSCTL_INT(_net_inet_tcp, OID_AUTO, rfc3390, CTLFLAG_RW,
-    &tcp_do_rfc3390, 0,
-    "Enable RFC 3390 (Increasing TCP's Initial Congestion Window)");
-
 static int tcp_do_eifel_detect = 1;
 SYSCTL_INT(_net_inet_tcp, OID_AUTO, eifel, CTLFLAG_RW,
     &tcp_do_eifel_detect, 0, "Eifel detection algorithm (RFC 3522)");
@@ -343,8 +338,9 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 			tp->encloseblk.rblk_start = p->tqe_th->th_seq;
 			if (i >= *tlenp) {
 				/* preceding encloses incoming segment */
-				tp->encloseblk.rblk_end = p->tqe_th->th_seq +
-				    p->tqe_len;
+				tp->encloseblk.rblk_end = TCP_SACK_BLKEND(
+				    p->tqe_th->th_seq + p->tqe_len,
+				    p->tqe_th->th_flags);
 				tcpstat.tcps_rcvduppack++;
 				tcpstat.tcps_rcvdupbyte += *tlenp;
 				m_freem(m);
@@ -362,8 +358,8 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 			*tlenp -= i;
 			th->th_seq += i;
 			/* incoming segment end is enclosing block end */
-			tp->encloseblk.rblk_end = th->th_seq + *tlenp +
-			    ((th->th_flags & TH_FIN) != 0);
+			tp->encloseblk.rblk_end = TCP_SACK_BLKEND(
+			    th->th_seq + *tlenp, th->th_flags);
 			/* trim end of reported D-SACK block */
 			tp->reportblk.rblk_end = th->th_seq;
 		}
@@ -378,6 +374,7 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	while (q) {
 		tcp_seq_diff_t i = (th->th_seq + *tlenp) - q->tqe_th->th_seq;
 		tcp_seq qend = q->tqe_th->th_seq + q->tqe_len;
+		tcp_seq qend_sack = TCP_SACK_BLKEND(qend, q->tqe_th->th_flags);
 		struct tseg_qent *nq;
 
 		if (i <= 0)
@@ -389,9 +386,9 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 			tp->reportblk.rblk_start = q->tqe_th->th_seq;
 		}
 		if ((tp->t_flags & TF_ENCLOSESEG) &&
-		    SEQ_GT(qend, tp->encloseblk.rblk_end)) {
+		    SEQ_GT(qend_sack, tp->encloseblk.rblk_end)) {
 			/* extend enclosing block if one exists */
-			tp->encloseblk.rblk_end = qend;
+			tp->encloseblk.rblk_end = qend_sack;
 		}
 		if (i < q->tqe_len) {
 			q->tqe_th->th_seq += i;
@@ -416,18 +413,19 @@ tcp_reass(struct tcpcb *tp, struct tcphdr *th, int *tlenp, struct mbuf *m)
 	/* check if can coalesce with following segment */
 	if (q != NULL && (th->th_seq + *tlenp == q->tqe_th->th_seq)) {
 		tcp_seq tend = te->tqe_th->th_seq + te->tqe_len;
+		tcp_seq tend_sack = TCP_SACK_BLKEND(tend, te->tqe_th->th_flags);
 
 		te->tqe_len += q->tqe_len;
 		if (q->tqe_th->th_flags & TH_FIN)
 			te->tqe_th->th_flags |= TH_FIN;
 		m_cat(te->tqe_m, q->tqe_m);
-		tp->encloseblk.rblk_end = tend;
+		tp->encloseblk.rblk_end = tend_sack;
 		/*
 		 * When not reporting a duplicate segment, use
 		 * the larger enclosing block as the SACK block.
 		 */
 		if (!(tp->t_flags & TF_DUPSEG))
-			tp->reportblk.rblk_end = tend;
+			tp->reportblk.rblk_end = tend_sack;
 		LIST_REMOVE(q, tqe_q);
 		kfree(q, M_TSEGQ);
 		atomic_add_int(&tcp_reass_qsize, -1);
@@ -1668,9 +1666,8 @@ after_listen:
 		if (TCP_DO_SACK(tp)) {
 			/* Report duplicate segment at head of packet. */
 			tp->reportblk.rblk_start = th->th_seq;
-			tp->reportblk.rblk_end = th->th_seq + tlen;
-			if (thflags & TH_FIN)
-				++tp->reportblk.rblk_end;
+			tp->reportblk.rblk_end = TCP_SACK_BLKEND(
+			    th->th_seq + tlen, thflags);
 			if (SEQ_GT(tp->reportblk.rblk_end, tp->rcv_nxt))
 				tp->reportblk.rblk_end = tp->rcv_nxt;
 			tp->t_flags |= (TF_DUPSEG | TF_SACKLEFT | TF_ACKNOW);
@@ -1983,16 +1980,10 @@ fastretransmit:
 				    tp->t_maxseg;
 				tcp_output(tp);
 
-				/*
-				 * Other acks may have been processed,
-				 * snd_nxt cannot be reset to a value less
-				 * then snd_una.
-				 */
 				if (SEQ_LT(oldsndnxt, oldsndmax)) {
-				    if (SEQ_GT(oldsndnxt, tp->snd_una))
+					KASSERT(SEQ_GEQ(oldsndnxt, tp->snd_una),
+					    ("snd_una moved in other threads"));
 					tp->snd_nxt = oldsndnxt;
-				    else
-					tp->snd_nxt = tp->snd_una;
 				}
 				tp->snd_cwnd = oldcwnd;
 				sent = tp->snd_max - oldsndmax;
@@ -2133,13 +2124,8 @@ process_ACK:
 
 		/*
 		 * Update window information.
-		 * Don't look at window if no ACK:
-		 * TAC's send garbage on first SYN.
 		 */
-		if (SEQ_LT(tp->snd_wl1, th->th_seq) ||
-		    (tp->snd_wl1 == th->th_seq &&
-		     (SEQ_LT(tp->snd_wl2, th->th_ack) ||
-		      (tp->snd_wl2 == th->th_ack && tiwin > tp->snd_wnd)))) {
+		if (acceptable_window_update(tp, th, tiwin)) {
 			/* keep track of pure window updates */
 			if (tlen == 0 && tp->snd_wl2 == th->th_ack &&
 			    tiwin > tp->snd_wnd)
@@ -2428,8 +2414,8 @@ dodata:							/* XXX */
 			if (!(tp->t_flags & TF_DUPSEG)) {
 				/* Initialize SACK report block. */
 				tp->reportblk.rblk_start = th->th_seq;
-				tp->reportblk.rblk_end = th->th_seq + tlen +
-				    ((thflags & TH_FIN) != 0);
+				tp->reportblk.rblk_end = TCP_SACK_BLKEND(
+				    th->th_seq + tlen, thflags);
 			}
 			thflags = tcp_reass(tp, th, &tlen, m);
 			tp->t_flags |= TF_ACKNOW;
@@ -2522,6 +2508,7 @@ dodata:							/* XXX */
 	 */
 	if (needoutput || (tp->t_flags & TF_ACKNOW))
 		tcp_output(tp);
+	tcp_sack_report_cleanup(tp);
 	return(IPPROTO_DONE);
 
 dropafterack:
@@ -2553,6 +2540,7 @@ dropafterack:
 	m_freem(m);
 	tp->t_flags |= TF_ACKNOW;
 	tcp_output(tp);
+	tcp_sack_report_cleanup(tp);
 	return(IPPROTO_DONE);
 
 dropwithreset:
@@ -2599,6 +2587,8 @@ dropwithreset:
 		tcp_respond(tp, mtod(m, void *), th, m, th->th_seq + tlen,
 			    (tcp_seq)0, TH_RST | TH_ACK);
 	}
+	if (tp != NULL)
+		tcp_sack_report_cleanup(tp);
 	return(IPPROTO_DONE);
 
 drop:
@@ -2610,6 +2600,8 @@ drop:
 		tcp_trace(TA_DROP, ostate, tp, tcp_saveipgen, &tcp_savetcp, 0);
 #endif
 	m_freem(m);
+	if (tp != NULL)
+		tcp_sack_report_cleanup(tp);
 	return(IPPROTO_DONE);
 }
 
@@ -3023,13 +3015,11 @@ tcp_mss(struct tcpcb *tp, int offer)
 	}
 
 	/*
-	 * Set the slow-start flight size depending on whether this
-	 * is a local network or not.
+	 * Set the slow-start flight size
+	 *
+	 * NOTE: t_maxseg must have been configured!
 	 */
-	if (tcp_do_rfc3390)
-		tp->snd_cwnd = min(4 * mss, max(2 * mss, 4380));
-	else
-		tp->snd_cwnd = mss;
+	tp->snd_cwnd = tcp_initial_window(tp);
 
 	if (rt->rt_rmx.rmx_ssthresh) {
 		/*
@@ -3215,15 +3205,7 @@ tcp_established(struct tcpcb *tp)
 	tp->t_state = TCPS_ESTABLISHED;
 	tcp_callout_reset(tp, tp->tt_keep, tcp_getkeepidle(tp), tcp_timer_keep);
 
-	if (tp->t_flags & TF_SYN_WASLOST) {
-		/*
-		 * RFC3390:
-		 * "If the SYN or SYN/ACK is lost, the initial window used by
-		 *  a sender after a correctly transmitted SYN MUST be one
-		 *  segment consisting of MSS bytes."
-		 */
-		tp->snd_cwnd = tp->t_maxseg;
-
+	if (tp->t_rxtsyn > 0) {
 		/*
 		 * RFC6298:
 		 * "If the timer expires awaiting the ACK of a SYN segment

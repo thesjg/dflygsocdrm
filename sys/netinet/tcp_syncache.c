@@ -151,10 +151,11 @@ static struct syncache *syncookie_lookup(struct in_conninfo *,
 
 /*
  * Transmit the SYN,ACK fewer times than TCP_MAXRXTSHIFT specifies.
- * 3 retransmits corresponds to a timeout of (1 + 2 + 4 + 8 == 15) seconds,
- * the odds are that the user has given up attempting to connect by then.
+ * 4 retransmits corresponds to a timeout of (3 + 3 + 3 + 3 + 3 == 15) seconds
+ * or (1 + 1 + 2 + 4 + 8 == 16) seconds if RFC6298 is used, the odds are that
+ * the user has given up attempting to connect by then.
  */
-#define SYNCACHE_MAXREXMTS		3
+#define SYNCACHE_MAXREXMTS		4
 
 /* Arbitrary values */
 #define TCP_SYNCACHE_HASHSIZE		512
@@ -239,25 +240,39 @@ static MALLOC_DEFINE(M_SYNCACHE, "syncache", "TCP syncache");
 
 #define ENDPTS6_EQ(a, b) (memcmp(a, b, sizeof(*a)) == 0)
 
+static __inline int
+syncache_rto(int slot)
+{
+	if (tcp_low_rtobase)
+		return (TCPTV_RTOBASE * tcp_syn_backoff_low[slot]);
+	else
+		return (TCPTV_RTOBASE * tcp_syn_backoff[slot]);
+}
+
 static __inline void
 syncache_timeout(struct tcp_syncache_percpu *syncache_percpu,
 		 struct syncache *sc, int slot)
 {
+	int rto;
+
 	if (slot > 0) {
 		/*
-		 * Record that SYN|ACK was lost.
+		 * Record the time that we spent in SYN|ACK
+		 * retransmition.
+		 *
 		 * Needed by RFC3390 and RFC6298.
 		 */
-		sc->sc_flags |= SCF_SYN_WASLOST;
+		sc->sc_rxtused += syncache_rto(slot - 1);
 	}
 	sc->sc_rxtslot = slot;
-	sc->sc_rxttime = ticks + TCPTV_RTOBASE * tcp_backoff[slot];
+
+	rto = syncache_rto(slot);
+	sc->sc_rxttime = ticks + rto;
+
 	TAILQ_INSERT_TAIL(&syncache_percpu->timerq[slot], sc, sc_timerq);
 	if (!callout_active(&syncache_percpu->tt_timerq[slot])) {
-		callout_reset(&syncache_percpu->tt_timerq[slot],
-			      TCPTV_RTOBASE * tcp_backoff[slot],
-			      syncache_timer,
-			      &syncache_percpu->mrec[slot]);
+		callout_reset(&syncache_percpu->tt_timerq[slot], rto,
+		    syncache_timer, &syncache_percpu->mrec[slot]);
 	}
 }
 
@@ -856,14 +871,13 @@ syncache_socket(struct syncache *sc, struct socket *lso, struct mbuf *m)
 	}
 	if (sc->sc_flags & SCF_SACK_PERMITTED)
 		tp->t_flags |= TF_SACK_PERMITTED;
-	if (sc->sc_flags & SCF_SYN_WASLOST)
-		tp->t_flags |= TF_SYN_WASLOST;
 
 #ifdef TCP_SIGNATURE
 	if (sc->sc_flags & SCF_SIGNATURE)
 		tp->t_flags |= TF_SIGNATURE;
 #endif /* TCP_SIGNATURE */
 
+	tp->t_rxtsyn = sc->sc_rxtused;
 	tcp_mss(tp, sc->sc_peer_mss);
 
 	/*
