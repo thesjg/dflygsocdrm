@@ -64,6 +64,13 @@
  * SUCH DAMAGE.
  */
 
+/*
+ * NOTE:
+ *
+ * MSI-X MUST NOT be enabled on 82574:
+ *   <<82574 specification update>> errata #15
+ */
+
 #include "opt_ifpoll.h"
 #include "opt_rss.h"
 #include "opt_emx.h"
@@ -226,6 +233,7 @@ static void	emx_set_multi(struct emx_softc *);
 static void	emx_update_link_status(struct emx_softc *);
 static void	emx_smartspeed(struct emx_softc *);
 static void	emx_set_itr(struct emx_softc *, uint32_t);
+static void	emx_disable_aspm(struct emx_softc *);
 
 static void	emx_print_debug_info(struct emx_softc *);
 static void	emx_print_nvm_info(struct emx_softc *);
@@ -1754,6 +1762,7 @@ emx_reset(struct emx_softc *sc)
 	/* Issue a global reset */
 	e1000_reset_hw(&sc->hw);
 	E1000_WRITE_REG(&sc->hw, E1000_WUC, 0);
+	emx_disable_aspm(sc);
 
 	if (e1000_init_hw(&sc->hw) < 0) {
 		device_printf(dev, "Hardware Initialization Failed\n");
@@ -2828,7 +2837,6 @@ emx_rxeof(struct emx_softc *sc, int ring_idx, int count)
 	emx_rxdesc_t *current_desc;
 	struct mbuf *mp;
 	int i;
-	struct mbuf_chain chain[MAXCPU];
 
 	i = rdata->next_rx_desc_to_check;
 	current_desc = &rdata->rx_desc[i];
@@ -2836,8 +2844,6 @@ emx_rxeof(struct emx_softc *sc, int ring_idx, int count)
 
 	if (!(staterr & E1000_RXD_STAT_DD))
 		return;
-
-	ether_input_chain_init(chain);
 
 	while ((staterr & E1000_RXD_STAT_DD) && count != 0) {
 		struct pktinfo *pi = NULL, pi0;
@@ -2940,7 +2946,7 @@ discard:
 		}
 
 		if (m != NULL)
-			ether_input_chain(ifp, m, pi, chain);
+			ether_input_pkt(ifp, m, pi);
 
 		/* Advance our pointers to the next descriptor. */
 		if (++i == rdata->num_rx_desc)
@@ -2950,8 +2956,6 @@ discard:
 		staterr = le32toh(current_desc->rxd_staterr);
 	}
 	rdata->next_rx_desc_to_check = i;
-
-	ether_input_dispatch(chain);
 
 	/* Advance the E1000's Receive Queue "Tail Pointer". */
 	if (--i < 0)
@@ -3833,4 +3837,40 @@ emx_set_itr(struct emx_softc *sc, uint32_t itr)
 		for (i = 0; i < 4; ++i)
 			E1000_WRITE_REG(&sc->hw, E1000_EITR_82574(i), itr);
 	}
+}
+
+/*
+ * Disable the L0s, 82574L Errata #20
+ */
+static void
+emx_disable_aspm(struct emx_softc *sc)
+{
+	uint16_t link_cap, link_ctrl;
+	uint8_t pcie_ptr, reg;
+	device_t dev = sc->dev;
+
+	switch (sc->hw.mac.type) {
+	case e1000_82573:
+	case e1000_82574:
+		break;
+
+	default:
+		return;
+	}
+
+	pcie_ptr = pci_get_pciecap_ptr(dev);
+	if (pcie_ptr == 0)
+		return;
+
+	link_cap = pci_read_config(dev, pcie_ptr + PCIER_LINKCAP, 2);
+	if ((link_cap & PCIEM_LNKCAP_ASPM_MASK) == 0)
+		return;
+
+	if (bootverbose)
+		if_printf(&sc->arpcom.ac_if, "disable L0s\n");
+
+	reg = pcie_ptr + PCIER_LINKCTRL;
+	link_ctrl = pci_read_config(dev, reg, 2);
+	link_ctrl &= ~PCIEM_LNKCTL_ASPM_L0S;
+	pci_write_config(dev, reg, link_ctrl, 2);
 }
