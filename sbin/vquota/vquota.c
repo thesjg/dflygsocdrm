@@ -312,8 +312,8 @@ get_dirsize(char* dirname)
 				unp = unode_insert(file_uid);
 			if ((gnp = RB_FIND(ac_gtree, &ac_groot, &gfind)) == NULL)
 				gnp = gnode_insert(file_gid);
-			unp->uid_chunk[(file_uid & ACCT_CHUNK_MASK)] += file_size;
-			gnp->gid_chunk[(file_gid & ACCT_CHUNK_MASK)] += file_size;
+			unp->uid_chunk[(file_uid & ACCT_CHUNK_MASK)].space += file_size;
+			gnp->gid_chunk[(file_gid & ACCT_CHUNK_MASK)].space += file_size;
 		}
 	}
 	fts_close(fts);
@@ -365,30 +365,30 @@ cmd_check(char* dirname)
 	}
 	RB_FOREACH(unp, ac_utree, &ac_uroot) {
 	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
-		if (unp->uid_chunk[i] != 0) {
+		if (unp->uid_chunk[i].space != 0) {
 		    uid = (unp->left_bits << ACCT_CHUNK_BITS) + i;
 		    print_user(uid);
 		    if (flag_humanize) {
 			humanize_number(hbuf, sizeof(hbuf),
-			unp->uid_chunk[i], "", HN_AUTOSCALE, HN_NOSPACE);
+			unp->uid_chunk[i].space, "", HN_AUTOSCALE, HN_NOSPACE);
 			printf(" %s\n", hbuf);
 		    } else {
-			printf(" %" PRIu64 "\n", unp->uid_chunk[i]);
+			printf(" %" PRIu64 "\n", unp->uid_chunk[i].space);
 		    }
 		}
 	    }
 	}
 	RB_FOREACH(gnp, ac_gtree, &ac_groot) {
 	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
-		if (gnp->gid_chunk[i] != 0) {
+		if (gnp->gid_chunk[i].space != 0) {
 		    gid = (gnp->left_bits << ACCT_CHUNK_BITS) + i;
 		    print_group(gid);
 		    if (flag_humanize) {
 			humanize_number(hbuf, sizeof(hbuf),
-			gnp->gid_chunk[i], "", HN_AUTOSCALE, HN_NOSPACE);
+			gnp->gid_chunk[i].space, "", HN_AUTOSCALE, HN_NOSPACE);
 			printf(" %s\n", hbuf);
 		    } else {
-			printf(" %" PRIu64 "\n", gnp->gid_chunk[i]);
+			printf(" %" PRIu64 "\n", gnp->gid_chunk[i].space);
 		    }
 		}
 	    }
@@ -490,7 +490,7 @@ show_mp(char *path)
 	prop_object_iterator_t	iter;
 	prop_dictionary_t item;
 	uint32_t id;
-	uint64_t space;
+	uint64_t space, limit=0;
 	char hbuf[5];
 
 	args = prop_dictionary_create();
@@ -523,6 +523,7 @@ show_mp(char *path)
 
 	while ((item = prop_object_iterator_next(iter)) != NULL) {
 		rv = prop_dictionary_get_uint64(item, "space used", &space);
+		rv = prop_dictionary_get_uint64(item, "limit", &limit);
 		if (prop_dictionary_get_uint32(item, "uid", &id))
 			print_user(id);
 		else if (prop_dictionary_get_uint32(item, "gid", &id))
@@ -531,9 +532,19 @@ show_mp(char *path)
 			printf("total:");
 		if (flag_humanize) {
 			humanize_number(hbuf, sizeof(hbuf), space, "", HN_AUTOSCALE, HN_NOSPACE);
-			printf(" %s\n", hbuf);
+			printf(" %s", hbuf);
 		} else {
-			printf(" %" PRIu64 "\n", space);
+			printf(" %"PRIu64, space);
+		}
+		if (limit == 0) {
+			printf("\n");
+			continue;
+		}
+		if (flag_humanize) {
+			humanize_number(hbuf, sizeof(hbuf), limit, "", HN_AUTOSCALE, HN_NOSPACE);
+			printf(", limit = %s\n", hbuf);
+		} else {
+			printf(", limit = %"PRIu64"\n", limit);
 		}
 	}
 	prop_object_iterator_release(iter);
@@ -570,24 +581,24 @@ static int cmd_sync(char *dirname)
 
 	RB_FOREACH(unp, ac_utree, &ac_uroot) {
 	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
-		if (unp->uid_chunk[i] != 0) {
+		if (unp->uid_chunk[i].space != 0) {
 		    item = prop_dictionary_create();
 		    (void) prop_dictionary_set_uint32(item, "uid",
 				(unp->left_bits << ACCT_CHUNK_BITS) + i);
 		    (void) prop_dictionary_set_uint64(item, "space used",
-				unp->uid_chunk[i]);
+				unp->uid_chunk[i].space);
 		    prop_array_add_and_rel(args, item);
 		}
 	    }
 	}
 	RB_FOREACH(gnp, ac_gtree, &ac_groot) {
 	    for (i=0; i<ACCT_CHUNK_NIDS; i++) {
-		if (gnp->gid_chunk[i] != 0) {
+		if (gnp->gid_chunk[i].space != 0) {
 		    item = prop_dictionary_create();
 		    (void) prop_dictionary_set_uint32(item, "gid",
 				(gnp->left_bits << ACCT_CHUNK_BITS) + i);
 		    (void) prop_dictionary_set_uint64(item, "space used",
-				gnp->gid_chunk[i]);
+				gnp->gid_chunk[i].space);
 		    prop_array_add_and_rel(args, item);
 		}
 	    }
