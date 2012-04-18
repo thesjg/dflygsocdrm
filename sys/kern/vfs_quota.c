@@ -269,6 +269,62 @@ cmd_set_usage_all(struct mount *mp, prop_array_t args)
 	return 0;
 }
 
+static int
+cmd_set_limit(struct mount *mp, prop_dictionary_t args)
+{
+	uint64_t limit;
+
+	prop_dictionary_get_uint64(args, "limit", &limit);
+
+	spin_lock(&mp->mnt_acct.ac_spin);
+	mp->mnt_acct.ac_limit = limit;
+	spin_unlock(&mp->mnt_acct.ac_spin);
+
+	return 0;
+}
+
+static int
+cmd_set_limit_uid(struct mount *mp, prop_dictionary_t args)
+{
+	uint64_t limit;
+	uid_t uid;
+	struct ac_unode ufind, *unp;
+
+	prop_dictionary_get_uint32(args, "uid", &uid);
+	prop_dictionary_get_uint64(args, "limit", &limit);
+
+	ufind.left_bits = (uid >> ACCT_CHUNK_BITS);
+
+	spin_lock(&mp->mnt_acct.ac_spin);
+	if ((unp = RB_FIND(ac_utree, &mp->mnt_acct.ac_uroot, &ufind)) == NULL)
+		unp = unode_insert(mp, uid);
+	unp->uid_chunk[(uid & ACCT_CHUNK_MASK)].limit = limit;
+	spin_unlock(&mp->mnt_acct.ac_spin);
+
+	return 0;
+}
+
+static int
+cmd_set_limit_gid(struct mount *mp, prop_dictionary_t args)
+{
+	uint64_t limit;
+	gid_t gid;
+	struct ac_gnode gfind, *gnp;
+
+	prop_dictionary_get_uint32(args, "gid", &gid);
+	prop_dictionary_get_uint64(args, "limit", &limit);
+
+	gfind.left_bits = (gid >> ACCT_CHUNK_BITS);
+
+	spin_lock(&mp->mnt_acct.ac_spin);
+	if ((gnp = RB_FIND(ac_gtree, &mp->mnt_acct.ac_groot, &gfind)) == NULL)
+		gnp = gnode_insert(mp, gid);
+	gnp->gid_chunk[(gid & ACCT_CHUNK_MASK)].limit = limit;
+	spin_unlock(&mp->mnt_acct.ac_spin);
+
+	return 0;
+}
+
 int
 sys_vquotactl(struct vquotactl_args *vqa)
 /* const char *path, struct plistref *pref */
@@ -285,6 +341,8 @@ sys_vquotactl(struct vquotactl_args *vqa)
 	struct mount *mp;
 	int error;
 
+	if (!vfs_accounting_enabled)
+		return EOPNOTSUPP;
 	path = vqa->path;
 	error = copyin(vqa->pref, &pref, sizeof(pref));
 	error = prop_dictionary_copyin(&pref, &dict);
@@ -324,6 +382,18 @@ sys_vquotactl(struct vquotactl_args *vqa)
 		error = cmd_set_usage_all(mp, args);
 		goto done;
 	}
+	if (strcmp(cmd, "set limit") == 0) {
+		error = cmd_set_limit(mp, args);
+		goto done;
+	}
+	if (strcmp(cmd, "set limit uid") == 0) {
+		error = cmd_set_limit_uid(mp, args);
+		goto done;
+	}
+	if (strcmp(cmd, "set limit gid") == 0) {
+		error = cmd_set_limit_gid(mp, args);
+		goto done;
+	}
 	return EINVAL;
 
 done:
@@ -337,7 +407,7 @@ done:
 	return error;
 }
 
-/* 
+/*
  * Returns a valid mount point for accounting purposes
  * We cannot simply use vp->v_mount if the vnode belongs
  * to a PFS mount point
@@ -355,4 +425,56 @@ vq_vptomp(struct vnode *vp)
 		/* Not a PFS or a PFS beeing unmounted */
 		return vp->v_mount;
 	}
+}
+
+int
+vq_write_ok(struct mount *mp, uid_t uid, gid_t gid, uint64_t delta)
+{
+	int rv = 1;
+	struct ac_unode ufind, *unp;
+	struct ac_gnode gfind, *gnp;
+	uint64_t space, limit;
+
+	spin_lock(&mp->mnt_acct.ac_spin);
+
+	if (mp->mnt_acct.ac_limit == 0)
+		goto check_uid;
+	if ((mp->mnt_acct.ac_bytes + delta) > mp->mnt_acct.ac_limit) {
+		rv = 0;
+		goto done;
+	}
+
+check_uid:
+	ufind.left_bits = (uid >> ACCT_CHUNK_BITS);
+	if ((unp = RB_FIND(ac_utree, &mp->mnt_acct.ac_uroot, &ufind)) == NULL) {
+		space = 0;
+		limit = 0;
+	} else {
+		space = unp->uid_chunk[(uid & ACCT_CHUNK_MASK)].space;
+		limit = unp->uid_chunk[(uid & ACCT_CHUNK_MASK)].limit;
+	}
+	if (limit == 0)
+		goto check_gid;
+	if ((space + delta) > limit) {
+		rv = 0;
+		goto done;
+	}
+
+check_gid:
+	gfind.left_bits = (gid >> ACCT_CHUNK_BITS);
+	if ((gnp = RB_FIND(ac_gtree, &mp->mnt_acct.ac_groot, &gfind)) == NULL) {
+		space = 0;
+		limit = 0;
+	} else {
+		space = gnp->gid_chunk[(gid & ACCT_CHUNK_MASK)].space;
+		limit = gnp->gid_chunk[(gid & ACCT_CHUNK_MASK)].limit;
+	}
+	if (limit == 0)
+		goto done;
+	if ((space + delta) > limit)
+		rv = 0;
+
+done:
+	spin_unlock(&mp->mnt_acct.ac_spin);
+	return rv;
 }

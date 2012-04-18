@@ -62,6 +62,9 @@ usage(int retcode)
 {
 	fprintf(stderr, "usage: vquota [-Dhn] check directory\n");
 	fprintf(stderr, "       vquota [-Dhn] lsfs\n");
+	fprintf(stderr, "       vquota [-Dhn] limit mount_point size\n");
+	fprintf(stderr, "       vquota [-Dhn] ulim  mount_point user  size\n");
+	fprintf(stderr, "       vquota [-Dhn] glim  mount_point group size\n");
 	fprintf(stderr, "       vquota [-Dhn] show mount_point\n");
 	fprintf(stderr, "       vquota [-Dhn] sync mount_point\n");
 	exit(retcode);
@@ -615,10 +618,91 @@ static int cmd_sync(char *dirname)
 	return rv;
 }
 
+static int
+cmd_limit(char *dirname, uint64_t limit)
+{
+	prop_dictionary_t res, args;
+	int rv = 0;
+
+	args = prop_dictionary_create();
+	if (args == NULL)
+		printf("cmd_limit(): couldn't create args dictionary\n");
+	res  = prop_dictionary_create();
+	if (res == NULL)
+		printf("cmd_limit(): couldn't create res dictionary\n");
+
+	(void) prop_dictionary_set_uint64(args, "limit", limit);
+
+	if (send_command(dirname, "set limit", args, &res) == false) {
+		printf("Failed to send message to kernel\n");
+		rv = 1;
+	}
+
+	prop_object_release(args);
+	prop_object_release(res);
+
+	return rv;
+}
+
+static int
+cmd_limit_uid(char *dirname, uid_t uid, uint64_t limit)
+{
+	prop_dictionary_t res, args;
+	int rv = 0;
+
+	args = prop_dictionary_create();
+	if (args == NULL)
+		printf("cmd_limit_uid(): couldn't create args dictionary\n");
+	res  = prop_dictionary_create();
+	if (res == NULL)
+		printf("cmd_limit_uid(): couldn't create res dictionary\n");
+
+	(void) prop_dictionary_set_uint32(args, "uid", uid);
+	(void) prop_dictionary_set_uint64(args, "limit", limit);
+
+	if (send_command(dirname, "set limit uid", args, &res) == false) {
+		printf("Failed to send message to kernel\n");
+		rv = 1;
+	}
+
+	prop_object_release(args);
+	prop_object_release(res);
+
+	return rv;
+}
+
+static int
+cmd_limit_gid(char *dirname, gid_t gid, uint64_t limit)
+{
+	prop_dictionary_t res, args;
+	int rv = 0;
+
+	args = prop_dictionary_create();
+	if (args == NULL)
+		printf("cmd_limit_gid(): couldn't create args dictionary\n");
+	res  = prop_dictionary_create();
+	if (res == NULL)
+		printf("cmd_limit_gid(): couldn't create res dictionary\n");
+
+	(void) prop_dictionary_set_uint32(args, "gid", gid);
+	(void) prop_dictionary_set_uint64(args, "limit", limit);
+
+	if (send_command(dirname, "set limit gid", args, &res) == false) {
+		printf("Failed to send message to kernel\n");
+		rv = 1;
+	}
+
+	prop_object_release(args);
+	prop_object_release(res);
+
+	return rv;
+}
+
 int
 main(int argc, char **argv)
 {
 	int ch;
+	uint64_t limit;
 
 	while ((ch = getopt(argc, argv, "Dhn")) != -1) {
 		switch(ch) {
@@ -646,6 +730,14 @@ main(int argc, char **argv)
 	if (strcmp(argv[0], "lsfs") == 0) {
 		return get_fslist();
 	}
+	if (strcmp(argv[0], "limit") == 0) {
+		if (argc != 3)
+			usage(1);
+		if (dehumanize_number(argv[2], &limit) < 0)
+			err(1, "bad number for option: %s", argv[2]);
+
+		return cmd_limit(argv[1], limit);
+	}
 	if (strcmp(argv[0], "show") == 0) {
 		if (argc != 2)
 			usage(1);
@@ -655,6 +747,28 @@ main(int argc, char **argv)
 		if (argc != 2)
 			usage(1);
 		return cmd_sync(argv[1]);
+	}
+	if (strcmp(argv[0], "ulim") == 0) {
+		struct passwd *pwd;
+		if (argc != 4)
+			usage(1);
+		if ((pwd = getpwnam(argv[2])) == NULL)
+			errx(1, "%s: no such user", argv[2]);
+		if (dehumanize_number(argv[3], &limit) < 0)
+			err(1, "bad number for option: %s", argv[2]);
+
+		return cmd_limit_uid(argv[1], pwd->pw_uid, limit);
+	}
+	if (strcmp(argv[0], "glim") == 0) {
+		struct group *grp;
+		if (argc != 4)
+			usage(1);
+		if ((grp = getgrnam(argv[2])) == NULL)
+			errx(1, "%s: no such group", argv[2]);
+		if (dehumanize_number(argv[3], &limit) < 0)
+			err(1, "bad number for option: %s", argv[2]);
+
+		return cmd_limit_gid(argv[1], grp->gr_gid, limit);
 	}
 
 	usage(0);
